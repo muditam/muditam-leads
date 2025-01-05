@@ -1,0 +1,6 @@
+Date,Time,Name,Contact No,Lead Source,Enquiry For,Customer Type,Agent Assigned,Product Pitched,Lead Status,Sales Status,Next Followup,Reminder,Agent's Remarks,Products Ordered,Dosage Ordered,Amount Paid,Mode of Payment,Delivery Status,Health Expert Assigned,Order ID,Dosage Expiring,RT Next Followup Date,RT-Followup Reminder,RT-Followup Status,Repeat Dosage Ordered,Retention Status,RT-Remark
+01-01-2025,10:00 AM,John Doe,1234567890,,,,,,,,,,,,,,,,,,,,,,,,
+01-01-2025,10:00 AM,John Doe,1234567890,,,,Nirdesh,,Sales Done,Sales Done,,,,,,,,,,,,,,,,,
+02-01-2025,11:30 AM,Jane Smith,987654321,,,,Sidra,,Sales Done,Sales Done,,,,,,,,,,,,,,,,,
+02-01-2025,11:30 AM,Jane Smith,987654321,,,,,,,,,,,,,,,,,,,,,,,,
+03-01-2025,12:00 PM,Emily Clark,1231231231,,,,,,,,,,,,,,,,,,,,,,,,
