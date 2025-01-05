@@ -4,8 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
-    "heroku-postbuild": "NPM_CONFIG_PRODUCTION=false npm install --prefix lead-management && npm run build --prefix lead-management"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
