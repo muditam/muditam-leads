@@ -2,18 +2,20 @@ require('dotenv').config();
 
 const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors'); 
+const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
 const XLSX = require("xlsx");
+const axios = require('axios');
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());  
-app.use(express.json()); 
+app.use(cors());
+app.use(express.json());
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGO_URI, {
@@ -35,21 +37,69 @@ const EmployeeSchema = new mongoose.Schema({
 const Employee = mongoose.model('Employee', EmployeeSchema);
 
 const RetentionSalesSchema = new mongoose.Schema({
-  date: { type: String, required: true },
-  name: { type: String, default: "" },
-  contactNumber: { type: String, default: "" },
-  productsOrdered: { type: [String], default: [] },
+  date: String,
+  name: String,
+  contactNumber: String,
+  productsOrdered: [String],
   dosageOrdered: { type: String, default: "" },
-  amountPaid: { type: Number, default: 0 },
-  modeOfPayment: { type: String, default: "Not Specified" },
-  deliveryStatus: { type: String, default: "Pending" },
-  orderCreatedBy: { type: String, required: true },
+  amountPaid: Number,
+  modeOfPayment: String,
+  deliveryStatus: String,
+  orderCreatedBy: String,
 });
 
 const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
 
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: true,
+  secureProtocol: 'TLSv1_2_method'
+});
+
+async function fetchAllOrders(url, accessToken, allOrders = []) {
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json'
+      },
+      httpsAgent: httpsAgent
+    });
+
+    const fetchedOrders = response.data.orders.map(order => ({
+      ...order,
+      channel_name: order.source_name || 'Unknown' // Adjust this field based on actual API response
+    }));
+
+    allOrders = allOrders.concat(fetchedOrders);
+
+    const nextLink = response.headers.link && response.headers.link.split(',').filter(s => s.includes('rel="next"')).map(s => s.match(/<(.*)>; rel="next"/)).find(Boolean);
+    if (nextLink && nextLink[1]) {
+      return fetchAllOrders(nextLink[1], accessToken, allOrders);
+    }
+
+    return allOrders;
+  } catch (error) {
+    console.error('Failed to fetch orders:', error);
+    throw error;  
+  }
+}
+
+
+app.get('/api/orders', async (req, res) => {
+  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2025-01-01T00:00:00Z&limit=250`;
+  try {
+    const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
+    res.json(orders); // Ensure this includes the channel_name in each order object
+  } catch (error) {
+    console.error('Error fetching orders from Shopify:', error);
+    res.status(500).send('Failed to fetch orders');
+  }
+});
+
+
+
 app.get('/api/retention-sales', async (req, res) => {
-  const { orderCreatedBy } = req.query; // Get the logged-in user's name from query
+  const { orderCreatedBy } = req.query;
 
   if (!orderCreatedBy) {
     return res.status(400).json({ message: 'Order created by is required.' });
@@ -67,43 +117,41 @@ app.get('/api/retention-sales', async (req, res) => {
 
 app.post('/api/retention-sales', async (req, res) => {
   const {
-      date,
-      name = "",  
-      contactNumber = "",  
-      productsOrdered = [],  
-      dosageOrdered = "",  
-      amountPaid = 0, 
-      modeOfPayment = "Not Specified", 
-      deliveryStatus = "Pending",  
-      orderCreatedBy,
+    date,
+    name = "",
+    contactNumber = "",
+    productsOrdered = [],
+    dosageOrdered = "",
+    amountPaid = 0, 
+    modeOfPayment = "Not Specified", 
+    deliveryStatus = "Pending",
+    orderCreatedBy,
   } = req.body;
 
   if (!date || !orderCreatedBy) {
-      return res.status(400).json({ message: "Date and orderCreatedBy are required." });
+    return res.status(400).json({ message: "Date and orderCreatedBy are required." });
   }
 
   try {
-      const newSale = new RetentionSales({
-          date,
-          name,
-          contactNumber,
-          productsOrdered,
-          dosageOrdered,
-          amountPaid,
-          modeOfPayment,
-          deliveryStatus,
-          orderCreatedBy,
-      });
+    const newSale = new RetentionSales({
+      date,
+      name,
+      contactNumber,
+      productsOrdered,
+      dosageOrdered,
+      amountPaid,
+      modeOfPayment,
+      deliveryStatus,
+      orderCreatedBy,
+    });
 
-      await newSale.save();
-      res.status(201).json(newSale);
+    await newSale.save();
+    res.status(201).json(newSale);
   } catch (error) {
-      console.error('Error adding retention sale:', error);
-      res.status(500).json({ message: 'Error adding retention sale', error });
+    console.error('Error adding retention sale:', error);
+    res.status(500).json({ message: 'Error adding retention sale', error });
   }
 });
-
-
 
 app.put('/api/retention-sales/:id', async (req, res) => {
   const { id } = req.params;
@@ -124,24 +172,6 @@ app.put('/api/retention-sales/:id', async (req, res) => {
   }
 });
 
-app.put('/api/retention-sales/:id', async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const updatedOrder = await RetentionSales.findByIdAndUpdate(id, req.body, {
-      new: true,
-    });
-
-    if (!updatedOrder) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-
-    res.status(200).json(updatedOrder);
-  } catch (error) {
-    console.error('Error updating retention order:', error);
-    res.status(500).json({ message: 'Error updating retention order', error });
-  }
-});
 
 // Route to Delete Retention Sale
 app.delete('/api/retention-sales/:id', async (req, res) => {
@@ -549,36 +579,7 @@ app.get('/api/leads/assigned', async (req, res) => {
   }
 });
 
-app.get('/api/retention-sales', async (req, res) => {
-  try {
-    const retentionSales = await RetentionSales.find();
-    res.status(200).json(retentionSales);
-  } catch (error) {
-    console.error('Error fetching retention sales:', error);
-    res.status(500).json({ message: 'Error fetching retention sales', error });
-  }
-});
 
-app.post('/api/retention-sales', async (req, res) => {
-  try {
-      const newSale = new RetentionSales(req.body); // Assumes req.body has default values
-      await newSale.save();
-      res.status(201).json(newSale); // Send back the saved sale with its MongoDB _id
-  } catch (error) {
-      console.error('Error adding retention sale:', error);
-      res.status(500).json({ message: 'Error adding retention sale', error });
-  }
-});
-
-app.get('/api/retention-orders', async (req, res) => {
-  try {
-    const retentionOrders = await RetentionSales.find().sort({ date: -1 }); // Sort newest first
-    res.status(200).json(retentionOrders);
-  } catch (error) {
-    console.error('Error fetching retention orders:', error);
-    res.status(500).json({ message: 'Error fetching retention orders', error });
-  }
-});
 
 // Search endpoint
 app.get('/api/search', async (req, res) => {
@@ -602,6 +603,7 @@ app.get('/api/search', async (req, res) => {
     res.status(500).json({ message: "Error during search", error });
   }
 });
+
 
 // Start Server
 app.listen(PORT, () => {

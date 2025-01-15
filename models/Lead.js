@@ -4,9 +4,9 @@ const LeadSchema = new mongoose.Schema({
   date: String,
   time: String,
   name: String,
-  contactNumber: String,
+  contactNumber: String, 
   leadSource: String,
-  enquiryFor: String,
+  enquiryFor: String, 
   customerType: String,
   agentAssigned: String,
   productPitched: [String],
@@ -31,8 +31,7 @@ const LeadSchema = new mongoose.Schema({
   retentionStatus: String,
   rtRemark: String,
 });
-
-// Corrected usage of LeadSchema (uppercase "L")
+ 
 const Lead = mongoose.model('Lead', LeadSchema);
 
 module.exports = Lead;
