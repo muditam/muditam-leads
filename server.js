@@ -67,29 +67,28 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
 
     const fetchedOrders = response.data.orders.map(order => ({
       ...order,
-      channel_name: order.source_name || 'Unknown' // Adjust this field based on actual API response
+      channel_name: order.source_name || 'Unknown'  
     }));
 
-    allOrders = allOrders.concat(fetchedOrders);
+    allOrders = allOrders.concat(fetchedOrders); 
 
     const nextLink = response.headers.link && response.headers.link.split(',').filter(s => s.includes('rel="next"')).map(s => s.match(/<(.*)>; rel="next"/)).find(Boolean);
     if (nextLink && nextLink[1]) {
       return fetchAllOrders(nextLink[1], accessToken, allOrders);
     }
 
-    return allOrders;
+    return allOrders;  
   } catch (error) {
     console.error('Failed to fetch orders:', error);
     throw error;  
   }
 }
 
-
 app.get('/api/orders', async (req, res) => {
   const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2025-01-01T00:00:00Z&limit=250`;
   try {
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
-    res.json(orders); // Ensure this includes the channel_name in each order object
+    res.json(orders);  
   } catch (error) {
     console.error('Error fetching orders from Shopify:', error);
     res.status(500).send('Failed to fetch orders');
@@ -256,8 +255,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
     if (errors.length > 0) {
       return res.status(400).json({ success: false, error: errors.join(". ") });
     }
-
-    // Insert validated leads into the database
+ 
     await Lead.insertMany(leads.filter(Boolean));
     res.json({ success: true });
   } catch (err) {
@@ -476,6 +474,12 @@ app.get('/api/leads/retention', async (req, res) => {
         rtRemark: 1,
       }
     );
+
+    const leadsWithReminder = leads.map((lead) => ({
+      ...lead._doc, // Retain existing fields
+      rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
+    }));
+    
     res.status(200).json(leads);
   } catch (error) {
     res.status(500).json({
@@ -601,6 +605,16 @@ app.get('/api/search', async (req, res) => {
   } catch (error) {
     console.error("Error during search:", error);
     res.status(500).json({ message: "Error during search", error });
+  }
+});
+
+app.get('/api/retention-orders', async (req, res) => {
+  try {
+      const orders = await RetentionSales.find({}); // Adjust the query according to your needs
+      res.json(orders);
+  } catch (error) {
+      console.error('Error fetching retention orders:', error);
+      res.status(500).json({ message: 'Failed to fetch retention orders', error: error });
   }
 });
 
