@@ -369,39 +369,53 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
   }
 });
 
-app.put('/api/leads/:id', async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const updatedLead = await Lead.findByIdAndUpdate(id, req.body, {
-      new: true,
-      runValidators: true, // Ensures validation rules are applied
-    });
-
-    if (!updatedLead) {
-      return res.status(404).json({ message: 'Lead not found' });
-    }
-
-    res.status(200).json({ message: 'Lead updated successfully', lead: updatedLead });
-  } catch (error) {
-    console.error('Error updating lead:', error);
-    res.status(500).json({ message: 'Error updating lead', error: error.message });
-  }
-});
 
 app.get('/api/leads', async (req, res) => {
-  const { agentAssignedName, salesStatus } = req.query;
-  try {
-    let query = {};
-    if (agentAssignedName) query.agentAssigned = agentAssignedName;
-    if (salesStatus) query.salesStatus = salesStatus;
-    const leads = await Lead.find(query);
+  const { page = 1, limit = 30, filters = '{}' } = req.query;
+  const filterCriteria = JSON.parse(filters);
 
-    res.status(200).json(leads);
+  try {
+      const query = {};
+ 
+      if (filterCriteria.name) query.name = { $regex: filterCriteria.name, $options: 'i' };
+      if (filterCriteria.contactNumber) query.contactNumber = filterCriteria.contactNumber;
+      if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
+
+      if (filterCriteria.startDate || filterCriteria.endDate) {
+          query.date = {};
+          if (filterCriteria.startDate) query.date.$gte = new Date(filterCriteria.startDate);
+          if (filterCriteria.endDate) query.date.$lte = new Date(filterCriteria.endDate);
+      }
+
+      if (filterCriteria.orderDate) query.orderDate = new Date(filterCriteria.orderDate);
+      if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
+      if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
+      if (filterCriteria.salesStatus?.length) query.salesStatus = { $in: filterCriteria.salesStatus };
+      if (filterCriteria.deliveryStatus) query.deliveryStatus = filterCriteria.deliveryStatus;
+      if (filterCriteria.customerType) query.customerType = filterCriteria.customerType;
+      if (filterCriteria.healthExpertAssigned) query.healthExpertAssigned = filterCriteria.healthExpertAssigned;
+      if (filterCriteria.rtFollowupStatus?.length) query.rtFollowupStatus = { $in: filterCriteria.rtFollowupStatus };
+      if (filterCriteria.retentionStatus) query.retentionStatus = filterCriteria.retentionStatus;
+      if (filterCriteria.enquiryFor?.length) query.enquiryFor = { $in: filterCriteria.enquiryFor };
+
+      const totalLeads = await Lead.countDocuments(query);
+      const leads = await Lead.find(query)
+          .sort({ _id: -1 })
+          .skip((page - 1) * limit)
+          .limit(Number(limit));
+
+      res.status(200).json({
+          leads,
+          totalLeads,
+          totalPages: Math.ceil(totalLeads / limit),
+          currentPage: Number(page),
+      });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching leads', error });
+      res.status(500).json({ message: 'Error fetching leads', error });
   }
 });
+
+
 
 
 app.post('/api/leads', async (req, res) => {
@@ -414,6 +428,7 @@ app.post('/api/leads', async (req, res) => {
     res.status(500).json({ message: 'Error adding lead', error });
   }
 });
+
 
 app.put('/api/leads/:id', async (req, res) => {
   const { id } = req.params;
@@ -448,8 +463,21 @@ app.delete('/api/leads/:id', async (req, res) => {
   }
 });
 
+
 // Route for Master Data - Retention
 app.get('/api/leads/retention', async (req, res) => {
+  const calculateReminder = (nextFollowupDate) => { 
+
+    const today = new Date();
+    const followupDate = new Date(nextFollowupDate);
+    const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
+
+    if (diffInDays < 0) return "Follow-up Missed";
+    if (diffInDays === 0) return "Today";
+    if (diffInDays === 1) return "Tomorrow";
+    return "Later";
+  };
+
   try {
     const leads = await Lead.find(
       { salesStatus: "Sales Done" },
@@ -476,21 +504,21 @@ app.get('/api/leads/retention', async (req, res) => {
     );
 
     const leadsWithReminder = leads.map((lead) => ({
-      ...lead._doc, // Retain existing fields
+      ...lead._doc,
       rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
     }));
-    
-    res.status(200).json(leads);
+
+    res.status(200).json(leadsWithReminder);
   } catch (error) {
-    res.status(500).json({
-      message: 'Error fetching retention data',
-      error: error.message,
-    });
+    console.error("Error in retention endpoint:", error.message);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 });
 
+
+
 app.get('/api/leads/retentions', async (req, res) => {
-  const { fullName, email } = req.query; // Get from frontend
+  const { fullName, email } = req.query;  
 
   if (!fullName || !email) {
     return res.status(400).json({ message: 'Full name and email are required' });
@@ -610,7 +638,7 @@ app.get('/api/search', async (req, res) => {
 
 app.get('/api/retention-orders', async (req, res) => {
   try {
-      const orders = await RetentionSales.find({}); // Adjust the query according to your needs
+      const orders = await RetentionSales.find({});  
       res.json(orders);
   } catch (error) {
       console.error('Error fetching retention orders:', error);
@@ -618,8 +646,7 @@ app.get('/api/retention-orders', async (req, res) => {
   }
 });
 
-
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-});
+}); 
