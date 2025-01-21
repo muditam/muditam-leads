@@ -369,19 +369,58 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
   }
 });
 
+
 app.get('/api/leads', async (req, res) => {
-  const { agentAssignedName, salesStatus } = req.query;
+  const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus } = req.query;
+  const filterCriteria = JSON.parse(filters);
+
   try {
-    let query = {};
+    const query = {};
+
+    // Filters-based queries (for LeadTable)
+    if (filterCriteria.name) query.name = { $regex: filterCriteria.name, $options: 'i' };
+    if (filterCriteria.contactNumber) query.contactNumber = filterCriteria.contactNumber;
+    if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
+
+    if (filterCriteria.startDate || filterCriteria.endDate) {
+      query.date = {};
+      if (filterCriteria.startDate) query.date.$gte = new Date(filterCriteria.startDate);
+      if (filterCriteria.endDate) query.date.$lte = new Date(filterCriteria.endDate);
+    }
+
+    if (filterCriteria.orderDate) query.orderDate = new Date(filterCriteria.orderDate);
+    if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
+    if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
+    if (filterCriteria.salesStatus?.length) query.salesStatus = { $in: filterCriteria.salesStatus };
+    if (filterCriteria.deliveryStatus) query.deliveryStatus = filterCriteria.deliveryStatus;
+    if (filterCriteria.customerType) query.customerType = filterCriteria.customerType;
+    if (filterCriteria.healthExpertAssigned) query.healthExpertAssigned = filterCriteria.healthExpertAssigned;
+    if (filterCriteria.rtFollowupStatus?.length) query.rtFollowupStatus = { $in: filterCriteria.rtFollowupStatus };
+    if (filterCriteria.retentionStatus) query.retentionStatus = filterCriteria.retentionStatus;
+    if (filterCriteria.enquiryFor?.length) query.enquiryFor = { $in: filterCriteria.enquiryFor };
+
+    // Direct query parameters (for SalesMyLeads)
     if (agentAssignedName) query.agentAssigned = agentAssignedName;
     if (salesStatus) query.salesStatus = salesStatus;
-    const leads = await Lead.find(query);
 
-    res.status(200).json(leads);
+    // Fetch data
+    const totalLeads = await Lead.countDocuments(query);
+    const leads = await Lead.find(query)
+      .sort({ _id: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+
+    res.status(200).json({
+      leads,
+      totalLeads,
+      totalPages: Math.ceil(totalLeads / limit),
+      currentPage: Number(page),
+    });
   } catch (error) {
     res.status(500).json({ message: 'Error fetching leads', error });
   }
 });
+
 
 app.post('/api/leads', async (req, res) => {
   try {
@@ -393,6 +432,7 @@ app.post('/api/leads', async (req, res) => {
     res.status(500).json({ message: 'Error adding lead', error });
   }
 });
+
 
 app.put('/api/leads/:id', async (req, res) => {
   const { id } = req.params;
@@ -426,6 +466,7 @@ app.delete('/api/leads/:id', async (req, res) => {
     res.status(500).json({ message: 'Error deleting lead', error });
   }
 });
+
 
 // Route for Master Data - Retention
 app.get('/api/leads/retention', async (req, res) => {
@@ -478,8 +519,10 @@ app.get('/api/leads/retention', async (req, res) => {
   }
 });
 
+
+
 app.get('/api/leads/retentions', async (req, res) => {
-  const { fullName, email } = req.query; // Get from frontend
+  const { fullName, email } = req.query;  
 
   if (!fullName || !email) {
     return res.status(400).json({ message: 'Full name and email are required' });
@@ -599,7 +642,7 @@ app.get('/api/search', async (req, res) => {
 
 app.get('/api/retention-orders', async (req, res) => {
   try {
-      const orders = await RetentionSales.find({}); // Adjust the query according to your needs
+      const orders = await RetentionSales.find({});  
       res.json(orders);
   } catch (error) {
       console.error('Error fetching retention orders:', error);
