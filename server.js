@@ -369,10 +369,16 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
   }
 });
 
-
+ 
 app.get('/api/leads', async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus } = req.query;
   const filterCriteria = JSON.parse(filters);
+
+  const parseDate = (dateString) => {
+    const [day, month, year] = dateString.split('-').map(Number);
+    if (!day || !month || !year) return null;
+    return new Date(Date.UTC(year, month - 1, day));
+  };
 
   try {
     const query = {};
@@ -382,13 +388,28 @@ app.get('/api/leads', async (req, res) => {
     if (filterCriteria.contactNumber) query.contactNumber = filterCriteria.contactNumber;
     if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
 
+    // Start and End Date 
     if (filterCriteria.startDate || filterCriteria.endDate) {
       query.date = {};
-      if (filterCriteria.startDate) query.date.$gte = new Date(filterCriteria.startDate);
-      if (filterCriteria.endDate) query.date.$lte = new Date(filterCriteria.endDate);
+      if (filterCriteria.startDate) {
+        const parsedStartDate = parseDate(filterCriteria.startDate);
+        if (parsedStartDate) query.date.$gte = parsedStartDate;
+      }
+      if (filterCriteria.endDate) {
+        const parsedEndDate = parseDate(filterCriteria.endDate);
+        if (parsedEndDate) query.date.$lte = parsedEndDate;
+      }
+      if (Object.keys(query.date).length === 0) delete query.date;
     }
 
-    if (filterCriteria.orderDate) query.orderDate = new Date(filterCriteria.orderDate);
+    // Order Date
+    if (filterCriteria.orderDate) {
+      const parsedOrderDate = parseDate(filterCriteria.orderDate);
+      if (parsedOrderDate) {
+        query.orderDate = parsedOrderDate;
+      }
+    }
+
     if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
     if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
     if (filterCriteria.salesStatus?.length) query.salesStatus = { $in: filterCriteria.salesStatus };
@@ -398,6 +419,20 @@ app.get('/api/leads', async (req, res) => {
     if (filterCriteria.rtFollowupStatus?.length) query.rtFollowupStatus = { $in: filterCriteria.rtFollowupStatus };
     if (filterCriteria.retentionStatus) query.retentionStatus = filterCriteria.retentionStatus;
     if (filterCriteria.enquiryFor?.length) query.enquiryFor = { $in: filterCriteria.enquiryFor };
+
+    // Reminder Filter
+    if (filterCriteria.reminder) {
+      const today = new Date();
+      if (filterCriteria.reminder === 'Today') {
+        query.nextFollowup = { $eq: today.toISOString().split('T')[0] };
+      } else if (filterCriteria.reminder === 'Tomorrow') {
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+        query.nextFollowup = { $eq: tomorrow.toISOString().split('T')[0] };
+      } else if (filterCriteria.reminder === 'Follow-up Missed') {
+        query.nextFollowup = { $lt: today.toISOString().split('T')[0] };
+      }
+    }
 
     // Direct query parameters (for SalesMyLeads)
     if (agentAssignedName) query.agentAssigned = agentAssignedName;
@@ -417,6 +452,7 @@ app.get('/api/leads', async (req, res) => {
       currentPage: Number(page),
     });
   } catch (error) {
+    console.error('Error fetching leads:', error);
     res.status(500).json({ message: 'Error fetching leads', error });
   }
 });
