@@ -60,60 +60,42 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
     const response = await axios.get(url, {
       headers: {
         'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
-      httpsAgent: httpsAgent,
+      httpsAgent: httpsAgent
     });
 
-    const fetchedOrders = response.data.orders.map((order) => ({
+    const fetchedOrders = response.data.orders.map(order => ({
       ...order,
-      channel_name: order.source_name || 'Unknown',
+      channel_name: order.source_name || 'Unknown'  
     }));
 
-    allOrders = allOrders.concat(fetchedOrders);
+    allOrders = allOrders.concat(fetchedOrders); 
 
-    const nextLink = response.headers.link?.split(',').find((s) => s.includes('rel="next"'));
-    if (nextLink) {
-      const nextUrl = nextLink.match(/<(.*)>/)[1];
-      return fetchAllOrders(nextUrl, accessToken, allOrders);
+    const nextLink = response.headers.link && response.headers.link.split(',').filter(s => s.includes('rel="next"')).map(s => s.match(/<(.*)>; rel="next"/)).find(Boolean);
+    if (nextLink && nextLink[1]) {
+      return fetchAllOrders(nextLink[1], accessToken, allOrders);
     }
 
-    return allOrders;
+    return allOrders;  
   } catch (error) {
-    console.error('Error in fetchAllOrders:', error.message);
-    throw error;
+    console.error('Failed to fetch orders:', error);
+    throw error;  
   }
 }
 
 app.get('/api/orders', async (req, res) => {
-  const { page = 1, limit = 50 } = req.query;  
-  const offset = (page - 1) * limit;
-
-  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&limit=${limit}&created_at_min=2025-01-01T00:00:00Z`;
-
+  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2025-01-01T00:00:00Z&limit=250`;
   try {
-    console.log('Fetching orders from Shopify...');
-    console.log('API URL:', shopifyAPIEndpoint);
-
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
-    console.log('Total Orders Fetched:', orders.length);
-
-    const paginatedOrders = orders.slice(offset, offset + Number(limit));
-    res.json({
-      orders: paginatedOrders,
-      total: orders.length,
-      currentPage: page,
-    });
+    res.json(orders);  
   } catch (error) {
-    console.error('Error fetching orders:', error.message);
-    console.error('Error details:', error.response?.data || error.message);
+    console.error('Error fetching orders from Shopify:', error);
     res.status(500).send('Failed to fetch orders');
   }
 });
 
 
-
-  
 app.get('/api/retention-sales', async (req, res) => {
   const { orderCreatedBy } = req.query;
 
