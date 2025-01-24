@@ -85,10 +85,12 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
 }
 
 app.get('/api/orders', async (req, res) => {
-  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2025-01-01T00:00:00Z&limit=250`;
+  const { page = 1, limit = 50 } = req.query; // Default to page 1 and 50 items per page
+  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2025-01-01T00:00:00Z&limit=${limit}&page=${page}`;
+  
   try {
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
-    res.json(orders);  
+    res.json({ orders, total: orders.length, currentPage: page });
   } catch (error) {
     console.error('Error fetching orders from Shopify:', error);
     res.status(500).send('Failed to fetch orders');
@@ -189,8 +191,7 @@ app.delete('/api/retention-sales/:id', async (req, res) => {
     res.status(500).json({ message: 'Error deleting retention sale', error });
   }
 });
-
-// Configure multer for file uploads
+ 
 const upload = multer({
   dest: "uploads/",
   fileFilter: (req, file, cb) => {
@@ -375,10 +376,11 @@ app.get('/api/leads', async (req, res) => {
   const filterCriteria = JSON.parse(filters);
 
   const parseDate = (dateString) => {
-    const [day, month, year] = dateString.split('-').map(Number);
-    if (!day || !month || !year) return null;
-    return new Date(Date.UTC(year, month - 1, day));
-  };
+    if (!dateString) return null;
+    const parsedDate = new Date(dateString);  
+    return isNaN(parsedDate) ? null : parsedDate;  
+};
+
 
   try {
     const query = {};
@@ -388,19 +390,20 @@ app.get('/api/leads', async (req, res) => {
     if (filterCriteria.contactNumber) query.contactNumber = filterCriteria.contactNumber;
     if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
 
-    // Start and End Date 
     if (filterCriteria.startDate || filterCriteria.endDate) {
       query.date = {};
       if (filterCriteria.startDate) {
-        const parsedStartDate = parseDate(filterCriteria.startDate);
-        if (parsedStartDate) query.date.$gte = parsedStartDate;
+          const parsedStartDate = parseDate(filterCriteria.startDate);
+          if (parsedStartDate) query.date.$gte = parsedStartDate;
       }
       if (filterCriteria.endDate) {
-        const parsedEndDate = parseDate(filterCriteria.endDate);
-        if (parsedEndDate) query.date.$lte = parsedEndDate;
+          const parsedEndDate = parseDate(filterCriteria.endDate);
+          if (parsedEndDate) query.date.$lte = parsedEndDate;
       }
+      // Remove `query.date` if empty
       if (Object.keys(query.date).length === 0) delete query.date;
-    }
+  }
+  
 
     // Order Date
     if (filterCriteria.orderDate) {
@@ -420,19 +423,36 @@ app.get('/api/leads', async (req, res) => {
     if (filterCriteria.retentionStatus) query.retentionStatus = filterCriteria.retentionStatus;
     if (filterCriteria.enquiryFor?.length) query.enquiryFor = { $in: filterCriteria.enquiryFor };
 
-    // Reminder Filter
     if (filterCriteria.reminder) {
       const today = new Date();
-      if (filterCriteria.reminder === 'Today') {
-        query.nextFollowup = { $eq: today.toISOString().split('T')[0] };
-      } else if (filterCriteria.reminder === 'Tomorrow') {
-        const tomorrow = new Date(today);
-        tomorrow.setDate(today.getDate() + 1);
-        query.nextFollowup = { $eq: tomorrow.toISOString().split('T')[0] };
-      } else if (filterCriteria.reminder === 'Follow-up Missed') {
-        query.nextFollowup = { $lt: today.toISOString().split('T')[0] };
+      if (filterCriteria.reminder === "Today") {
+          query.nextFollowup = { $eq: today.toISOString().split("T")[0] };
+      } else if (filterCriteria.reminder === "Tomorrow") {
+          const tomorrow = new Date(today);
+          tomorrow.setDate(today.getDate() + 1);
+          query.nextFollowup = { $eq: tomorrow.toISOString().split("T")[0] };
+      } else if (filterCriteria.reminder === "Follow-up Missed") {
+          query.nextFollowup = { $lt: today.toISOString().split("T")[0] };
+      } else if (filterCriteria.reminder === "Later") {
+          query.nextFollowup = { $gt: today.toISOString().split("T")[0] };
       }
-    }
+  }
+  
+  if (filterCriteria.rtFollowupReminder) {
+      const today = new Date();
+      if (filterCriteria.rtFollowupReminder === "Today") {
+          query.rtNextFollowupDate = { $eq: today.toISOString().split("T")[0] };
+      } else if (filterCriteria.rtFollowupReminder === "Tomorrow") {
+          const tomorrow = new Date(today);
+          tomorrow.setDate(today.getDate() + 1);
+          query.rtNextFollowupDate = { $eq: tomorrow.toISOString().split("T")[0] };
+      } else if (filterCriteria.rtFollowupReminder === "Follow-up Missed") {
+          query.rtNextFollowupDate = { $lt: today.toISOString().split("T")[0] };
+      } else if (filterCriteria.rtFollowupReminder === "Later") {
+          query.rtNextFollowupDate = { $gt: today.toISOString().split("T")[0] };
+      }
+  }
+  
 
     // Direct query parameters (for SalesMyLeads)
     if (agentAssignedName) query.agentAssigned = agentAssignedName;
@@ -615,13 +635,11 @@ app.post("/api/login", async (req, res) => {
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password." });
     }
-
-    // Match passwords directly (no hashing)
+ 
     if (user.password !== password) {
       return res.status(400).json({ message: "Invalid email or password." });
     }
-
-    // Send user data back (excluding sensitive info like password)
+ 
     res.status(200).json({
       message: "Login successful",
       user: {

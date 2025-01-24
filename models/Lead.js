@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const LeadSchema = new mongoose.Schema({
+const LeadSchema = new mongoose.Schema({ 
   date: String,
   time: String,
   name: String,
