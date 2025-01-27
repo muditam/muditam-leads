@@ -431,7 +431,7 @@ app.get('/api/leads', async (req, res) => {
       } else if (filterCriteria.reminder === "Follow-up Missed") {
           query.nextFollowup = { $lt: today.toISOString().split("T")[0] };
       } else if (filterCriteria.reminder === "Later") {
-          query.nextFollowup = { $gt: today.toISOString().split("T")[0] };
+          query.nextFollowup = { $gt: today.toISOString().split("T")[0] }; 
       }
   }
   
@@ -600,7 +600,7 @@ app.get('/api/leads/new-orders', async (req, res) => {
     const leads = await Lead.find(
       { salesStatus: "Sales Done" },
       {
-        date: 1,
+        lastOrderDate: 1,
         name: 1,
         contactNumber: 1,
         agentAssigned: 1,
