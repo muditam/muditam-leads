@@ -52,65 +52,48 @@ const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
-  secureProtocol: 'TLSv1_2_method',
+  secureProtocol: 'TLSv1_2_method'
 });
 
-async function fetchOrdersWithPagination(url, accessToken, allOrders = []) {
+async function fetchAllOrders(url, accessToken, allOrders = []) {
   try {
     const response = await axios.get(url, {
       headers: {
         'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
-      httpsAgent: httpsAgent,
+      httpsAgent: httpsAgent
     });
- 
+
     const fetchedOrders = response.data.orders.map(order => ({
-      id: order.id,
-      name: order.name,
-      customer_name: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`,
-      contact_number: order.customer?.default_address?.phone || 'N/A',
-      total_price: order.total_price,
-      payment_gateway: order.payment_gateway_names.join(', ') || 'N/A',
-      products: order.line_items.map(item => `${item.title} (Qty: ${item.quantity})`).join(', '),
-      channel_name: order.source_name || 'Unknown',
+      ...order,
+      channel_name: order.source_name || 'Unknown'  
     }));
 
-    // Add fetched orders to the cumulative list
-    allOrders = allOrders.concat(fetchedOrders);
+    allOrders = allOrders.concat(fetchedOrders); 
 
-    // Check for the `next` link in the headers
-    const nextLinkHeader = response.headers.link;
-    const nextLinkMatch = nextLinkHeader && nextLinkHeader.match(/<([^>]+)>; rel="next"/);
-
-    if (nextLinkMatch && nextLinkMatch[1]) {
-      const nextLink = nextLinkMatch[1];
-      return fetchOrdersWithPagination(nextLink, accessToken, allOrders);
+    const nextLink = response.headers.link && response.headers.link.split(',').filter(s => s.includes('rel="next"')).map(s => s.match(/<(.*)>; rel="next"/)).find(Boolean);
+    if (nextLink && nextLink[1]) {
+      return fetchAllOrders(nextLink[1], accessToken, allOrders);
     }
 
-    return allOrders;
+    return allOrders;  
   } catch (error) {
     console.error('Failed to fetch orders:', error);
-    throw error;
+    throw error;  
   }
 }
 
 app.get('/api/orders', async (req, res) => {
-  const { page = 1, limit = 50 } = req.query; // Allow page/limit as optional query parameters
-  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2025-01-01T00:00:00Z&limit=${limit}&fields=id,name,customer,total_price,payment_gateway_names,line_items,source_name`;
-
+  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2025-01-01T00:00:00Z&limit=250`;
   try {
-    const orders = await fetchOrdersWithPagination(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
-    // Return paginated data based on the requested page/limit
-    const startIndex = (page - 1) * limit;
-    const paginatedOrders = orders.slice(startIndex, startIndex + parseInt(limit, 10));
-    res.json(paginatedOrders);
+    const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
+    res.json(orders);  
   } catch (error) {
     console.error('Error fetching orders from Shopify:', error);
     res.status(500).send('Failed to fetch orders');
   }
 });
-
 
 
 app.get('/api/retention-sales', async (req, res) => {
