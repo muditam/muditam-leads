@@ -54,8 +54,8 @@ const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
   secureProtocol: 'TLSv1_2_method',
 });
- 
 
+// Function to fetch paginated orders
 async function fetchPaginatedOrders(accessToken, limit = 50, cursor = null) {
   const query = `
     query($limit: Int!, $cursor: String) {
@@ -82,9 +82,6 @@ async function fetchPaginatedOrders(accessToken, limit = 50, cursor = null) {
               }
             }
             sourceName
-            fulfillments(first: 1) {
-              status  // This is the fulfillment status (e.g., "shipped", "unfulfilled")
-            }
           }
         }
         pageInfo {
@@ -116,6 +113,7 @@ async function fetchPaginatedOrders(accessToken, limit = 50, cursor = null) {
       throw new Error('Invalid Shopify response');
     }
 
+    // Extract orders and pagination info
     const orders = data.orders.edges.map((edge) => {
       const order = edge.node;
       return {
@@ -123,7 +121,7 @@ async function fetchPaginatedOrders(accessToken, limit = 50, cursor = null) {
         customer: {
           first_name: order.customer?.firstName || '',
           last_name: order.customer?.lastName || '',
-          phone: order.customer?.defaultAddress?.phone || '',
+          default_address: { phone: order.customer?.defaultAddress?.phone || '' },
         },
         total_price: order.totalPrice,
         payment_gateway_names: order.paymentGatewayNames.join(', '),
@@ -132,7 +130,6 @@ async function fetchPaginatedOrders(accessToken, limit = 50, cursor = null) {
           quantity: itemEdge.node.quantity,
         })),
         channel_name: order.sourceName || 'Unknown',
-        delivery_status: order.fulfillments.length > 0 ? order.fulfillments[0].status : 'Not Fulfilled',  // Delivery status (from fulfillments)
       };
     });
 
@@ -147,9 +144,8 @@ async function fetchPaginatedOrders(accessToken, limit = 50, cursor = null) {
 }
 
 
-
 app.get('/api/orders', async (req, res) => {
-  const { limit = 50, cursor = null } = req.query;
+  const { limit = 50, cursor } = req.query;
 
   const shopifyAccessToken = process.env.SHOPIFY_API_SECRET;
 
@@ -157,19 +153,18 @@ app.get('/api/orders', async (req, res) => {
     const { orders, pageInfo } = await fetchPaginatedOrders(
       shopifyAccessToken,
       parseInt(limit, 10),
-      cursor   
+      cursor
     );
 
     res.status(200).json({
       orders,
-      pageInfo,
+      pageInfo,  
     });
   } catch (error) {
     console.error('Error fetching paginated orders:', error);
     res.status(500).json({ message: 'Failed to fetch orders', error: error.message });
   }
 });
-
  
 
 app.get('/api/retention-sales', async (req, res) => {
