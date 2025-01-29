@@ -371,8 +371,6 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
 app.get('/api/leads', async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus } = req.query;
   const filterCriteria = JSON.parse(filters);
-
-  const skip = (page - 1) * limit;
   
   const parseDate = (dateString) => {
     if (!dateString) return null;
