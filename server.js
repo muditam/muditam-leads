@@ -52,49 +52,125 @@ const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
-  secureProtocol: 'TLSv1_2_method'
+  secureProtocol: 'TLSv1_2_method',
 });
+ 
 
-async function fetchAllOrders(url, accessToken, allOrders = []) {
+async function fetchPaginatedOrders(accessToken, limit = 50, cursor = null) {
+  const query = `
+    query($limit: Int!, $cursor: String) {
+      orders(first: $limit, after: $cursor) {
+        edges {
+          cursor
+          node {
+            name
+            customer {
+              firstName
+              lastName
+              defaultAddress {
+                phone
+              }
+            }
+            totalPrice
+            paymentGatewayNames
+            lineItems(first: 10) {
+              edges {
+                node {
+                  title
+                  quantity
+                }
+              }
+            }
+            sourceName
+            fulfillments(first: 1) {
+              status  // This is the fulfillment status (e.g., "shipped", "unfulfilled")
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  `;
+
   try {
-    const response = await axios.get(url, {
-      headers: {
-        'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json'
+    const response = await axios.post(
+      `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/graphql.json`,
+      {
+        query,
+        variables: { limit, cursor },
       },
-      httpsAgent: httpsAgent
-    });
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
+        httpsAgent,
+      }
+    );
 
-    const fetchedOrders = response.data.orders.map(order => ({
-      ...order,
-      channel_name: order.source_name || 'Unknown'  
-    }));
-
-    allOrders = allOrders.concat(fetchedOrders); 
-
-    const nextLink = response.headers.link && response.headers.link.split(',').filter(s => s.includes('rel="next"')).map(s => s.match(/<(.*)>; rel="next"/)).find(Boolean);
-    if (nextLink && nextLink[1]) {
-      return fetchAllOrders(nextLink[1], accessToken, allOrders);
+    const data = response.data.data;
+    if (!data || !data.orders) {
+      throw new Error('Invalid Shopify response');
     }
 
-    return allOrders;  
+    const orders = data.orders.edges.map((edge) => {
+      const order = edge.node;
+      return {
+        name: order.name,
+        customer: {
+          first_name: order.customer?.firstName || '',
+          last_name: order.customer?.lastName || '',
+          phone: order.customer?.defaultAddress?.phone || '',
+        },
+        total_price: order.totalPrice,
+        payment_gateway_names: order.paymentGatewayNames.join(', '),
+        line_items: order.lineItems.edges.map((itemEdge) => ({
+          title: itemEdge.node.title,
+          quantity: itemEdge.node.quantity,
+        })),
+        channel_name: order.sourceName || 'Unknown',
+        delivery_status: order.fulfillments.length > 0 ? order.fulfillments[0].status : 'Not Fulfilled',  // Delivery status (from fulfillments)
+      };
+    });
+
+    return {
+      orders,
+      pageInfo: data.orders.pageInfo,
+    };
   } catch (error) {
     console.error('Failed to fetch orders:', error);
-    throw error;  
+    throw error;
   }
 }
 
+
+
 app.get('/api/orders', async (req, res) => {
-  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2024-12-01T00:00:00Z&limit=250`;
+  const { limit = 50, cursor = null } = req.query;
+
+  const shopifyAccessToken = process.env.SHOPIFY_API_SECRET;
+
   try {
-    const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
-    res.json(orders);  
+    const { orders, pageInfo } = await fetchPaginatedOrders(
+      shopifyAccessToken,
+      parseInt(limit, 10),
+      cursor   
+    );
+
+    res.status(200).json({
+      orders,
+      pageInfo,
+    });
   } catch (error) {
-    console.error('Error fetching orders from Shopify:', error);
-    res.status(500).send('Failed to fetch orders');
+    console.error('Error fetching paginated orders:', error);
+    res.status(500).json({ message: 'Failed to fetch orders', error: error.message });
   }
 });
 
+ 
 
 app.get('/api/retention-sales', async (req, res) => {
   const { orderCreatedBy } = req.query;
@@ -372,6 +448,8 @@ app.get('/api/leads', async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus } = req.query;
   const filterCriteria = JSON.parse(filters);
 
+  const skip = (page - 1) * limit;
+  
   const parseDate = (dateString) => {
     if (!dateString) return null;
     const parsedDate = new Date(dateString);  
