@@ -276,7 +276,7 @@ app.get('/api/employees', async (req, res) => {
     }
 
     const { async, agentNumber, callerId } = employee;
-    res.status(200).json([{ async, agentNumber, callerId }]); // Ensure response is always an array
+    res.status(200).json([{ async, agentNumber, callerId }]);  
   } catch (error) {
     res.status(500).json({ message: "Error fetching employee details", error });
   }
