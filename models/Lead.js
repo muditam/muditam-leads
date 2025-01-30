@@ -10,7 +10,7 @@ const LeadSchema = new mongoose.Schema({
   customerType: String,
   agentAssigned: String,
   productPitched: [String],
-  leadStatus: String, 
+  leadStatus: String,  
   salesStatus: String,
   nextFollowup: String,
   calculateReminder: String,

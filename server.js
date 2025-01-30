@@ -8,7 +8,7 @@ const path = require('path');
 const Lead = require('./models/Lead');
 const XLSX = require("xlsx");
 const axios = require('axios');
-const https = require('https');
+const https = require('https'); 
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -28,9 +28,11 @@ mongoose.connect(process.env.MONGO_URI, {
 const EmployeeSchema = new mongoose.Schema({
   fullName: { type: String, required: true },
   email: { type: String, required: true, unique: true },
-  contactNumber: { type: String, required: true },
+  callerId: { type: String, required: true },
   role: { type: String, required: true },
   password: { type: String, required: true },
+  agentNumber: { type: String, required: true },
+  async: { type: Number, default: 1 },
 });
 
 // Create Employee model
@@ -84,6 +86,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
   }
 }
 
+
 app.get('/api/orders', async (req, res) => {
   const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2024-12-01T00:00:00Z&limit=250`;
   try {
@@ -94,7 +97,7 @@ app.get('/api/orders', async (req, res) => {
     res.status(500).send('Failed to fetch orders');
   }
 });
- 
+
 
 app.get('/api/retention-sales', async (req, res) => {
   const { orderCreatedBy } = req.query;
@@ -262,23 +265,24 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// Routes for employees
-app.get("/api/employees", async (req, res) => {
-  const { role } = req.query;
+app.get('/api/employees', async (req, res) => {
+  const { fullName, email } = req.query;
 
   try {
-    let employees;
-    if (role) {
-      employees = await Employee.find({ role }, "fullName email contactNumber role");
-    } else {
-      employees = await Employee.find({}, "fullName email contactNumber role");
+    const employee = await Employee.findOne({ fullName, email });
+
+    if (!employee) {
+      return res.status(404).json({ message: "Employee not found" });
     }
 
-    res.status(200).json(employees);
+    const { async, agentNumber, callerId } = employee;
+    res.status(200).json([{ async, agentNumber, callerId }]); // Ensure response is always an array
   } catch (error) {
-    res.status(500).json({ message: "Error fetching employees", error });
+    res.status(500).json({ message: "Error fetching employee details", error });
   }
 });
+
+
 
 app.delete('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
@@ -296,35 +300,45 @@ app.delete('/api/employees/:id', async (req, res) => {
 
 app.put('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
-  const { password, ...updateData } = req.body; // Extract password from request body
+  const { callerId, agentNumber, password, ...updateData } = req.body; // Extract callerId, agentNumber, and password from request body
 
   try {
-    // If a password is provided, include it in the update
+    // If password is provided, include it in the update
     if (password) {
       updateData.password = password;
     }
 
-    const updatedEmployee = await Employee.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    // Update the employee in the database
+    const updatedEmployee = await Employee.findByIdAndUpdate(
+      id,
+      { callerId, agentNumber, async: 1, ...updateData }, 
+      {
+        new: true, // Return the updated employee
+        runValidators: true, 
+      }
+    );
 
     if (!updatedEmployee) {
       return res.status(404).json({ message: 'Employee not found' });
     }
 
-    res.status(200).json({ message: 'Employee updated successfully', employee: updatedEmployee });
+    // Respond with the updated employee data
+    res.status(200).json({
+      message: 'Employee updated successfully',
+      employee: updatedEmployee,
+    }); 
   } catch (error) {
     console.error('Error updating employee:', error);
     res.status(500).json({ message: 'Error updating employee', error });
   }
 });
 
+
 app.post('/api/employees', async (req, res) => {
-  const { fullName, email, contactNumber, role, password } = req.body;
+  const { fullName, email, callerId, agentNumber, role, password } = req.body;
 
   // Check for missing fields
-  if (!fullName || !email || !contactNumber || !role || !password) {
+  if (!fullName || !email || !callerId || !agentNumber || !role || !password) {
     return res.status(400).json({ message: 'All fields are required.' });
   }
 
@@ -339,9 +353,11 @@ app.post('/api/employees', async (req, res) => {
     const newEmployee = new Employee({
       fullName,
       email,
-      contactNumber,
+      callerId, 
+      agentNumber,
       role,
       password,
+      async: 1,
     });
 
     await newEmployee.save();
@@ -643,7 +659,7 @@ app.post("/api/login", async (req, res) => {
         id: user._id,
         fullName: user.fullName,
         email: user.email,
-        role: user.role,
+        role: user.role,  
       },
     });
   } catch (error) {
@@ -700,6 +716,43 @@ app.get('/api/retention-orders', async (req, res) => {
       res.status(500).json({ message: 'Failed to fetch retention orders', error: error });
   }
 });
+ 
+
+app.post("/api/click_to_call", async (req, res) => {
+  const { destination_number, async, agent_number, caller_id } = req.body;
+
+  console.log("Received API Request:", req.body);
+
+  if (!destination_number || !agent_number || !caller_id) {
+    return res.status(400).json({ status: "error", message: "Missing required parameters" });
+  }
+
+  try {
+    const response = await axios.post(
+      "https://api-smartflo.tatateleservices.com/v1/click_to_call",
+      { destination_number, async, agent_number, caller_id },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.SMARTFLO_TOKEN}`,   
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("Smartflo API Response:", response.data);
+
+    if (response.data.status === "success") {
+      res.status(200).json({ status: "success", message: "Call initiated successfully" });
+    } else {
+      res.status(500).json({ status: "error", message: "Failed to initiate the call" });
+    }
+  } catch (error) {
+    console.error("Error during Smartflo API call:", error.response?.data || error);
+    res.status(500).json({ status: "error", message: "Error initiating the call" });
+  }
+});
+
+
 
 // Start Server
 app.listen(PORT, () => {
