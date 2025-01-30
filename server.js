@@ -265,20 +265,31 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.get('/api/employees', async (req, res) => {
-  const { fullName, email } = req.query;
+
+app.get("/api/employees", async (req, res) => {
+  const { role, fullName, email } = req.query;
 
   try {
-    const employee = await Employee.findOne({ fullName, email });
+    if (fullName && email) {
+      // Fetch a single employee by fullName and email
+      const employee = await Employee.findOne({ fullName, email });
 
-    if (!employee) {
-      return res.status(404).json({ message: "Employee not found" });
+      if (!employee) {
+        return res.status(404).json({ message: "Employee not found" });
+      }
+
+      const { async, agentNumber, callerId } = employee;
+      return res.status(200).json([{ async, agentNumber, callerId }]); // Ensure response is always an array
     }
 
-    const { async, agentNumber, callerId } = employee;
-    res.status(200).json([{ async, agentNumber, callerId }]);  
+    // Fetch employees based on role or all employees
+    const query = role ? { role } : {};
+    const employees = await Employee.find(query, "fullName email callerId agentNumber async role");
+
+    res.status(200).json(employees);
   } catch (error) {
-    res.status(500).json({ message: "Error fetching employee details", error });
+    console.error("Error fetching employees:", error);
+    res.status(500).json({ message: "Error fetching employees", error });
   }
 });
 
