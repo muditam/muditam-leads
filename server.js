@@ -88,7 +88,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
 
 
 app.get('/api/orders', async (req, res) => {
-  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2024-12-01T00:00:00Z&limit=250`;
+  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2024-10-01T00:00:00Z&limit=250`;
   try {
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
     res.json(orders);  
@@ -270,8 +270,7 @@ app.get("/api/employees", async (req, res) => {
   const { role, fullName, email } = req.query;
 
   try {
-    if (fullName && email) {
-      // Fetch a single employee by fullName and email
+    if (fullName && email) { 
       const employee = await Employee.findOne({ fullName, email });
 
       if (!employee) {
@@ -279,10 +278,9 @@ app.get("/api/employees", async (req, res) => {
       }
 
       const { async, agentNumber, callerId } = employee;
-      return res.status(200).json([{ async, agentNumber, callerId }]); // Ensure response is always an array
+      return res.status(200).json([{ async, agentNumber, callerId }]);  
     }
-
-    // Fetch employees based on role or all employees
+ 
     const query = role ? { role } : {};
     const employees = await Employee.find(query, "fullName email callerId agentNumber async role");
 
@@ -311,20 +309,18 @@ app.delete('/api/employees/:id', async (req, res) => {
 
 app.put('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
-  const { callerId, agentNumber, password, ...updateData } = req.body; // Extract callerId, agentNumber, and password from request body
+  const { callerId, agentNumber, password, ...updateData } = req.body;  
 
-  try {
-    // If password is provided, include it in the update
+  try { 
     if (password) {
       updateData.password = password;
     }
-
-    // Update the employee in the database
+ 
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
       { callerId, agentNumber, async: 1, ...updateData }, 
       {
-        new: true, // Return the updated employee
+        new: true, 
         runValidators: true, 
       }
     );
@@ -390,7 +386,7 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
     return res.status(200).json({ exists: false });
   } catch (error) {
     console.error("Error checking duplicate:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" }); 
   }
 });
 
