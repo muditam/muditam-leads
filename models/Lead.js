@@ -29,9 +29,15 @@ const LeadSchema = new mongoose.Schema({
   lastOrderDate: String,
   repeatDosageOrdered: String,
   retentionStatus: String,
-  rtRemark: String,
+  rtRemark: String, 
+  rtSubcells: [
+    {
+      date: String,
+      value: String,
+    }
+  ]
 });
- 
+
 const Lead = mongoose.model('Lead', LeadSchema);
 
 module.exports = Lead;
