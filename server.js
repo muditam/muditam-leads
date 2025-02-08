@@ -15,8 +15,21 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+// app.use(cors());
+
+const allowedOrigins = ['http://localhost:3000', 'https://60brands.com'];
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+}));
+
 app.use(express.json());
+
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGO_URI, {
@@ -839,8 +852,7 @@ app.post('/api/leads/transfer-approve', async (req, res) => {
     return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 });
-
-// --- Lead Retrieval Endpoint ---
+ 
 // This route must come AFTER the more specific transfer requests routes.
 app.get('/api/leads/:id', async (req, res) => {
   try {
