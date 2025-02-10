@@ -9,7 +9,7 @@ const Lead = require('./models/Lead');
 const XLSX = require("xlsx");
 const axios = require('axios');
 const https = require('https'); 
-const TransferRequest = require('./models/TransferRequest');
+const TransferRequest = require('./models/TransferRequests');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
