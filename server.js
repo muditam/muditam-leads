@@ -546,10 +546,67 @@ app.delete('/api/leads/:id', async (req, res) => {
 });
 
 
-// Route for Master Data - Retention
-app.get('/api/leads/retention', async (req, res) => {
-  const calculateReminder = (nextFollowupDate) => { 
+// // Route for Master Data - Retention
+// app.get('/api/leads/retention', async (req, res) => {
+//   const calculateReminder = (nextFollowupDate) => { 
 
+//     const today = new Date();
+//     const followupDate = new Date(nextFollowupDate);
+//     const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
+
+//     if (diffInDays < 0) return "Follow-up Missed";
+//     if (diffInDays === 0) return "Today";
+//     if (diffInDays === 1) return "Tomorrow";
+//     return "Later";
+//   };
+
+//   try {
+//     const leads = await Lead.find(
+//       { salesStatus: "Sales Done" },
+//       {
+//         name: 1,
+//         contactNumber: 1,
+//         agentAssigned: 1,
+//         productPitched: 1,
+//         agentsRemarks: 1,
+//         productsOrdered: 1,
+//         dosageOrdered: 1,
+//         modeOfPayment: 1,
+//         deliveryStatus: 1,
+//         healthExpertAssigned: 1,
+//         dosageExpiring: 1,
+//         rtNextFollowupDate: 1,
+//         rtFollowupReminder: 1,
+//         rtFollowupStatus: 1,
+//         lastOrderDate: 1,
+//         repeatDosageOrdered: 1,
+//         retentionStatus: 1,
+//         rtRemark: 1,
+//       }
+//     );
+
+//     const leadsWithReminder = leads.map((lead) => ({
+//       ...lead._doc,
+//       rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
+//     }));
+
+//     res.status(200).json(leadsWithReminder);
+//   } catch (error) {
+//     console.error("Error in retention endpoint:", error.message);
+//     res.status(500).json({ message: "Internal Server Error", error: error.message });
+//   }
+// });
+
+
+// Server-side code (e.g. in your app.js or routes file)
+app.get('/api/leads/retention', async (req, res) => {
+  // Read pagination parameters from the query string
+  const page = parseInt(req.query.page) || 1;           // default to page 1
+  const limit = parseInt(req.query.limit) || 50;          // default to 50 records per page
+  const skip = (page - 1) * limit;
+
+  // Function to calculate reminder text based on the next follow-up date
+  const calculateReminder = (nextFollowupDate) => {
     const today = new Date();
     const followupDate = new Date(nextFollowupDate);
     const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
@@ -561,36 +618,47 @@ app.get('/api/leads/retention', async (req, res) => {
   };
 
   try {
-    const leads = await Lead.find(
-      { salesStatus: "Sales Done" },
-      {
-        name: 1,
-        contactNumber: 1,
-        agentAssigned: 1,
-        productPitched: 1,
-        agentsRemarks: 1,
-        productsOrdered: 1,
-        dosageOrdered: 1,
-        modeOfPayment: 1,
-        deliveryStatus: 1,
-        healthExpertAssigned: 1,
-        dosageExpiring: 1,
-        rtNextFollowupDate: 1,
-        rtFollowupReminder: 1,
-        rtFollowupStatus: 1,
-        lastOrderDate: 1,
-        repeatDosageOrdered: 1,
-        retentionStatus: 1,
-        rtRemark: 1,
-      }
-    );
+    const query = { salesStatus: "Sales Done" };
 
+    // Get the total number of matching leads
+    const totalLeads = await Lead.countDocuments(query);
+
+    // Fetch only the current page of leads (with projection, sort, skip, and limit)
+    const leads = await Lead.find(query, {
+      name: 1,
+      contactNumber: 1,
+      agentAssigned: 1,
+      productPitched: 1,
+      agentsRemarks: 1,
+      productsOrdered: 1,
+      dosageOrdered: 1,
+      modeOfPayment: 1,
+      deliveryStatus: 1,
+      healthExpertAssigned: 1,
+      dosageExpiring: 1,
+      rtNextFollowupDate: 1,
+      rtFollowupReminder: 1,
+      rtFollowupStatus: 1,
+      lastOrderDate: 1,
+      repeatDosageOrdered: 1,
+      retentionStatus: 1,
+      rtRemark: 1,
+    })
+      .sort({ _id: -1 })
+      .skip(skip)
+      .limit(limit);
+ 
     const leadsWithReminder = leads.map((lead) => ({
       ...lead._doc,
       rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
     }));
 
-    res.status(200).json(leadsWithReminder);
+    res.status(200).json({
+      leads: leadsWithReminder,
+      totalLeads,
+      totalPages: Math.ceil(totalLeads / limit),
+      currentPage: page,
+    });
   } catch (error) {
     console.error("Error in retention endpoint:", error.message);
     res.status(500).json({ message: "Internal Server Error", error: error.message });
