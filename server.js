@@ -600,10 +600,13 @@ app.delete('/api/leads/:id', async (req, res) => {
 
 // Server-side code (e.g. in your app.js or routes file)
 app.get('/api/leads/retention', async (req, res) => {
-  // Read pagination parameters from the query string
-  const page = parseInt(req.query.page) || 1;           // default to page 1
-  const limit = parseInt(req.query.limit) || 50;          // default to 50 records per page
-  const skip = (page - 1) * limit;
+  // Check if the client requested to fetch all records
+  const fetchAll = req.query.fetchAll === "true";
+
+  // Only use pagination if fetchAll is not set
+  const page = fetchAll ? 1 : parseInt(req.query.page) || 1;           
+  const limit = fetchAll ? null : parseInt(req.query.limit) || 50;          
+  const skip = fetchAll ? 0 : (page - 1) * limit;
 
   // Function to calculate reminder text based on the next follow-up date
   const calculateReminder = (nextFollowupDate) => {
@@ -623,31 +626,57 @@ app.get('/api/leads/retention', async (req, res) => {
     // Get the total number of matching leads
     const totalLeads = await Lead.countDocuments(query);
 
-    // Fetch only the current page of leads (with projection, sort, skip, and limit)
-    const leads = await Lead.find(query, {
-      name: 1,
-      contactNumber: 1,
-      agentAssigned: 1,
-      productPitched: 1,
-      agentsRemarks: 1,
-      productsOrdered: 1,
-      dosageOrdered: 1,
-      modeOfPayment: 1,
-      deliveryStatus: 1,
-      healthExpertAssigned: 1,
-      dosageExpiring: 1,
-      rtNextFollowupDate: 1,
-      rtFollowupReminder: 1,
-      rtFollowupStatus: 1,
-      lastOrderDate: 1,
-      repeatDosageOrdered: 1,
-      retentionStatus: 1,
-      rtRemark: 1,
-    })
-      .sort({ _id: -1 })
-      .skip(skip)
-      .limit(limit);
- 
+    // Fetch leads based on whether we want all records or paginated results
+    let leads;
+    if (fetchAll) {
+      // Return all matching records
+      leads = await Lead.find(query, {
+        name: 1,
+        contactNumber: 1,
+        agentAssigned: 1,
+        productPitched: 1,
+        agentsRemarks: 1,
+        productsOrdered: 1,
+        dosageOrdered: 1,
+        modeOfPayment: 1,
+        deliveryStatus: 1,
+        healthExpertAssigned: 1,
+        dosageExpiring: 1,
+        rtNextFollowupDate: 1,
+        rtFollowupReminder: 1,
+        rtFollowupStatus: 1,
+        lastOrderDate: 1,
+        repeatDosageOrdered: 1,
+        retentionStatus: 1,
+        rtRemark: 1,
+      }).sort({ _id: -1 });
+    } else {
+      // Return only the current page of records
+      leads = await Lead.find(query, {
+        name: 1,
+        contactNumber: 1,
+        agentAssigned: 1,
+        productPitched: 1,
+        agentsRemarks: 1,
+        productsOrdered: 1,
+        dosageOrdered: 1,
+        modeOfPayment: 1,
+        deliveryStatus: 1,
+        healthExpertAssigned: 1,
+        dosageExpiring: 1,
+        rtNextFollowupDate: 1,
+        rtFollowupReminder: 1,
+        rtFollowupStatus: 1,
+        lastOrderDate: 1,
+        repeatDosageOrdered: 1,
+        retentionStatus: 1,
+        rtRemark: 1,
+      })
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(limit);
+    }
+
     const leadsWithReminder = leads.map((lead) => ({
       ...lead._doc,
       rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
@@ -656,7 +685,7 @@ app.get('/api/leads/retention', async (req, res) => {
     res.status(200).json({
       leads: leadsWithReminder,
       totalLeads,
-      totalPages: Math.ceil(totalLeads / limit),
+      totalPages: fetchAll ? 1 : Math.ceil(totalLeads / limit),
       currentPage: page,
     });
   } catch (error) {
@@ -664,6 +693,7 @@ app.get('/api/leads/retention', async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 });
+
 
 
 
