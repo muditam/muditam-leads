@@ -14,16 +14,30 @@ const TransferRequest = require('./models/TransferRequests');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://www.60brands.com"
+];
+
 const corsOptions = {
-  // Allow requests from any origin; or set to 'http://localhost:3000' to restrict it
-  origin: "*", 
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      // Origin is allowed
+      callback(null, true);
+    } else {
+      // Origin is not allowed
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
   allowedHeaders: ["Content-Type", "Authorization"],
   optionsSuccessStatus: 204,
 };
 
 app.use(cors(corsOptions));
+
 
 app.use(express.json());
 
