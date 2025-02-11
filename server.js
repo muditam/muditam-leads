@@ -15,7 +15,16 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+const corsOptions = {
+  // Allow requests from any origin; or set to 'http://localhost:3000' to restrict it
+  origin: "*", 
+  methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+
 app.use(express.json());
 
  
@@ -302,7 +311,7 @@ app.delete('/api/employees/:id', async (req, res) => {
     if (!employee) {
       return res.status(404).json({ message: 'Employee not found' });
     }
-    const employees = await Employee.find({}, '-password'); // Fetch updated employees list
+    const employees = await Employee.find({}, '-password');  
     res.status(200).json({ message: 'Employee deleted successfully', employees });
   } catch (error) {
     res.status(500).json({ message: 'Error deleting employee', error });
@@ -600,13 +609,10 @@ app.delete('/api/leads/:id', async (req, res) => {
 
 // Server-side code (e.g. in your app.js or routes file)
 app.get('/api/leads/retention', async (req, res) => {
-  // Check if the client requested to fetch all records
-  const fetchAll = req.query.fetchAll === "true";
-
-  // Only use pagination if fetchAll is not set
-  const page = fetchAll ? 1 : parseInt(req.query.page) || 1;           
-  const limit = fetchAll ? null : parseInt(req.query.limit) || 50;          
-  const skip = fetchAll ? 0 : (page - 1) * limit;
+  // Read pagination parameters from the query string
+  const page = parseInt(req.query.page) || 1;         
+  const limit = parseInt(req.query.limit) || 50;          
+  const skip = (page - 1) * limit;
 
   // Function to calculate reminder text based on the next follow-up date
   const calculateReminder = (nextFollowupDate) => {
@@ -622,61 +628,33 @@ app.get('/api/leads/retention', async (req, res) => {
 
   try {
     const query = { salesStatus: "Sales Done" };
-
-    // Get the total number of matching leads
+ 
     const totalLeads = await Lead.countDocuments(query);
-
-    // Fetch leads based on whether we want all records or paginated results
-    let leads;
-    if (fetchAll) {
-      // Return all matching records
-      leads = await Lead.find(query, {
-        name: 1,
-        contactNumber: 1,
-        agentAssigned: 1,
-        productPitched: 1,
-        agentsRemarks: 1,
-        productsOrdered: 1,
-        dosageOrdered: 1,
-        modeOfPayment: 1,
-        deliveryStatus: 1,
-        healthExpertAssigned: 1,
-        dosageExpiring: 1,
-        rtNextFollowupDate: 1,
-        rtFollowupReminder: 1,
-        rtFollowupStatus: 1,
-        lastOrderDate: 1,
-        repeatDosageOrdered: 1,
-        retentionStatus: 1,
-        rtRemark: 1,
-      }).sort({ _id: -1 });
-    } else {
-      // Return only the current page of records
-      leads = await Lead.find(query, {
-        name: 1,
-        contactNumber: 1,
-        agentAssigned: 1,
-        productPitched: 1,
-        agentsRemarks: 1,
-        productsOrdered: 1,
-        dosageOrdered: 1,
-        modeOfPayment: 1,
-        deliveryStatus: 1,
-        healthExpertAssigned: 1,
-        dosageExpiring: 1,
-        rtNextFollowupDate: 1,
-        rtFollowupReminder: 1,
-        rtFollowupStatus: 1,
-        lastOrderDate: 1,
-        repeatDosageOrdered: 1,
-        retentionStatus: 1,
-        rtRemark: 1,
-      })
-        .sort({ _id: -1 })
-        .skip(skip)
-        .limit(limit);
-    }
-
+ 
+    const leads = await Lead.find(query, {
+      name: 1,
+      contactNumber: 1,
+      agentAssigned: 1,
+      productPitched: 1,
+      agentsRemarks: 1,
+      productsOrdered: 1,
+      dosageOrdered: 1,
+      modeOfPayment: 1,
+      deliveryStatus: 1,
+      healthExpertAssigned: 1,
+      dosageExpiring: 1,
+      rtNextFollowupDate: 1,
+      rtFollowupReminder: 1,
+      rtFollowupStatus: 1,
+      lastOrderDate: 1,
+      repeatDosageOrdered: 1,
+      retentionStatus: 1,
+      rtRemark: 1,
+    })
+      .sort({ _id: -1 })
+      .skip(skip)
+      .limit(limit);
+ 
     const leadsWithReminder = leads.map((lead) => ({
       ...lead._doc,
       rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
@@ -685,7 +663,7 @@ app.get('/api/leads/retention', async (req, res) => {
     res.status(200).json({
       leads: leadsWithReminder,
       totalLeads,
-      totalPages: fetchAll ? 1 : Math.ceil(totalLeads / limit),
+      totalPages: Math.ceil(totalLeads / limit),
       currentPage: page,
     });
   } catch (error) {
@@ -693,7 +671,6 @@ app.get('/api/leads/retention', async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 });
-
 
 
 
