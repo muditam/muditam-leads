@@ -89,7 +89,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
 
 
 app.get('/api/orders', async (req, res) => {
-  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2024-06-01T00:00:00Z&created_at_max=2024-08-31T23:59:59Z&limit=250`;
+  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2024-12-01T00:00:00Z&limit=250`;
   try {
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
     res.json(orders);  
