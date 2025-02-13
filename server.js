@@ -20,14 +20,11 @@ const allowedOrigins = [
 ];
 
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
+  origin: function (origin, callback) { 
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      // Origin is allowed
+    if (allowedOrigins.indexOf(origin) !== -1) { 
       callback(null, true);
-    } else {
-      // Origin is not allowed
+    } else { 
       callback(new Error("Not allowed by CORS"));
     }
   },
@@ -113,7 +110,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
 
 
 app.get('/api/orders', async (req, res) => {
-  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2024-10-01T00:00:00Z&limit=250`;
+  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2024-08-01T00:00:00Z&limit=250`;
   try {
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
     res.json(orders);  
@@ -627,8 +624,7 @@ app.get('/api/leads/retention', async (req, res) => {
   const page = parseInt(req.query.page) || 1;         
   const limit = parseInt(req.query.limit) || 50;          
   const skip = (page - 1) * limit;
-
-  // Function to calculate reminder text based on the next follow-up date
+ 
   const calculateReminder = (nextFollowupDate) => {
     const today = new Date();
     const followupDate = new Date(nextFollowupDate);
@@ -965,6 +961,17 @@ app.post('/api/leads/transfer-reject', async (req, res) => {
     return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 });
+
+app.get('/api/leads/transfer-requests/all', async (req, res) => {
+  try {
+    const requests = await TransferRequest.find().populate("leadId");
+    res.status(200).json(requests);
+  } catch (error) {
+    console.error("Error fetching transfer requests:", error);
+    res.status(500).json({ message: "Error fetching transfer requests", error: error.message });
+  }
+});
+
 
 // Start Server
 app.listen(PORT, () => {
