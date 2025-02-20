@@ -685,23 +685,113 @@ app.get('/api/leads/retentions', async (req, res) => {
 
 app.get('/api/leads/new-orders', async (req, res) => {
   try {
-    const leads = await Lead.find(
-      { salesStatus: "Sales Done" },
-      {
-        lastOrderDate: 1,
-        name: 1,
-        contactNumber: 1,
-        agentAssigned: 1,
-        productsOrdered: 1,
-        dosageOrdered: 1,
-        healthExpertAssigned: 1,
-        agentsRemarks: 1,
-        amountPaid: 1,
-        modeOfPayment: 1,
-        deliveryStatus: 1,
+    // Extract page, limit, and other filter parameters from query
+    const { page = 1, limit = 50, ...filters } = req.query;
+    
+    // Build the query with default filter and exclusion for Admin/Online Order
+    const query = { 
+      salesStatus: "Sales Done",
+      agentAssigned: { $nin: ['Admin', 'Online Order'] }
+    };
+
+    // Apply additional filters if provided
+    if (filters.name) {
+      query.name = { $regex: filters.name, $options: "i" };
+    }
+    if (filters.contactNumber) {
+      query.contactNumber = { $regex: filters.contactNumber };
+    }
+    if (filters.agentName) {
+      let agentArr = filters.agentName;
+      if (!Array.isArray(agentArr)) {
+        agentArr = [agentArr];
       }
-    );
-    res.status(200).json(leads);
+      // This will override our $nin if provided, so merge carefully if needed
+      query.agentAssigned = { $in: agentArr };
+    }
+    if (filters.healthExpertAssigned) {
+      if (filters.healthExpertAssigned === "blank") {
+        query.$or = [
+          { healthExpertAssigned: { $exists: false } },
+          { healthExpertAssigned: "" },
+          { healthExpertAssigned: { $regex: /^\s*$/ } }
+        ];
+      } else {
+        query.healthExpertAssigned = { $regex: filters.healthExpertAssigned, $options: "i" };
+      }
+    }
+    if (filters.modeOfPayment) {
+      let paymentArr = filters.modeOfPayment;
+      if (!Array.isArray(paymentArr)) {
+        paymentArr = [paymentArr];
+      }
+      query.modeOfPayment = { $in: paymentArr };
+    }
+    if (filters.deliveryStatus) {
+      let deliveryArr = filters.deliveryStatus;
+      if (!Array.isArray(deliveryArr)) {
+        deliveryArr = [deliveryArr];
+      }
+      query.deliveryStatus = { $in: deliveryArr };
+    }
+    if (filters.productsOrdered) {
+      let productsArr = filters.productsOrdered;
+      if (!Array.isArray(productsArr)) {
+        productsArr = [productsArr];
+      }
+      query.productsOrdered = { $in: productsArr };
+    }
+
+    // Date filtering on lastOrderDate
+    if (filters.startDate) {
+      query.lastOrderDate = query.lastOrderDate || {};
+      query.lastOrderDate.$gte = new Date(filters.startDate);
+    }
+    if (filters.endDate) {
+      query.lastOrderDate = query.lastOrderDate || {};
+      query.lastOrderDate.$lte = new Date(filters.endDate);
+    }
+    if (filters.orderDate) {
+      // Use an exact day match by using a range from orderDate to orderDate + 1 day
+      const orderDateStart = new Date(filters.orderDate);
+      const orderDateEnd = new Date(filters.orderDate);
+      orderDateEnd.setDate(orderDateEnd.getDate() + 1);
+      query.lastOrderDate = { $gte: orderDateStart, $lt: orderDateEnd };
+    }
+
+    // Convert page and limit to numbers and calculate skip
+    const pageNumber = parseInt(page, 10);
+    const limitNumber = parseInt(limit, 10);
+    const skip = (pageNumber - 1) * limitNumber;
+
+    // Get total count for pagination (with filters applied)
+    const total = await Lead.countDocuments(query);
+
+    // Find leads using the query, applying sorting, skip, and limit
+    const leads = await Lead.find(query, {
+      lastOrderDate: 1,
+      name: 1,
+      contactNumber: 1,
+      agentAssigned: 1,
+      productsOrdered: 1,
+      dosageOrdered: 1,
+      healthExpertAssigned: 1,
+      agentsRemarks: 1,
+      amountPaid: 1,
+      modeOfPayment: 1,
+      deliveryStatus: 1,
+    })
+      .sort({ _id: -1 })
+      .skip(skip)
+      .limit(limitNumber);
+
+    res.status(200).json({
+      leads,
+      total,
+      page: pageNumber,
+      limit: limitNumber,
+      totalPages: Math.ceil(total / limitNumber),
+    });
   } catch (error) {
     res.status(500).json({
       message: 'Error fetching new orders',
@@ -709,6 +799,9 @@ app.get('/api/leads/new-orders', async (req, res) => {
     });
   }
 });
+
+
+
 
 // Login Route
 app.post("/api/login", async (req, res) => {
