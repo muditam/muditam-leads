@@ -686,7 +686,7 @@ app.get('/api/leads/retentions', async (req, res) => {
 app.get('/api/leads/new-orders', async (req, res) => {
   try {
     // Extract page, limit, and other filter parameters from query
-    const { page = 1, limit = 50, ...filters } = req.query;
+    const { page = 1, limit = 30, ...filters } = req.query;
     
     // Build the query with default filter and exclusion for Admin/Online Order
     const query = { 
