@@ -30,6 +30,7 @@ const LeadSchema = new mongoose.Schema({
   repeatDosageOrdered: String,
   retentionStatus: String,
   rtRemark: String, 
+  rowColor: String,  
   rtSubcells: [
     {
       date: String,

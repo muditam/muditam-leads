@@ -49,6 +49,7 @@ const RetentionSalesSchema = new mongoose.Schema({
   modeOfPayment: String,
   deliveryStatus: String,
   orderCreatedBy: String,
+  remarks: String, 
 });
 
 const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
