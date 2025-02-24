@@ -68,35 +68,73 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
       httpsAgent: httpsAgent
     });
 
+    if (!response.data.orders) {
+      console.error("No orders found in response:", response.data);
+      return allOrders;
+    }
+ 
     const fetchedOrders = response.data.orders.map(order => ({
-      ...order,
-      channel_name: order.source_name || 'Unknown'  
+      order_id: order.name,  
+      name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : '',
+      contact_number: order.customer && order.customer.default_address 
+        ? order.customer.default_address.phone.replace(/^\+91/, '').trim()
+        : '',
+      created_at: order.created_at,           
+      total_price: order.total_price,         
+      payment_gateway_names: order.payment_gateway_names, 
+      line_items: order.line_items,           
+      channel_name: order.source_name || 'Unknown',
+      delivery_status: order.fulfillment_status || 'Not Specified' 
     }));
 
-    allOrders = allOrders.concat(fetchedOrders); 
+    allOrders = allOrders.concat(fetchedOrders);
 
-    const nextLink = response.headers.link && response.headers.link.split(',').filter(s => s.includes('rel="next"')).map(s => s.match(/<(.*)>; rel="next"/)).find(Boolean);
+    const nextLink = response.headers.link &&
+      response.headers.link
+        .split(',')
+        .filter(s => s.includes('rel="next"'))
+        .map(s => s.match(/<(.*)>; rel="next"/))
+        .find(Boolean);
     if (nextLink && nextLink[1]) {
       return fetchAllOrders(nextLink[1], accessToken, allOrders);
     }
 
-    return allOrders;  
+    return allOrders;
   } catch (error) {
     console.error('Failed to fetch orders:', error);
-    throw error;  
+    throw error;
   }
 }
 
-app.get('/api/orders', async (req, res) => {
-  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=2025-02-01T00:00:00Z&limit=250`;
+app.get('/api/orders', async (req, res) => { 
+  const { startDate, endDate } = req.query;
+   
+  if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+    return res.status(400).send("Invalid date range: startDate cannot be after endDate.");
+  }
+   
+  const defaultStartDate = "2025-02-01T00:00:00Z";
+  const defaultEndDate = new Date().toISOString();
+ 
+  const start = startDate ? new Date(startDate).toISOString() : defaultStartDate;
+  const end = endDate ? new Date(endDate).toISOString() : defaultEndDate;
+
+  const startEncoded = encodeURIComponent(start);
+  const endEncoded = encodeURIComponent(end);
+
+  const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=${startEncoded}&created_at_max=${endEncoded}&limit=250`;
+  
+  console.log("Fetching orders from Shopify with URL:", shopifyAPIEndpoint);
+  
   try {
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
-    res.json(orders);  
+    res.json(orders);
   } catch (error) {
-    console.error('Error fetching orders from Shopify:', error);
+    console.error('Error fetching orders from Shopify:', error.response ? error.response.data : error);
     res.status(500).send('Failed to fetch orders');
   }
 });
+
 
 
 app.get('/api/retention-sales', async (req, res) => {
@@ -595,19 +633,19 @@ app.delete('/api/leads/:id', async (req, res) => {
 //   }
 // });
 
-
-// Server-side code (e.g. in your app.js or routes file)
-app.get('/api/leads/retention', async (req, res) => {
-  // Read pagination parameters from the query string
-  const page = parseInt(req.query.page) || 1;         
-  const limit = parseInt(req.query.limit) || 50;          
-  const skip = (page - 1) * limit;
+ 
+app.get('/api/leads/retention', async (req, res) => { 
+  const { page, limit, all, fullName } = req.query;
+ 
+  let query = { salesStatus: "Sales Done" };
+  if (fullName) { 
+    query.healthExpertAssigned = fullName;
+  }
  
   const calculateReminder = (nextFollowupDate) => {
     const today = new Date();
     const followupDate = new Date(nextFollowupDate);
     const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
-
     if (diffInDays < 0) return "Follow-up Missed";
     if (diffInDays === 0) return "Today";
     if (diffInDays === 1) return "Tomorrow";
@@ -615,50 +653,88 @@ app.get('/api/leads/retention', async (req, res) => {
   };
 
   try {
-    const query = { salesStatus: "Sales Done" };
- 
-    const totalLeads = await Lead.countDocuments(query);
- 
-    const leads = await Lead.find(query, {
-      name: 1,
-      contactNumber: 1,
-      agentAssigned: 1,
-      productPitched: 1,
-      agentsRemarks: 1,
-      productsOrdered: 1,
-      dosageOrdered: 1,
-      modeOfPayment: 1,
-      deliveryStatus: 1,
-      healthExpertAssigned: 1,
-      dosageExpiring: 1,
-      rtNextFollowupDate: 1,
-      rtFollowupReminder: 1,
-      rtFollowupStatus: 1,
-      lastOrderDate: 1,
-      repeatDosageOrdered: 1,
-      retentionStatus: 1,
-      rtRemark: 1,
-    })
-      .sort({ _id: -1 })
-      .skip(skip)
-      .limit(limit);
- 
-    const leadsWithReminder = leads.map((lead) => ({
-      ...lead._doc,
-      rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
-    }));
+    // If the client requests all records, bypass pagination
+    if (all === "true") {
+      const leads = await Lead.find(query, {
+        name: 1,
+        contactNumber: 1,
+        agentAssigned: 1,
+        productPitched: 1,
+        agentsRemarks: 1,
+        productsOrdered: 1,
+        dosageOrdered: 1,
+        modeOfPayment: 1,
+        deliveryStatus: 1,
+        healthExpertAssigned: 1,
+        dosageExpiring: 1,
+        rtNextFollowupDate: 1,
+        rtFollowupReminder: 1,
+        rtFollowupStatus: 1,
+        lastOrderDate: 1,
+        repeatDosageOrdered: 1,
+        retentionStatus: 1,
+        rtRemark: 1,
+      }).sort({ _id: -1 });
+      const leadsWithReminder = leads.map((lead) => ({
+        ...lead._doc,
+        rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
+      }));
 
-    res.status(200).json({
-      leads: leadsWithReminder,
-      totalLeads,
-      totalPages: Math.ceil(totalLeads / limit),
-      currentPage: page,
-    });
+      return res.status(200).json({
+        leads: leadsWithReminder,
+        totalLeads: leadsWithReminder.length,
+        totalPages: 1,
+        currentPage: 1,
+      });
+    } else {
+      // Use pagination if "all" is not true
+      const pageNumber = parseInt(page) || 1;
+      const limitNumber = parseInt(limit) || 50;
+      const skip = (pageNumber - 1) * limitNumber;
+
+      const totalLeads = await Lead.countDocuments(query);
+      const leads = await Lead.find(query, {
+        name: 1,
+        contactNumber: 1,
+        agentAssigned: 1,
+        productPitched: 1,
+        agentsRemarks: 1,
+        productsOrdered: 1,
+        dosageOrdered: 1,
+        modeOfPayment: 1,
+        deliveryStatus: 1,
+        healthExpertAssigned: 1,
+        dosageExpiring: 1,
+        rtNextFollowupDate: 1,
+        rtFollowupReminder: 1,
+        rtFollowupStatus: 1,
+        lastOrderDate: 1,
+        repeatDosageOrdered: 1,
+        retentionStatus: 1,
+        rtRemark: 1,
+      })
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(limitNumber);
+
+      const leadsWithReminder = leads.map((lead) => ({
+        ...lead._doc,
+        rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
+      }));
+
+      return res.status(200).json({
+        leads: leadsWithReminder,
+        totalLeads,
+        totalPages: Math.ceil(totalLeads / limitNumber),
+        currentPage: pageNumber,
+      });
+    }
   } catch (error) {
     console.error("Error in retention endpoint:", error.message);
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 });
+
 
 
 
