@@ -247,6 +247,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
   const filePath = req.file.path;
 
   try {
+    // Parse the uploaded file
     const workbook = XLSX.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet);
@@ -254,33 +255,16 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
     const requiredFields = ["Date", "Name", "Contact No"];
     const errors = [];
 
+    // Validate and prepare data for insertion
     const leads = rows.map((row, index) => {
       const missingFields = requiredFields.filter((field) => !row[field]);
       if (missingFields.length > 0) {
         errors.push(`Row ${index + 2} is missing mandatory fields: ${missingFields.join(", ")}`);
         return null;
       }
-
-      // --- Generate IST date & time for each lead ---
-      const nowISTString = new Date().toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-      });
-      const nowIST = new Date(nowISTString);
-      const dateIST = nowIST.toISOString().split("T")[0];
-      const timeIST = nowIST.toLocaleTimeString("en-IN", {
-        hour12: true,
-        timeZone: "Asia/Kolkata",
-      });
-
       return {
-        // Always use the current IST date/time (ignoring the spreadsheet's Date/Time columns)
-        date: dateIST,
-        time: timeIST,
-
-        // or if you want to fallback to the spreadsheet’s fields only if they exist:
-        // date: row.Date || dateIST,
-        // time: row.Time || timeIST,
-
+        date: new Date().toISOString().split("T")[0],   
+        time: row.Time || "",
         name: row.Name,
         contactNumber: row["Contact No"],
         leadSource: row["Lead Source"] || "",
@@ -313,7 +297,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
     if (errors.length > 0) {
       return res.status(400).json({ success: false, error: errors.join(". ") });
     }
-
+ 
     await Lead.insertMany(leads.filter(Boolean));
     res.json({ success: true });
   } catch (err) {
@@ -321,7 +305,6 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
-
 
 
 app.get("/api/employees", async (req, res) => {
