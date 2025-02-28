@@ -466,27 +466,35 @@ const reformatDate = (dateString) => {
     if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
 
     if (filterCriteria.startDate || filterCriteria.endDate) {
+      console.log("Original Start Date:", filterCriteria.startDate);
+      console.log("Original End Date:", filterCriteria.endDate);
+
       query.date = {};
       if (filterCriteria.startDate) {
-          const parsedStartDate = parseDate(filterCriteria.startDate);
-          if (parsedStartDate)
-            query.date.$gte = formattedStartDate;
+        const formattedStartDate = reformatDate(filterCriteria.startDate);
+        console.log("Formatted Start Date:", formattedStartDate);
+        if (formattedStartDate) {
+          query.date.$gte = formattedStartDate;
+        }
       }
       if (filterCriteria.endDate) {
-          const parsedEndDate = parseDate(filterCriteria.endDate);
-          if (parsedEndDate) 
-            query.date.$lte = formattedStartDate;
+        const formattedEndDate = reformatDate(filterCriteria.endDate);
+        console.log("Formatted End Date:", formattedEndDate);
+        if (formattedEndDate) {
+          query.date.$lte = formattedEndDate;
+        }
       }
+
       // Remove `query.date` if empty
       if (Object.keys(query.date).length === 0) delete query.date;
   }
   
 
     // Order Date
-    if (filterCriteria.orderDate) {
-      const parsedOrderDate = parseDate(filterCriteria.orderDate);
-      if (parsedOrderDate) {
-        query.orderDate = formattedStartDate;
+     if (filterCriteria.orderDate) {
+      const formattedOrderDate = reformatDate(filterCriteria.orderDate);
+      if (formattedOrderDate) {
+        query.orderDate = formattedOrderDate;
       }
     }
 
