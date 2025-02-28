@@ -456,10 +456,10 @@ app.get('/api/leads', async (req, res) => {
   
 
     // Order Date
-    if (filterCriteria.orderDate) {
-      const parsedOrderDate = parseDate(filterCriteria.orderDate);
-      if (parsedOrderDate) {
-          query.orderDate = parsedOrderDate;
+    if (filterCriteria.lastOrderDate) {
+      const parsedlastOrderDate = parseDate(filterCriteria.lastOrderDate);
+      if (parsedlastOrderDate) {
+          query.lastOrderDate = parsedlastOrderDate;
       }
   }
   
