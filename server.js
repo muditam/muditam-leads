@@ -455,11 +455,13 @@ app.get('/api/leads', async (req, res) => {
       query.date = {};
       if (filterCriteria.startDate) {
           const parsedStartDate = parseDate(filterCriteria.startDate);
-          if (parsedStartDate) query.date.$gte = parsedStartDate;
+          if (parsedStartDate)
+            query.date.$gte = parsedStartDate.toISOString().split("T")[0];
       }
       if (filterCriteria.endDate) {
           const parsedEndDate = parseDate(filterCriteria.endDate);
-          if (parsedEndDate) query.date.$lte = parsedEndDate;
+          if (parsedEndDate) 
+            query.date.$lte = parsedEndDate.toISOString().split("T")[0];
       }
       // Remove `query.date` if empty
       if (Object.keys(query.date).length === 0) delete query.date;
@@ -470,7 +472,7 @@ app.get('/api/leads', async (req, res) => {
     if (filterCriteria.orderDate) {
       const parsedOrderDate = parseDate(filterCriteria.orderDate);
       if (parsedOrderDate) {
-        query.orderDate = parsedOrderDate;
+        query.orderDate = parsedOrderDate.toISOString().split("T")[0];
       }
     }
 
