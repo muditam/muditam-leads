@@ -442,6 +442,20 @@ app.get('/api/leads', async (req, res) => {
     return isNaN(parsedDate) ? null : parsedDate;  
 };
 
+const reformatDate = (dateString) => {
+  if (!dateString) return null;
+
+  // Split the date into day, month, and year
+  const [day, month, year] = dateString.split("-");
+
+  // Validate the date components
+  if (!day || !month || !year || day.length !== 2 || month.length !== 2 || year.length !== 4) {
+    return null; // Invalid date format
+  }
+
+  // Return the date in YYYY-MM-DD format
+  return `${year}-${month}-${day}`;
+};
 
   try {
     const query = {};
@@ -456,12 +470,12 @@ app.get('/api/leads', async (req, res) => {
       if (filterCriteria.startDate) {
           const parsedStartDate = parseDate(filterCriteria.startDate);
           if (parsedStartDate)
-            query.date.$gte = parsedStartDate.toISOString().split("T")[0];
+            query.date.$gte = formattedStartDate;
       }
       if (filterCriteria.endDate) {
           const parsedEndDate = parseDate(filterCriteria.endDate);
           if (parsedEndDate) 
-            query.date.$lte = parsedEndDate.toISOString().split("T")[0];
+            query.date.$lte = formattedStartDate;
       }
       // Remove `query.date` if empty
       if (Object.keys(query.date).length === 0) delete query.date;
@@ -472,7 +486,7 @@ app.get('/api/leads', async (req, res) => {
     if (filterCriteria.orderDate) {
       const parsedOrderDate = parseDate(filterCriteria.orderDate);
       if (parsedOrderDate) {
-        query.orderDate = parsedOrderDate.toISOString().split("T")[0];
+        query.orderDate = formattedStartDate;
       }
     }
 
