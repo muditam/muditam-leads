@@ -435,32 +435,21 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
 app.get('/api/leads', async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus } = req.query;
   const filterCriteria = JSON.parse(filters);
-  
-  const parseDate = (dateString) => {
+
+  const reformatDate = (dateString) => {
     if (!dateString) return null;
-    const parsedDate = new Date(dateString);  
-    return isNaN(parsedDate) ? null : parsedDate;  
-};
-
-const reformatDate = (dateString) => {
-  if (!dateString) return null;
-
-  // Split the date into day, month, and year
-  const [day, month, year] = dateString.split("-");
-
-  // Validate the date components
-  if (!day || !month || !year || day.length !== 2 || month.length !== 2 || year.length !== 4) {
-    return null; // Invalid date format
-  }
-
-  // Return the date in YYYY-MM-DD format
-  return `${year}-${month}-${day}`;
-};
+   
+    const [day, month, year] = dateString.split("-");
+   
+    if (!day || !month || !year || day.length !== 2 || month.length !== 2 || year.length !== 4) {
+      return null;  
+    } 
+    return `${year}-${month}-${day}`;
+  };
 
   try {
     const query = {};
-
-    // Filters-based queries (for LeadTable)
+ 
     if (filterCriteria.name) query.name = { $regex: filterCriteria.name, $options: 'i' };
     if (filterCriteria.contactNumber) query.contactNumber = filterCriteria.contactNumber;
     if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
@@ -474,14 +463,14 @@ const reformatDate = (dateString) => {
         const formattedStartDate = reformatDate(filterCriteria.startDate);
         console.log("Formatted Start Date:", formattedStartDate);
         if (formattedStartDate) {
-          query.date.$gte = formattedStartDate;
+          query.date.$gte = new Date(formattedStartDate);
         }
       }
       if (filterCriteria.endDate) {
         const formattedEndDate = reformatDate(filterCriteria.endDate);
         console.log("Formatted End Date:", formattedEndDate);
         if (formattedEndDate) {
-          query.date.$lte = formattedEndDate;
+          query.date.$lte = new Date(formattedEndDate);
         }
       }
 
@@ -494,7 +483,7 @@ const reformatDate = (dateString) => {
      if (filterCriteria.orderDate) {
       const formattedOrderDate = reformatDate(filterCriteria.orderDate);
       if (formattedOrderDate) {
-        query.orderDate = formattedOrderDate;
+        query.orderDate = new Date(formattedOrderDate);
       }
     }
 
