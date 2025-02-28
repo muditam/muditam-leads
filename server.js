@@ -19,15 +19,13 @@ app.use(express.json());
 
 const templateRoutes = require("./routes/templates");
 app.use("/api/templates", templateRoutes);
-
-// MongoDB Connection
+ 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
-
-// Define Employee Schema
+ 
 const EmployeeSchema = new mongoose.Schema({
   fullName: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -214,8 +212,7 @@ app.put('/api/retention-sales/:id', async (req, res) => {
   }
 });
 
-
-// Route to Delete Retention Sale
+ 
 app.delete('/api/retention-sales/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -246,16 +243,14 @@ const upload = multer({
 app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
   const filePath = req.file.path;
 
-  try {
-    // Parse the uploaded file
+  try { 
     const workbook = XLSX.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet);
 
     const requiredFields = ["Date", "Name", "Contact No"];
     const errors = [];
-
-    // Validate and prepare data for insertion
+ 
     const leads = rows.map((row, index) => {
       const missingFields = requiredFields.filter((field) => !row[field]);
       if (missingFields.length > 0) {
@@ -369,8 +364,7 @@ app.put('/api/employees/:id', async (req, res) => {
     if (!updatedEmployee) {
       return res.status(404).json({ message: 'Employee not found' });
     }
-
-    // Respond with the updated employee data
+ 
     res.status(200).json({
       message: 'Employee updated successfully',
       employee: updatedEmployee,
@@ -384,20 +378,17 @@ app.put('/api/employees/:id', async (req, res) => {
 
 app.post('/api/employees', async (req, res) => {
   const { fullName, email, callerId, agentNumber, role, password } = req.body;
-
-  // Check for missing fields
+ 
   if (!fullName || !email || !callerId || !agentNumber || !role || !password) {
     return res.status(400).json({ message: 'All fields are required.' });
   }
 
-  try {
-    // Check if the email already exists
+  try { 
     const existingEmployee = await Employee.findOne({ email });
     if (existingEmployee) {
       return res.status(400).json({ message: 'Email already exists.' });
     }
-
-    // Save the new employee
+ 
     const newEmployee = new Employee({
       fullName,
       email,
@@ -436,16 +427,12 @@ app.get('/api/leads', async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus } = req.query;
   const filterCriteria = JSON.parse(filters);
 
-  const reformatDate = (dateString) => {
+  const parseDate = (dateString) => {
     if (!dateString) return null;
-   
-    const [day, month, year] = dateString.split("-");
-   
-    if (!day || !month || !year || day.length !== 2 || month.length !== 2 || year.length !== 4) {
-      return null;  
-    } 
-    return `${year}-${month}-${day}`;
-  };
+    const parsedDate = new Date(dateString);
+    return isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString().split("T")[0];  
+};
+
 
   try {
     const query = {};
@@ -455,37 +442,28 @@ app.get('/api/leads', async (req, res) => {
     if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
 
     if (filterCriteria.startDate || filterCriteria.endDate) {
-      console.log("Original Start Date:", filterCriteria.startDate);
-      console.log("Original End Date:", filterCriteria.endDate);
-
       query.date = {};
       if (filterCriteria.startDate) {
-        const formattedStartDate = reformatDate(filterCriteria.startDate);
-        console.log("Formatted Start Date:", formattedStartDate);
-        if (formattedStartDate) {
-          query.date.$gte = new Date(formattedStartDate);
-        }
+          const parsedStartDate = parseDate(filterCriteria.startDate);
+          if (parsedStartDate) query.date.$gte = parsedStartDate;
       }
       if (filterCriteria.endDate) {
-        const formattedEndDate = reformatDate(filterCriteria.endDate);
-        console.log("Formatted End Date:", formattedEndDate);
-        if (formattedEndDate) {
-          query.date.$lte = new Date(formattedEndDate);
-        }
+          const parsedEndDate = parseDate(filterCriteria.endDate);
+          if (parsedEndDate) query.date.$lte = parsedEndDate;
       }
-
-      // Remove `query.date` if empty
-      if (Object.keys(query.date).length === 0) delete query.date;
+      if (Object.keys(query.date).length === 0) delete query.date;  
   }
   
 
     // Order Date
-     if (filterCriteria.orderDate) {
-      const formattedOrderDate = reformatDate(filterCriteria.orderDate);
-      if (formattedOrderDate) {
-        query.orderDate = new Date(formattedOrderDate);
+    if (filterCriteria.orderDate) {
+      const parsedOrderDate = parseDate(filterCriteria.orderDate);
+      if (parsedOrderDate) {
+          query.orderDate = parsedOrderDate;
       }
-    }
+  }
+  
+
 
     if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
     if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
@@ -526,13 +504,10 @@ app.get('/api/leads', async (req, res) => {
           query.rtNextFollowupDate = { $gt: today.toISOString().split("T")[0] };
       }
   }
-  
-
-    // Direct query parameters (for SalesMyLeads)
+   
     if (agentAssignedName) query.agentAssigned = agentAssignedName;
     if (salesStatus) query.salesStatus = salesStatus;
-
-    // Fetch data
+ 
     const totalLeads = await Lead.countDocuments(query);
     const leads = await Lead.find(query)
       .sort({ _id: -1 })
@@ -595,59 +570,7 @@ app.delete('/api/leads/:id', async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: 'Error deleting lead', error });
   }
-});
-
-
-// // Route for Master Data - Retention
-// app.get('/api/leads/retention', async (req, res) => {
-//   const calculateReminder = (nextFollowupDate) => { 
-
-//     const today = new Date();
-//     const followupDate = new Date(nextFollowupDate);
-//     const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
-
-//     if (diffInDays < 0) return "Follow-up Missed";
-//     if (diffInDays === 0) return "Today";
-//     if (diffInDays === 1) return "Tomorrow";
-//     return "Later";
-//   };
-
-//   try {
-//     const leads = await Lead.find(
-//       { salesStatus: "Sales Done" },
-//       {
-//         name: 1,
-//         contactNumber: 1,
-//         agentAssigned: 1,
-//         productPitched: 1,
-//         agentsRemarks: 1,
-//         productsOrdered: 1,
-//         dosageOrdered: 1,
-//         modeOfPayment: 1,
-//         deliveryStatus: 1,
-//         healthExpertAssigned: 1,
-//         dosageExpiring: 1,
-//         rtNextFollowupDate: 1,
-//         rtFollowupReminder: 1,
-//         rtFollowupStatus: 1,
-//         lastOrderDate: 1,
-//         repeatDosageOrdered: 1,
-//         retentionStatus: 1,
-//         rtRemark: 1,
-//       }
-//     );
-
-//     const leadsWithReminder = leads.map((lead) => ({
-//       ...lead._doc,
-//       rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
-//     }));
-
-//     res.status(200).json(leadsWithReminder);
-//   } catch (error) {
-//     console.error("Error in retention endpoint:", error.message);
-//     res.status(500).json({ message: "Internal Server Error", error: error.message });
-//   }
-// });
+}); 
 
  
 app.get('/api/leads/retention', async (req, res) => { 
@@ -668,8 +591,7 @@ app.get('/api/leads/retention', async (req, res) => {
     return "Later";
   };
 
-  try {
-    // If the client requests all records, bypass pagination
+  try { 
     if (all === "true") {
       const leads = await Lead.find(query, {
         name: 1,
@@ -890,9 +812,7 @@ app.get('/api/leads/new-orders', async (req, res) => {
     });
   }
 });
-
-
-
+ 
 
 // Login Route
 app.post("/api/login", async (req, res) => {
@@ -937,9 +857,7 @@ app.get('/api/leads/assigned', async (req, res) => {
     res.status(500).json({ message: 'Error fetching assigned leads', error });
   }
 });
-
-
-
+ 
 // Search endpoint
 app.get('/api/search', async (req, res) => {
   const { query } = req.query;
@@ -954,7 +872,7 @@ app.get('/api/search', async (req, res) => {
         { name: { $regex: query, $options: "i" } },
         { contactNumber: { $regex: query } }
       ],
-    }).limit(10); // Limit results for performance
+    }).limit(10);  
 
     res.status(200).json(results);
   } catch (error) {
@@ -1017,9 +935,7 @@ app.get('/api/leads/transfer-requests', async (req, res) => {
     res.status(500).json({ message: "Error fetching transfer requests", error: error.message });
   }
 });
-
-
-// 2. Create a transfer request
+ 
 app.post('/api/leads/transfer-request', async (req, res) => {
   const { leadId, requestedBy, role } = req.body;
   if (!leadId || !requestedBy || !role) {
@@ -1029,9 +945,8 @@ app.post('/api/leads/transfer-request', async (req, res) => {
     const lead = await Lead.findById(leadId);
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
-    }
-    // For Sales Agents, check the "agentAssigned" field.
-    // For Retention Agents, check the "healthExpertAssigned" field.
+    } 
+
     if (role === "Sales Agent") {
       if (lead.agentAssigned === requestedBy) {
         return res.status(400).json({ message: "You are already assigned to this lead" });
@@ -1042,8 +957,8 @@ app.post('/api/leads/transfer-request', async (req, res) => {
       }
     } else {
       return res.status(400).json({ message: "Invalid role for transfer" });
-    }
-    // Create the transfer request
+    } 
+
     const newRequest = new TransferRequest({ leadId, requestedBy, role });
     await newRequest.save();
     return res.status(200).json({ message: "Transfer request sent successfully", request: newRequest });
@@ -1051,9 +966,8 @@ app.post('/api/leads/transfer-request', async (req, res) => {
     console.error("Error in transfer request:", error);
     return res.status(500).json({ message: "Internal server error", error: error.message });
   }
-});
+}); 
 
-// 3. Approve a transfer request (Manager action)
 app.post('/api/leads/transfer-approve', async (req, res) => {
   const { requestId } = req.body;
   if (!requestId) {
@@ -1070,8 +984,7 @@ app.post('/api/leads/transfer-approve', async (req, res) => {
     const lead = await Lead.findById(transferRequest.leadId);
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
-    }
-    // Update the correct assignment field based on the role
+    } 
     if (transferRequest.role === "Sales Agent") {
       lead.agentAssigned = transferRequest.requestedBy;
     } else if (transferRequest.role === "Retention Agent") {
@@ -1086,8 +999,7 @@ app.post('/api/leads/transfer-approve', async (req, res) => {
     return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 });
- 
-// This route must come AFTER the more specific transfer requests routes.
+  
 app.get('/api/leads/:id', async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id);
