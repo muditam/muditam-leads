@@ -263,8 +263,8 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
         return null;
       }
       return {
-        date: row.Date,
-        time: row.Time || "",
+        date: new Date().toISOString().split("T")[0],   
+        time: new Date().toLocaleTimeString("en-IN"), 
         name: row.Name,
         contactNumber: row["Contact No"],
         leadSource: row["Lead Source"] || "",
@@ -995,7 +995,6 @@ app.post("/api/click_to_call", async (req, res) => {
   }
 });
 
-
 app.get('/api/leads/transfer-requests', async (req, res) => {
   try {
     const requests = await TransferRequest.find({ status: 'pending' }).populate("leadId");
@@ -1121,8 +1120,9 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
   }
 });
 
-
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 }); 
+
+ 
