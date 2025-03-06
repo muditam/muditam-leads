@@ -4,7 +4,7 @@ const axios = require("axios");
 
 /**
  * GET /api/shopify/products
- * @param {string} req.query.query - The text to search in product titles
+ * @param {string} req.query.query - The text to search in product titles 
  */
 router.get("/products", async (req, res) => {
   const { query = "" } = req.query;   
