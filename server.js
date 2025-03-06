@@ -9,16 +9,25 @@ const Lead = require('./models/Lead');
 const XLSX = require("xlsx");
 const axios = require('axios');
 const https = require('https'); 
+const cron = require('node-cron');
 const TransferRequest = require('./models/TransferRequests');
+const shopifyProductsRoute = require("./services/shopifyProducts");
+const shopifyOrdersRoute = require("./services/shopifyOrders");
+const ShopifyPush = require("./services/ShopifyPush");
+const razorpayRoutes = require("./services/razorpay");
+const templateRoutes = require("./routes/templates");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-app.use(express.json()); 
+app.use(express.json());  
 
-const templateRoutes = require("./routes/templates");
 app.use("/api/templates", templateRoutes);
+app.use("/api/shopify", shopifyProductsRoute);
+app.use("/api/shopify", shopifyOrdersRoute);
+app.use("/api/shopify", ShopifyPush);
+app.use("/api/razorpay", razorpayRoutes); 
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -47,11 +56,13 @@ const RetentionSalesSchema = new mongoose.Schema({
   dosageOrdered: { type: String, default: "" },
   amountPaid: Number,
   modeOfPayment: String,
-  deliveryStatus: String,
+  orderId: String, 
+  shopify_amount: String,  
+  shipway_status: String,  
   orderCreatedBy: String,
   remarks: String, 
 });
-
+ 
 const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
 
 const httpsAgent = new https.Agent({
@@ -124,12 +135,22 @@ app.get('/api/orders', async (req, res) => {
   const endEncoded = encodeURIComponent(end);
 
   const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=${startEncoded}&created_at_max=${endEncoded}&limit=250`;
-  
-  console.log("Fetching orders from Shopify with URL:", shopifyAPIEndpoint);
-  
+    
   try {
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
-    res.json(orders);
+    
+    // For each Shopify order, normalize the order_id (remove "#" if present) 
+    // and attach the shipment status from the Shipway database.
+    const ordersWithShipwayStatus = await Promise.all(orders.map(async (order) => {
+      const normalizedOrderId = order.order_id.startsWith('#')
+        ? order.order_id.slice(1)
+        : order.order_id;
+      const shipwayOrder = await Order.findOne({ order_id: normalizedOrderId });
+      order.shipway_status = shipwayOrder ? shipwayOrder.shipment_status : "Not available";
+      return order;
+    }));
+
+    res.json(ordersWithShipwayStatus);
   } catch (error) {
     console.error('Error fetching orders from Shopify:', error.response ? error.response.data : error);
     res.status(500).send('Failed to fetch orders');
@@ -137,23 +158,331 @@ app.get('/api/orders', async (req, res) => {
 });
 
 
+ // Define the Order schema and model (storing order_id, shipment_status, and order_date for filtering)
+const orderSchema = new mongoose.Schema({
+  order_id: { type: String, required: true, unique: true },
+  shipment_status: { type: String, required: true },
+  order_date: { type: Date } // stored for date filtering
+}, { timestamps: true });
+
+const Order = mongoose.model('Order', orderSchema);
+
+// Shipment status mapping (abbreviation to full text)
+const statusMapping = {
+  "DEL": "Delivered",
+  "INT": "In Transit", 
+  "UND": "Undelivered",
+  "RTO": "RTO",
+  "RTD": "RTO Delivered",
+  "CAN": "Canceled",
+  "SCH": "Shipment Booked",
+  "ONH": "On Hold",
+  "OOD": "Out For Delivery",
+  "NFI": "Status Pending",
+  "NFIDS": "NFID",
+  "RSCH": "Pickup Scheduled",
+  "ROOP": "Out for Pickup",
+  "RPKP": "Shipment Picked Up",
+  "RDEL": "Return Delivered",
+  "RINT": "Return In Transit",
+  "RPSH": "Pickup Rescheduled",
+  "RCAN": "Return Request Cancelled",
+  "RCLO": "Return Request Closed",
+  "RSMD": "Pickup Delayed",
+  "PCAN": "Pickup Cancelled",
+  "ROTH": "Others",
+  "RPF": "Pickup Failed"
+};
+ 
+const fetchOrdersFromShipway = async (page, startDate, endDate) => {
+  const username = process.env.SHIPWAY_USERNAME;
+  const licenseKey = process.env.SHIPWAY_LICENSE_KEY;
+  const authHeader = `Basic ${Buffer.from(`${username}:${licenseKey}`).toString('base64')}`;
+
+  const params = { page, startDate, endDate };
+
+  const response = await axios.get("https://app.shipway.com/api/getorders", {
+    headers: { Authorization: authHeader },
+    params
+  });
+
+  return response.data.message;  
+};
+ 
+const syncOrdersForDateRange = async (startDate, endDate) => {
+  console.log(`Syncing orders from Shipway API for date range ${startDate} to ${endDate}...`);
+  let page = 1;
+  let totalFetched = 0;
+  const rowsPerPage = 100;  
+
+  while (true) {
+    try {
+      const orders = await fetchOrdersFromShipway(page, startDate, endDate);
+      if (!orders || orders.length === 0) {
+        break;
+      }
+      for (const order of orders) {
+        const orderId = order.order_id;
+        const shipmentStatus = statusMapping[order.shipment_status] || order.shipment_status;
+        const orderDate = order.order_date ? new Date(order.order_date) : null; 
+        await Order.updateOne(
+          { order_id: orderId },
+          { order_id: orderId, shipment_status: shipmentStatus, order_date: orderDate },
+          { upsert: true }
+        );
+      }
+      totalFetched += orders.length; 
+      if (orders.length < rowsPerPage) {
+        break;
+      }
+      page++;
+    } catch (error) {
+      console.error("Error syncing orders:", error.response ? error.response.data : error.message);
+      break;
+    }
+  }
+  console.log(`Total orders fetched and stored: ${totalFetched}`);
+  return totalFetched;
+};
+ 
+app.post('/api/shipway/fetch-orders', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.body;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "Missing startDate or endDate in request body" });
+    }
+    const totalFetched = await syncOrdersForDateRange(startDate, endDate);
+    res.json({ message: `Fetched and stored ${totalFetched} orders for date range ${startDate} to ${endDate}` });
+  } catch (error) {
+    console.error("Error in fetch-orders endpoint:", error.message);
+    res.status(500).json({ message: "Error fetching orders", error: error.message });
+  }
+});
+ 
+app.get('/api/shipway/orders', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const rowsPerPage = 100;
+    const skip = (page - 1) * rowsPerPage;
+ 
+    const { startDate, endDate } = req.query;
+    let filter = {};
+    if (startDate || endDate) {
+      filter.order_date = {};
+      if (startDate) {
+        filter.order_date.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        filter.order_date.$lte = new Date(endDate);
+      }
+    }
+
+    const orders = await Order.find(filter)
+      .skip(skip)
+      .limit(rowsPerPage)
+      .sort({ createdAt: -1 });
+
+    const totalOrders = await Order.countDocuments(filter);
+    res.json({ message: orders, totalOrders });
+  } catch (error) {
+    console.error("Error fetching orders from database:", error.message);
+    res.status(500).json({ message: "Error fetching orders", error: error.message });
+  }
+});
+ 
+app.post('/api/shipway/neworder', async (req, res) => {
+  try {
+    const { order_id, shipment_status, order_date } = req.body;
+    if (!order_id || !shipment_status) {
+      return res.status(400).json({ message: "Missing order_id or shipment_status" });
+    }
+    const status = statusMapping[shipment_status] || shipment_status;
+    const date = order_date ? new Date(order_date) : null;
+    await Order.updateOne(
+      { order_id },
+      { order_id, shipment_status: status, order_date: date },
+      { upsert: true }
+    );
+    res.json({ message: "Order saved/updated" });
+  } catch (error) {
+    console.error("Error saving new order:", error.message);
+    res.status(500).json({ message: "Error saving new order", error: error.message });
+  }
+});
+ 
+cron.schedule('0 * * * *', async () => {
+  console.log("Running scheduled job to update shipping statuses...");
+  try {
+    const orders = await Order.find({});
+    for (const order of orders) {
+      try { 
+        if (!order.order_date) continue;
+        const page = 1;
+        const dateStr = order.order_date.toISOString().split("T")[0];
+        const ordersFromShipway = await fetchOrdersFromShipway(page, dateStr, dateStr);
+        const updatedOrder = ordersFromShipway.find(o => o.order_id === order.order_id);
+        if (updatedOrder) {
+          const shipmentStatus = statusMapping[updatedOrder.shipment_status] || updatedOrder.shipment_status;
+          await Order.updateOne({ order_id: order.order_id }, { shipment_status: shipmentStatus });
+        }
+      } catch (err) {
+        console.error(`Error updating order ${order.order_id}:`, err.message);
+      }
+    }
+  } catch (error) {
+    console.error("Error in scheduled job:", error.message);
+  }
+});
+ 
 
 app.get('/api/retention-sales', async (req, res) => {
+  // If orderCreatedBy is provided, filter; otherwise fetch all
   const { orderCreatedBy } = req.query;
-
-  if (!orderCreatedBy) {
-    return res.status(400).json({ message: 'Order created by is required.' });
-  }
-
   try {
-    const retentionSales = await RetentionSales.find({ orderCreatedBy }).sort({ date: -1 });
-    res.status(200).json(retentionSales);
+    let retentionSales;
+    if (orderCreatedBy) {
+      retentionSales = await RetentionSales.find({ orderCreatedBy })
+        .sort({ date: -1 })
+        .lean();
+    } else {
+      retentionSales = await RetentionSales.find({})
+        .sort({ date: -1 })
+        .lean();
+    }
+    if (retentionSales.length === 0) {
+      return res.status(200).json([]);
+    }
+
+    // Determine overall date range from retention sales
+    const dates = retentionSales.map((sale) => new Date(sale.date));
+    const minDate = new Date(Math.min(...dates));
+    const maxDate = new Date(Math.max(...dates));
+    // Expand the range slightly (one day on each side)
+    const startDate = new Date(minDate.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const endDate = new Date(maxDate.getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+    // Encode dates for Shopify API query
+    const startEncoded = encodeURIComponent(startDate);
+    const endEncoded = encodeURIComponent(endDate);
+    const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=${startEncoded}&created_at_max=${endEncoded}&limit=250`;
+
+    // Helper function to recursively fetch all Shopify orders
+    const fetchAllOrders = async (url, allOrders = []) => {
+      try {
+        const response = await axios.get(url, {
+          headers: {
+            'X-Shopify-Access-Token': process.env.SHOPIFY_API_SECRET,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!response.data.orders) {
+          return allOrders;
+        }
+        const fetchedOrders = response.data.orders;
+        allOrders = allOrders.concat(fetchedOrders);
+        const nextLinkHeader = response.headers.link;
+        if (nextLinkHeader) {
+          const match = nextLinkHeader.match(/<([^>]+)>;\s*rel="next"/);
+          if (match && match[1]) {
+            return fetchAllOrders(match[1], allOrders);
+          }
+        }
+        return allOrders;
+      } catch (err) {
+        console.error('Error fetching Shopify orders:', err);
+        return allOrders;
+      }
+    };
+
+    // Fetch Shopify orders for the determined date range
+    const shopifyOrders = await fetchAllOrders(shopifyAPIEndpoint);
+
+    // Helper to normalize phone numbers: remove non-digits, country code, leading zeros
+    const normalizePhoneNumber = (phone) => {
+      if (!phone) return "";
+      let digits = phone.replace(/\D/g, "");
+      if (digits.length > 10 && digits.startsWith("91")) {
+        digits = digits.slice(2);
+      }
+      if (digits.length === 11 && digits.startsWith("0")) {
+        digits = digits.slice(1);
+      }
+      return digits;
+    };
+
+    // Process each retention sale to match against Shopify orders
+    const updatedSales = await Promise.all(
+      retentionSales.map(async (sale) => {
+        const saleDateStr = sale.date; // assumed "YYYY-MM-DD"
+        const saleDate = new Date(saleDateStr);
+        const nextDay = new Date(saleDate.getTime() + 24 * 60 * 60 * 1000);
+        const normalizedSalePhone = normalizePhoneNumber(sale.contactNumber);
+
+        // Filter Shopify orders within the sale's date range (based on created_at)
+        const ordersInDate = shopifyOrders.filter((order) => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= saleDate && orderDate < nextDay;
+        });
+
+        // 1. Full match: both normalized phone and date match
+        let fullMatch = ordersInDate.find((order) => {
+          const shopifyPhone =
+            order.customer && order.customer.default_address
+              ? order.customer.default_address.phone
+              : "";
+          return normalizePhoneNumber(shopifyPhone) === normalizedSalePhone;
+        });
+        if (fullMatch) {
+          // Use Shopify order's "name" field as order ID (e.g., "#MA40491")
+          sale.orderId = fullMatch.name;
+          // Also attach the Shopify total price as shopify_amount
+          sale.shopify_amount = fullMatch.total_price;
+        } else {
+          // 2. Phone-only match across all Shopify orders
+          let phoneMatch = shopifyOrders.find((order) => {
+            const shopifyPhone =
+              order.customer && order.customer.default_address
+                ? order.customer.default_address.phone
+                : "";
+            return normalizePhoneNumber(shopifyPhone) === normalizedSalePhone;
+          });
+          if (phoneMatch) {
+            sale.orderId = "date mismatch";
+          } else if (ordersInDate.length > 0) {
+            // 3. If orders exist in date range but no phone match
+            sale.orderId = "phone mismatch";
+          } else {
+            // 4. Neither phone nor date match
+            sale.orderId = "phone and date mismatch";
+          }
+          // No valid Shopify order found so clear shopify_amount
+          sale.shopify_amount = "";
+        }
+
+        // Now, if we have a valid Shopify order ID (not a mismatch message), fetch shipment status from Shipway orders.
+        if (sale.orderId && !sale.orderId.includes("mismatch")) {
+          // Normalize order id (remove leading "#" if exists)
+          const normalizedOrderId = sale.orderId.startsWith("#")
+            ? sale.orderId.slice(1)
+            : sale.orderId;
+          const shipwayOrder = await Order.findOne({ order_id: normalizedOrderId }).lean();
+          sale.shipway_status = shipwayOrder ? shipwayOrder.shipment_status : "Not available";
+        } else {
+          sale.shipway_status = "";
+        }
+
+        return sale;
+      })
+    );
+
+    res.status(200).json(updatedSales);
   } catch (error) {
-    console.error('Error fetching retention sales:', error);
-    res.status(500).json({ message: 'Error fetching retention sales', error });
+    console.error("Error fetching retention sales:", error);
+    res.status(500).json({ message: "Error fetching retention sales", error });
   }
 });
 
+ 
 
 app.post('/api/retention-sales', async (req, res) => {
   const {
@@ -163,9 +492,12 @@ app.post('/api/retention-sales', async (req, res) => {
     productsOrdered = [],
     dosageOrdered = "",
     amountPaid = 0, 
-    modeOfPayment = "Not Specified", 
-    deliveryStatus = "Pending",
+    modeOfPayment = "Not Specified",  
     orderCreatedBy,
+    remarks = "", 
+    orderId = "",
+    shopify_amount = "",
+    shipway_status = ""
   } = req.body;
 
   if (!date || !orderCreatedBy) {
@@ -180,9 +512,12 @@ app.post('/api/retention-sales', async (req, res) => {
       productsOrdered,
       dosageOrdered,
       amountPaid,
-      modeOfPayment,
-      deliveryStatus,
+      modeOfPayment, 
       orderCreatedBy,
+      remarks,
+      orderId,
+      shopify_amount,
+      shipway_status
     });
 
     await newSale.save();
@@ -192,6 +527,7 @@ app.post('/api/retention-sales', async (req, res) => {
     res.status(500).json({ message: 'Error adding retention sale', error });
   }
 });
+
 
 app.put('/api/retention-sales/:id', async (req, res) => {
   const { id } = req.params;
@@ -884,7 +1220,7 @@ app.get('/api/search', async (req, res) => {
 app.get('/api/retention-orders', async (req, res) => {
   try {
       const orders = await RetentionSales.find({});  
-      res.json(orders);
+      res.json(orders); 
   } catch (error) {
       console.error('Error fetching retention orders:', error);
       res.status(500).json({ message: 'Failed to fetch retention orders', error: error });
@@ -1044,6 +1380,8 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
     res.status(500).json({ message: "Error fetching transfer requests", error: error.message });
   }
 });
+
+
 
 // Start Server
 app.listen(PORT, () => {
