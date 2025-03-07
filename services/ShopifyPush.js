@@ -159,4 +159,44 @@ router.get("/customer-orders", async (req, res) => {
   res.json({ addresses: [] });
 });
 
+// POST /update-order-note endpoint to update the order note on Shopify
+router.post("/update-order-note", async (req, res) => {
+  const { orderId, note } = req.body;
+  const shopifyStore = process.env.SHOPIFY_STORE_NAME;
+  const accessToken = process.env.SHOPIFY_API_SECRET;
+  const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${orderId}.json`;
+  
+  try {
+    const response = await axios.put(
+      url,
+      {
+        order: {
+          id: orderId,
+          note: note,
+        },
+      },
+      {
+        headers: {
+          "X-Shopify-Access-Token": accessToken,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    res.status(200).json({
+      message: "Order note updated successfully",
+      order: response.data.order,
+    });
+  } catch (error) {
+    console.error(
+      "Error updating order note:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({
+      message: "Error updating order note",
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
+
 module.exports = router;
