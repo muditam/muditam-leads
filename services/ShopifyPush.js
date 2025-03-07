@@ -17,7 +17,6 @@ router.post("/create-order", async (req, res) => {
   const shopifyStore = process.env.SHOPIFY_STORE_NAME;
   const accessToken = process.env.SHOPIFY_API_SECRET;
  
-  
   const orderPayload = {
     order: {
       line_items: cartItems.map(item => ({
@@ -32,6 +31,7 @@ router.post("/create-order", async (req, res) => {
         province: shippingAddress.province,
         country: shippingAddress.country,
         zip: shippingAddress.zip,
+        phone: shippingAddress.phone, // phone number pushed here
       },
       billing_address: {
         first_name: billingAddress.firstName,
@@ -116,6 +116,39 @@ router.get("/customer", async (req, res) => {
     res.status(500).json({
       message: "Error fetching customer",
       error: error.response?.data || error.message,
+    });
+  }
+});
+
+// POST /create-customer endpoint to create a new customer on Shopify
+router.post("/create-customer", async (req, res) => {
+  const { phone, first_name, last_name } = req.body;
+  const shopifyStore = process.env.SHOPIFY_STORE_NAME;
+  const accessToken = process.env.SHOPIFY_API_SECRET;
+  const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers.json`;
+  const payload = {
+    customer: {
+      first_name,
+      last_name,
+      phone,
+    }
+  };
+  try {
+    const response = await axios.post(url, payload, {
+       headers: {
+          "X-Shopify-Access-Token": accessToken,
+          "Content-Type": "application/json",
+       },
+    });
+    res.status(201).json({
+       message: "Customer created successfully",
+       customer: response.data.customer,
+    });
+  } catch (error) {
+    console.error("Error creating customer:", error.response?.data || error.message);
+    res.status(500).json({
+       message: "Error creating customer",
+       error: error.response?.data || error.message,
     });
   }
 });
