@@ -15,6 +15,7 @@ const shopifyProductsRoute = require("./services/shopifyProducts");
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
 const razorpayRoutes = require("./services/razorpay");
+const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
 
 const app = express();
@@ -28,6 +29,7 @@ app.use("/api/shopify", shopifyProductsRoute);
 app.use("/api/shopify", shopifyOrdersRoute);
 app.use("/api/shopify", ShopifyPush);
 app.use("/api/razorpay", razorpayRoutes); 
+app.use("/api/shopify", shopifyRoutes);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
