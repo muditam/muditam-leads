@@ -71,7 +71,7 @@ router.get('/customerDetails', async (req, res) => {
       lineItems: order.line_items.map(item => ({
         title: item.title,
         variant: item.variant_title,
-        amountPaid: item.price, // Adjust if needed for correct amount paid
+        amountPaid: `₹${item.price}`, // Updated to use the rupee symbol
       })),
     }));
 
