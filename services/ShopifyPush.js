@@ -152,14 +152,11 @@ router.post("/create-customer", async (req, res) => {
     });
   }
 });
-
-// (Optional) GET /customer-orders endpoint placeholder
-router.get("/customer-orders", async (req, res) => {
-  // Example: return an empty list of addresses if no orders are found.
+ 
+router.get("/customer-orders", async (req, res) => { 
   res.json({ addresses: [] });
 });
-
-// POST /update-order-note endpoint to update the order note on Shopify
+ 
 router.post("/update-order-note", async (req, res) => {
   const { orderId, note } = req.body;
   const shopifyStore = process.env.SHOPIFY_STORE_NAME;

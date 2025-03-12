@@ -1,29 +1,11 @@
-// routes/shopifyRoutes.js
-
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 
 const { SHOPIFY_STORE_NAME, SHOPIFY_ACCESS_TOKEN } = process.env;
 
-// Utility: Remove all non-digit characters from a phone string.
 const normalizePhone = (phoneStr) => phoneStr.replace(/\D/g, '');
 
-/**
- * GET /api/shopify/customerDetails?phone=...
- *
- * Searches for a customer in Shopify based on a normalized phone number.
- * If found, it fetches all orders for that customer, then aggregates:
- *  - Total orders placed.
- *  - Total spent (from customer record).
- *  - Last order date & time.
- *  - Last order payment status.
- *  - Detailed list of orders, where each order includes:
- *      - Created date & time.
- *      - Total item count.
- *      - Delivery (fulfillment) status.
- *      - For each line item: product title, variant, and amount paid.
- */
 router.get('/customerDetails', async (req, res) => {
   try {
     const { phone } = req.query;
@@ -32,7 +14,6 @@ router.get('/customerDetails', async (req, res) => {
     }
     const normalizedPhone = normalizePhone(phone);
 
-    // 1. Search for the customer using Shopify's customers search endpoint.
     const customerUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2023-04/customers/search.json?query=phone:${normalizedPhone}`;
     const headers = {
       'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
@@ -71,7 +52,7 @@ router.get('/customerDetails', async (req, res) => {
       lineItems: order.line_items.map(item => ({
         title: item.title,
         variant: item.variant_title,
-        amountPaid: `₹${item.price}`, // Updated to use the rupee symbol
+        amountPaid: `${item.price}`,  
       })),
     }));
 

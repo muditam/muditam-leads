@@ -45,6 +45,7 @@ const EmployeeSchema = new mongoose.Schema({
   password: { type: String, required: true },
   agentNumber: { type: String, required: true },
   async: { type: Number, default: 1 },
+  status: { type: String, default: "active" },
 });
 
 // Create Employee model
@@ -328,7 +329,7 @@ cron.schedule('0 * * * *', async () => {
   } catch (error) { 
   }
 });
- 
+  
 app.get('/api/retention-sales', async (req, res) => {
   const { orderCreatedBy } = req.query;
 
@@ -672,7 +673,7 @@ app.get("/api/employees", async (req, res) => {
     }
  
     const query = role ? { role } : {};
-    const employees = await Employee.find(query, "fullName email callerId agentNumber async role");
+    const employees = await Employee.find(query, "fullName email callerId agentNumber async role status");
 
     res.status(200).json(employees);
   } catch (error) {
@@ -817,8 +818,6 @@ app.get('/api/leads', async (req, res) => {
       }
   }
   
-
-
     if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
     if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
     if (filterCriteria.salesStatus?.length) query.salesStatus = { $in: filterCriteria.salesStatus };
@@ -1028,8 +1027,6 @@ app.get('/api/leads/retention', async (req, res) => {
 });
 
 
-
-
 app.get('/api/leads/retentions', async (req, res) => {
   const { fullName, email } = req.query;  
 
@@ -1182,6 +1179,11 @@ app.post("/api/login", async (req, res) => {
     if (user.password !== password) {
       return res.status(400).json({ message: "Invalid email or password." });
     }
+
+    // Prevent login if employee is inactive
+    if (user.status !== "active") {
+      return res.status(403).json({ message: "Inactive employees are not allowed to login." });
+    }
  
     res.status(200).json({
       message: "Login successful",
@@ -1196,6 +1198,7 @@ app.post("/api/login", async (req, res) => {
     res.status(500).json({ message: "Server error. Please try again later." });
   }
 });
+
 
 app.get('/api/leads/assigned', async (req, res) => {
   const { agentAssigned } = req.query;
