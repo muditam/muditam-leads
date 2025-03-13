@@ -161,11 +161,11 @@ app.get('/api/orders', async (req, res) => {
 });
 
 
- // Define the Order schema and model (storing order_id, shipment_status, and order_date for filtering)
+// Define the Order schema and model (storing order_id, shipment_status, and order_date for filtering)
 const orderSchema = new mongoose.Schema({
   order_id: { type: String, required: true, unique: true },
   shipment_status: { type: String, required: true },
-  order_date: { type: Date } // stored for date filtering
+  order_date: { type: Date }  
 }, { timestamps: true });
 
 const Order = mongoose.model('Order', orderSchema);
@@ -1403,10 +1403,7 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
 });
 
 
-
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 }); 
-
- 
