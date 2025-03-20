@@ -11,6 +11,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@fast-csv/format": "^5.0.2",
     "@shopify/shopify-api": "^11.7.0",
     "axios": "^1.8.2",
     "bcrypt": "^5.1.1",

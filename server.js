@@ -17,6 +17,7 @@ const ShopifyPush = require("./services/ShopifyPush");
 const razorpayRoutes = require("./services/razorpay");
 const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
+const exportLeadsRouter = require('./routes/exportLeads');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -30,6 +31,8 @@ app.use("/api/shopify", shopifyOrdersRoute);
 app.use("/api/shopify", ShopifyPush);
 app.use("/api/razorpay", razorpayRoutes); 
 app.use("/api/shopify", shopifyRoutes);
+
+app.use('/', exportLeadsRouter);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -158,7 +161,7 @@ app.get('/api/orders', async (req, res) => {
     console.error('Error fetching orders from Shopify:', error.response ? error.response.data : error);
     res.status(500).send('Failed to fetch orders');
   }
-});
+});[]
 
 
 // Define the Order schema and model (storing order_id, shipment_status, and order_date for filtering)
