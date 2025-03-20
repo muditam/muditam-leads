@@ -2,7 +2,7 @@
 const express = require("express");
 const axios = require("axios");
 const router = express.Router();
-
+ 
 /**
  * GET /api/shopify/customer-orders?phone=<phoneNumber>
  * Searches Shopify customers by phone and returns their addresses.
@@ -57,6 +57,7 @@ router.get("/customer-orders", async (req, res) => {
       state: addr.province || "",
       country: addr.country || "",
       pincode: addr.zip || "",
+      valid: true,
     }));
 
     return res.json({ addresses });
