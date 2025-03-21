@@ -13,11 +13,9 @@ router.get('/export-leads', async (req, res) => {
   const csvStream = format({ headers: true });
   csvStream.pipe(res);
 
-  try {
-    // Use a Mongoose cursor to stream large datasets without loading everything into memory
-    const cursor = Lead.find().sort({ createdAt: -1 }).cursor();
-    cursor.on('data', (doc) => {
-      // Convert each Mongoose document to a plain JavaScript object
+  try { 
+    const cursor = Lead.find().sort({ _id: -1 }).cursor();
+    cursor.on('data', (doc) => { 
       csvStream.write(doc.toObject());
     });
     cursor.on('end', () => {
