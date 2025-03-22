@@ -24,7 +24,7 @@ const Order = require('./models/Order');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const allowedOrigins = ['https://60brands.com', 'http://localhost:3000'];
+const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
 app.use(cors({
     origin: function(origin, callback) { 
         if (!origin) return callback(null, true);
