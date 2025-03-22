@@ -24,16 +24,31 @@ const Order = require('./models/Order');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// List of allowed origins
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
+
+// CORS middleware using the cors package
 app.use(cors({
-    origin: function(origin, callback) { 
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            return callback(new Error('Not allowed by CORS'));
-        }
-        return callback(null, true);
+  origin: function(origin, callback) { 
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      return callback(new Error('Not allowed by CORS'));
     }
+    return callback(null, true);
+  }
 }));
+
+// Additional middleware to always set CORS headers on every response
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  next();
+});
 
 app.use(express.json());  
 
