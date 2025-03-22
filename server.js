@@ -24,7 +24,17 @@ const Order = require('./models/Order');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+const allowedOrigins = ['https://60brands.com', 'http://localhost:3000'];
+app.use(cors({
+    origin: function(origin, callback) { 
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            return callback(new Error('Not allowed by CORS'));
+        }
+        return callback(null, true);
+    }
+}));
+
 app.use(express.json());  
 
 app.use("/api/templates", templateRoutes);
@@ -58,22 +68,6 @@ const EmployeeSchema = new mongoose.Schema({
 // Create Employee model
 const Employee = mongoose.model('Employee', EmployeeSchema);
 
-// const RetentionSalesSchema = new mongoose.Schema({
-//   date: String,
-//   name: String,
-//   contactNumber: String,
-//   productsOrdered: [String],
-//   dosageOrdered: { type: String, default: "" },
-//   amountPaid: Number,
-//   modeOfPayment: String,
-//   orderId: String, 
-//   shopify_amount: String,  
-//   shipway_status: String,  
-//   orderCreatedBy: String,
-//   remarks: String, 
-// });
- 
-// const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
@@ -167,15 +161,6 @@ app.get('/api/orders', async (req, res) => {
   }
 });[]
 
-
-// Define the Order schema and model (storing order_id, shipment_status, and order_date for filtering)
-// const orderSchema = new mongoose.Schema({
-//   order_id: { type: String, required: true, unique: true },
-//   shipment_status: { type: String, required: true },
-//   order_date: { type: Date }  
-// }, { timestamps: true });
-
-// const Order = mongoose.model('Order', orderSchema);
 
 // Shipment status mapping (abbreviation to full text)
 const statusMapping = {
@@ -315,7 +300,7 @@ app.post('/api/shipway/neworder', async (req, res) => {
   }
 });
  
-cron.schedule('0 * * * *', async () => { 
+cron.schedule('0 23 * * *', async () => { 
   try {
     const orders = await Order.find({});
     for (const order of orders) {
@@ -334,262 +319,11 @@ cron.schedule('0 * * * *', async () => {
     }
   } catch (error) { 
   }
+}, {
+  timezone: 'Asia/Kolkata'  
 });
-  
-// app.get('/api/retention-sales', async (req, res) => {
-//   const { orderCreatedBy } = req.query;
-
-//   try {
-//     // 1. Fetch retention sales (filtered by orderCreatedBy if provided)
-//     let retentionSales;
-//     if (orderCreatedBy) {
-//       retentionSales = await RetentionSales.find({ orderCreatedBy }).sort({ date: -1 });
-//     } else {
-//       retentionSales = await RetentionSales.find({}).sort({ date: -1 });
-//     }
-
-//     if (retentionSales.length === 0) {
-//       return res.status(200).json([]);
-//     }
-
-//     // 2. Determine overall date range from retention sales
-//     const dates = retentionSales.map((sale) => new Date(sale.date));
-//     const minDate = new Date(Math.min(...dates));
-//     const maxDate = new Date(Math.max(...dates));
-
-//     // Expand the range slightly (one day on each side)
-//     const startDate = new Date(minDate.getTime() - 24 * 60 * 60 * 1000).toISOString();
-//     const endDate = new Date(maxDate.getTime() + 24 * 60 * 60 * 1000).toISOString();
-
-//     // 3. Build Shopify API URL
-//     const startEncoded = encodeURIComponent(startDate);
-//     const endEncoded = encodeURIComponent(endDate);
-//     const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=${startEncoded}&created_at_max=${endEncoded}&limit=250`;
-
-//     // Helper function to recursively fetch all Shopify orders
-//     const fetchAllOrders = async (url, allOrders = []) => {
-//       try {
-//         const response = await axios.get(url, {
-//           headers: {
-//             'X-Shopify-Access-Token': process.env.SHOPIFY_API_SECRET,
-//             'Content-Type': 'application/json',
-//           },
-//         });
-
-//         if (!response.data.orders) {
-//           return allOrders;
-//         }
-
-//         allOrders = allOrders.concat(response.data.orders);
-
-//         const nextLinkHeader = response.headers.link;
-//         if (nextLinkHeader) {
-//           const match = nextLinkHeader.match(/<([^>]+)>;\s*rel="next"/);
-//           if (match && match[1]) {
-//             return fetchAllOrders(match[1], allOrders);
-//           }
-//         }
-//         return allOrders;
-//       } catch (err) {
-//         console.error('Error fetching Shopify orders:', err);
-//         return allOrders;
-//       }
-//     };
-
-//     // 4. Fetch all Shopify orders in this date range
-//     const shopifyOrders = await fetchAllOrders(shopifyAPIEndpoint);
-
-//     // 5. Normalization helper for phone numbers
-//     const normalizePhoneNumber = (phone) => {
-//       if (!phone) return "";
-//       let digits = phone.replace(/\D/g, "");
-//       if (digits.length > 10 && digits.startsWith("91")) {
-//         digits = digits.slice(2);
-//       }
-//       if (digits.length === 11 && digits.startsWith("0")) {
-//         digits = digits.slice(1);
-//       }
-//       return digits;
-//     };
-
-//     // 6. Iterate over each retention sale and update if needed
-//     const updatedSales = await Promise.all(
-//       retentionSales.map(async (sale) => {
-//         // If sale.orderId is already a valid ID (not containing "mismatch" & not empty),
-//         // we skip the matching logic unless you want to always re-check.
-//         if (sale.orderId && !sale.orderId.includes("mismatch")) {
-//           // Optionally, you might still want to refresh shipway_status here:
-//           const normalizedOrderId = sale.orderId.startsWith("#")
-//             ? sale.orderId.slice(1)
-//             : sale.orderId;
-//           const shipwayOrder = await Order.findOne({ order_id: normalizedOrderId }).lean();
-//           const newShipwayStatus = shipwayOrder ? shipwayOrder.shipment_status : "Not available";
-
-//           // If the status changed, update it:
-//           if (sale.shipway_status !== newShipwayStatus) {
-//             sale.shipway_status = newShipwayStatus;
-//             await RetentionSales.findByIdAndUpdate(sale._id, {
-//               shipway_status: sale.shipway_status,
-//             });
-//           }
-
-//           // Return as-is (already matched)
-//           return sale;
-//         }
-
-//         // Otherwise, we attempt to match with Shopify
-//         const saleDateStr = sale.date; // e.g. "2025-02-05"
-//         const saleDate = new Date(saleDateStr);
-//         const nextDay = new Date(saleDate.getTime() + 24 * 60 * 60 * 1000);
-//         const normalizedSalePhone = normalizePhoneNumber(sale.contactNumber);
-
-//         // Filter Shopify orders within that day range
-//         const ordersInDate = shopifyOrders.filter((order) => {
-//           const orderDate = new Date(order.created_at);
-//           return orderDate >= saleDate && orderDate < nextDay;
-//         });
-
-//         // 6a. Full match: phone + date
-//         let fullMatch = ordersInDate.find((order) => {
-//           const shopifyPhone =
-//             order.customer && order.customer.default_address
-//               ? order.customer.default_address.phone
-//               : "";
-//           return normalizePhoneNumber(shopifyPhone) === normalizedSalePhone;
-//         });
-
-//         if (fullMatch) {
-//           sale.orderId = fullMatch.name; // e.g. "#MA40491"
-//           sale.shopify_amount = fullMatch.total_price;
-
-//           // Check Shipway status
-//           const normalizedOrderId = sale.orderId.startsWith("#")
-//             ? sale.orderId.slice(1)
-//             : sale.orderId;
-//           const shipwayOrder = await Order.findOne({ order_id: normalizedOrderId }).lean();
-//           sale.shipway_status = shipwayOrder ? shipwayOrder.shipment_status : "Not available";
-//         } else {
-//           // 6b. Phone-only match across all Shopify orders
-//           let phoneMatch = shopifyOrders.find((order) => {
-//             const shopifyPhone =
-//               order.customer && order.customer.default_address
-//                 ? order.customer.default_address.phone
-//                 : "";
-//             return normalizePhoneNumber(shopifyPhone) === normalizedSalePhone;
-//           });
-
-//           if (phoneMatch) {
-//             sale.orderId = "date mismatch";
-//           } else if (ordersInDate.length > 0) {
-//             sale.orderId = "phone mismatch";
-//           } else {
-//             sale.orderId = "phone and date mismatch";
-//           }
-//           sale.shopify_amount = "";
-//           sale.shipway_status = "";
-//         }
-
-//         // 7. Persist the new values in MongoDB
-//         await RetentionSales.findByIdAndUpdate(sale._id, {
-//           orderId: sale.orderId,
-//           shopify_amount: sale.shopify_amount,
-//           shipway_status: sale.shipway_status,
-//         });
-
-//         return sale;
-//       })
-//     );
-
-//     // 8. Return the updated array of sales
-//     return res.status(200).json(updatedSales);
-//   } catch (error) {
-//     console.error("Error fetching retention sales:", error);
-//     return res.status(500).json({ message: "Error fetching retention sales", error });
-//   }
-// });
- 
-
-// app.post('/api/retention-sales', async (req, res) => {
-//   const {
-//     date,
-//     name = "",
-//     contactNumber = "",
-//     productsOrdered = [],
-//     dosageOrdered = "",
-//     amountPaid = 0, 
-//     modeOfPayment = "Not Specified",  
-//     orderCreatedBy,
-//     remarks = "", 
-//     orderId = "",
-//     shopify_amount = "",
-//     shipway_status = ""
-//   } = req.body;
-
-//   if (!date || !orderCreatedBy) {
-//     return res.status(400).json({ message: "Date and orderCreatedBy are required." });
-//   }
-
-//   try {
-//     const newSale = new RetentionSales({
-//       date,
-//       name,
-//       contactNumber,
-//       productsOrdered,
-//       dosageOrdered,
-//       amountPaid,
-//       modeOfPayment, 
-//       orderCreatedBy,
-//       remarks,
-//       orderId,
-//       shopify_amount,
-//       shipway_status
-//     });
-
-//     await newSale.save();
-//     res.status(201).json(newSale);
-//   } catch (error) {
-//     console.error('Error adding retention sale:', error);
-//     res.status(500).json({ message: 'Error adding retention sale', error });
-//   }
-// });
 
 
-// app.put('/api/retention-sales/:id', async (req, res) => {
-//   const { id } = req.params;
-
-//   try {
-//     const updatedSale = await RetentionSales.findByIdAndUpdate(id, req.body, {
-//       new: true,
-//     });
-
-//     if (!updatedSale) {
-//       return res.status(404).json({ message: 'Sale not found' });
-//     }
-
-//     res.status(200).json(updatedSale); 
-//   } catch (error) {
-//     console.error('Error updating retention sale:', error);
-//     res.status(500).json({ message: 'Error updating retention sale', error });
-//   }
-// });
-
- 
-// app.delete('/api/retention-sales/:id', async (req, res) => {
-//   const { id } = req.params;
-
-//   try {
-//     const deletedSale = await RetentionSales.findByIdAndDelete(id);
-
-//     if (!deletedSale) {
-//       return res.status(404).json({ message: 'Sale not found' });
-//     }
-
-//     res.status(200).json({ message: 'Sale deleted successfully' });
-//   } catch (error) {
-//     console.error('Error deleting retention sale:', error);
-//     res.status(500).json({ message: 'Error deleting retention sale', error });
-//   }
-// });
  
 const upload = multer({
   dest: "uploads/",
