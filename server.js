@@ -218,7 +218,7 @@ const fetchOrdersFromShipway = async (page, startDate, endDate) => {
 
   return response.data.message;  
 };
- 
+
 const syncOrdersForDateRange = async (startDate, endDate) => {
   console.log(`Syncing orders from Shipway API for date range ${startDate} to ${endDate}...`);
   let page = 1;
@@ -232,12 +232,12 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
         break;
       }
       for (const order of orders) {
-        const orderId = order.order_id;
+        const orderId = order.order_id; // from Shipway response
         const shipmentStatus = statusMapping[order.shipment_status] || order.shipment_status;
         const orderDate = order.order_date ? new Date(order.order_date) : null; 
         await Order.updateOne(
-          { order_id: orderId },
-          { order_id: orderId, shipment_status: shipmentStatus, order_date: orderDate },
+          { orderId: orderId },
+          { orderId: orderId, shipment_status: shipmentStatus, order_date: orderDate },
           { upsert: true }
         );
       }
@@ -252,7 +252,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
   } 
   return totalFetched;
 };
- 
+
 app.post('/api/shipway/fetch-orders', async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
@@ -265,7 +265,7 @@ app.post('/api/shipway/fetch-orders', async (req, res) => {
     res.status(500).json({ message: "Error fetching orders", error: error.message });
   }
 });
- 
+
 app.get('/api/shipway/orders', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -295,7 +295,7 @@ app.get('/api/shipway/orders', async (req, res) => {
     res.status(500).json({ message: "Error fetching orders", error: error.message });
   }
 });
- 
+
 app.post('/api/shipway/neworder', async (req, res) => {
   try {
     const { order_id, shipment_status, order_date } = req.body;
@@ -305,8 +305,8 @@ app.post('/api/shipway/neworder', async (req, res) => {
     const status = statusMapping[shipment_status] || shipment_status;
     const date = order_date ? new Date(order_date) : null;
     await Order.updateOne(
-      { order_id },
-      { order_id, shipment_status: status, order_date: date },
+      { orderId: order_id },
+      { orderId: order_id, shipment_status: status, order_date: date },
       { upsert: true }
     );
     res.json({ message: "Order saved/updated" });
@@ -314,7 +314,8 @@ app.post('/api/shipway/neworder', async (req, res) => {
     res.status(500).json({ message: "Error saving new order", error: error.message });
   }
 });
- 
+
+// Cron job to update shipment status every hour
 cron.schedule('0 * * * *', async () => { 
   try {
     const orders = await Order.find({});
@@ -324,15 +325,15 @@ cron.schedule('0 * * * *', async () => {
         const page = 1;
         const dateStr = order.order_date.toISOString().split("T")[0];
         const ordersFromShipway = await fetchOrdersFromShipway(page, dateStr, dateStr);
-        const updatedOrder = ordersFromShipway.find(o => o.order_id === order.order_id);
+        const updatedOrder = ordersFromShipway.find(o => o.order_id === order.orderId);
         if (updatedOrder) {
           const shipmentStatus = statusMapping[updatedOrder.shipment_status] || updatedOrder.shipment_status;
-          await Order.updateOne({ order_id: order.order_id }, { shipment_status: shipmentStatus });
+          await Order.updateOne({ orderId: order.orderId }, { shipment_status: shipmentStatus });
         }
-      } catch (err) { 
+      } catch (err) {  
       }
     }
-  } catch (error) { 
+  } catch (error) {  
   }
 });
 
