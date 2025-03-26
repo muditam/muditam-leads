@@ -236,8 +236,8 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
         const shipmentStatus = statusMapping[order.shipment_status] || order.shipment_status;
         const orderDate = order.order_date ? new Date(order.order_date) : null; 
         await Order.updateOne(
-          { orderId: orderId },
-          { orderId: orderId, shipment_status: shipmentStatus, order_date: orderDate },
+          { order_id: orderId },
+          { order_id: orderId, shipment_status: shipmentStatus, order_date: orderDate },
           { upsert: true }
         );
       }
@@ -305,8 +305,8 @@ app.post('/api/shipway/neworder', async (req, res) => {
     const status = statusMapping[shipment_status] || shipment_status;
     const date = order_date ? new Date(order_date) : null;
     await Order.updateOne(
-      { orderId: order_id },
-      { orderId: order_id, shipment_status: status, order_date: date },
+      { order_id: order_id },
+      { order_id: order_id, shipment_status: status, order_date: date },
       { upsert: true }
     );
     res.json({ message: "Order saved/updated" });
@@ -325,15 +325,17 @@ cron.schedule('0 * * * *', async () => {
         const page = 1;
         const dateStr = order.order_date.toISOString().split("T")[0];
         const ordersFromShipway = await fetchOrdersFromShipway(page, dateStr, dateStr);
-        const updatedOrder = ordersFromShipway.find(o => o.order_id === order.orderId);
+        const updatedOrder = ordersFromShipway.find(o => o.order_id === order.order_id);
         if (updatedOrder) {
           const shipmentStatus = statusMapping[updatedOrder.shipment_status] || updatedOrder.shipment_status;
-          await Order.updateOne({ orderId: order.orderId }, { shipment_status: shipmentStatus });
+          await Order.updateOne({ order_id: order.order_id }, { shipment_status: shipmentStatus });
         }
       } catch (err) {  
+        // Optionally log individual order update errors
       }
     }
   } catch (error) {  
+    // Optionally log cron job errors
   }
 });
 
