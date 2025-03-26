@@ -315,7 +315,7 @@ app.post('/api/shipway/neworder', async (req, res) => {
   }
 });
  
-cron.schedule('0 23 * * *', async () => { 
+cron.schedule('0 * * * *', async () => { 
   try {
     const orders = await Order.find({});
     for (const order of orders) {
@@ -334,10 +334,7 @@ cron.schedule('0 23 * * *', async () => {
     }
   } catch (error) { 
   }
-}, {
-  timezone: 'Asia/Kolkata'  
 });
-
 
  
 const upload = multer({

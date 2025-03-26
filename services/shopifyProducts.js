@@ -11,10 +11,7 @@ router.get("/products", async (req, res) => {
   const shopifyStore = process.env.SHOPIFY_STORE_NAME;
   const accessToken = process.env.SHOPIFY_API_SECRET;
  
-  try {
-    // For a basic title match, you can pass the 'title' parameter in Shopify's REST endpoint:
-    // ?status=active&title=Sugar%20Defend
-    // Note: Shopify's built-in filtering by title can be exact or partial depending on your data.
+  try { 
     const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/products.json?status=active&title=${encodeURIComponent(query)}`;
 
     const response = await axios.get(url, {
