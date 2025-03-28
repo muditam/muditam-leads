@@ -19,6 +19,7 @@ const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
+const activeCountsRoute = require("./routes/activeCountsRoute");
 const Order = require('./models/Order');
 
 const app = express();
@@ -62,6 +63,8 @@ app.use("/api/shopify", shopifyRoutes);
 app.use(retentionSalesRoutes);
 
 app.use('/', exportLeadsRouter);
+
+app.use("/api/leads/retention", activeCountsRoute);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -176,8 +179,6 @@ app.get('/api/orders', async (req, res) => {
   }
 });[]
 
-
-// Shipment status mapping (abbreviation to full text)
 const statusMapping = {
   "DEL": "Delivered",
   "INT": "In Transit", 
@@ -232,14 +233,16 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
         break;
       }
       for (const order of orders) {
-        const orderId = order.order_id; // from Shipway response
+        // Normalize order_id from Shipway (remove leading '#' if present)
+        const normalizedOrderId = order.order_id.replace(/^#/, '');
         const shipmentStatus = statusMapping[order.shipment_status] || order.shipment_status;
         const orderDate = order.order_date ? new Date(order.order_date) : null; 
-        await Order.updateOne(
-          { order_id: orderId },
-          { order_id: orderId, shipment_status: shipmentStatus, order_date: orderDate },
+        const updateResult = await Order.updateOne(
+          { order_id: normalizedOrderId },
+          { order_id: normalizedOrderId, shipment_status: shipmentStatus, order_date: orderDate },
           { upsert: true }
         );
+        console.log(`Updated order ${normalizedOrderId}:`, updateResult);
       }
       totalFetched += orders.length; 
       if (orders.length < rowsPerPage) {
@@ -247,6 +250,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
       }
       page++;
     } catch (error) { 
+      console.error("Error during syncOrdersForDateRange:", error);
       break;
     }
   } 
@@ -304,9 +308,11 @@ app.post('/api/shipway/neworder', async (req, res) => {
     }
     const status = statusMapping[shipment_status] || shipment_status;
     const date = order_date ? new Date(order_date) : null;
+    // Normalize order_id before updating
+    const normalizedOrderId = order_id.replace(/^#/, '');
     await Order.updateOne(
-      { order_id: order_id },
-      { order_id: order_id, shipment_status: status, order_date: date },
+      { order_id: normalizedOrderId },
+      { order_id: normalizedOrderId, shipment_status: status, order_date: date },
       { upsert: true }
     );
     res.json({ message: "Order saved/updated" });
@@ -325,19 +331,20 @@ cron.schedule('0 * * * *', async () => {
         const page = 1;
         const dateStr = order.order_date.toISOString().split("T")[0];
         const ordersFromShipway = await fetchOrdersFromShipway(page, dateStr, dateStr);
-        const updatedOrder = ordersFromShipway.find(o => o.order_id === order.order_id);
+        // Find matching order using normalized order_id
+        const updatedOrder = ordersFromShipway.find(o => o.order_id.replace(/^#/, '') === order.order_id);
         if (updatedOrder) {
           const shipmentStatus = statusMapping[updatedOrder.shipment_status] || updatedOrder.shipment_status;
           await Order.updateOne({ order_id: order.order_id }, { shipment_status: shipmentStatus });
         }
       } catch (err) {  
-        // Optionally log individual order update errors
+        console.error(`Error updating order ${order.order_id}:`, err);
       }
     }
   } catch (error) {  
-    // Optionally log cron job errors
+    console.error("Cron job error:", error);
   }
-});
+}); 
 
  
 const upload = multer({
@@ -681,14 +688,34 @@ app.delete('/api/leads/:id', async (req, res) => {
 }); 
 
  
-app.get('/api/leads/retention', async (req, res) => { 
-  const { page, limit, all, fullName } = req.query;
- 
+app.get('/api/leads/retention', async (req, res) => {
+  // Extract pagination and "all" flag; all other query keys are considered filters
+  const { page, limit, all, ...filterParams } = req.query;
+  
+  // Base query always includes salesStatus "Sales Done"
   let query = { salesStatus: "Sales Done" };
-  if (fullName) { 
-    query.healthExpertAssigned = fullName;
+
+  // Add filters based on query parameters
+  for (const key in filterParams) {
+    if (filterParams[key] && filterParams[key] !== "") {
+      // If the filter is already an array (multiple values sent by axios), use $in
+      if (Array.isArray(filterParams[key])) {
+        query[key] = { $in: filterParams[key] };
+      } else {
+        // For fields that are arrays in the database, you might expect a comma-separated string.
+        // Here we split by comma and use $in to check if any of the values match.
+        if (["productPitched", "productsOrdered"].includes(key)) {
+          const arr = filterParams[key].split(",").map(item => item.trim());
+          query[key] = { $in: arr };
+        } else {
+          // For normal string fields, use a regex for partial, case-insensitive match
+          query[key] = { $regex: filterParams[key], $options: "i" };
+        }
+      }
+    }
   }
- 
+
+  // Function to calculate follow-up reminder
   const calculateReminder = (nextFollowupDate) => {
     const today = new Date();
     const followupDate = new Date(nextFollowupDate);
@@ -699,7 +726,7 @@ app.get('/api/leads/retention', async (req, res) => {
     return "Later";
   };
 
-  try { 
+  try {
     if (all === "true") {
       const leads = await Lead.find(query, {
         name: 1,
@@ -733,7 +760,6 @@ app.get('/api/leads/retention', async (req, res) => {
         currentPage: 1,
       });
     } else {
-      // Use pagination if "all" is not true
       const pageNumber = parseInt(page) || 1;
       const limitNumber = parseInt(limit) || 50;
       const skip = (pageNumber - 1) * limitNumber;
@@ -1156,6 +1182,292 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
     res.status(500).json({ message: "Error fetching transfer requests", error: error.message });
   }
 });
+
+// In your Express server file (server.js)
+
+app.get('/api/sales-summary', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    // If not provided, default to "today"
+    const sDate = startDate || new Date().toISOString().split("T")[0];
+    const eDate = endDate || new Date().toISOString().split("T")[0];
+
+    // Match leads whose date is between sDate and eDate (inclusive)
+    const perAgentPipeline = [
+      {
+        $match: {
+          date: { $gte: sDate, $lte: eDate },
+        },
+      },
+      {
+        $group: {
+          _id: "$agentAssigned",
+          openLeads: {
+            $sum: { $cond: [{ $eq: ["$salesStatus", "On Follow Up"] }, 1, 0] },
+          },
+          leadsAssignedToday: { $sum: 1 },
+          salesDone: {
+            $sum: { $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0] },
+          },
+          totalSales: { $sum: { $ifNull: ["$amountPaid", 0] } },
+          totalLeads: { $sum: 1 },
+        },
+      },
+      {
+        $addFields: {
+          conversionRate: {
+            $cond: [
+              { $gt: ["$leadsAssignedToday", 0] },
+              {
+                $multiply: [
+                  { $divide: ["$salesDone", "$leadsAssignedToday"] },
+                  100,
+                ],
+              },
+              0,
+            ],
+          },
+          avgOrderValue: {
+            $cond: [
+              { $gt: ["$salesDone", 0] },
+              { $divide: ["$totalSales", "$salesDone"] },
+              0,
+            ],
+          },
+        },
+      },
+      {
+        $project: {
+          agentName: "$_id",
+          _id: 0,
+          openLeads: 1,
+          leadsAssignedToday: 1,
+          salesDone: 1,
+          conversionRate: { $round: ["$conversionRate", 2] },
+          totalSales: { $round: ["$totalSales", 2] },
+          avgOrderValue: { $round: ["$avgOrderValue", 2] },
+          totalLeads: 1,
+        },
+      },
+    ];
+
+    const perAgentData = await Lead.aggregate(perAgentPipeline);
+
+    // Overall pipeline
+    const overallPipeline = [
+      {
+        $match: {
+          date: { $gte: sDate, $lte: eDate },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          openLeads: {
+            $sum: { $cond: [{ $eq: ["$salesStatus", "On Follow Up"] }, 1, 0] },
+          },
+          leadsAssignedToday: { $sum: 1 },
+          salesDone: {
+            $sum: { $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0] },
+          },
+          totalSales: { $sum: { $ifNull: ["$amountPaid", 0] } },
+        },
+      },
+      {
+        $addFields: {
+          conversionRate: {
+            $cond: [
+              { $gt: ["$leadsAssignedToday", 0] },
+              {
+                $multiply: [
+                  { $divide: ["$salesDone", "$leadsAssignedToday"] },
+                  100,
+                ],
+              },
+              0,
+            ],
+          },
+          avgOrderValue: {
+            $cond: [
+              { $gt: ["$salesDone", 0] },
+              { $divide: ["$totalSales", "$salesDone"] },
+              0,
+            ],
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          openLeads: 1,
+          leadsAssignedToday: 1,
+          salesDone: 1,
+          conversionRate: { $round: ["$conversionRate", 2] },
+          totalSales: { $round: ["$totalSales", 2] },
+          avgOrderValue: { $round: ["$avgOrderValue", 2] },
+        },
+      },
+    ];
+
+    const overallDataArr = await Lead.aggregate(overallPipeline);
+    const overallData = overallDataArr[0] || {};
+
+    res.json({ perAgent: perAgentData, overall: overallData });
+  } catch (error) {
+    console.error("Error fetching sales summary:", error);
+    res.status(500).json({ message: "Error fetching sales summary" });
+  }
+});
+
+app.get('/api/followup-summary', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const sDate = startDate || new Date().toISOString().split("T")[0];
+    const eDate = endDate || new Date().toISOString().split("T")[0];
+
+    // We'll match leads whose "date" is in [sDate, eDate]
+    // Then group by agent and compute noFollowupSet, etc.
+    const pipeline = [
+      {
+        $match: {
+          date: { $gte: sDate, $lte: eDate },
+        },
+      },
+      {
+        $group: {
+          _id: "$agentAssigned",
+          noFollowupSet: {
+            $sum: {
+              $cond: [
+                {
+                  $or: [
+                    { $eq: ["$nextFollowup", null] },
+                    { $eq: ["$nextFollowup", ""] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          followupMissed: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ["$nextFollowup", null] },
+                    { $ne: ["$nextFollowup", ""] },
+                    { $lt: ["$nextFollowup", sDate] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          followupToday: {
+            $sum: {
+              $cond: [{ $eq: ["$nextFollowup", sDate] }, 1, 0],
+            },
+          },
+          followupTomorrow: {
+            $sum: {
+              $cond: [{ $eq: ["$nextFollowup", eDate] }, 1, 0],
+            },
+          },
+          // "followupLater" means nextFollowup > eDate
+          followupLater: {
+            $sum: {
+              $cond: [{ $gt: ["$nextFollowup", eDate] }, 1, 0],
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          agentName: "$_id",
+          _id: 0,
+          noFollowupSet: 1,
+          followupMissed: 1,
+          followupToday: 1,
+          followupTomorrow: 1,
+          followupLater: 1,
+        },
+      },
+    ];
+
+    const results = await Lead.aggregate(pipeline);
+    res.json({ followup: results });
+  } catch (error) {
+    console.error("Error fetching followup summary:", error);
+    res.status(500).json({ message: "Error fetching followup summary" });
+  }
+});
+
+app.get('/api/lead-source-summary', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const sDate = startDate || new Date().toISOString().split("T")[0];
+    const eDate = endDate || new Date().toISOString().split("T")[0];
+
+    // Basic pipeline that matches leads in date range, then groups by leadSource
+    const pipeline = [
+      {
+        $match: {
+          date: { $gte: sDate, $lte: eDate },
+        },
+      },
+      {
+        $group: {
+          _id: "$leadSource",
+          leadsAssigned: { $sum: 1 },
+          leadsConverted: {
+            $sum: {
+              $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0],
+            },
+          },
+          salesAmount: { $sum: { $ifNull: ["$amountPaid", 0] } },
+        },
+      },
+      {
+        $addFields: {
+          conversionRate: {
+            $cond: [
+              { $gt: ["$leadsAssigned", 0] },
+              {
+                $multiply: [
+                  { $divide: ["$leadsConverted", "$leadsAssigned"] },
+                  100,
+                ],
+              },
+              0,
+            ],
+          },
+        },
+      },
+      {
+        $project: {
+          leadSource: "$_id",
+          _id: 0,
+          leadsAssigned: 1,
+          leadsConverted: 1,
+          conversionRate: { $round: ["$conversionRate", 2] },
+          salesAmount: { $round: ["$salesAmount", 2] },
+        },
+      },
+    ];
+
+    const results = await Lead.aggregate(pipeline);
+    res.json({ leadSourceSummary: results });
+  } catch (error) {
+    console.error("Error fetching lead source summary:", error);
+    res.status(500).json({ message: "Error fetching lead source summary" });
+  }
+});
+
+
+
 
 
 // Start Server
