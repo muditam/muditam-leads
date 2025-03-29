@@ -205,16 +205,17 @@ router.get('/followup-summary', async (req, res) => {
 // GET /api/lead-source-summary
 router.get('/lead-source-summary', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, agentAssignedName } = req.query;
     const sDate = startDate || new Date().toISOString().split("T")[0];
     const eDate = endDate || new Date().toISOString().split("T")[0];
 
+    const matchCriteria = { date: { $gte: sDate, $lte: eDate } };
+    if (agentAssignedName && agentAssignedName !== "All Agents") {
+      matchCriteria.agentAssigned = agentAssignedName;
+    }
+
     const pipeline = [
-      {
-        $match: {
-          date: { $gte: sDate, $lte: eDate },
-        },
-      },
+      { $match: matchCriteria },
       {
         $group: {
           _id: "$leadSource",

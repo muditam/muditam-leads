@@ -469,16 +469,47 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
   }
 });
 
-router.get('/api/today-summary', async (req, res) => {
+function parseDateOrToday(dateStr) {
+  if (!dateStr) {
+    return new Date().toISOString().split("T")[0]; // fallback to "today"
+  }
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) {
+    return new Date().toISOString().split("T")[0]; // fallback
+  }
+  return dateStr;
+}
+
+/**
+ * GET /api/today-summary
+ * Accepts: agentName, startDate, endDate
+ * If startDate/endDate not provided, fallback to "today".
+ */
+router.get("/api/today-summary", async (req, res) => {
   try {
     const agentName = req.query.agentName;
     if (!agentName) {
-      return res.status(400).json({ message: 'Agent name is required.' });
+      return res.status(400).json({ message: "agentName is required." });
     }
-    // Get today's date in YYYY-MM-DD format.
-    const today = new Date().toISOString().split("T")[0];
+    // parse the date range or fallback to "today"
+    const sDate = parseDateOrToday(req.query.startDate);
+    const eDate = parseDateOrToday(req.query.endDate);
 
-    // Active Customers from the Leads collection.
+    // Convert sDate/eDate to actual Date objects
+    const start = new Date(sDate);
+    const end = new Date(eDate);
+    // If you want the end date to be inclusive, set end to end-of-day
+    end.setHours(23, 59, 59, 999);
+
+    // For example, fetch "activeCustomers" from leads in the date range,
+    // or just keep the logic you had. 
+    // Suppose you want to consider all leads assigned to agentName 
+    // that were "retentionStatus=Active" during that range, etc.
+    // Or you can store creation date in leads if needed.
+    // Example below simply counts "activeCustomers" ignoring date,
+    // but you can adapt as needed.
+
+    // 1) Active Customers
     const activeCustomers = await Lead.countDocuments({
       healthExpertAssigned: agentName,
       $or: [
@@ -487,13 +518,18 @@ router.get('/api/today-summary', async (req, res) => {
       ]
     });
 
-    // Get today's retention sales for this agent.
-    const salesToday = await RetentionSales.find({
+    // 2) fetch retention sales in that date range
+    // The "date" field is in "YYYY-MM-DD" string form, so compare strings
+    const retentionSales = await RetentionSales.find({
       orderCreatedBy: agentName,
-      date: today
+      date: { $gte: sDate, $lte: eDate },
     });
-    const salesDone = salesToday.length;
-    const totalSales = salesToday.reduce((acc, sale) => acc + (sale.amountPaid || 0), 0);
+
+    const salesDone = retentionSales.length;
+    const totalSales = retentionSales.reduce(
+      (acc, sale) => acc + (sale.amountPaid || 0),
+      0
+    );
     const avgOrderValue = salesDone > 0 ? totalSales / salesDone : 0;
 
     res.json({
@@ -504,23 +540,42 @@ router.get('/api/today-summary', async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching today summary:", error);
-    res.status(500).json({ message: "Error fetching today summary", error: error.message });
+    res.status(500).json({
+      message: "Error fetching today summary",
+      error: error.message
+    });
   }
 });
 
+/**
+ * GET /api/followup-summary
+ * Accepts: agentName, startDate, endDate
+ * If not provided, fallback to "today" logic.
+ */
 router.get("/api/followup-summary", async (req, res) => {
   try {
     const agentName = req.query.agentName;
     if (!agentName) {
-      return res.status(400).json({ message: "Agent name is required." });
+      return res.status(400).json({ message: "agentName is required." });
     }
-    // Get today's date and tomorrow's date in YYYY-MM-DD format.
-    const today = new Date().toISOString().split("T")[0];
-    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
+    const sDate = parseDateOrToday(req.query.startDate);
+    const eDate = parseDateOrToday(req.query.endDate);
 
-    // Count leads where no followup date is set.
+    // For your followup logic, you might check leads with 
+    // rtNextFollowupDate between sDate and eDate, etc.
+    // For example, if you want to count leads in that entire range:
+    // or keep your existing logic if you only do "today", "tomorrow", etc.
+
+    // Example: let's interpret sDate/eDate as the "window" for nextFollowup
+    // So "noFollowupSet" is leads that have no nextFollowup 
+    // but were assigned to agentName at all (no date filtering).
+    // Adjust as you see fit if you want date-based filtering for followups.
+
+    // Or you can do a simplified approach: if sDate/eDate is not "today", 
+    // you can just interpret them as the "window" for nextFollowup. 
+    // The code below is an example.
+
+    // noFollowupSet
     const noFollowupSet = await Lead.countDocuments({
       healthExpertAssigned: agentName,
       $or: [
@@ -530,28 +585,29 @@ router.get("/api/followup-summary", async (req, res) => {
       ],
     });
 
-    // Count leads with followup date before today (missed followup).
+    // followupMissed => leads with rtNextFollowupDate < sDate
     const followupMissed = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      rtNextFollowupDate: { $lt: today },
+      rtNextFollowupDate: { $lt: sDate }
     });
 
-    // Count leads with followup date equal to today.
+    // followupToday => leads with rtNextFollowupDate == sDate
     const followupToday = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      rtNextFollowupDate: today,
+      rtNextFollowupDate: sDate
     });
 
-    // Count leads with followup date equal to tomorrow.
+    // followupTomorrow => leads with rtNextFollowupDate == eDate
+    // (this is arbitrary if you want sDate/eDate logic)
     const followupTomorrow = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      rtNextFollowupDate: tomorrow,
+      rtNextFollowupDate: eDate
     });
 
-    // Count leads with followup date greater than tomorrow.
+    // followupLater => leads with rtNextFollowupDate > eDate
     const followupLater = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      rtNextFollowupDate: { $gt: tomorrow },
+      rtNextFollowupDate: { $gt: eDate }
     });
 
     res.json({
@@ -559,11 +615,14 @@ router.get("/api/followup-summary", async (req, res) => {
       followupMissed,
       followupToday,
       followupTomorrow,
-      followupLater,
+      followupLater
     });
   } catch (error) {
     console.error("Error fetching followup summary:", error);
-    res.status(500).json({ message: "Error fetching followup summary", error: error.message });
+    res.status(500).json({
+      message: "Error fetching followup summary",
+      error: error.message
+    });
   }
 });
 
@@ -703,3 +762,4 @@ router.get("/api/shipment-summary", async (req, res) => {
 });
 
 module.exports = router;
+ 
