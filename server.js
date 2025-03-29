@@ -20,6 +20,8 @@ const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
 const activeCountsRoute = require("./routes/activeCountsRoute");
+const summaryRoutes = require('./routes/summaryRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 const Order = require('./models/Order');
 
 const app = express();
@@ -64,7 +66,14 @@ app.use(retentionSalesRoutes);
 
 app.use('/', exportLeadsRouter);
 
+//MasterRetentiondashboard
 app.use("/api/leads/retention", activeCountsRoute);
+
+//MasterSalesdashboard
+app.use('/api', summaryRoutes);
+
+//Sales Agent
+app.use('/api/dashboard', dashboardRoutes);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -1183,293 +1192,8 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
   }
 });
 
-// In your Express server file (server.js)
 
-app.get('/api/sales-summary', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-
-    // If not provided, default to "today"
-    const sDate = startDate || new Date().toISOString().split("T")[0];
-    const eDate = endDate || new Date().toISOString().split("T")[0];
-
-    // Match leads whose date is between sDate and eDate (inclusive)
-    const perAgentPipeline = [
-      {
-        $match: {
-          date: { $gte: sDate, $lte: eDate },
-        },
-      },
-      {
-        $group: {
-          _id: "$agentAssigned",
-          openLeads: {
-            $sum: { $cond: [{ $eq: ["$salesStatus", "On Follow Up"] }, 1, 0] },
-          },
-          leadsAssignedToday: { $sum: 1 },
-          salesDone: {
-            $sum: { $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0] },
-          },
-          totalSales: { $sum: { $ifNull: ["$amountPaid", 0] } },
-          totalLeads: { $sum: 1 },
-        },
-      },
-      {
-        $addFields: {
-          conversionRate: {
-            $cond: [
-              { $gt: ["$leadsAssignedToday", 0] },
-              {
-                $multiply: [
-                  { $divide: ["$salesDone", "$leadsAssignedToday"] },
-                  100,
-                ],
-              },
-              0,
-            ],
-          },
-          avgOrderValue: {
-            $cond: [
-              { $gt: ["$salesDone", 0] },
-              { $divide: ["$totalSales", "$salesDone"] },
-              0,
-            ],
-          },
-        },
-      },
-      {
-        $project: {
-          agentName: "$_id",
-          _id: 0,
-          openLeads: 1,
-          leadsAssignedToday: 1,
-          salesDone: 1,
-          conversionRate: { $round: ["$conversionRate", 2] },
-          totalSales: { $round: ["$totalSales", 2] },
-          avgOrderValue: { $round: ["$avgOrderValue", 2] },
-          totalLeads: 1,
-        },
-      },
-    ];
-
-    const perAgentData = await Lead.aggregate(perAgentPipeline);
-
-    // Overall pipeline
-    const overallPipeline = [
-      {
-        $match: {
-          date: { $gte: sDate, $lte: eDate },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          openLeads: {
-            $sum: { $cond: [{ $eq: ["$salesStatus", "On Follow Up"] }, 1, 0] },
-          },
-          leadsAssignedToday: { $sum: 1 },
-          salesDone: {
-            $sum: { $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0] },
-          },
-          totalSales: { $sum: { $ifNull: ["$amountPaid", 0] } },
-        },
-      },
-      {
-        $addFields: {
-          conversionRate: {
-            $cond: [
-              { $gt: ["$leadsAssignedToday", 0] },
-              {
-                $multiply: [
-                  { $divide: ["$salesDone", "$leadsAssignedToday"] },
-                  100,
-                ],
-              },
-              0,
-            ],
-          },
-          avgOrderValue: {
-            $cond: [
-              { $gt: ["$salesDone", 0] },
-              { $divide: ["$totalSales", "$salesDone"] },
-              0,
-            ],
-          },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          openLeads: 1,
-          leadsAssignedToday: 1,
-          salesDone: 1,
-          conversionRate: { $round: ["$conversionRate", 2] },
-          totalSales: { $round: ["$totalSales", 2] },
-          avgOrderValue: { $round: ["$avgOrderValue", 2] },
-        },
-      },
-    ];
-
-    const overallDataArr = await Lead.aggregate(overallPipeline);
-    const overallData = overallDataArr[0] || {};
-
-    res.json({ perAgent: perAgentData, overall: overallData });
-  } catch (error) {
-    console.error("Error fetching sales summary:", error);
-    res.status(500).json({ message: "Error fetching sales summary" });
-  }
-});
-
-app.get('/api/followup-summary', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    const sDate = startDate || new Date().toISOString().split("T")[0];
-    const eDate = endDate || new Date().toISOString().split("T")[0];
-
-    // We'll match leads whose "date" is in [sDate, eDate]
-    // Then group by agent and compute noFollowupSet, etc.
-    const pipeline = [
-      {
-        $match: {
-          date: { $gte: sDate, $lte: eDate },
-        },
-      },
-      {
-        $group: {
-          _id: "$agentAssigned",
-          noFollowupSet: {
-            $sum: {
-              $cond: [
-                {
-                  $or: [
-                    { $eq: ["$nextFollowup", null] },
-                    { $eq: ["$nextFollowup", ""] },
-                  ],
-                },
-                1,
-                0,
-              ],
-            },
-          },
-          followupMissed: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $ne: ["$nextFollowup", null] },
-                    { $ne: ["$nextFollowup", ""] },
-                    { $lt: ["$nextFollowup", sDate] },
-                  ],
-                },
-                1,
-                0,
-              ],
-            },
-          },
-          followupToday: {
-            $sum: {
-              $cond: [{ $eq: ["$nextFollowup", sDate] }, 1, 0],
-            },
-          },
-          followupTomorrow: {
-            $sum: {
-              $cond: [{ $eq: ["$nextFollowup", eDate] }, 1, 0],
-            },
-          },
-          // "followupLater" means nextFollowup > eDate
-          followupLater: {
-            $sum: {
-              $cond: [{ $gt: ["$nextFollowup", eDate] }, 1, 0],
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          agentName: "$_id",
-          _id: 0,
-          noFollowupSet: 1,
-          followupMissed: 1,
-          followupToday: 1,
-          followupTomorrow: 1,
-          followupLater: 1,
-        },
-      },
-    ];
-
-    const results = await Lead.aggregate(pipeline);
-    res.json({ followup: results });
-  } catch (error) {
-    console.error("Error fetching followup summary:", error);
-    res.status(500).json({ message: "Error fetching followup summary" });
-  }
-});
-
-app.get('/api/lead-source-summary', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    const sDate = startDate || new Date().toISOString().split("T")[0];
-    const eDate = endDate || new Date().toISOString().split("T")[0];
-
-    // Basic pipeline that matches leads in date range, then groups by leadSource
-    const pipeline = [
-      {
-        $match: {
-          date: { $gte: sDate, $lte: eDate },
-        },
-      },
-      {
-        $group: {
-          _id: "$leadSource",
-          leadsAssigned: { $sum: 1 },
-          leadsConverted: {
-            $sum: {
-              $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0],
-            },
-          },
-          salesAmount: { $sum: { $ifNull: ["$amountPaid", 0] } },
-        },
-      },
-      {
-        $addFields: {
-          conversionRate: {
-            $cond: [
-              { $gt: ["$leadsAssigned", 0] },
-              {
-                $multiply: [
-                  { $divide: ["$leadsConverted", "$leadsAssigned"] },
-                  100,
-                ],
-              },
-              0,
-            ],
-          },
-        },
-      },
-      {
-        $project: {
-          leadSource: "$_id",
-          _id: 0,
-          leadsAssigned: 1,
-          leadsConverted: 1,
-          conversionRate: { $round: ["$conversionRate", 2] },
-          salesAmount: { $round: ["$salesAmount", 2] },
-        },
-      },
-    ];
-
-    const results = await Lead.aggregate(pipeline);
-    res.json({ leadSourceSummary: results });
-  } catch (error) {
-    console.error("Error fetching lead source summary:", error);
-    res.status(500).json({ message: "Error fetching lead source summary" });
-  }
-});
-
-
-
-
-
+ 
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

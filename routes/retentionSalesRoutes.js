@@ -5,6 +5,8 @@ const axios = require('axios');
 const mongoose = require('mongoose');
 const router = express.Router();
 
+const Lead = require('../models/Lead');
+
 // Import the Order model (Shipway data)
 const Order = require('../models/Order');
 
@@ -41,6 +43,17 @@ const normalizePhoneNumber = (phone) => {
   }
   return digits;
 };
+
+
+const buildDateMatch = (startDate, endDate) => {
+  const match = {};
+  if (startDate) match.date = { $gte: startDate };
+  if (endDate) {
+    match.date = match.date ? { ...match.date, $lte: endDate } : { $lte: endDate };
+  }
+  return match;
+};
+
 
 /**
  * 3. GET: Fetch retention sales (lightweight)
@@ -251,6 +264,441 @@ router.post('/api/retention-sales/update-matching', async (req, res) => {
   } catch (error) {
     console.error("Error updating retention sales matching:", error);
     res.status(500).json({ message: "Error updating retention sales matching", error });
+  }
+});
+
+router.get('/api/retention-sales/aggregated', async (req, res) => {
+  const { startDate, endDate } = req.query;
+  try {
+    const match = buildDateMatch(startDate, endDate);
+    const aggregatedData = await RetentionSales.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$orderCreatedBy",
+          salesDone: { $sum: 1 },
+          totalSales: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
+        }
+      },
+      {
+        $project: {
+          agentName: "$_id",
+          salesDone: 1,
+          totalSales: 1,
+          avgOrderValue: {
+            $cond: [
+              { $eq: ["$salesDone", 0] },
+              0,
+              { $divide: ["$totalSales", "$salesDone"] }
+            ]
+          }
+        }
+      }
+    ]);
+    res.status(200).json(aggregatedData);
+  } catch (error) {
+    console.error("Error aggregating retention sales:", error);
+    res.status(500).json({ message: "Error aggregating retention sales", error: error.message });
+  }
+});
+
+/**
+ * NEW Endpoint 2: Overall Shipment Status Summary
+ * GET /api/retention-sales/shipment-summary?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+/**
+ * Endpoint 2: Overall Shipment Status Summary
+ * GET /api/retention-sales/shipment-summary?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+router.get('/api/retention-sales/shipment-summary', async (req, res) => {
+  const { startDate, endDate } = req.query;
+  try {
+    // 1) Build the match query
+    const match = buildDateMatch(startDate, endDate);
+
+    // 2) Aggregate
+    const aggregatedShipment = await RetentionSales.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$shipway_status",
+          count: { $sum: 1 },
+          totalAmount: {
+            $sum: {
+              $toDouble: {
+                $ifNull: ["$amountPaid", 0]
+              }
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          category: {
+            $cond: [
+              {
+                $or: [
+                  { $eq: ["$_id", null] },  // If shipway_status is null
+                  { $eq: ["$_id", ""] }     // If shipway_status is an empty string
+                ]
+              },
+              "Not available",
+              "$_id"
+            ]
+          },
+          count: 1,
+          totalAmount: 1
+        }
+        
+      }
+    ]);
+
+    // 3) Compute percentages
+    const totalCount = aggregatedShipment.reduce((sum, item) => sum + item.count, 0);
+    aggregatedShipment.forEach(item => {
+      item.percentage =
+        totalCount > 0 ? ((item.count / totalCount) * 100).toFixed(2) : "0.00";
+    });
+
+    // 4) Insert "Total Orders" row at the start
+    const totalAmount = aggregatedShipment.reduce((sum, item) => sum + item.totalAmount, 0);
+    aggregatedShipment.unshift({
+      category: "Total Orders",
+      count: totalCount,
+      totalAmount,
+      percentage: "100"
+    });
+
+    // Note: we do NOT force "Not available" if it doesn't exist
+
+    res.status(200).json(aggregatedShipment);
+  } catch (error) {
+    console.error("Error aggregating shipment summary:", error);
+    res.status(500).json({
+      message: "Error aggregating shipment summary",
+      error: error.message
+    });
+  }
+});
+
+
+/**
+ * Endpoint 3: Agent-wise Shipment Status Summary
+ * GET /api/retention-sales/shipment-summary/agent?agentName=AgentName&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
+  const { agentName, startDate, endDate } = req.query;
+  if (!agentName) {
+    return res.status(400).json({ message: "Agent name is required" });
+  }
+
+  try {
+    // 1) Build the match query
+    const match = {
+      orderCreatedBy: agentName,
+      ...buildDateMatch(startDate, endDate)
+    };
+
+    // 2) Aggregate
+    const aggregatedAgentShipment = await RetentionSales.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$shipway_status",
+          count: { $sum: 1 },
+          totalAmount: {
+            $sum: {
+              $toDouble: {
+                $ifNull: ["$amountPaid", 0]
+              }
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          category: {
+            $cond: [
+              {
+                $or: [
+                  { $eq: ["$_id", null] },  // If shipway_status is null
+                  { $eq: ["$_id", ""] }     // If shipway_status is an empty string
+                ]
+              },
+              "Not available",
+              "$_id"
+            ]
+          },
+          count: 1,
+          totalAmount: 1
+        }        
+      }
+    ]);
+
+    // 3) Compute percentages
+    const totalCount = aggregatedAgentShipment.reduce(
+      (sum, item) => sum + item.count,
+      0
+    );
+    aggregatedAgentShipment.forEach(item => {
+      item.percentage =
+        totalCount > 0 ? ((item.count / totalCount) * 100).toFixed(2) : "0.00";
+    });
+
+    // 4) Insert "Total Orders" row at the start
+    const totalAmount = aggregatedAgentShipment.reduce(
+      (sum, item) => sum + item.totalAmount,
+      0
+    );
+    aggregatedAgentShipment.unshift({
+      category: "Total Orders",
+      count: totalCount,
+      totalAmount,
+      percentage: "100"
+    });
+
+    // Note: we do NOT force "Not available" if it doesn't exist
+
+    res.status(200).json(aggregatedAgentShipment);
+  } catch (error) {
+    console.error("Error aggregating agent shipment summary:", error);
+    res.status(500).json({
+      message: "Error aggregating agent shipment summary",
+      error: error.message
+    });
+  }
+});
+
+router.get('/api/today-summary', async (req, res) => {
+  try {
+    const agentName = req.query.agentName;
+    if (!agentName) {
+      return res.status(400).json({ message: 'Agent name is required.' });
+    }
+    // Get today's date in YYYY-MM-DD format.
+    const today = new Date().toISOString().split("T")[0];
+
+    // Active Customers from the Leads collection.
+    const activeCustomers = await Lead.countDocuments({
+      healthExpertAssigned: agentName,
+      $or: [
+        { retentionStatus: { $exists: false } },
+        { retentionStatus: "Active" }
+      ]
+    });
+
+    // Get today's retention sales for this agent.
+    const salesToday = await RetentionSales.find({
+      orderCreatedBy: agentName,
+      date: today
+    });
+    const salesDone = salesToday.length;
+    const totalSales = salesToday.reduce((acc, sale) => acc + (sale.amountPaid || 0), 0);
+    const avgOrderValue = salesDone > 0 ? totalSales / salesDone : 0;
+
+    res.json({
+      activeCustomers,
+      salesDone,
+      totalSales,
+      avgOrderValue
+    });
+  } catch (error) {
+    console.error("Error fetching today summary:", error);
+    res.status(500).json({ message: "Error fetching today summary", error: error.message });
+  }
+});
+
+router.get("/api/followup-summary", async (req, res) => {
+  try {
+    const agentName = req.query.agentName;
+    if (!agentName) {
+      return res.status(400).json({ message: "Agent name is required." });
+    }
+    // Get today's date and tomorrow's date in YYYY-MM-DD format.
+    const today = new Date().toISOString().split("T")[0];
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+
+    // Count leads where no followup date is set.
+    const noFollowupSet = await Lead.countDocuments({
+      healthExpertAssigned: agentName,
+      $or: [
+        { rtNextFollowupDate: { $exists: false } },
+        { rtNextFollowupDate: null },
+        { rtNextFollowupDate: "" },
+      ],
+    });
+
+    // Count leads with followup date before today (missed followup).
+    const followupMissed = await Lead.countDocuments({
+      healthExpertAssigned: agentName,
+      rtNextFollowupDate: { $lt: today },
+    });
+
+    // Count leads with followup date equal to today.
+    const followupToday = await Lead.countDocuments({
+      healthExpertAssigned: agentName,
+      rtNextFollowupDate: today,
+    });
+
+    // Count leads with followup date equal to tomorrow.
+    const followupTomorrow = await Lead.countDocuments({
+      healthExpertAssigned: agentName,
+      rtNextFollowupDate: tomorrow,
+    });
+
+    // Count leads with followup date greater than tomorrow.
+    const followupLater = await Lead.countDocuments({
+      healthExpertAssigned: agentName,
+      rtNextFollowupDate: { $gt: tomorrow },
+    });
+
+    res.json({
+      noFollowupSet,
+      followupMissed,
+      followupToday,
+      followupTomorrow,
+      followupLater,
+    });
+  } catch (error) {
+    console.error("Error fetching followup summary:", error);
+    res.status(500).json({ message: "Error fetching followup summary", error: error.message });
+  }
+});
+
+router.get("/api/all-time-summary", async (req, res) => {
+  try {
+    const agentName = req.query.agentName;
+    if (!agentName) {
+      return res.status(400).json({ message: "Agent name is required." });
+    }
+
+    // Determine the current month's date range in "YYYY-MM-DD" format.
+    const now = new Date();
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+      .toISOString()
+      .split("T")[0];
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      .toISOString()
+      .split("T")[0];
+
+    // Run queries concurrently.
+    const totalCustomersPromise = Lead.countDocuments({ healthExpertAssigned: agentName });
+    const activeCustomersPromise = Lead.countDocuments({
+      healthExpertAssigned: agentName,
+      $or: [
+        { retentionStatus: { $exists: false } },
+        { retentionStatus: "Active" }
+      ]
+    });
+    const lostCustomersPromise = Lead.countDocuments({
+      healthExpertAssigned: agentName,
+      retentionStatus: "Lost"
+    });
+    const retentionSalesPromise = RetentionSales.find({ orderCreatedBy: agentName });
+
+    const [totalCustomers, activeCustomers, lostCustomers, retentionSales] = await Promise.all([
+      totalCustomersPromise,
+      activeCustomersPromise,
+      lostCustomersPromise,
+      retentionSalesPromise
+    ]);
+
+    // Compute metrics from retention sales.
+    const salesDone = retentionSales.length;
+    const totalSales = retentionSales.reduce((acc, sale) => acc + (sale.amountPaid || 0), 0);
+
+    // Count sales done in the current month.
+    const customersRetainedThisMonth = retentionSales.filter((sale) => {
+      // Assuming sale.date is stored in "YYYY-MM-DD" format.
+      return sale.date >= firstDayOfMonth && sale.date <= lastDayOfMonth;
+    }).length;
+
+    const retentionRate =
+      totalCustomers > 0
+        ? parseFloat(((customersRetainedThisMonth / totalCustomers) * 100).toFixed(2))
+        : 0;
+    const avgOrderValue =
+      salesDone > 0 ? parseFloat((totalSales / salesDone).toFixed(2)) : 0;
+
+    res.json({
+      totalCustomers,
+      activeCustomers,
+      lostCustomers,
+      customersRetainedThisMonth,
+      retentionRate,
+      salesDone,
+      totalSales,
+      avgOrderValue,
+    });
+  } catch (error) {
+    console.error("Error fetching all time summary:", error);
+    res.status(500).json({ message: "Error fetching all time summary", error: error.message });
+  }
+});
+
+router.get("/api/shipment-summary", async (req, res) => {
+  try {
+    const { agentName, startDate, endDate } = req.query;
+    if (!agentName) {
+      return res.status(400).json({ message: "Agent name is required." });
+    }
+
+    // Retrieve all retention sales for the given agent.
+    const sales = await RetentionSales.find({ orderCreatedBy: agentName });
+
+    // Filter sales by date if startDate and/or endDate are provided.
+    const filteredSales = sales.filter((sale) => {
+      if (!sale.date) return false; // Skip if date is not available.
+      if (startDate && sale.date < startDate) return false;
+      if (endDate && sale.date > endDate) return false;
+      return true;
+    });
+
+    const totalOrders = filteredSales.length;
+    const totalAmount = filteredSales.reduce(
+      (acc, sale) => acc + (sale.amountPaid || 0),
+      0
+    );
+
+    // Group sales by shipment status.
+    const statusMap = {};
+    filteredSales.forEach((sale) => {
+      const status = sale.shipway_status || "Unknown";
+      if (!statusMap[status]) {
+        statusMap[status] = { count: 0, amount: 0 };
+      }
+      statusMap[status].count += 1;
+      statusMap[status].amount += sale.amountPaid || 0;
+    });
+
+    // Build summary array. Start with a "Total Orders" row.
+    const summary = [
+      {
+        label: "Total Orders",
+        count: totalOrders,
+        amount: totalAmount,
+        percentage: "100.00",
+      },
+    ];
+
+    // For each shipment status, compute the percentage.
+    Object.entries(statusMap).forEach(([status, data]) => {
+      const percentage =
+        totalOrders > 0 ? ((data.count / totalOrders) * 100).toFixed(2) : "0.00";
+      summary.push({
+        label: status,
+        count: data.count,
+        amount: data.amount,
+        percentage,
+      });
+    });
+
+    res.json(summary);
+  } catch (error) {
+    console.error("Error fetching shipment summary:", error);
+    res.status(500).json({ message: "Error fetching shipment summary", error: error.message });
   }
 });
 
