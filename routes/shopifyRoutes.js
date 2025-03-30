@@ -76,4 +76,54 @@ router.get('/customerDetails', async (req, res) => {
   }
 });
 
+router.get("/order-details", async (req, res) => {
+  const { orderId } = req.query;
+  if (!orderId) {
+    return res.status(400).json({ error: "orderId query parameter is required" });
+  }
+  
+  try {
+    const shopifyStore = process.env.SHOPIFY_STORE_NAME;
+    const accessToken = process.env.SHOPIFY_API_SECRET;
+    // Use Shopify’s API to fetch a single order by its ID.
+    const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${orderId}.json`;
+    const response = await axios.get(url, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+    });
+    const order = response.data.order;
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    // Extract and format the fields expected by the frontend:
+    const orderDetails = {
+      customerName: order.customer
+        ? `${order.customer.first_name} ${order.customer.last_name}`.trim()
+        : "N/A",
+      phone:
+        order.customer && order.customer.default_address
+          ? order.customer.default_address.phone
+          : "N/A",
+          shippingAddress: order.shipping_address
+          ? `${order.shipping_address.address1}${order.shipping_address.address2 ? ", " + order.shipping_address.address2 : ""}, ${order.shipping_address.city}, ${order.shipping_address.province}, ${order.shipping_address.country}, ${order.shipping_address.zip}`
+          : "N/A",        
+      paymentStatus: order.financial_status,
+      productOrdered: order.line_items && order.line_items.length > 0
+        ? order.line_items.map(item => item.title).join(", ")
+        : "N/A",
+      orderDate: order.created_at,
+      orderId: order.name,
+      totalPrice: order.total_price,
+    };
+
+    return res.json(orderDetails);
+  } catch (error) {
+    console.error("Error fetching order details:", error.response?.data || error.message);
+    return res.status(500).json({ error: "Failed to fetch order details" });
+  }
+});
+
+
 module.exports = router;

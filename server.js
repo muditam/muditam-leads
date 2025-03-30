@@ -6,7 +6,7 @@ const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
-const XLSX = require("xlsx");
+const XLSX = require("xlsx"); 
 const axios = require('axios');
 const https = require('https'); 
 const cron = require('node-cron');
@@ -22,6 +22,7 @@ const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
 const activeCountsRoute = require("./routes/activeCountsRoute");
 const summaryRoutes = require('./routes/summaryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const myOrdersRoutes = require("./routes/myOrders");
 const Order = require('./models/Order');
 
 const app = express();
@@ -61,6 +62,7 @@ app.use("/api/shopify", shopifyOrdersRoute);
 app.use("/api/shopify", ShopifyPush);
 app.use("/api/razorpay", razorpayRoutes); 
 app.use("/api/shopify", shopifyRoutes);
+app.use("/api/my-orders", myOrdersRoutes);
 
 app.use(retentionSalesRoutes);
 

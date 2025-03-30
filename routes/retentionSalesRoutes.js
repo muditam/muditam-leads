@@ -16,7 +16,9 @@ const RetentionSalesSchema = new mongoose.Schema({
   contactNumber: String,
   productsOrdered: [String],
   dosageOrdered: { type: String, default: "" },
-  amountPaid: Number,
+  upsellAmount: { type: Number, default: 0 },  
+  partialPayment: { type: Number, default: 0 },  
+  amountPaid: { type: Number, default: 0 },
   modeOfPayment: String,
   orderId: String,
   shopify_amount: String,
@@ -26,6 +28,9 @@ const RetentionSalesSchema = new mongoose.Schema({
 });
 
 const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
+
+const MyOrder = require("../models/MyOrder");
+ 
 
 /**
  * 2. Helper to normalize phone numbers
@@ -83,13 +88,14 @@ router.post('/api/retention-sales', async (req, res) => {
     contactNumber = "",
     productsOrdered = [],
     dosageOrdered = "",
-    amountPaid = 0,
+    upsellAmount = 0, // New
+    partialPayment = 0, // New
     modeOfPayment = "Not Specified",
     orderCreatedBy,
     remarks = "",
     orderId = "",
     shopify_amount = "",
-    shipway_status = ""
+    shipway_status = "",
   } = req.body;
 
   if (!date || !orderCreatedBy) {
@@ -97,13 +103,17 @@ router.post('/api/retention-sales', async (req, res) => {
   }
 
   try {
+    const amountPaid = upsellAmount + partialPayment; // Updated Amount Paid calculation
+
     const newSale = new RetentionSales({
       date,
       name,
       contactNumber,
       productsOrdered,
       dosageOrdered,
-      amountPaid,
+      upsellAmount,
+      partialPayment,
+      amountPaid, // Updated Amount Paid
       modeOfPayment,
       orderCreatedBy,
       remarks,
@@ -140,19 +150,40 @@ router.put('/api/retention-sales/:id', async (req, res) => {
 /**
  * 6. DELETE: Delete a retention sale by ID
  */
+// router.delete('/api/retention-sales/:id', async (req, res) => {
+//   const { id } = req.params;
+//   try {
+//     const deletedSale = await RetentionSales.findByIdAndDelete(id);
+//     if (!deletedSale) {
+//       return res.status(404).json({ message: 'Sale not found' });
+//     }
+//     res.status(200).json({ message: 'Sale deleted successfully' });
+//   } catch (error) {
+//     console.error('Error deleting retention sale:', error);
+//     res.status(500).json({ message: 'Error deleting retention sale', error });
+//   }
+// });
+
+// In routes/retentionSalesRoutes.js, update the delete endpoint:
 router.delete('/api/retention-sales/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const deletedSale = await RetentionSales.findByIdAndDelete(id);
+    // Try deleting from RetentionSales first.
+    let deletedSale = await RetentionSales.findByIdAndDelete(id);
     if (!deletedSale) {
-      return res.status(404).json({ message: 'Sale not found' });
+      // If not found, try deleting from MyOrder collection.
+      deletedSale = await MyOrder.findByIdAndDelete(id);
+      if (!deletedSale) {
+        return res.status(404).json({ message: 'Sale not found in either collection' });
+      }
     }
     res.status(200).json({ message: 'Sale deleted successfully' });
   } catch (error) {
-    console.error('Error deleting retention sale:', error);
-    res.status(500).json({ message: 'Error deleting retention sale', error });
+    console.error('Error deleting sale:', error);
+    res.status(500).json({ message: 'Error deleting sale', error });
   }
 });
+
 
 /**
  * 7. POST: Update Shopify matching (heavy processing)
@@ -742,7 +773,7 @@ router.get("/api/shipment-summary", async (req, res) => {
       },
     ];
 
-    // For each shipment status, compute the percentage.
+    // For each shipment status, compute the percentage. 
     Object.entries(statusMap).forEach(([status, data]) => {
       const percentage =
         totalOrders > 0 ? ((data.count / totalOrders) * 100).toFixed(2) : "0.00";
@@ -760,6 +791,65 @@ router.get("/api/shipment-summary", async (req, res) => {
     res.status(500).json({ message: "Error fetching shipment summary", error: error.message });
   }
 });
+
+
+router.get('/api/retention-sales/all', async (req, res) => {
+  try {
+    const { orderCreatedBy } = req.query;
+
+    const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
+    const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
+
+    // Fetch RetentionSales records as they already are
+    const retentionSales = await RetentionSales.find(retentionQuery).lean();
+    const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+    // Transform MyOrder records to match RetentionSales shape and fetch Shopify amount
+    const transformedOrders = myOrders.map(order => {
+      const upsellAmount = Number(order.upsellAmount);
+      const partialPayment = Number(order.partialPayment);
+      const totalPrice = Number(order.totalPrice);
+
+      let amountPaid = 0;
+      if (upsellAmount > 0) {
+        amountPaid = upsellAmount;  
+      } else {
+        amountPaid = totalPrice;  
+      }
+
+      // Fetch Shopify amount (similarly to how it's done in /api/retention-sales)
+      const shopifyAmount = order.shopify_amount || "";   
+
+      return { 
+        _id: order._id, 
+        date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
+        name: order.customerName,
+        contactNumber: order.phone,
+        productsOrdered: order.productOrdered,
+        dosageOrdered: order.dosageOrdered,
+        upsellAmount: upsellAmount,  
+        partialPayment: partialPayment,  
+        amountPaid: amountPaid,  
+        modeOfPayment: order.paymentMethod,  
+        shipway_status: order.shipway_status || "",  
+        orderId: order.orderId,
+        orderCreatedBy: order.agentName,
+        remarks: order.selfRemark || "", 
+        source: "MyOrder"
+      };
+    });
+
+    // Combine both arrays and sort by date descending (assuming date is in YYYY-MM-DD format)
+    const combinedData = [...retentionSales, ...transformedOrders];
+    combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.status(200).json(combinedData);
+  } catch (error) {
+    console.error("Error fetching combined retention sales:", error);
+    res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
+  }
+});
+ 
 
 module.exports = router;
  
