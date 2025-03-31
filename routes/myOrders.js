@@ -15,10 +15,10 @@ router.post("/", async (req, res) => {
       totalPrice,
       agentName,
       partialPayment,
-      dosageOrdered,  // NEW field
-      selfRemark,     // NEW field
-      paymentMethod,  // NEW field
-      upsellAmount,   // NEW field
+      dosageOrdered,   
+      selfRemark,     
+      paymentMethod,   
+      upsellAmount    
     } = req.body;
 
     // Validate required fields
@@ -34,26 +34,27 @@ router.post("/", async (req, res) => {
       !agentName ||
       partialPayment == null ||
       !dosageOrdered ||
-      !paymentMethod // Ensure paymentMethod is provided
+      !paymentMethod
     ) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    // Convert values to the appropriate types
     const newOrder = new MyOrder({
       customerName,
       phone,
       shippingAddress,
       paymentStatus,
       productOrdered,
-      orderDate,
+      orderDate: new Date(orderDate),
       orderId,
-      totalPrice,
+      totalPrice: Number(totalPrice),
       agentName,
-      partialPayment,
-      dosageOrdered,  // NEW
-      selfRemark,     // NEW (optional)
-      paymentMethod,  // NEW
-      upsellAmount,   // NEW
+      partialPayment: Number(partialPayment),
+      dosageOrdered,
+      selfRemark,
+      paymentMethod,
+      upsellAmount: upsellAmount ? Number(upsellAmount) : 0,
     });
 
     await newOrder.save();
