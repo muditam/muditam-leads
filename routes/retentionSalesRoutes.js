@@ -804,22 +804,12 @@ router.get('/api/retention-sales/all', async (req, res) => {
     const retentionSales = await RetentionSales.find(retentionQuery).lean();
     const myOrders = await MyOrder.find(myOrderQuery).lean();
 
-    // Transform MyOrder records to match RetentionSales shape and fetch Shopify amount
+    // Transform MyOrder records to match RetentionSales shape
     const transformedOrders = myOrders.map(order => {
       const upsellAmount = Number(order.upsellAmount);
       const partialPayment = Number(order.partialPayment);
       const totalPrice = Number(order.totalPrice);
-
-      let amountPaid = 0;
-      if (upsellAmount > 0) {
-        amountPaid = upsellAmount;  
-      } else {
-        amountPaid = totalPrice;  
-      }
-
-      // Fetch Shopify amount (similarly to how it's done in /api/retention-sales)
-      const shopifyAmount = order.shopify_amount || "";   
-
+      let amountPaid = upsellAmount > 0 ? upsellAmount : totalPrice;
       return { 
         _id: order._id, 
         date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
@@ -839,8 +829,22 @@ router.get('/api/retention-sales/all', async (req, res) => {
       };
     });
 
-    // Combine both arrays and sort by date descending (assuming date is in YYYY-MM-DD format)
+    // Combine both arrays
     const combinedData = [...retentionSales, ...transformedOrders];
+
+    // For each record with an orderId but missing shipment status, query the Order collection
+    await Promise.all(
+      combinedData.map(async (sale) => {
+        if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
+          const normalizedOrderId = sale.orderId.startsWith('#') ? sale.orderId.slice(1) : sale.orderId;
+          const orderRecord = await Order.findOne({ order_id: normalizedOrderId }).lean();
+          if (orderRecord) {
+            sale.shipway_status = orderRecord.shipment_status;
+          }
+        }
+      })
+    );
+
     combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     res.status(200).json(combinedData);
@@ -849,6 +853,7 @@ router.get('/api/retention-sales/all', async (req, res) => {
     res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
   }
 });
+
  
 
 module.exports = router;

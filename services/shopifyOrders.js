@@ -11,7 +11,7 @@ router.get("/customer-orders", async (req, res) => {
   const { phone } = req.query;
   if (!phone) {
     return res.status(400).json({ message: "Phone number is required." });
-  }
+  } 
 
   try {
     // Shopify store details
@@ -47,6 +47,7 @@ router.get("/customer-orders", async (req, res) => {
     // We'll transform them into a simpler shape that matches your Payment UI
     // e.g. { fullName, phone, address1, address2, city, state, country, pincode }
     const addresses = customer.addresses.map((addr) => ({
+      id: addr.id,
       fullName: `${addr.first_name || customer.first_name} ${
         addr.last_name || customer.last_name
       }`.trim(),

@@ -197,5 +197,61 @@ router.post("/update-order-note", async (req, res) => {
   }
 });
 
+// In your Express routes file
+router.put("/customer-address", async (req, res) => {
+  const {
+    customerId,
+    addressId,
+    first_name,
+    last_name,
+    phone,
+    address1,
+    address2,
+    city,
+    province,
+    country,
+    zip,
+  } = req.body;
+
+  try {
+    const shopifyStore = process.env.SHOPIFY_STORE_NAME;
+    const accessToken = process.env.SHOPIFY_API_SECRET;
+    const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers/${customerId}/addresses/${addressId}.json`;
+
+    const payload = {
+      address: {
+        id: addressId,
+        first_name,
+        last_name,
+        phone,
+        address1,
+        address2,
+        city,
+        province,
+        country,
+        zip,
+      },
+    };
+
+    const response = await axios.put(url, payload, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+    });
+
+    res.status(200).json({
+      message: "Address updated successfully",
+      address: response.data.customer_address,
+    });
+  } catch (error) {
+    console.error("Error updating customer address:", error.response?.data || error.message);
+    res.status(500).json({
+      message: "Error updating customer address",
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
 
 module.exports = router;
