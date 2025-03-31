@@ -126,7 +126,7 @@ router.get('/sales-summary', async (req, res) => {
 });
 
 // GET /api/followup-summary
-router.get('/followup-summary', async (req, res) => {
+router.get('/followup-summarys', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const sDate = startDate || new Date().toISOString().split("T")[0];

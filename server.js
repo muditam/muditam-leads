@@ -24,6 +24,7 @@ const summaryRoutes = require('./routes/summaryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const myOrdersRoutes = require("./routes/myOrders");
 const Order = require('./models/Order');
+const MyOrder = require('./models/MyOrder');
  
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -688,15 +689,21 @@ app.put('/api/leads/:id', async (req, res) => {
 
 app.delete('/api/leads/:id', async (req, res) => {
   try {
+    // Delete the lead document by ID
     const deletedLead = await Lead.findByIdAndDelete(req.params.id);
     if (!deletedLead) {
       return res.status(404).json({ message: 'Lead not found' });
     }
-    res.status(200).json({ message: 'Lead deleted successfully' });
+
+    // Also delete the corresponding MyOrder document based on the contact number
+    await MyOrder.deleteOne({ phone: deletedLead.contactNumber });
+
+    res.status(200).json({ message: 'Lead and corresponding MyOrder deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Error deleting lead', error });
   }
-}); 
+});
+
 
  
 app.get('/api/leads/retention', async (req, res) => {

@@ -1,3 +1,5 @@
+//routes/myOrders
+
 const express = require("express");
 const router = express.Router();
 const MyOrder = require("../models/MyOrder");
@@ -8,7 +10,7 @@ router.post("/", async (req, res) => {
       customerName,
       phone,
       shippingAddress,
-      paymentStatus,
+      paymentStatus, 
       productOrdered,
       orderDate,
       orderId,
@@ -64,5 +66,16 @@ router.post("/", async (req, res) => {
     return res.status(500).json({ error: "Failed to add order to My Orders" });
   }
 });
+
+router.get("/", async (req, res) => {
+  try {
+    const orders = await MyOrder.find({});
+    res.json(orders);
+  } catch (error) {
+    console.error("Error fetching My Orders:", error);
+    res.status(500).json({ error: "Failed to fetch My Orders" });
+  }
+});
+
 
 module.exports = router;
