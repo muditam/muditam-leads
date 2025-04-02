@@ -19,7 +19,7 @@ const MyOrderSchema = new mongoose.Schema({
   upsellAmount: { type: Number, default: 0 }          
 });
 
-module.exports = mongoose.model('MyOrder', MyOrderSchema);
+module.exports = mongoose.model('MyOrder', MyOrderSchema); 
 
 
 

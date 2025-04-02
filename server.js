@@ -25,9 +25,26 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const myOrdersRoutes = require("./routes/myOrders");
 const Order = require('./models/Order');
 const MyOrder = require('./models/MyOrder');
+const Employee = require('./models/Employee');
+const orderByIdRoutes = require("./routes/orderById"); 
+
  
-const app = express();
+// const http = require('http');
+// const socketIo = require('socket.io');
+ 
+
+ 
+const app = express(); 
 const PORT = process.env.PORT || 5000;
+
+// const server = http.createServer(app);
+// const io = socketIo(server, {
+//   cors: {
+//     origin: ['https://www.60brands.com', 'http://localhost:3000'],
+//     methods: ['GET', 'POST']
+//   }
+// });
+
 
 // List of allowed origins
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
@@ -77,26 +94,32 @@ app.use('/api', summaryRoutes);
 
 //Sales Agent
 app.use('/api/dashboard', dashboardRoutes);
+
+app.use("/api/order-by-id", orderByIdRoutes);
+ 
+
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
- 
-const EmployeeSchema = new mongoose.Schema({
-  fullName: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  callerId: { type: String, required: true },
-  role: { type: String, required: true },
-  password: { type: String, required: true },
-  agentNumber: { type: String, required: true },
-  async: { type: Number, default: 1 },
-  status: { type: String, default: "active" },
-});
+  
 
-// Create Employee model
-const Employee = mongoose.model('Employee', EmployeeSchema);
+// const FacebookLeadSchema = new mongoose.Schema({
+//   meta_lead_id: { type: String, required: true, unique: true },
+//   form_id: String,
+//   ad_id: String,
+//   name: String,
+//   email: String,
+//   phone: String,
+//   status: { type: String, default: 'new', enum: ['new', 'contacted', 'qualified', 'converted'] },
+//   notes: [String],
+//   timestamp: { type: Date, default: Date.now },
+//   custom_fields: mongoose.Schema.Types.Mixed
+// });
+
+// const FacebookLead = mongoose.model('FacebookLead', FacebookLeadSchema);
 
 
 const httpsAgent = new https.Agent({
@@ -1203,6 +1226,7 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
 
 
  
+
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

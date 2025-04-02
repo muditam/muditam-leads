@@ -1,36 +1,30 @@
 const express = require('express');
 const router = express.Router();
 const Lead = require('../models/Lead');
+const MyOrder = require('../models/MyOrder'); 
 
-// Helper: parse date range from query
 function parseDateRange(req) {
   const { startDate, endDate } = req.query;
-  // If either is missing or invalid, fallback to "today"
-  const now = new Date().toISOString().split("T")[0];
+  const now = new Date().toISOString().split("T")[0]; // e.g. "2025-04-02"
   const sDate = startDate && startDate.length === 10 ? startDate : now;
   const eDate = endDate && endDate.length === 10 ? endDate : now;
   return { sDate, eDate };
 }
 
-/* -------------------------
-   1) /api/dashboard/today-summary-agent
-   Accepts: agentAssignedName, startDate, endDate
-------------------------- */
 router.get('/today-summary-agent', async (req, res) => {
   try {
     const agentName = req.query.agentAssignedName;
     const { sDate, eDate } = parseDateRange(req);
 
-    // Build match criteria
-    const matchCriteria = {
-      date: { $gte: sDate, $lte: eDate },
-    };
+    // ------------------------------
+    // 1) Aggregate data from Lead collection
+    // ------------------------------
+    const leadMatch = { date: { $gte: sDate, $lte: eDate } };
     if (agentName) {
-      matchCriteria.agentAssigned = agentName;
+      leadMatch.agentAssigned = agentName;
     }
-
-    const pipeline = [
-      { $match: matchCriteria },
+    const leadPipeline = [
+      { $match: leadMatch },
       {
         $group: {
           _id: null,
@@ -38,71 +32,84 @@ router.get('/today-summary-agent', async (req, res) => {
           openLeads: {
             $sum: {
               $cond: [
-                {
-                  $or: [
-                    { $eq: ["$salesStatus", "On Follow Up"] },
-                    { $eq: ["$salesStatus", ""] }
-                  ]
-                },
+                { $or: [{ $eq: ["$salesStatus", "On Follow Up"] }, { $eq: ["$salesStatus", ""] }] },
                 1,
                 0
               ]
             }
           },
-          salesDone: {
-            $sum: { $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0] }
-          },
+          salesDone: { $sum: { $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0] } },
           totalSales: { $sum: { $ifNull: ["$amountPaid", 0] } }
-        }
-      },
-      {
-        $addFields: {
-          conversionRate: {
-            $cond: [
-              { $gt: ["$leadsAssignedToday", 0] },
-              { $multiply: [{ $divide: ["$salesDone", "$leadsAssignedToday"] }, 100] },
-              0
-            ]
-          },
-          avgOrderValue: {
-            $cond: [
-              { $gt: ["$salesDone", 0] },
-              { $divide: ["$totalSales", "$salesDone"] },
-              0
-            ]
-          }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          openLeads: 1,
-          leadsAssignedToday: 1,
-          salesDone: 1,
-          conversionRate: { $round: ["$conversionRate", 2] },
-          totalSales: { $round: ["$totalSales", 2] },
-          avgOrderValue: { $round: ["$avgOrderValue", 2] }
         }
       }
     ];
+    const leadResult = await Lead.aggregate(leadPipeline);
+    const leadData = leadResult[0] || { leadsAssignedToday: 0, openLeads: 0, salesDone: 0, totalSales: 0 };
 
-    const result = await Lead.aggregate(pipeline);
-    if (result.length === 0) {
-      return res.json({
-        openLeads: 0,
-        leadsAssignedToday: 0,
-        salesDone: 0,
-        conversionRate: 0,
-        totalSales: 0,
-        avgOrderValue: 0
-      });
+    // ------------------------------
+    // 2) Aggregate data from MyOrder collection
+    // ------------------------------
+    const myOrderMatch = {};
+    if (agentName) {
+      myOrderMatch.agentName = agentName;
     }
-    res.json(result[0]);
+    // IMPORTANT: Use sDate for start and eDate for end boundaries
+    const startDateObj = new Date(sDate + "T00:00:00+05:30");
+    const endDateObj = new Date(eDate + "T23:59:59.999+05:30");
+    myOrderMatch.orderDate = { $gte: startDateObj, $lte: endDateObj };
+
+    // For MyOrder, count each order as one sale and compute totalSales as:
+    // if upsellAmount > 0 then upsellAmount, else totalPrice.
+    const orderPipeline = [
+      { $match: myOrderMatch },
+      {
+        $group: {
+          _id: null,
+          leadsAssignedToday: { $sum: 1 },
+          salesDone: { $sum: 1 },
+          totalSales: {
+            $sum: {
+              $cond: [
+                { $gt: ["$upsellAmount", 0] },
+                { $toDouble: "$upsellAmount" },
+                { $toDouble: "$totalPrice" }
+              ]
+            }
+          }
+        }
+      }
+    ];
+    const orderResult = await MyOrder.aggregate(orderPipeline);
+    const orderData = orderResult[0] || { leadsAssignedToday: 0, salesDone: 0, totalSales: 0 };
+
+    // ------------------------------
+    // 3) Combine the results
+    // ------------------------------
+    const combinedLeadsAssigned = leadData.leadsAssignedToday + orderData.leadsAssignedToday;
+    const combinedSalesDone = leadData.salesDone + orderData.salesDone;
+    const combinedTotalSales = leadData.totalSales + orderData.totalSales;
+    // Open leads come only from Lead collection.
+    const openLeads = leadData.openLeads;
+
+    const conversionRate =
+      combinedLeadsAssigned > 0 ? (combinedSalesDone / combinedLeadsAssigned) * 100 : 0;
+    const avgOrderValue =
+      combinedSalesDone > 0 ? combinedTotalSales / combinedSalesDone : 0;
+
+    res.json({
+      openLeads,
+      leadsAssignedToday: combinedLeadsAssigned,
+      salesDone: combinedSalesDone,
+      conversionRate: Number(conversionRate.toFixed(2)),
+      totalSales: Number(combinedTotalSales.toFixed(2)),
+      avgOrderValue: Number(avgOrderValue.toFixed(2))
+    });
   } catch (error) {
     console.error("Error in today-summary-agent:", error);
     res.status(500).json({ message: "Error in today-summary-agent" });
   }
 });
+
 
 /* -------------------------
    2) /api/dashboard/followup-summary-agent
@@ -277,111 +284,98 @@ function parseDate(str) {
     }
   });
 
-  router.get("/delivery-status-summary-limited", async (req, res) => {
+  router.get('/shipment-status-summary', async (req, res) => {
     try {
-      const { agentAssignedName, startDate, endDate } = req.query;
+      const { startDate, endDate, agentName } = req.query;
+      // Use provided dates or default to today
+      const sDate = startDate || new Date().toISOString().split("T")[0];
+      const eDate = endDate || new Date().toISOString().split("T")[0];
   
-      // If no valid date, default to "today"
-      const sDate = parseDate(startDate) || new Date().toISOString().split("T")[0];
-      const eDate = parseDate(endDate) || new Date().toISOString().split("T")[0];
+      // Convert start and end into Date objects.
+      const start = new Date(sDate);
+      const end = new Date(eDate);
+      // To include the entire end date, add one day and use $lt.
+      const nextDay = new Date(end);
+      nextDay.setDate(end.getDate() + 1);
   
-      // We only care about leads that are "Sales Done"
+      // Build match criteria for MyOrder
       const matchCriteria = {
-        date: { $gte: sDate, $lte: eDate },
-        salesStatus: "Sales Done",
+        orderDate: { $gte: start, $lt: nextDay }
       };
-      if (agentAssignedName) {
-        matchCriteria.agentAssigned = agentAssignedName;
+      if (agentName && agentName !== "All Agents") {
+        matchCriteria.agentName = agentName;
       }
   
-      // Aggregate: group by deliveryStatus, counting how many & summing amountPaid
       const pipeline = [
+        // Normalize orderId: remove a leading "#" if present.
+        {
+          $addFields: {
+            normalizedOrderId: {
+              $cond: [
+                { $eq: [ { $substr: ["$orderId", 0, 1] }, "#" ] },
+                { $substr: [ "$orderId", 1, { $subtract: [ { $strLenCP: "$orderId" }, 1 ] } ] },
+                "$orderId"
+              ]
+            }
+          }
+        },
         { $match: matchCriteria },
         {
-          $group: {
-            _id: "$deliveryStatus",
-            totalOrders: { $sum: 1 },
-            totalAmount: { $sum: { $ifNull: ["$amountPaid", 0] } },
-          },
+          $lookup: {
+            from: "orders", // Ensure this matches your Order collection name (often in lowercase)
+            let: { normId: "$normalizedOrderId" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: { $eq: ["$order_id", "$$normId"] }
+                }
+              },
+              { $project: { shipment_status: 1, _id: 0 } }
+            ],
+            as: "orderData"
+          }
         },
+        {
+          $addFields: {
+            shipmentStatus: {
+              $cond: [
+                { $gt: [ { $size: "$orderData" }, 0 ] },
+                { $arrayElemAt: [ "$orderData.shipment_status", 0 ] },
+                "Not available"
+              ]
+            }
+          }
+        },
+        {
+          $group: {
+            _id: "$shipmentStatus",
+            totalOrders: { $sum: 1 },
+            totalAmount: { $sum: "$totalPrice" }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            category: "$_id",
+            totalOrders: 1,
+            totalAmount: { $round: ["$totalAmount", 2] }
+          }
+        }
       ];
   
-      const result = await Lead.aggregate(pipeline);
+      const summary = await MyOrder.aggregate(pipeline);
+      const overall = await MyOrder.countDocuments(matchCriteria);
   
-      // Summation of everything for "Total Orders"
-      const grandTotal = result.reduce((acc, r) => acc + r.totalOrders, 0);
-      const grandAmount = result.reduce((acc, r) => acc + r.totalAmount, 0);
+      // Calculate percentage for each category.
+      const summaryWithPercentage = summary.map(item => ({
+        ...item,
+        percentage: overall > 0 ? ((item.totalOrders / overall) * 100).toFixed(2) : "0.00"
+      }));
   
-      // Utility to find & pop from result or return 0
-      function findAndRemove(deliveryKey) {
-        const idx = result.findIndex((r) => r._id === deliveryKey);
-        if (idx === -1) return { totalOrders: 0, totalAmount: 0 };
-        const item = result[idx];
-        // remove it from the array so we can handle "Others" next
-        result.splice(idx, 1);
-        return item;
-      }
-  
-      // 1) total => from aggregator or just use the sums
-      const summaryArray = [];
-      summaryArray.push({
-        label: "Total Orders",
-        totalOrders: grandTotal,
-        totalAmount: grandAmount,
-        percentage: grandTotal > 0 ? 100 : 0,
-      });
-  
-      // 2) delivered
-      const delivered = findAndRemove("Delivered");
-      summaryArray.push({
-        label: "Delivered Orders",
-        totalOrders: delivered.totalOrders,
-        totalAmount: delivered.totalAmount,
-        percentage:
-          grandTotal > 0
-            ? ((delivered.totalOrders / grandTotal) * 100).toFixed(2)
-            : 0,
-      });
-  
-      // 3) in transit => your code says "Undelivered" means in transit
-      const inTransit = findAndRemove("Undelivered");
-      summaryArray.push({
-        label: "In Transit",
-        totalOrders: inTransit.totalOrders,
-        totalAmount: inTransit.totalAmount,
-        percentage:
-          grandTotal > 0
-            ? ((inTransit.totalOrders / grandTotal) * 100).toFixed(2)
-            : 0,
-      });
-  
-      // 4) RTO
-      const rto = findAndRemove("RTO");
-      summaryArray.push({
-        label: "RTO",
-        totalOrders: rto.totalOrders,
-        totalAmount: rto.totalAmount,
-        percentage:
-          grandTotal > 0 ? ((rto.totalOrders / grandTotal) * 100).toFixed(2) : 0,
-      });
-  
-      // 5) "Others" => everything else in result
-      const othersOrders = result.reduce((acc, r) => acc + r.totalOrders, 0);
-      const othersAmount = result.reduce((acc, r) => acc + r.totalAmount, 0);
-      summaryArray.push({
-        label: "Others",
-        totalOrders: othersOrders,
-        totalAmount: othersAmount,
-        percentage:
-          grandTotal > 0 ? ((othersOrders / grandTotal) * 100).toFixed(2) : 0,
-      });
-  
-      res.json(summaryArray);
+      res.json({ shipmentStatusSummary: summaryWithPercentage });
     } catch (error) {
-      console.error("Error in delivery-status-summary-limited:", error);
-      res
-        .status(500)
-        .json({ message: "Error fetching delivery-status-summary-limited" });
+      console.error("Error fetching shipment status summary:", error);
+      res.status(500).json({ message: "Error fetching shipment status summary", error: error.message });
     }
   });
 
