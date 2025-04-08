@@ -9,6 +9,7 @@ const Lead = require('../models/Lead');
 
 // Import the Order model (Shipway data)
 const Order = require('../models/Order');
+const MyOrder = require("../models/MyOrder");
 
 const RetentionSalesSchema = new mongoose.Schema({
   date: String,
@@ -28,8 +29,6 @@ const RetentionSalesSchema = new mongoose.Schema({
 });
 
 const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
-
-const MyOrder = require("../models/MyOrder");
  
 
 /**
@@ -301,14 +300,100 @@ router.post('/api/retention-sales/update-matching', async (req, res) => {
 router.get('/api/retention-sales/aggregated', async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
-    const match = buildDateMatch(startDate, endDate);
+    // For RetentionSales the "date" field is stored as a string.
+    // We assume that buildDateMatch returns an object like:
+    // { date: { $gte: "YYYY-MM-DD", $lte: "YYYY-MM-DD" } }
+    const retentionMatch = buildDateMatch(startDate, endDate);
+
+    // Build a filter for MyOrder based on the orderDate field.
+    // MyOrder.orderDate is stored as a Date so we must convert the string(s)
+    // to Date objects and include the entire day for the end date.
+    let myOrderMatch = {};
+    if (startDate || endDate) {
+      myOrderMatch.orderDate = {};
+      if (startDate) {
+        myOrderMatch.orderDate.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const endDateObj = new Date(endDate);
+        endDateObj.setHours(23, 59, 59, 999);
+        myOrderMatch.orderDate.$lte = endDateObj;
+      }
+    }
+
+    // Aggregate from RetentionSales collection.
+    // We assume that each retention sales record has:
+    // - "orderCreatedBy": the agent name,
+    // - "amountPaid": the sales amount (as a string or number).
+    // We output a standardized structure with:
+    //   salesDone: 1 per record, totalSales: amountPaid converted to number.
     const aggregatedData = await RetentionSales.aggregate([
-      { $match: match },
+      { $match: retentionMatch },
+      {
+        $project: {
+          orderCreatedBy: 1,
+          salesDone: { $literal: 1 },
+          amountPaid: { $toDouble: { $ifNull: ["$amountPaid", 0] } }
+        }
+      },
       {
         $group: {
           _id: "$orderCreatedBy",
-          salesDone: { $sum: 1 },
-          totalSales: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
+          retentionSalesDone: { $sum: "$salesDone" },
+          retentionTotalSales: { $sum: "$amountPaid" }
+        }
+      },
+      {
+        $project: {
+          agentName: "$_id",
+          salesDone: "$retentionSalesDone",
+          totalSales: "$retentionTotalSales"
+        }
+      },
+      // Use $unionWith to add MyOrder data into the pipeline.
+      { 
+        $unionWith: {
+          coll: "myorders", // The collection name for MyOrder documents (Mongoose pluralizes it)
+          pipeline: [
+            { $match: myOrderMatch },
+            {
+              $project: {
+                agentName: "$agentName",
+                // Determine the effective "amountPaid":
+                // Use upsellAmount if greater than zero; otherwise use totalPrice.
+                salesDone: { $literal: 1 },
+                amountPaid: {
+                  $cond: [
+                    { $gt: ["$upsellAmount", 0] },
+                    { $toDouble: "$upsellAmount" },
+                    { $toDouble: "$totalPrice" }
+                  ]
+                }
+              }
+            },
+            {
+              $group: {
+                _id: "$agentName",
+                myOrderSalesDone: { $sum: "$salesDone" },
+                myOrderTotalSales: { $sum: "$amountPaid" }
+              }
+            },
+            {
+              $project: {
+                agentName: "$_id",
+                salesDone: "$myOrderSalesDone",
+                totalSales: "$myOrderTotalSales"
+              }
+            }
+          ]
+        }
+      },
+      // Now merge the two sets of results by grouping again on agentName.
+      {
+        $group: {
+          _id: "$agentName",
+          salesDone: { $sum: "$salesDone" },
+          totalSales: { $sum: "$totalSales" }
         }
       },
       {
@@ -328,10 +413,11 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
     ]);
     res.status(200).json(aggregatedData);
   } catch (error) {
-    console.error("Error aggregating retention sales:", error);
-    res.status(500).json({ message: "Error aggregating retention sales", error: error.message });
+    console.error("Error aggregating sales:", error);
+    res.status(500).json({ message: "Error aggregating sales", error: error.message });
   }
 });
+
 
 /**
  * NEW Endpoint 2: Overall Shipment Status Summary
@@ -344,35 +430,25 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
 router.get('/api/retention-sales/shipment-summary', async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
-    // 1) Build the match query
-    const match = buildDateMatch(startDate, endDate);
+    // For RetentionSales: build a match filter based on the string date field.
+    const retentionMatch = buildDateMatch(startDate, endDate);
 
-    // 2) Aggregate
-    const aggregatedShipment = await RetentionSales.aggregate([
-      { $match: match },
+    // Pipeline for RetentionSales shipment data
+    const retentionPipeline = [
+      { $match: retentionMatch },
       {
         $group: {
           _id: "$shipway_status",
           count: { $sum: 1 },
-          totalAmount: {
-            $sum: {
-              $toDouble: {
-                $ifNull: ["$amountPaid", 0]
-              }
-            }
-          }
+          totalAmount: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
         }
       },
       {
         $project: {
+          // If shipway_status is null or empty, label it as "Not available"
           category: {
             $cond: [
-              {
-                $or: [
-                  { $eq: ["$_id", null] },  // If shipway_status is null
-                  { $eq: ["$_id", ""] }     // If shipway_status is an empty string
-                ]
-              },
+              { $or: [{ $eq: ["$_id", null] }, { $eq: ["$_id", ""] }] },
               "Not available",
               "$_id"
             ]
@@ -380,37 +456,129 @@ router.get('/api/retention-sales/shipment-summary', async (req, res) => {
           count: 1,
           totalAmount: 1
         }
-        
+      }
+    ];
+
+    // Build a match filter for MyOrder on the Date field.
+    let myOrderMatch = {};
+    if (startDate || endDate) {
+      myOrderMatch.orderDate = {};
+      if (startDate) myOrderMatch.orderDate.$gte = new Date(startDate);
+      if (endDate) {
+        const endObj = new Date(endDate);
+        endObj.setHours(23, 59, 59, 999);
+        myOrderMatch.orderDate.$lte = endObj;
+      }
+    }
+
+    // Pipeline for MyOrder shipment data.
+    // Here we normalize the orderId (remove a leading '#' if present),
+    // then look up the corresponding Order document to get its shipment status.
+    const myOrderPipeline = [
+      { $match: myOrderMatch },
+      {
+        $addFields: {
+          normalizedOrderId: {
+            $cond: [
+              { $eq: [{ $substrCP: ["$orderId", 0, 1] }, "#"] },
+              { $substrCP: ["$orderId", 1, { $subtract: [{ $strLenCP: "$orderId" }, 1] }] },
+              "$orderId"
+            ]
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: "orders", // make sure this collection name is correct!
+          localField: "normalizedOrderId",
+          foreignField: "order_id",
+          as: "orderDoc"
+        }
+      },
+      { 
+        $unwind: { path: "$orderDoc", preserveNullAndEmptyArrays: true } 
+      },
+      {
+        $project: {
+          // Extract the shipment status from the looked-up orderDoc or default to "Not available"
+          shipmentStatus: { $ifNull: ["$orderDoc.shipment_status", "Not available"] },
+          // Determine the effective amountPaid: use upsellAmount if > 0, else use totalPrice.
+          amountPaid: {
+            $cond: [
+              { $gt: ["$upsellAmount", 0] },
+              { $toDouble: "$upsellAmount" },
+              { $toDouble: "$totalPrice" }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$shipmentStatus",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amountPaid" }
+        }
+      },
+      {
+        $project: {
+          category: "$_id",
+          count: 1,
+          totalAmount: 1
+        }
+      }
+    ];
+
+    // Use $unionWith to combine the results from RetentionSales and MyOrder pipelines,
+    // then group again by category (i.e. shipment status) to merge duplicate groups.
+    const combinedAggregation = await RetentionSales.aggregate([
+      ...retentionPipeline,
+      {
+        $unionWith: {
+          coll: "myorders",
+          pipeline: myOrderPipeline
+        }
+      },
+      {
+        $group: {
+          _id: "$category",
+          count: { $sum: "$count" },
+          totalAmount: { $sum: "$totalAmount" }
+        }
+      },
+      {
+        $project: {
+          category: "$_id",
+          count: 1,
+          totalAmount: 1
+        }
       }
     ]);
 
-    // 3) Compute percentages
-    const totalCount = aggregatedShipment.reduce((sum, item) => sum + item.count, 0);
-    aggregatedShipment.forEach(item => {
-      item.percentage =
-        totalCount > 0 ? ((item.count / totalCount) * 100).toFixed(2) : "0.00";
-    });
+    // Compute the total count for percentage calculation.
+    const totalCount = combinedAggregation.reduce((acc, curr) => acc + curr.count, 0);
+    const result = combinedAggregation.map(item => ({
+      category: item.category,
+      count: item.count,
+      totalAmount: item.totalAmount,
+      percentage: totalCount ? ((item.count / totalCount) * 100).toFixed(2) : "0.00"
+    }));
 
-    // 4) Insert "Total Orders" row at the start
-    const totalAmount = aggregatedShipment.reduce((sum, item) => sum + item.totalAmount, 0);
-    aggregatedShipment.unshift({
+    // Optionally, you can add a "Total Orders" row at the beginning.
+    const totalAmount = result.reduce((acc, curr) => acc + curr.totalAmount, 0);
+    result.unshift({
       category: "Total Orders",
       count: totalCount,
-      totalAmount,
-      percentage: "100"
+      totalAmount: totalAmount,
+      percentage: "100.00"
     });
 
-    // Note: we do NOT force "Not available" if it doesn't exist
-
-    res.status(200).json(aggregatedShipment);
+    res.status(200).json(result);
   } catch (error) {
-    console.error("Error aggregating shipment summary:", error);
-    res.status(500).json({
-      message: "Error aggregating shipment summary",
-      error: error.message
-    });
+    console.error("Error in combined shipment summary aggregation:", error);
+    res.status(500).json({ message: "Error aggregating shipment summary", error: error.message });
   }
 });
+
 
 
 /**
@@ -424,25 +592,20 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
   }
 
   try {
-    // 1) Build the match query
-    const match = {
-      orderCreatedBy: agentName,
+    // For RetentionSales, build a match filter on agent and date.
+    const retentionMatch = { 
+      orderCreatedBy: agentName, 
       ...buildDateMatch(startDate, endDate)
     };
 
-    // 2) Aggregate
-    const aggregatedAgentShipment = await RetentionSales.aggregate([
-      { $match: match },
+    const retentionPipeline = [
+      { $match: retentionMatch },
       {
         $group: {
           _id: "$shipway_status",
           count: { $sum: 1 },
-          totalAmount: {
-            $sum: {
-              $toDouble: {
-                $ifNull: ["$amountPaid", 0]
-              }
-            }
+          totalAmount: { 
+            $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } 
           }
         }
       },
@@ -450,47 +613,127 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
         $project: {
           category: {
             $cond: [
-              {
-                $or: [
-                  { $eq: ["$_id", null] },  // If shipway_status is null
-                  { $eq: ["$_id", ""] }     // If shipway_status is an empty string
-                ]
-              },
+              { $or: [{ $eq: ["$_id", null] }, { $eq: ["$_id", ""] }] },
               "Not available",
               "$_id"
             ]
           },
           count: 1,
           totalAmount: 1
-        }        
+        }
+      }
+    ];
+
+    // For MyOrder, match records for the agent and within the date range.
+    let myOrderMatch = { agentName };
+    if (startDate || endDate) {
+      myOrderMatch.orderDate = {};
+      if (startDate) {
+        myOrderMatch.orderDate.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const endObj = new Date(endDate);
+        endObj.setHours(23, 59, 59, 999);
+        myOrderMatch.orderDate.$lte = endObj;
+      }
+    }
+
+    // MyOrder pipeline: normalize the order ID, lookup the corresponding Order
+    // to get shipment status, and then group by that shipment status.
+    const myOrderPipeline = [
+      { $match: myOrderMatch },
+      {
+        $addFields: {
+          normalizedOrderId: {
+            $cond: [
+              { $eq: [{ $substrCP: ["$orderId", 0, 1] }, "#"] },
+              { $substrCP: ["$orderId", 1, { $subtract: [{ $strLenCP: "$orderId" }, 1] }] },
+              "$orderId"
+            ]
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: "orders", // Ensure that this collection name matches yours
+          localField: "normalizedOrderId",
+          foreignField: "order_id",
+          as: "orderDoc"
+        }
+      },
+      { 
+        $unwind: { path: "$orderDoc", preserveNullAndEmptyArrays: true } 
+      },
+      {
+        $project: {
+          // Use the shipment status from the looked-up Order or default to "Not available"
+          shipmentStatus: { $ifNull: ["$orderDoc.shipment_status", "Not available"] },
+          // For MyOrder, determine the effective amountPaid:
+          // use upsellAmount if > 0, else totalPrice.
+          amountPaid: {
+            $cond: [
+              { $gt: ["$upsellAmount", 0] },
+              { $toDouble: "$upsellAmount" },
+              { $toDouble: "$totalPrice" }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$shipmentStatus",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amountPaid" }
+        }
+      },
+      {
+        $project: {
+          category: "$_id",
+          count: 1,
+          totalAmount: 1
+        }
+      }
+    ];
+
+    // Use $unionWith to combine the two pipelines and then group by category.
+    const combinedAggregation = await RetentionSales.aggregate([
+      ...retentionPipeline,
+      {
+        $unionWith: {
+          coll: "myorders",
+          pipeline: myOrderPipeline
+        }
+      },
+      {
+        $group: {
+          _id: "$category",
+          count: { $sum: "$count" },
+          totalAmount: { $sum: "$totalAmount" }
+        }
+      },
+      {
+        $project: {
+          category: "$_id",
+          count: 1,
+          totalAmount: 1
+        }
       }
     ]);
 
-    // 3) Compute percentages
-    const totalCount = aggregatedAgentShipment.reduce(
-      (sum, item) => sum + item.count,
-      0
-    );
-    aggregatedAgentShipment.forEach(item => {
-      item.percentage =
-        totalCount > 0 ? ((item.count / totalCount) * 100).toFixed(2) : "0.00";
+    // Compute overall percentages and insert a "Total Orders" row.
+    const totalCount = combinedAggregation.reduce((sum, item) => sum + item.count, 0);
+    combinedAggregation.forEach(item => {
+      item.percentage = totalCount ? ((item.count / totalCount) * 100).toFixed(2) : "0.00";
     });
-
-    // 4) Insert "Total Orders" row at the start
-    const totalAmount = aggregatedAgentShipment.reduce(
-      (sum, item) => sum + item.totalAmount,
-      0
-    );
-    aggregatedAgentShipment.unshift({
+    const totalAmount = combinedAggregation.reduce((sum, item) => sum + item.totalAmount, 0);
+    combinedAggregation.unshift({
       category: "Total Orders",
       count: totalCount,
-      totalAmount,
-      percentage: "100"
+      totalAmount: totalAmount,
+      percentage: "100.00"
     });
 
-    // Note: we do NOT force "Not available" if it doesn't exist
-
-    res.status(200).json(aggregatedAgentShipment);
+    res.status(200).json(combinedAggregation);
   } catch (error) {
     console.error("Error aggregating agent shipment summary:", error);
     res.status(500).json({
@@ -500,15 +743,13 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
   }
 });
 
-function parseDateOrToday(dateStr) {
-  if (!dateStr) {
-    return new Date().toISOString().split("T")[0]; // fallback to "today"
-  }
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) {
-    return new Date().toISOString().split("T")[0]; // fallback
-  }
-  return dateStr;
+
+function parseDateRange(req) {
+  const { startDate, endDate } = req.query;
+  const today = new Date().toISOString().split("T")[0];
+  const sDate = (startDate && startDate.length === 10) ? startDate : today;
+  const eDate = (endDate && endDate.length === 10) ? endDate : today;
+  return { sDate, eDate };
 }
 
 /**
@@ -516,49 +757,39 @@ function parseDateOrToday(dateStr) {
  * Accepts: agentName, startDate, endDate
  * If startDate/endDate not provided, fallback to "today".
  */
-router.get("/api/today-summary", async (req, res) => {
+router.get('/today-summary-agent', async (req, res) => {
   try {
-    const agentName = req.query.agentName;
+    const agentName = req.query.agentAssignedName;
     if (!agentName) {
-      return res.status(400).json({ message: "agentName is required." });
+      return res.status(400).json({ message: "agentAssignedName is required" });
     }
-    // Parse the date range or fallback to "today"
-    const sDate = parseDateOrToday(req.query.startDate);
-    const eDate = parseDateOrToday(req.query.endDate);
 
-    // Convert sDate/eDate to Date objects for MyOrder query
-    const startDateObj = new Date(sDate);
-    const endDateObj = new Date(eDate);
-    // Include the full day for the end date
-    endDateObj.setHours(23, 59, 59, 999);
+    // Parse date range from the query. RetentionSales stores date as string.
+    const { sDate, eDate } = parseDateRange(req);
 
-    // 1) Active Customers from Lead collection (unchanged)
-    const activeCustomers = await Lead.countDocuments({
-      healthExpertAssigned: agentName,
-      $or: [
-        { retentionStatus: { $exists: false } },
-        { retentionStatus: "Active" }
-      ]
-    });
+    // For MyOrder, convert these to Date objects.
+    const startDateObj = new Date(sDate + "T00:00:00");
+    const endDateObj = new Date(eDate + "T23:59:59.999");
 
-    // 2) Get retention sales from RetentionSales collection (date is stored as string "YYYY-MM-DD")
+    // 1. Query RetentionSales collection
     const retentionSales = await RetentionSales.find({
       orderCreatedBy: agentName,
       date: { $gte: sDate, $lte: eDate }
     });
-    const retentionSalesCount = retentionSales.length;
+    const retentionCount = retentionSales.length;
+    // Sum up amountPaid for retention (assumes amountPaid is stored in RetentionSales)
     const retentionTotalSales = retentionSales.reduce(
-      (acc, sale) => acc + (sale.amountPaid || 0),
+      (acc, sale) => acc + (sale.amountPaid ? Number(sale.amountPaid) : 0),
       0
     );
 
-    // 3) Get MyOrder data for the given agent and date range (orderDate is Date type)
+    // 2. Query MyOrder collection
     const myOrders = await MyOrder.find({
       agentName,
       orderDate: { $gte: startDateObj, $lte: endDateObj }
     });
     const myOrdersCount = myOrders.length;
-    // For each MyOrder, compute amountPaid as: upsellAmount > 0 ? upsellAmount : totalPrice
+    // For each MyOrder, choose upsellAmount if > 0, else use totalPrice.
     const myOrdersTotalSales = myOrders.reduce((acc, order) => {
       const upsellAmount = Number(order.upsellAmount) || 0;
       const totalPrice = Number(order.totalPrice) || 0;
@@ -566,23 +797,20 @@ router.get("/api/today-summary", async (req, res) => {
       return acc + amountPaid;
     }, 0);
 
-    // 4) Combine both sets of data
-    const salesDone = retentionSalesCount + myOrdersCount;
-    const totalSales = retentionTotalSales + myOrdersTotalSales;
-    const avgOrderValue = salesDone > 0 ? totalSales / salesDone : 0;
+    // 3. Compute combined metrics
+    const combinedSalesDone = retentionCount + myOrdersCount;
+    const combinedTotalSales = retentionTotalSales + myOrdersTotalSales;
+    const combinedAvgOrderValue =
+      combinedSalesDone > 0 ? combinedTotalSales / combinedSalesDone : 0;
 
     res.json({
-      activeCustomers,
-      salesDone,
-      totalSales,
-      avgOrderValue
+      salesDone: combinedSalesDone,
+      totalSales: Number(combinedTotalSales.toFixed(2)),
+      avgOrderValue: Number(combinedAvgOrderValue.toFixed(2))
     });
   } catch (error) {
-    console.error("Error fetching today summary:", error);
-    res.status(500).json({
-      message: "Error fetching today summary",
-      error: error.message
-    });
+    console.error("Error in today-summary-agent:", error);
+    res.status(500).json({ message: "Error fetching today summary", error: error.message });
   }
 });
 
@@ -658,78 +886,6 @@ router.get("/api/followup-summary", async (req, res) => {
 });
 
 
-
-// router.get("/api/all-time-summary", async (req, res) => {
-//   try {
-//     const agentName = req.query.agentName;
-//     if (!agentName) {
-//       return res.status(400).json({ message: "Agent name is required." });
-//     }
-
-//     // Determine the current month's date range in "YYYY-MM-DD" format.
-//     const now = new Date();
-//     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-//       .toISOString()
-//       .split("T")[0];
-//     const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-//       .toISOString()
-//       .split("T")[0];
-
-//     // Run queries concurrently.
-//     const totalCustomersPromise = Lead.countDocuments({ healthExpertAssigned: agentName });
-//     const activeCustomersPromise = Lead.countDocuments({
-//       healthExpertAssigned: agentName,
-//       $or: [
-//         { retentionStatus: { $exists: false } },
-//         { retentionStatus: "Active" }
-//       ]
-//     });
-//     const lostCustomersPromise = Lead.countDocuments({
-//       healthExpertAssigned: agentName,
-//       retentionStatus: "Lost"
-//     });
-//     const retentionSalesPromise = RetentionSales.find({ orderCreatedBy: agentName });
-
-//     const [totalCustomers, activeCustomers, lostCustomers, retentionSales] = await Promise.all([
-//       totalCustomersPromise,
-//       activeCustomersPromise,
-//       lostCustomersPromise,
-//       retentionSalesPromise
-//     ]);
-
-//     // Compute metrics from retention sales.
-//     const salesDone = retentionSales.length;
-//     const totalSales = retentionSales.reduce((acc, sale) => acc + (sale.amountPaid || 0), 0);
-
-//     // Count sales done in the current month.
-//     const customersRetainedThisMonth = retentionSales.filter((sale) => {
-//       // Assuming sale.date is stored in "YYYY-MM-DD" format.
-//       return sale.date >= firstDayOfMonth && sale.date <= lastDayOfMonth;
-//     }).length;
-
-//     const retentionRate =
-//       totalCustomers > 0
-//         ? parseFloat(((customersRetainedThisMonth / totalCustomers) * 100).toFixed(2))
-//         : 0;
-//     const avgOrderValue =
-//       salesDone > 0 ? parseFloat((totalSales / salesDone).toFixed(2)) : 0;
-
-//     res.json({
-//       totalCustomers,
-//       activeCustomers,
-//       lostCustomers,
-//       customersRetainedThisMonth,
-//       retentionRate,
-//       salesDone,
-//       totalSales,
-//       avgOrderValue,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching all time summary:", error);
-//     res.status(500).json({ message: "Error fetching all time summary", error: error.message });
-//   }
-// });
-
 router.get("/api/shipment-summary", async (req, res) => {
   try {
     const { agentName, startDate, endDate } = req.query;
@@ -740,7 +896,6 @@ router.get("/api/shipment-summary", async (req, res) => {
     // ----------------------------
     // 1. Fetch RetentionSales Data
     // ----------------------------
-    // Build a query for RetentionSales where date is stored as "YYYY-MM-DD"
     const retentionQuery = { orderCreatedBy: agentName };
     if (startDate || endDate) {
       retentionQuery.date = {};
@@ -756,7 +911,6 @@ router.get("/api/shipment-summary", async (req, res) => {
     // ----------------------------
     // 2. Fetch MyOrders Data
     // ----------------------------
-    // Build a query for MyOrders where orderDate is a Date
     const myOrderQuery = { agentName };
     if (startDate || endDate) {
       myOrderQuery.orderDate = {};
@@ -764,7 +918,6 @@ router.get("/api/shipment-summary", async (req, res) => {
         myOrderQuery.orderDate.$gte = new Date(startDate);
       }
       if (endDate) {
-        // Ensure the full day is covered for endDate
         const endDateObj = new Date(endDate);
         endDateObj.setHours(23, 59, 59, 999);
         myOrderQuery.orderDate.$lte = endDateObj;
@@ -772,31 +925,28 @@ router.get("/api/shipment-summary", async (req, res) => {
     }
     const myOrders = await MyOrder.find(myOrderQuery).lean();
 
-    // Transform MyOrder documents to match the shape of RetentionSales records.
-    // For each MyOrder, compute amountPaid as: upsellAmount > 0 ? upsellAmount : totalPrice.
-    const transformedMyOrders = myOrders.map(order => {
+    // Transform MyOrder documents into the same shape
+    const transformedMyOrders = myOrders.map((order) => {
       const upsellAmount = Number(order.upsellAmount) || 0;
       const totalPrice = Number(order.totalPrice) || 0;
       const amountPaid = upsellAmount > 0 ? upsellAmount : totalPrice;
       return {
-        // Convert orderDate to a string in "YYYY-MM-DD" format for consistency.
-        date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
-        shipway_status: order.shipway_status && order.shipway_status.trim() ? order.shipway_status : "Unknown",
-        amountPaid
+        date: order.orderDate
+          ? new Date(order.orderDate).toISOString().split("T")[0]
+          : "",
+        shipway_status: order.shipway_status?.trim() || "Unknown",
+        amountPaid,
       };
     });
 
     // ----------------------------
-    // 3. Combine and Aggregate Data
+    // 3. Combine & Aggregate Data
     // ----------------------------
-    // Combine the two arrays
     const combinedSales = [...retentionSales, ...transformedMyOrders];
 
-    // Group by shipment status.
     const statusMap = {};
-    combinedSales.forEach(sale => {
-      // Use "Unknown" if no valid shipment status is found.
-      const status = sale.shipway_status && sale.shipway_status.trim() ? sale.shipway_status : "Unknown";
+    combinedSales.forEach((sale) => {
+      const status = sale.shipway_status?.trim() || "Unknown";
       if (!statusMap[status]) {
         statusMap[status] = { count: 0, amount: 0 };
       }
@@ -805,24 +955,29 @@ router.get("/api/shipment-summary", async (req, res) => {
     });
 
     const totalOrders = combinedSales.length;
-    const totalAmount = combinedSales.reduce((acc, sale) => acc + (sale.amountPaid || 0), 0);
+    const totalAmount = combinedSales.reduce(
+      (acc, sale) => acc + (sale.amountPaid || 0),
+      0
+    );
 
-    // Build the summary array with a "Total Orders" row at the beginning.
-    const summary = [{
-      label: "Total Orders",
-      count: totalOrders,
-      amount: totalAmount,
-      percentage: "100.00"
-    }];
+    // Build the summary array
+    const summary = [
+      {
+        label: "Total Orders",
+        count: totalOrders,
+        amount: totalAmount,
+        percentage: "100.00",
+      },
+    ];
 
-    // For each shipment status, calculate the percentage of orders.
     Object.entries(statusMap).forEach(([status, data]) => {
-      const percentage = totalOrders > 0 ? ((data.count / totalOrders) * 100).toFixed(2) : "0.00";
+      const percentage =
+        totalOrders > 0 ? ((data.count / totalOrders) * 100).toFixed(2) : "0.00";
       summary.push({
         label: status,
         count: data.count,
         amount: data.amount,
-        percentage
+        percentage,
       });
     });
 
@@ -831,7 +986,7 @@ router.get("/api/shipment-summary", async (req, res) => {
     console.error("Error fetching shipment summary:", error);
     res.status(500).json({
       message: "Error fetching shipment summary",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -840,15 +995,11 @@ router.get("/api/shipment-summary", async (req, res) => {
 router.get('/api/retention-sales/all', async (req, res) => {
   try {
     const { orderCreatedBy } = req.query;
-
     const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
     const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
-
-    // Fetch RetentionSales records as they already are
     const retentionSales = await RetentionSales.find(retentionQuery).lean();
     const myOrders = await MyOrder.find(myOrderQuery).lean();
 
-    // Transform MyOrder records to match RetentionSales shape
     const transformedOrders = myOrders.map(order => {
       const upsellAmount = Number(order.upsellAmount);
       const partialPayment = Number(order.partialPayment);
@@ -873,11 +1024,8 @@ router.get('/api/retention-sales/all', async (req, res) => {
       };
     });
 
-    // Combine both arrays
     const combinedData = [...retentionSales, ...transformedOrders];
 
-    // For each record with an orderId but missing shipment status,
-    // query the Order collection to fetch the shipway shipment status.
     await Promise.all(
       combinedData.map(async (sale) => {
         if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
@@ -892,7 +1040,6 @@ router.get('/api/retention-sales/all', async (req, res) => {
       })
     );
 
-    // Sort the combined data by date (most recent first)
     combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     res.status(200).json(combinedData);
