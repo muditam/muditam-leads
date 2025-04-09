@@ -757,11 +757,11 @@ function parseDateRange(req) {
  * Accepts: agentName, startDate, endDate
  * If startDate/endDate not provided, fallback to "today".
  */
-router.get('/today-summary-agent', async (req, res) => {
+router.get('/api/today-summary', async (req, res) => {
   try {
-    const agentName = req.query.agentAssignedName;
+    const agentName = req.query.agentName;
     if (!agentName) {
-      return res.status(400).json({ message: "agentAssignedName is required" });
+      return res.status(400).json({ message: "agentName is required" });
     }
 
     // Parse date range from the query. RetentionSales stores date as string.
@@ -777,7 +777,6 @@ router.get('/today-summary-agent', async (req, res) => {
       date: { $gte: sDate, $lte: eDate }
     });
     const retentionCount = retentionSales.length;
-    // Sum up amountPaid for retention (assumes amountPaid is stored in RetentionSales)
     const retentionTotalSales = retentionSales.reduce(
       (acc, sale) => acc + (sale.amountPaid ? Number(sale.amountPaid) : 0),
       0
@@ -789,7 +788,6 @@ router.get('/today-summary-agent', async (req, res) => {
       orderDate: { $gte: startDateObj, $lte: endDateObj }
     });
     const myOrdersCount = myOrders.length;
-    // For each MyOrder, choose upsellAmount if > 0, else use totalPrice.
     const myOrdersTotalSales = myOrders.reduce((acc, order) => {
       const upsellAmount = Number(order.upsellAmount) || 0;
       const totalPrice = Number(order.totalPrice) || 0;
@@ -800,10 +798,19 @@ router.get('/today-summary-agent', async (req, res) => {
     // 3. Compute combined metrics
     const combinedSalesDone = retentionCount + myOrdersCount;
     const combinedTotalSales = retentionTotalSales + myOrdersTotalSales;
-    const combinedAvgOrderValue =
-      combinedSalesDone > 0 ? combinedTotalSales / combinedSalesDone : 0;
+    const combinedAvgOrderValue = combinedSalesDone > 0 ? combinedTotalSales / combinedSalesDone : 0;
+
+    // 4. Compute Active Customers
+    // For RetentionSales we assume the field is "contactNumber"
+    // For MyOrder we assume the field is "phone"
+    const retentionContacts = retentionSales.map(sale => sale.contactNumber);
+    const myOrderContacts = myOrders.map(order => order.phone);
+    // Combine and get unique values using a Set.
+    const uniqueCustomers = new Set([...retentionContacts, ...myOrderContacts]);
+    const activeCustomers = uniqueCustomers.size;
 
     res.json({
+      activeCustomers,
       salesDone: combinedSalesDone,
       totalSales: Number(combinedTotalSales.toFixed(2)),
       avgOrderValue: Number(combinedAvgOrderValue.toFixed(2))
@@ -813,6 +820,15 @@ router.get('/today-summary-agent', async (req, res) => {
     res.status(500).json({ message: "Error fetching today summary", error: error.message });
   }
 });
+
+function parseDateOrToday(dateStr) {
+  // If dateStr is provided and has the correct length (e.g., "YYYY-MM-DD"), return it.
+  // Otherwise, return today's date in "YYYY-MM-DD" format.
+  if (dateStr && dateStr.length === 10) {
+    return dateStr;
+  }
+  return new Date().toISOString().split("T")[0];
+}
 
 /**
  * GET /api/followup-summary
