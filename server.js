@@ -1234,117 +1234,58 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
   }
 });
 
-app.get('/proxy/consultation/:slug', async (req, res) => {
-  const { slug } = req.params;
-  
-  // Example: fetch user consultation data from DB using slug
-  const consultation = await ConsultationDetails.findOne({ slug });
+app.post('/api/create-shopify-page', async (req, res) => {
+  try {
+    const { customerId, closing, selectedProducts } = req.body;
 
-  if (!consultation) {
-    return res.status(404).send('Consultation not found');
+    if (!customerId) {
+      return res.status(400).json({ error: 'CustomerId is required' });
+    }
+
+    // For demonstration purposes, we are logging the received data.
+    // Replace the code below with your actual logic to save/update the plan details
+    // in your database.
+    console.log("Storing consultation plan data for customer:", customerId);
+    console.log("Closing data:", closing);
+    console.log("Selected Products:", selectedProducts);
+
+    // TODO: Replace this with the real database saving logic.
+    // await saveConsultationPlan(customerId, { closing, selectedProducts });
+
+    // Once the plan details are stored, return the URL of the dynamic Shopify page.
+    // This dynamic page (e.g., pages/plan) will use the customerId to fetch the details.
+    const dynamicPlanUrl = `https://muditam.com/pages/plan?customerId=${customerId}`;
+    return res.json({ url: dynamicPlanUrl });
+  } catch (error) {
+    console.error("Error in /api/create-shopify-page:", error.response ? error.response.data : error.message);
+    return res.status(500).json({
+      error: `Error processing consultation plan: ${
+        error.response && error.response.data
+          ? JSON.stringify(error.response.data)
+          : error.message
+      }`
+    });
   }
-
-  const customer = await Customer.findById(consultation.customerId);
-
-  return res.send(`
-    <div>
-      <h1>Plan for ${customer.name}</h1>
-      <p>${consultation.suggestion}</p>
-    </div>
-  `);
 });
 
-
-// app.post('/api/create-shopify-page', async (req, res) => {
-//   try {
-//     const { customerId, closing, selectedProducts } = req.body;
-
-//     if (!customerId) {
-//       return res.status(400).json({ error: 'CustomerId is required' });
-//     }
-
-//     // Construct a unique page handle using customerId and a timestamp
-//     const uniqueHandle = `plan-${customerId}-${Date.now()}`;
-
-//     // Destructure consultation details from "closing"
-//     const {
-//       consultationStatus,
-//       expectedResult,
-//       preferredDiet,
-//       courseDuration,
-//       freebie, // This is sent as "freebie" in the payload (mapped from your front-end array of freebies)
-//       bloodTest,
-//       bloodTestDetails
-//     } = closing || {};
-
-//     // Build the HTML content for the Shopify page
-//     let htmlContent = `<div style="padding:20px;">`;
-//     htmlContent += `<h1>Your Custom Plan</h1>`;
-//     htmlContent += `<p><strong>Consultation Status:</strong> ${consultationStatus || ''}</p>`;
-//     htmlContent += `<p><strong>Expected Result:</strong> ${expectedResult || ''}</p>`;
-//     htmlContent += `<p><strong>Preferred Diet:</strong> ${preferredDiet || ''}</p>`;
-//     htmlContent += `<p><strong>Course Duration:</strong> ${courseDuration || ''}</p>`;
-
-//     if (freebie && freebie.length > 0) {
-//       htmlContent += `<p><strong>Freebies:</strong> ${freebie.join(', ')}</p>`;
-//     }
-
-//     htmlContent += `<p><strong>Blood Test Recommendation:</strong> ${bloodTest || ''}</p>`;
-//     if (bloodTestDetails) {
-//       htmlContent += `<p><strong>Address:</strong> ${bloodTestDetails.address || ''}</p>`;
-//       htmlContent += `<p><strong>Preferred Time Slot:</strong> ${bloodTestDetails.preferredTimeSlot || ''}</p>`;
-//       htmlContent += `<p><strong>Preferred Date 1:</strong> ${bloodTestDetails.preferredDate1 || ''}</p>`;
-//       htmlContent += `<p><strong>Preferred Date 2:</strong> ${bloodTestDetails.preferredDate2 || ''}</p>`;
-//     }
-//     if (selectedProducts && selectedProducts.length > 0) {
-//       htmlContent += `<p><strong>Recommended Products:</strong> ${selectedProducts.join(', ')}</p>`;
-//     }
-//     htmlContent += `</div>`;
-
-//     // Shopify API configuration from environment variables
-//     const shopDomain = process.env.SHOP_DOMAIN; // e.g., "muditam.myshopify.com"
-//     const shopifyAccessToken = process.env.SHOPIFY_ACCESS_TOKEN;
-//     const shopifyApiVersion = process.env.SHOPIFY_API_VERSION || '2023-01';
-
-//     // Prepare the payload for creating the page on Shopify
-//     const payload = {
-//       page: {
-//         title: `Plan for Customer ${customerId}`,
-//         handle: uniqueHandle,
-//         body_html: htmlContent
-//       }
-//     };
-
-//     // Call Shopify Admin API to create the page
-//     const shopifyResponse = await axios.post(
-//       `https://${shopDomain}/admin/api/${shopifyApiVersion}/pages.json`,
-//       payload,
-//       {
-//         headers: {
-//           "X-Shopify-Access-Token": shopifyAccessToken,
-//           "Content-Type": "application/json"
-//         }
-//       }
-//     );
-
-//     // Check if the page has been created
-//     if (shopifyResponse.data && shopifyResponse.data.page) {
-//       const page = shopifyResponse.data.page;
-//       // Construct the page URL using storefront domain if available
-//       const shopifyStorefrontDomain = process.env.SHOPIFY_STOREFRONT_DOMAIN || shopDomain;
-//       const pageUrl = `https://${shopifyStorefrontDomain}/pages/${page.handle}`;
-//       return res.json({ url: pageUrl });
-//     } else {
-//       return res.status(500).json({ error: 'Failed to create page on Shopify.' });
-//     }
-//   } catch (error) {
-//     // Log detailed error information for debugging
-//     console.error("Error in /api/create-shopify-page:", error.response ? error.response.data : error.message);
-//     return res.status(500).json({
-//       error: `Error creating Shopify page: ${error.response && error.response.data ? JSON.stringify(error.response.data) : error.message}`
-//     });
-//   }
-// });
+app.get('/api/consultation-plan', async (req, res) => {
+  const { customerId } = req.query;
+  if (!customerId) {
+    return res.status(400).json({ error: 'customerId is required' });
+  }
+  
+  try {
+    // Replace this with your actual data retrieval logic.
+    const planData = await getConsultationPlanData(customerId);
+    if (!planData) {
+      return res.status(404).json({ error: 'Plan data not found for this customer' });
+    }
+    res.json(planData);
+  } catch (error) {
+    console.error("Error retrieving consultation plan:", error);
+    res.status(500).json({ error: 'Internal server error retrieving consultation plan' });
+  }
+});
 
 // Start Server
 app.listen(PORT, () => {
