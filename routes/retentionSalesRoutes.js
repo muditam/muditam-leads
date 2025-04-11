@@ -1013,6 +1013,7 @@ router.get('/api/retention-sales/all', async (req, res) => {
     const { orderCreatedBy } = req.query;
     const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
     const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
+
     const retentionSales = await RetentionSales.find(retentionQuery).lean();
     const myOrders = await MyOrder.find(myOrderQuery).lean();
 
@@ -1020,7 +1021,10 @@ router.get('/api/retention-sales/all', async (req, res) => {
       const upsellAmount = Number(order.upsellAmount);
       const partialPayment = Number(order.partialPayment);
       const totalPrice = Number(order.totalPrice);
-      let amountPaid = upsellAmount > 0 ? upsellAmount : totalPrice;
+
+      // Calculate the correct amountPaid (totalPrice + partialPayment)
+      let amountPaid = totalPrice + partialPayment + upsellAmount;  // Updated calculation
+
       return { 
         _id: order._id, 
         date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
@@ -1030,7 +1034,7 @@ router.get('/api/retention-sales/all', async (req, res) => {
         dosageOrdered: order.dosageOrdered,
         upsellAmount: upsellAmount,  
         partialPayment: partialPayment,  
-        amountPaid: amountPaid,  
+        amountPaid: amountPaid,  // Updated amountPaid calculation
         modeOfPayment: order.paymentMethod,  
         shipway_status: order.shipway_status || "",  
         orderId: order.orderId,
@@ -1042,6 +1046,7 @@ router.get('/api/retention-sales/all', async (req, res) => {
 
     const combinedData = [...retentionSales, ...transformedOrders];
 
+    // Update the shipway_status from the corresponding Order document if missing
     await Promise.all(
       combinedData.map(async (sale) => {
         if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
@@ -1056,8 +1061,10 @@ router.get('/api/retention-sales/all', async (req, res) => {
       })
     );
 
+    // Sort the combined data by date in descending order
     combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
 
+    // Return the combined and updated sales data
     res.status(200).json(combinedData);
   } catch (error) {
     console.error("Error fetching combined retention sales:", error);
@@ -1065,6 +1072,33 @@ router.get('/api/retention-sales/all', async (req, res) => {
   }
 });
 
+
+router.put('/api/retention-sales/all/:id', async (req, res) => {
+  const { id } = req.params;
+  // Expect the update payload to have a field "source" indicating the origin.
+  const { source, ...updateData } = req.body;
+  
+  try {
+    let updatedRecord;
+    if (source && source === "MyOrder") {
+      // If the record is from the MyOrder collection, update it there.
+      updatedRecord = await MyOrder.findByIdAndUpdate(id, updateData, { new: true });
+      if (!updatedRecord) {
+        return res.status(404).json({ message: "MyOrder record not found" });
+      }
+    } else {
+      // Otherwise, update the record in the RetentionSales collection.
+      updatedRecord = await RetentionSales.findByIdAndUpdate(id, updateData, { new: true });
+      if (!updatedRecord) {
+        return res.status(404).json({ message: "RetentionSales record not found" });
+      }
+    }
+    res.status(200).json(updatedRecord);
+  } catch (error) {
+    console.error("Error updating combined record:", error);
+    res.status(500).json({ message: "Error updating combined record", error: error.message });
+  }
+});
 
 module.exports = router;
  

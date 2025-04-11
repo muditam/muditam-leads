@@ -6,7 +6,7 @@ const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
-const XLSX = require("xlsx"); 
+const XLSX = require("xlsx");  
 const axios = require('axios');
 const https = require('https'); 
 const cron = require('node-cron');
@@ -28,7 +28,9 @@ const MyOrder = require('./models/MyOrder');
 const Employee = require('./models/Employee');
 const orderByIdRoutes = require("./routes/orderById"); 
 const combinedOrdersRoute = require("./routes/combinedOrders"); 
- 
+const customerRoutes = require("./routes/customerRoutes"); 
+const consultationDetailsRoutes = require("./routes/consultationDetailsRoutes");
+const consultationProxyRoutes = require("./routes/consultationProxy");
 
 // const http = require('http');
 // const socketIo = require('socket.io');
@@ -91,7 +93,7 @@ app.use('/', exportLeadsRouter);
 app.use("/api/leads/retention", activeCountsRoute);
 
 //MasterSalesdashboard
-app.use('/api', summaryRoutes);
+app.use('/api', summaryRoutes); 
 
 //Sales Agent
 app.use('/api/dashboard', dashboardRoutes);
@@ -99,8 +101,16 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use("/api/order-by-id", orderByIdRoutes);
  
 app.use("/api/orders/combined", combinedOrdersRoute);
- 
- 
+
+// Use customer routes
+app.use(customerRoutes);
+
+// Use the consultation details routes for all endpoints starting with /api/consultation-details
+app.use("/api/consultation-details", consultationDetailsRoutes);
+
+app.use("/", consultationProxyRoutes);
+
+
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -1226,8 +1236,6 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
   }
 });
 
-
- 
  
 // Start Server
 app.listen(PORT, () => {
