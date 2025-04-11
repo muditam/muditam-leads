@@ -106,7 +106,7 @@ app.use(customerRoutes);
 
 // Use the consultation details routes for all endpoints starting with /api/consultation-details
 app.use("/api/consultation-details", consultationDetailsRoutes);
- 
+
 
 
 mongoose.connect(process.env.MONGO_URI, {
@@ -1234,58 +1234,34 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
   }
 });
 
-app.post('/api/create-shopify-page', async (req, res) => {
-  try {
-    const { customerId, closing, selectedProducts } = req.body;
+// GET /proxy/consultation/:slug
+app.get('/proxy/consultation/:slug', async (req, res) => {
+  const { slug } = req.params;
 
-    if (!customerId) {
-      return res.status(400).json({ error: 'CustomerId is required' });
+  try {
+    const consultation = await ConsultationDetails.findOne({ slug });
+    const customer = await Customer.findOne({ _id: consultation.customerId });
+
+    if (!consultation || !customer) {
+      return res.status(404).send('<h2>Consultation not found</h2>');
     }
 
-    // For demonstration purposes, we are logging the received data.
-    // Replace the code below with your actual logic to save/update the plan details
-    // in your database.
-    console.log("Storing consultation plan data for customer:", customerId);
-    console.log("Closing data:", closing);
-    console.log("Selected Products:", selectedProducts);
+    const html = `
+      <div>
+        <h1>Consultation Plan for ${customer.name}</h1>
+        <p><strong>Phone:</strong> ${customer.phone}</p>
+        <p><strong>Suggestions:</strong> ${consultation.suggestions}</p>
+        <!-- add more fields here as needed -->
+      </div>
+    `;
 
-    // TODO: Replace this with the real database saving logic.
-    // await saveConsultationPlan(customerId, { closing, selectedProducts });
-
-    // Once the plan details are stored, return the URL of the dynamic Shopify page.
-    // This dynamic page (e.g., pages/plan) will use the customerId to fetch the details.
-    const dynamicPlanUrl = `https://muditam.com/pages/plan?customerId=${customerId}`;
-    return res.json({ url: dynamicPlanUrl });
-  } catch (error) {
-    console.error("Error in /api/create-shopify-page:", error.response ? error.response.data : error.message);
-    return res.status(500).json({
-      error: `Error processing consultation plan: ${
-        error.response && error.response.data
-          ? JSON.stringify(error.response.data)
-          : error.message
-      }`
-    });
+    res.send(html);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('<h2>Error loading consultation</h2>');
   }
 });
 
-app.get('/api/consultation-plan', async (req, res) => {
-  const { customerId } = req.query;
-  if (!customerId) {
-    return res.status(400).json({ error: 'customerId is required' });
-  }
-  
-  try {
-    // Replace this with your actual data retrieval logic.
-    const planData = await getConsultationPlanData(customerId);
-    if (!planData) {
-      return res.status(404).json({ error: 'Plan data not found for this customer' });
-    }
-    res.json(planData);
-  } catch (error) {
-    console.error("Error retrieving consultation plan:", error);
-    res.status(500).json({ error: 'Internal server error retrieving consultation plan' });
-  }
-});
 
 // Start Server
 app.listen(PORT, () => {
