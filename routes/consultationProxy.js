@@ -3,74 +3,93 @@ const router = express.Router();
 const ConsultationDetails = require("../models/ConsultationDetails");
 const Customer = require("../models/Customer");
 
-// GET route for App Proxy using customer ID directly
-router.get("/proxy/consultation/:id", async (req, res) => {
-  const customerId = req.params.id;
+router.get("/proxy/consultation/:slug", async (req, res) => {
+    const slug = req.params.slug;
+    try {
+        // Find customer by slug instead of using findById()
+        const customer = await Customer.findOne({ slug }).lean();
+        if (!customer) return res.status(404).send("Customer not found");
 
-  try {
-    // Fetch customer data using customerId
-    const customer = await Customer.findById(customerId).lean();
-    if (!customer) {
-      return res.status(404).send("Customer not found.");
+        // Use the customer's _id to look up consultation details if that's how they're linked
+        const consult = await ConsultationDetails.findOne({ customerId: customer._id }).lean();
+
+        // Build and send the HTML page with responsive background images
+        const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8" />
+            <title>Consultation Plan</title>
+            <meta name="robots" content="noindex, nofollow" />
+            <style>
+              /* Default (desktop) background image */
+              body {
+                margin: 0;
+                padding: 0;
+                background: url('https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_11_2025_04_42_09_PM_1.jpg?v=1744455727') no-repeat center center fixed;
+                background-size: cover;
+                font-family: Arial, sans-serif;
+                color: white;
+              }
+              /* Mobile background image */
+              @media only screen and (max-width: 767px) {
+                body {
+                  background: url('https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_11_2025_12_36_24_PM_1.png?v=1744455727') no-repeat center center fixed;
+                  background-size: cover;
+                }
+              }
+              /* Full-screen overlay to contain content */
+              .overlay {
+                position: relative;
+                width: 100%;
+                height: 100vh;
+              }
+              /* Position content to begin at 40% from the top */
+              .content {
+                position: absolute;
+                top: 40%;
+                width: 100%;
+                text-align: center;
+              }
+              .customer-name {
+                font-size: 2.5rem;
+                font-weight: bold;
+                margin-bottom: 20px;
+              }
+              .title-text {
+                font-size: 2rem;
+                line-height: 1.2;
+              }
+              /* Course duration is displayed in a black box with white text */
+              .course-duration {
+                margin-top: 20px;
+                background: black;
+                padding: 10px 20px;
+                display: inline-block;
+                color: white;
+                font-size: 1.2rem;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="overlay">
+              <div class="content">
+                <div class="customer-name">${customer.name}</div>
+                <div class="title-text">Diabetes<br>Management<br>Plan</div>
+                <div class="course-duration">
+                  ${consult && consult.closing ? consult.closing.courseDuration : "N/A"}
+                </div>
+              </div>
+            </div>
+          </body>
+        </html>
+        `;
+        res.setHeader("Content-Type", "text/html");
+        res.send(html);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Server error");
     }
-
-    // Fetch consultation details using customerId
-    const consultationDetails = await ConsultationDetails.findOne({ customerId }).lean();
-    if (!consultationDetails) {
-      return res.status(404).send("Consultation details not found.");
-    }
-
-    // Build an HTML response that combines customer and consultation details
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Consultation Plan for ${customer.name}</title>
-          <!-- Prevent search engines from indexing this page -->
-          <meta name="robots" content="noindex, nofollow">
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; padding: 20px; line-height: 1.6; }
-            h1, h2 { color: #333; }
-            .section { margin-bottom: 20px; }
-            .label { font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <h1>Consultation Plan for ${customer.name}</h1>
-          
-          <div class="section">
-            <h2>Customer Details</h2>
-            <p><span class="label">Name:</span> ${customer.name}</p>
-            <p><span class="label">Phone:</span> ${customer.phone}</p>
-            <p><span class="label">Age:</span> ${customer.age}</p>
-            <p><span class="label">Location:</span> ${customer.location}</p>
-          </div>
-          
-          <div class="section">
-            <h2>Consultation Summary</h2>
-            <p><span class="label">Expected Result:</span> ${consultationDetails.closing?.expectedResult || "Not provided"}</p>
-            <p><span class="label">Preferred Diet:</span> ${consultationDetails.closing?.preferredDiet || "Not provided"}</p>
-            <p><span class="label">Course Duration:</span> ${consultationDetails.closing?.courseDuration || "Not provided"}</p>
-            <p><span class="label">Freebies:</span> ${(consultationDetails.closing?.freebie || []).join(", ") || "None"}</p>
-            <p><span class="label">Blood Test:</span> ${consultationDetails.closing?.bloodTest || "Not specified"}</p>
-          </div>
-          
-          <div class="section">
-            <h2>Presales & Additional Info</h2>
-            <p><span class="label">HbA1c:</span> ${consultationDetails.presales?.hba1c || "Not provided"}</p>
-            <p><span class="label">Notes:</span> ${consultationDetails.presales?.notes || "None"}</p>
-          </div>
-        </body>
-      </html>
-    `;
-
-    res.setHeader("Content-Type", "text/html");
-    res.send(html);
-  } catch (error) {
-    console.error("Error in consultation proxy route:", error);
-    res.status(500).send("Internal server error");
-  }
 });
 
 module.exports = router;
