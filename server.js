@@ -30,6 +30,7 @@ const orderByIdRoutes = require("./routes/orderById");
 const combinedOrdersRoute = require("./routes/combinedOrders"); 
 const customerRoutes = require("./routes/customerRoutes"); 
 const consultationDetailsRoutes = require("./routes/consultationDetailsRoutes"); 
+const consultationProxyRoutes = require("./routes/consultationProxy");
 
 // const http = require('http');
 // const socketIo = require('socket.io');
@@ -107,7 +108,7 @@ app.use(customerRoutes);
 // Use the consultation details routes for all endpoints starting with /api/consultation-details
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
-
+app.use("/", consultationProxyRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -1231,28 +1232,6 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
   } catch (error) {
     console.error("Error fetching transfer requests:", error);
     res.status(500).json({ message: "Error fetching transfer requests", error: error.message });
-  }
-});
-
-app.get('/proxy/consultation/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const consultation = await ConsultationDetails.findById(id);
-    if (!consultation) return res.status(404).send("Consultation not found");
-    const customer = await Customer.findById(consultation.customerId);
-
-    const html = `
-      <div>
-        <h1>Consultation Plan for ${customer.name}</h1>
-        <p><strong>Phone:</strong> ${customer.phone}</p>
-        <p><strong>Expert:</strong> ${consultation.presales?.assignExpert}</p>
-        <p><strong>Notes:</strong> ${consultation.presales?.notes}</p>
-      </div>
-    `;
-    res.send(html);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Error fetching consultation");
   }
 });
 
