@@ -84,10 +84,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </head>
           <body>
             <div class="container">
-              <img
-                class="bg-img"
-                src="ff.jpg"
-                alt="Background">
+             
               <div class="overlay">
                 <div class="customer-name">${customer.name}</div>
                 <div class="title-text">Diabetes<br>Management<br>Plan</div>
