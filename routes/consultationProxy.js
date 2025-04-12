@@ -32,7 +32,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <style>
             body { font-family: Arial, sans-serif; margin: 20px; padding: 20px; line-height: 1.6; }
             h1, h2 { color: #333; }
-            .section { margin-bottom: 20px; text-align: left;}
+            .section { margin-bottom: 20px; }
             .label { font-weight: bold; }
           </style>
         </head>
@@ -41,7 +41,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           
           <div class="section">
             <p>${customer.name}</p>
-            <p>Diabetes<br> Management<br> Plan</p>
+            <p>Diabetes Management Plan</p>
             <p>${(consultationDetails.closing?.courseDuration || []).join(", ") || "None"}</p>
           </div>
           
