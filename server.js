@@ -1235,7 +1235,7 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
 });
 
 // GET /proxy/consultation/:slug
-app.get('/proxy/consultation/:slug', async (req, res) => {
+app.get('/proxy/consultation/:id', async (req, res) => {
   const { slug } = req.params;
 
   try {
