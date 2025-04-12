@@ -13,7 +13,7 @@ router.get("/proxy/consultation/:slug", async (req, res) => {
         // Use the customer's _id to look up consultation details if that's how they're linked
         const consult = await ConsultationDetails.findOne({ customerId: customer._id }).lean();
 
-        // Build and send the HTML page with responsive background images
+        // Build and send the HTML page
         const html = `
         <!DOCTYPE html>
         <html>
@@ -91,5 +91,6 @@ router.get("/proxy/consultation/:slug", async (req, res) => {
         res.status(500).send("Server error");
     }
 });
+
 
 module.exports = router;
