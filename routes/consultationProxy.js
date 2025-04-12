@@ -3,16 +3,22 @@ const router = express.Router();
 const ConsultationDetails = require("../models/ConsultationDetails");
 const Customer = require("../models/Customer");
 
-router.get("/proxy/consultation/:slug", async (req, res) => {
-    const slug = req.params.slug;
-    try {
-        // Find customer by slug instead of using findById()
-        const customer = await Customer.findOne({ slug }).lean();
-        if (!customer) return res.status(404).send("Customer not found");
+// GET route for App Proxy using customer ID directly
+router.get("/proxy/consultation/:id", async (req, res) => {
+  const customerId = req.params.id;
 
-        // Use the customer's _id to look up consultation details if that's how they're linked
-        const consult = await ConsultationDetails.findOne({ customerId: customer._id }).lean();
+  try {
+    // Fetch customer data using customerId
+    const customer = await Customer.findById(customerId).lean();
+    if (!customer) {
+      return res.status(404).send("Customer not found.");
+    }
 
+    // Fetch consultation details using customerId
+    const consultationDetails = await ConsultationDetails.findOne({ customerId }).lean();
+    if (!consultationDetails) {
+      return res.status(404).send("Consultation details not found.");
+    }
         // Build and send the HTML page
         const html = `
         <!DOCTYPE html>
@@ -85,12 +91,11 @@ router.get("/proxy/consultation/:slug", async (req, res) => {
         </html>
         `;
         res.setHeader("Content-Type", "text/html");
-        res.send(html);
-    } catch (err) {
-        console.error(err);
-        res.status(500).send("Server error");
-    }
+    res.send(html);
+  } catch (error) {
+    console.error("Error in consultation proxy route:", error);
+    res.status(500).send("Internal server error");
+  }
 });
-
 
 module.exports = router;
