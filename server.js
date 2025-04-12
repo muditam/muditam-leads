@@ -1234,33 +1234,28 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
   }
 });
 
-// GET /proxy/consultation/:slug
 app.get('/proxy/consultation/:id', async (req, res) => {
-  const { slug } = req.params;
-
+  const { id } = req.params;
   try {
-    const consultation = await ConsultationDetails.findOne({ slug });
-    const customer = await Customer.findOne({ _id: consultation.customerId });
-
-    if (!consultation || !customer) {
-      return res.status(404).send('<h2>Consultation not found</h2>');
-    }
+    const consultation = await ConsultationDetails.findById(id);
+    if (!consultation) return res.status(404).send("Consultation not found");
+    const customer = await Customer.findById(consultation.customerId);
 
     const html = `
       <div>
         <h1>Consultation Plan for ${customer.name}</h1>
         <p><strong>Phone:</strong> ${customer.phone}</p>
-        <p><strong>Suggestions:</strong> ${consultation.suggestions}</p>
-        <!-- add more fields here as needed -->
+        <p><strong>Expert:</strong> ${consultation.presales?.assignExpert}</p>
+        <p><strong>Notes:</strong> ${consultation.presales?.notes}</p>
       </div>
     `;
-
     res.send(html);
   } catch (err) {
     console.error(err);
-    res.status(500).send('<h2>Error loading consultation</h2>');
+    res.status(500).send("Error fetching consultation");
   }
 });
+
 
 
 // Start Server
