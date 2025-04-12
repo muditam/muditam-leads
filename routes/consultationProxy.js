@@ -86,7 +86,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             <div class="container">
               <img
                 class="bg-img"
-                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_11_2025_12_36_24_PM_1.png?v=1744455727"
+                src="ff.jpg"
                 alt="Background">
               <div class="overlay">
                 <div class="customer-name">${customer.name}</div>
