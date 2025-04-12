@@ -39,13 +39,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       /* Desktop background image */
       @media only screen and (min-width: 769px) {
         .background-container {
-          background-image: url('https://cdn.shopify.com/s/files/1/0929/2323/2544/files/ChatGPT_Image_Apr_11_2025_04_42_09_PM_1.jpg?v=1744458517');
+          background-image: url('https://media-hosting.imagekit.io/c3f763e470e84463/ChatGPT%20Image%20Apr%2011,%202025,%2004_42_09%20PM%201.jpg?Expires=1839067025&Key-Pair-Id=K2ZIVPTIP2VGHC&Signature=QFkulw9OYE53koFJWPb0jaP3vR0bkefVYkyGWIhPUPCfG8Zj2i0~BOCr26GrXPN52lHJxNiufuWKsQ948TvWp01ABv-ZzKEfcH2vlxZfR6HNjaNzJc2TmQTs1Bgv~SVc8F0cNACI3BPnEfZMgasijhiqOCHpzKlQ8LauvwKb~O94Vhl2B0gFDIjPB7hLTuyIdEOVbqwUzHcuHlJel3~hw0dQBjWz2bCN7g6xOZ61bGJ3ngDSdjc5YTc9nmQSqaMppJAjT1so7tdiusEvlIp7CE88K4fozrYXvd3cav3n~s-yo86hT5WDAaDt~wSjyi5IXaXKCzRM3UAgcrk66ZyrbA__');
         }
       }
       /* Mobile background image */
       @media only screen and (max-width: 768px) {
         .background-container {
-          background-image: url('https://cdn.shopify.com/s/files/1/0929/2323/2544/files/ChatGPT_Image_Apr_11_2025_12_36_24_PM_1.png?v=1744458517');
+          background-image: url('https://media-hosting.imagekit.io/41dcc84c21f74b1c/ChatGPT%20Image%20Apr%2011,%202025,%2012_36_24%20PM%201.png?Expires=1839067086&Key-Pair-Id=K2ZIVPTIP2VGHC&Signature=PCVSAr1rGhr9oKOlXJNG~LzwyBMZT0IHamjHtGLHBKFJVnYT5MhE7nM7vRVNibBygk3DYZ0K4xJrBgAIr2zMPqhr2ubt8NzNY8AJvxdD5kDPHybcAFjl0CGchOYIms0Mvz-WLm-1oEtf1n4i3hRTj0RUE02saciwRdQok32xqetm7C2KRUxgPrYKTlLvVD3vO5oPHDSBq-FYPDBZ5hWaVrHxlr6dmKGNEgQGcAVkrP04KXZvVsEU3i7U6hnEvWLYhh5OwTCa8CYmw9V~5ZwQ7mt5DAtjL2ckzArsmbXfXwRmiOJy1VA9GdFI~TANXf6DzDT5NX7zXrKYE4DIZjVlrg__');
         }
       }
       /* Overlay with content */
