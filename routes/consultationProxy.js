@@ -37,29 +37,11 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </style>
         </head>
         <body>
-          <h1>Consultation Plan for ${customer.name}</h1>
           
-          <div class="section">
-            <h2>Customer Details</h2>
-            <p><span class="label">Name:</span> ${customer.name}</p>
-            <p><span class="label">Phone:</span> ${customer.phone}</p>
-            <p><span class="label">Age:</span> ${customer.age}</p>
-            <p><span class="label">Location:</span> ${customer.location}</p>
-          </div>
-          
-          <div class="section">
-            <h2>Consultation Summary</h2>
-            <p><span class="label">Expected Result:</span> ${consultationDetails.closing?.expectedResult || "Not provided"}</p>
-            <p><span class="label">Preferred Diet:</span> ${consultationDetails.closing?.preferredDiet || "Not provided"}</p>
-            <p><span class="label">Course Duration:</span> ${consultationDetails.closing?.courseDuration || "Not provided"}</p>
-            <p><span class="label">Freebies:</span> ${(consultationDetails.closing?.freebie || []).join(", ") || "None"}</p>
-            <p><span class="label">Blood Test:</span> ${consultationDetails.closing?.bloodTest || "Not specified"}</p>
-          </div>
-          
-          <div class="section">
-            <h2>Presales & Additional Info</h2>
-            <p><span class="label">HbA1c:</span> ${consultationDetails.presales?.hba1c || "Not provided"}</p>
-            <p><span class="label">Notes:</span> ${consultationDetails.presales?.notes || "None"}</p>
+          <div class="section"> 
+            <p>${customer.name}'s</p> 
+            <p>DIABETES MANAGEMENT PLAN</p>
+            <p><span class="label">Expected Result:</span> ${consultationDetails.closing?.expectedResult || "Not provided"}</p> 
           </div>
         </body>
       </html>
