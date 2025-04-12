@@ -22,60 +22,31 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
     // Build an HTML response that combines customer and consultation details
     const html = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8" />
-            <title>Consultation Plan</title>
-            <meta name="robots" content="noindex, nofollow" />
-            <style>
-              /* No background image styling in CSS – we use the background attribute on body */
-              /* Basic styling for the overlay content */
-              .overlay {
-                position: absolute;
-                top: 40%;
-                width: 100%;
-                text-align: center;
-                transform: translateY(-40%);
-                color: white;
-              }
-              .customer-name {
-                font-size: 2.5rem;
-                font-weight: bold;
-                margin-bottom: 20px;
-              }
-              .title-text {
-                font-size: 2rem;
-                line-height: 1.2;
-              }
-              .course-duration {
-                margin-top: 20px;
-                background: black;
-                padding: 10px 20px;
-                display: inline-block;
-                color: white;
-                font-size: 1.2rem;
-              }
-              /* A little reset to position relative in order for absolute positioning of overlay */
-              html, body {
-                margin: 0;
-                padding: 0;
-                position: relative;
-                height: 100vh;
-              }
-            </style>
-          </head>
-          <body background="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_11_2025_12_36_24_PM_1.png?v=1744455727">
-            <div class="overlay">
-              <div class="customer-name">${customer.name}</div>
-              <div class="title-text">Diabetes<br>Management<br>Plan</div>
-              <div class="course-duration">
-                ${consult && consult.closing ? consult.closing.courseDuration : "N/A"}
-              </div>
-            </div>
-          </body>
-        </html>
-        `;
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Consultation Plan for ${customer.name}</title>
+          <!-- Prevent search engines from indexing this page -->
+          <meta name="robots" content="noindex, nofollow">
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; padding: 20px; line-height: 1.6; }
+            h1, h2 { color: #333; }
+            .section { margin-bottom: 20px; }
+            .label { font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          
+          <div class="section"> 
+            <p>${customer.name}'s</p> 
+            <p>DIABETES<br>MANAGEMENT<br>PLAN</p>
+            <p>${consultationDetails.closing?.courseDuration || "Not provided"}</p> 
+          </div>
+        </body>
+      </html>
+    `;
+
     res.setHeader("Content-Type", "text/html");
     res.send(html);
   } catch (error) {
