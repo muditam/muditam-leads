@@ -27,54 +27,36 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     }
 
     const courseDuration = consultationDetails.closing?.courseDuration || "Not provided";
+  
 
     let daysToAdd = 0;
-    let daysExpected = "";
     const cd = courseDuration.toLowerCase().trim();
     if (cd === "1 month") {
       daysToAdd = 30;
-      daysExpected = "30 days";
     } else if (cd === "2 months") {
       daysToAdd = 60;
-      daysExpected = "60 days";
     } else if (cd === "3 months") {
       daysToAdd = 90;
-      daysExpected = "90 days";
     } else if (cd === "4 months") {
       daysToAdd = 120;
-      daysExpected = "120 days";
-    } else {
-      daysExpected = "Not available";
     }
 
-    // Compute goal date by adding daysToAdd to the current date
+    // Compute the goal date as current date + daysToAdd and format it
     const goalDate = new Date();
     goalDate.setDate(goalDate.getDate() + daysToAdd);
     const goalDateString = formatMonthDay(goalDate) + " Goal";
 
-    // Compute presales Hba1c; default is 8.0 if not available
-    const presalesHba1c = parseFloat(consultationDetails.presales?.hba1c) || 8.0;
-
-    // Compute goal Hba1c (naive drop calculation)
-    let improvementDrop = 0.8; // default for expectedResult "1"
-    if (consultationDetails.closing?.expectedResult === "2") {
-      improvementDrop = 1.5;
-    } else if (consultationDetails.closing?.expectedResult === "3") {
-      improvementDrop = 2.5;
-    }
-    const goalHba1c = (presalesHba1c - improvementDrop).toFixed(1);
-
-    // Current date and current Hba1c formatted
+    // Compute current date string
     const currentDate = new Date();
     const currentDateString = formatMonthDay(currentDate);
+
+    // Retrieve presales Hba1c (default to 8.0 if not provided)
+    let presalesHba1c = parseFloat(consultationDetails.presales?.hba1c) || 8.0;
     const currentHba1c = presalesHba1c.toFixed(1);
 
-    // Compute dynamic pointer positions (in percent)
-    // Example: for pointer-current, map Hba1c (8 => 22%, 9 => 20%, etc.)
-    const pointerCurrentLeft = 22 - 2 * (presalesHba1c - 8); // simple linear formula
-
-    // For pointer-goal, sample formula (e.g., if goalHba1c = 9 then 27%, if 8 then 33%, if 10 then 21%)
-    const pointerGoalLeft = 27 + 6 * (9 - goalHba1c);
+    // Compute default goal Hba1c using a default improvement (for "Only Supplements")
+    let defaultImprovement = 0.8; // default improvement for Only Supplements
+    let goalHba1c = (presalesHba1c - defaultImprovement).toFixed(1);
 
     const html = `
       <!DOCTYPE html>
@@ -201,32 +183,70 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               display: block;
               margin: 0 auto;
             }
-            /* Pointer images: positions set dynamically via inline styles */
             .pointer-current {
               position: absolute;
               top: 10px;
+              left: 20%;
+              transform: translate(-50%, -50%);
               width: 25px;
               height: 25px;
             }
             .pointer-goal {
               position: absolute;
               top: 10px;
+              left: 80%;
+              transform: translate(-50%, -50%);
               width: 25px;
               height: 25px;
             }
-            /* Current info: positioned absolutely; text aligned right */
             .current-info {
               position: absolute;
-              top: 40px; /* adjust as needed */
-              width: 100%;
+              bottom: -20px;
+              right: 0;
+              font-size: 14px;
+              text-align: right;
+            }
+            /* Goal Section */
+            .goal-section {
+              text-align: center;
+              margin: 20px auto;
+            }
+            .goal-date {
+              font-size: 24px;
+              font-weight: 500;
+              margin: 10px 0 0;
+            }
+            .goal-hba1c {
+              color: green;
+              font-size: 32px;
+              margin: 10px 0 0;
+              font-weight: 600;
+              text-align: center;
+            }
+            .current-bar-info {
               text-align: right;
               font-size: 14px;
+              margin-top: 10px;
             }
-            /* Goal info: positioned absolutely; text aligned left */
-            .goal-info {
-              position: absolute;
-              top: 40px; /* adjust as needed */
-              font-size: 14px;
+            .select-option-label {
+              margin: 20px 0 10px;
+              font-size: 18px;
+            }
+            .expected-options {
+              display: flex;
+              justify-content: center;
+              gap: 10px;
+            }
+            .option-box {
+              display: flex;
+              align-items: center;
+              background-color: #F4F4F4;
+              padding: 5px 10px;
+              border-radius: 4px;
+              cursor: pointer;
+            }
+            .option-box input {
+              margin-right: 5px;
             }
           </style>
         </head>
@@ -251,22 +271,56 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <!-- Results Expected Section -->
           <div class="results-expected">
             <p class="results-expected-p">Results Expected in</p>
-            <h3 class="results-expected-h3">${daysExpected}</h3>
+            <h3 class="results-expected-h3">${daysToAdd} days</h3>
           </div>
-          <!-- Display goal info (goal date and goal Hba1c) at dynamic position -->
-          <div class="goal-info" style="left: ${pointerGoalLeft}%; position: absolute;">
+          <!-- Goal Section -->
+          <div class="goal-section">
             <p class="goal-date">${goalDateString}</p>
-            <p class="goal-hba1c" style="color: green;">${goalHba1c}%</p>
-          </div>
-          <!-- Bar Section with Pointers and Current Info -->
-          <div class="bar-section">
-            <img class="bar-image" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/bar.webp?v=1744629571" alt="Color Bar"/>
-            <img class="pointer-current" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Circle.webp?v=1744629571" alt="Current Pointer" style="left: ${pointerCurrentLeft}%;">
-            <img class="pointer-goal" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/circle_with_arrow.webp?v=1744629571" alt="Goal Pointer" style="left: ${pointerGoalLeft}%;">
-            <div class="current-info" style="left: ${pointerCurrentLeft}%; position: absolute; text-align: right;">
+            <p class="goal-hba1c" id="goalHba1cDisplay">${goalHba1c}%</p>
+            <!-- Goal pointer image (if needed) -->
+            <div class="goal-pointer-image">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HbA1c_Bar.webp?v=1744635117" alt="Goal Pointer" style="width:50px;height:50px;">
+            </div>
+            <!-- Current bar info: current date and current Hba1c -->
+            <div class="current-bar-info">
               <p>${currentDateString}: ${currentHba1c}%</p>
             </div>
+            <p class="select-option-label">Select an option to see expected results</p>
+            <div class="expected-options">
+              <label class="option-box">
+                <input type="checkbox" name="expectedOption" value="only" onchange="updateGoalHba1c(this)" />
+                <span>Only Supplements</span>
+              </label>
+              <label class="option-box">
+                <input type="checkbox" name="expectedOption" value="diet" onchange="updateGoalHba1c(this)" />
+                <span>With Diet & Supplements</span>
+              </label>
+              <label class="option-box">
+                <input type="checkbox" name="expectedOption" value="lifestyle" onchange="updateGoalHba1c(this)" />
+                <span>With Diet, Lifestyle modifications & Supplements</span>
+              </label>
+            </div>
           </div>
+          <script>
+            var currentHba1c = ${presalesHba1c};
+            function updateGoalHba1c(selected) {
+              // Uncheck all other checkboxes
+              var checkboxes = document.querySelectorAll('input[name="expectedOption"]');
+              checkboxes.forEach(function(box) {
+                box.checked = false;
+              });
+              selected.checked = true;
+              var newGoal;
+              if (selected.value === "only") {
+                newGoal = currentHba1c - 0.8;
+              } else if (selected.value === "diet") {
+                newGoal = currentHba1c - 1.5;
+              } else if (selected.value === "lifestyle") {
+                newGoal = currentHba1c - 2.5;
+              }
+              document.getElementById("goalHba1cDisplay").textContent = newGoal.toFixed(1) + "%";
+            }
+          </script>
         </body>
       </html>
     `;
