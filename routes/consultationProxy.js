@@ -47,12 +47,10 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     goalDate.setDate(goalDate.getDate() + daysToAdd);
     const goalDateString = formatMonthDay(goalDate) + " Goal";
 
-    // Get presales Hba1c (if available); use a default value if missing
-    const presalesHba1c = parseFloat(consultationDetails.presales?.hba1c) || 8.0;
-
-    // Compute goal Hba1c based on expectedResult (for demonstration, using simple logic)
-    // Default improvement drop is 0.8; if expectedResult is "2" then 1.5, if "3" then 2.5.
-    let improvementDrop = 0.8;
+    // 3) We'll do a naive assumption that "Goal Hba1c" is 0.8 less if "Only Supplements" or something
+    // For example, if the user selected "expectedResult" = 1 => 0.8 drop, = 2 => 1.5 drop, etc.
+    // (Adjust logic as needed from your DB or the React code.)
+    let improvementDrop = 0.8; // default
     if (consultationDetails.closing?.expectedResult === "2") {
       improvementDrop = 1.5;
     } else if (consultationDetails.closing?.expectedResult === "3") {
@@ -60,15 +58,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     }
     const goalHba1c = (presalesHba1c - improvementDrop).toFixed(1);
 
-    // Compute left positions for pointer-current and pointer-goal:
-    // For pointer-current: if currentHba1c is 8 => 22%, 9 => 20%, etc.
-    const pointerCurrentLeft = 22 - 2 * (presalesHba1c - 8); // in percent
-
-    // For pointer-goal: using provided examples: if goalHba1c is 10 => 21%, if 9 => 27%, if 8 => 33%.
-    // A linear formula: pointerGoalLeft = 27 + 6 * (9 - goalHba1c)
-    const pointerGoalLeft = 27 + 6 * (9 - goalHba1c);
-
-    // Current date string (Month day)
+    // 4) Current date (Month day) + current Hba1c
     const currentDate = new Date();
     const currentDateString = formatMonthDay(currentDate);
     const currentHba1c = presalesHba1c.toFixed(1);
@@ -76,8 +66,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     // Build the HTML
     const html = `
       <!DOCTYPE html>
-      <html>
-        <head> 
+      <html> 
+        <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <title>Consultation Plan for ${customer.name}</title>
@@ -199,32 +189,36 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               display: block;
               margin: 0 auto;
             }
-            /* Pointer images: positions set dynamically via inline styles */
+            /* Example pointer images */
             .pointer-current {
               position: absolute;
-              top: 10px; /* adjust if needed */
+              top: 10px; /* Adjust as needed */
+              left: 20%; /* Adjust as needed */
+              transform: translate(-50%, -50%);
               width: 25px;
               height: 25px;
             }
             .pointer-goal {
               position: absolute;
-              top: 10px; /* adjust if needed */
+              top: 10px;  
+              left: 80%;  
+              transform: translate(-50%, -50%);
               width: 25px;
               height: 25px;
             }
-            /* Current info: position absolutely; text aligned right */
-            .current-info {
-              position: absolute;
-              top: 80px; /* adjust vertical placement as needed */
-              width: 100%;
-              text-align: right;
+            .goal-date {
               font-size: 14px;
+              font-weight: 400;
+              margin: 10px 0 0;
             }
-            /* Goal info: position absolutely; text aligned left */
-            .goal-info {
-              position: absolute;
-              top: 40px; /* adjust vertical placement as needed */
-              text-align: left;
+            .goal-hba1c {
+              color: green;
+              font-size: 14px;
+              margin: 0;
+              font-weight: 400;
+            }
+            .current-info {
+              margin-top: 10px;
               font-size: 14px;
             }
           </style>
@@ -247,25 +241,35 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/d.webp?v=1744625952" alt="Additional Visual">
             </picture>
           </div>
-          <!-- Results Expected Section -->
+
+ <!-- Results Expected Section -->
           <div class="results-expected">
             <p class="results-expected-p">Results Expected in</p>
             <h3 class="results-expected-h3">${daysToAdd} days</h3>
           </div>
-          <!-- Goal Info Section (positioned based on pointer-goal) -->
-          <div class="goal-info" style="left: ${pointerGoalLeft}%;">
+          
+          <!-- Display goal date + hba1c -->
             <p class="goal-date">${goalDateString}</p>
-            <p class="goal-hba1c" style="color: green;">${goalHba1c}%</p>
-          </div>
-          <!-- Bar Section with Pointers and Current Info -->
+            <p class="goal-hba1c">${goalHba1c}%</p>  
+            
+          <!-- Bar Image + Pointers + Goal/Current Info -->
           <div class="bar-section">
+            <!-- The bar image -->
             <img class="bar-image" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/bar.webp?v=1744629571" alt="Color Bar"/>
-            <img class="pointer-current" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Circle.webp?v=1744629571" alt="Current Pointer" style="left: ${pointerCurrentLeft}%;">
-            <img class="pointer-goal" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/circle_with_arrow.webp?v=1744629571" alt="Goal Pointer" style="left: ${pointerGoalLeft}%;">
-            <div class="current-info" style="left: ${pointerCurrentLeft}%;">
-              <p>${currentDateString}: ${currentHba1c}%</p>
-            </div>
+
+            <!-- Current pointer above the bar for current Hba1c -->
+            <img class="pointer-current" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Circle.webp?v=1744629571" alt="Current Pointer" />
+
+            <!-- Goal pointer below the bar for goal Hba1c -->
+            <img class="pointer-goal" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/circle_with_arrow.webp?v=1744629571" alt="Goal Pointer" />
+
+            
+
+            <!-- Below the bar: Current date + current hba1c -->
+            <p class="current-info">${currentDateString}: ${currentHba1c}%</p>
           </div>
+
+         
         </body>
       </html>
     `;
