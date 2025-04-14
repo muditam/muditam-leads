@@ -20,7 +20,12 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       return res.status(404).send("Consultation details not found.");
     }
 
-    // Build an HTML response that combines customer and consultation details
+    const mobileBackgroundURL = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_11_2025_12_36_24_PM_1.png?v=17444557273";
+    const desktopBackgroundURL = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_11_2025_04_42_09_PM_1.jpg?v=1744455727";
+
+    const courseDuration = consultationDetails.closing?.courseDuration || "Not provided";
+
+    // Build an HTML response with a wrapper div that does the styling.
     const html = `
       <!DOCTYPE html>
       <html>
@@ -29,39 +34,87 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <title>Consultation Plan for ${customer.name}</title>
           <!-- Prevent search engines from indexing this page -->
           <meta name="robots" content="noindex, nofollow">
+          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Poppins:wght@300;400;500;600;700&display=swap">
           <style>
+            /* Clean body */
             body { 
-              font-family: Arial, sans-serif; 
-              margin: 20px; 
-              padding: 20px; 
-              line-height: 1.6; 
+              margin: 0; 
+              padding: 0; 
+              font-family: 'Poppins', sans-serif;
+            }
+            /* Wrapper that holds the background image */
+            .wrapper {
+              min-height: 100vh;
               background-size: cover;
               background-repeat: no-repeat;
-              background-position: center;
+              background-position: center center;
             }
             /* Mobile background image for widths less than 768px */
-            @media (max-width: 767px) {
-              body {
-                background-image: url("https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_11_2025_12_36_24_PM_1.png?v=1744455727");
+            @media only screen and (max-width: 767px) {
+              .wrapper {
+                background-image: url("${mobileBackgroundURL}");
               }
             }
             /* Desktop background image for widths 768px and above */
-            @media (min-width: 768px) {
-              body {
-                background-image: url("https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_11_2025_04_42_09_PM_1.jpg?v=1744455727");
+            @media only screen and (min-width: 768px) {
+              .wrapper {
+                background-image: url("${desktopBackgroundURL}");
               }
             }
-            h1, h2 { color: #333; }
-            .section { margin-bottom: 20px; }
-            .label { font-weight: bold; }
+            /* Container to center content vertically & horizontally */
+            .container {
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              text-align: center;
+              padding: 20px;
+              box-sizing: border-box;
+            }
+            /* A dark overlay behind the text */
+            .overlay {
+              background-color: rgba(0, 0, 0, 0.6);
+              color: #fff;
+              padding: 20px 30px;
+              border-radius: 8px;
+              max-width: 90%;
+              width: 400px;
+              margin: 0 auto;
+            }
+            
+            .dmp-heading{
+            font-size: 25px;
+            font-weight: 500;
+            font-family: 'Bebas Neue', cursive;
+            }
+
+            .dmp-heading-h1{
+            font-size: 23px;
+            font-weight: 400;
+            }
+
+            .duration-badge {
+              display: inline-block;
+              background-color: #000;
+              color: #fff;
+              padding: 5px 10px;
+              border-radius: 4px;
+              margin-top: 10px;
+              font-size: 1rem;
+            }
           </style>
         </head>
         <body>
-          <div class="section"> 
-            <p class="label">${customer.name}'s</p> 
-            <h1>DIABETES</h1>
-            <h2>MANAGEMENT PLAN</h2>
-            <p class="label">${consultationDetails.closing && consultationDetails.closing.courseDuration ? consultationDetails.closing.courseDuration : "Not provided"}</p> 
+          <div class="wrapper">
+            <div class="container">
+              <div class="overlay">
+                <h1 class="dmp-heading-h1">${customer.name}'s</h1>
+                <h2 class="dmp-heading">DIABETES<br> MANAGEMENT<br> PLAN</h2>
+                <div class="duration-badge">
+                  ${courseDuration}
+                </div>
+              </div>
+            </div>
           </div>
         </body>
       </html>
