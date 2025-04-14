@@ -28,18 +28,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
     const courseDuration = consultationDetails.closing?.courseDuration || "Not provided";
   
-
-    let daysToAdd = 0;
-    const cd = courseDuration.toLowerCase().trim();
-    if (cd === "1 month") {
-      daysToAdd = 30;
-    } else if (cd === "2 months") {
-      daysToAdd = 60;
-    } else if (cd === "3 months") {
-      daysToAdd = 90;
-    } else if (cd === "4 months") {
-      daysToAdd = 120;
-    }
+ 
 
     // Compute the goal date as current date + daysToAdd and format it
     const goalDate = new Date();
@@ -232,13 +221,12 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               margin: 20px 0 10px;
               font-size: 18px;
             }
-            .expected-options {
-              display: flex;
+            .expected-options { 
               justify-content: center;
               gap: 10px;
             }
-            .option-box {
-              display: flex;
+            .option-box { 
+            display: flex;
               align-items: center;
               background-color: #F4F4F4;
               padding: 5px 10px;
@@ -247,6 +235,34 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
             .option-box input {
               margin-right: 5px;
+            }
+              .Your-dce{
+              font-size: 32px;
+              font-weight: 400;
+              color: #C0C0C0;
+            }
+            .Your-dce-sp{
+              font-size: 40px;
+              font-weight: 600;
+              line-height: 30px;
+            }
+            .customer-dmp-top{
+              text-align: left;
+              padding: 10px;
+            }
+            .customer-dmp{
+              font-size: 18px;
+            }
+            .customer-dmp-1{
+              margin-top: -5px;
+              font-size: 22px;
+              color: #543087;
+            }
+            .customer-dmp-2{
+              background-color: #F4F4F4;
+              color: black;
+                box-shadow: 0 0 4px 0;
+                border-radius: 15px;
             }
           </style>
         </head>
@@ -271,7 +287,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <!-- Results Expected Section -->
           <div class="results-expected">
             <p class="results-expected-p">Results Expected in</p>
-            <h3 class="results-expected-h3">${daysToAdd} days</h3>
+            <h3 class="results-expected-h3">90 Days</h3>
           </div>
           <!-- Goal Section -->
           <div class="goal-section">
@@ -279,7 +295,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             <p class="goal-hba1c" id="goalHba1cDisplay">${goalHba1c}%</p>
             <!-- Goal pointer image (if needed) -->
             <div class="goal-pointer-image">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HbA1c_Bar.webp?v=1744635117" alt="Goal Pointer" style="width:50px;height:50px;">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HbA1c_Bar.webp?v=1744635117" alt="Goal Pointer" style="width:90%;height:60px;">
             </div>
             <!-- Current bar info: current date and current Hba1c -->
             <div class="current-bar-info">
@@ -299,6 +315,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 <input type="checkbox" name="expectedOption" value="lifestyle" onchange="updateGoalHba1c(this)" />
                 <span>With Diet, Lifestyle modifications & Supplements</span>
               </label>
+            </div>
+            <div><p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p></div>
+            
+            <hr style="height: 1px; background-color: #C0C0C0; width: 70%;">
+            
+            <div class="customer-dmp-top"><p class="customer-dmp">${customer.name}'s</p>
+            <p class="customer-dmp-1">Diabetes Management Plan</p>
+            <span class="customer-dmp-2">${customer.age}/${presales.gender}</span>
             </div>
           </div>
           <script>
