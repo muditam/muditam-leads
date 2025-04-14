@@ -322,7 +322,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             
             <div class="customer-dmp-top"><p class="customer-dmp">${customer.name}'s</p>
             <p class="customer-dmp-1">Diabetes Management Plan</p>
-            <span class="customer-dmp-2">${customer.age}/${presales.gender}</span>
+            <span class="customer-dmp-2">${customer.age}/gender</span>
             </div>
           </div>
           <script>
