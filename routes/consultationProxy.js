@@ -98,6 +98,39 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               margin-top: 10px;
               font-size: 50px;
             }
+
+            @media only screen and (max-width: 767px) {
+            .dmp-heading{
+              font-size: 50px; 
+              line-height: 60px;
+              letter-spacing: 3px;
+            }
+
+            .dmp-heading-h1{
+              font-size: 30px;
+              font-weight: 400;
+              margin: 0 auto 10px;
+            }
+
+            .duration-badge {
+              display: inline-block;
+              background-color: #000;
+              color: #fff;
+              padding: 5px 15px;
+              border-radius: 10px;
+              margin-top: 10px;
+              font-size: 25px;
+            }
+
+            .additional-image {
+              text-align: center;
+              margin-top: 20px;
+            }
+            .additional-image img {
+              max-width: 100%;
+              height: auto;
+            }
+            }
           </style>
         </head>
         <body>
@@ -112,10 +145,18 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               </div>
             </div>
           </div>
+           <!-- Additional Image Section -->
+            <div class="additional-image">
+              <picture>
+                <source media="(min-width: 768px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/d.webp?v=1744625952">
+                <source media="(max-width: 767px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/m.webp?v=1744625953">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/d.webp?v=1744625952" alt="Additional Visual">
+              </picture>
+            </div>
         </body>
       </html>
     `;
-    
+
     res.setHeader("Content-Type", "text/html");
     res.send(html);
   } catch (error) {
