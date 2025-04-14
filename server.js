@@ -77,6 +77,9 @@ app.use((req, res, next) => {
 
 app.use(express.json());  
 
+app.use(express.static(path.join(__dirname, 'build')));
+
+
 app.use("/api/templates", templateRoutes);
 app.use("/api/shopify", shopifyProductsRoute);
 app.use("/api/shopify", shopifyOrdersRoute);
@@ -109,6 +112,10 @@ app.use(customerRoutes);
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
 app.use("/", consultationProxyRoutes);
+
+app.get('/apps/consultation/:id', (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+});
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
