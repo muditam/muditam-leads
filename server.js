@@ -111,7 +111,10 @@ app.use(customerRoutes);
 // Use the consultation details routes for all endpoints starting with /api/consultation-details
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
-app.use("/", consultationProxyRoutes);
+// app.use("/", consultationProxyRoutes);
+
+app.use("/api/proxy/consultation", consultationProxyRoutes);
+
 
 app.get('/apps/consultation/:id', (req, res) => {
   res.sendFile(path.join(__dirname, 'build', 'index.html'));
