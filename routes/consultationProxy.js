@@ -5,7 +5,7 @@ const ConsultationDetails = require("../models/ConsultationDetails");
 const Customer = require("../models/Customer");
 
 // GET route that returns JSON data for a given customerId
-router.get("/proxy/consultation/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   const customerId = req.params.id;
 
   try {
