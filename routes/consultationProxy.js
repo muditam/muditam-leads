@@ -54,7 +54,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <title>Consultation Plan for ${customer.name}</title>
           <!-- Prevent search engines from indexing this page -->
           <meta name="robots" content="noindex, nofollow">
-          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Poppins:wght@300;400;500;600;700&display=swap">
+          
           <style>
             body { 
               margin: 0; 
