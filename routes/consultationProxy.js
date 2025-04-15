@@ -236,34 +236,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             .option-box input {
               margin-right: 5px;
             }
-              .Your-dce{
-              font-size: 32px;
-              font-weight: 400;
-              color: #C0C0C0;
-            }
-            .Your-dce-sp{
-              font-size: 40px;
-              font-weight: 600;
-              line-height: 30px;
-            }
-            .customer-dmp-top{
-              text-align: left;
-              padding: 10px;
-            }
-            .customer-dmp{
-              font-size: 18px;
-            }
-            .customer-dmp-1{
-              margin-top: -5px;
-              font-size: 22px;
-              color: #543087;
-            }
-            .customer-dmp-2{
-              background-color: #F4F4F4;
-              color: black;
-                box-shadow: 0 0 4px 0;
-                border-radius: 15px;
-            }
+              
           </style>
         </head>
         <body>
@@ -318,7 +291,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             </div>
             <div><p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p></div>
             
-            <hr style="height: 1px; background-color: #C0C0C0; width: 70%;">
+            <hr>
             
             
             </div>

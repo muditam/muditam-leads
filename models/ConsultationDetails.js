@@ -21,7 +21,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       outsideMeals: { type: String },
       timeOfSleep: { type: String },
       notes: { type: String },
-      assignExpert: { type: String }, // You may later change this to ObjectId referencing Employee if needed.
+      assignExpert: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" }, 
       file: { type: String }, // Stores file path or URL
       // Call checklist from Presales.js
       checklist: {
