@@ -289,11 +289,6 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 <span>With Diet, Lifestyle modifications & Supplements</span>
               </label>
             </div>
-            <div><p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p></div>
-            
-            <hr>
-            
-            
             </div>
           </div>
           <script>
