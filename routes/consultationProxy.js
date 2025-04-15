@@ -27,8 +27,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     }
 
     const courseDuration = consultationDetails.closing?.courseDuration || "Not provided";
-  
- 
+
+    const gender = consultationDetails.presales?.gender || "Not provided";
 
     // Compute the goal date as current date + daysToAdd and format it
     const goalDate = new Date();
@@ -320,9 +320,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             
             <hr style="height: 1px; background-color: #C0C0C0; width: 70%;">
             
-            <div class="customer-dmp-top"><p class="customer-dmp">${customer.name}'s</p>
-            <p class="customer-dmp-1">Diabetes Management Plan</p>
-            <span class="customer-dmp-2">${customer.age}/gender</span>
+            
             </div>
           </div>
           <script>
