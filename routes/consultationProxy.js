@@ -28,8 +28,6 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
     const courseDuration = consultationDetails.closing?.courseDuration || "Not provided";
 
-    const gender = consultationDetails.presales?.gender || "Not provided";
-
     // Compute the goal date as current date + daysToAdd and format it
     const goalDate = new Date();
     goalDate.setDate(goalDate.getDate() + daysToAdd);
@@ -288,7 +286,9 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 <input type="checkbox" name="expectedOption" value="lifestyle" onchange="updateGoalHba1c(this)" />
                 <span>With Diet, Lifestyle modifications & Supplements</span>
               </label>
-            </div>
+            </div> 
+            
+            
             </div>
           </div>
           <script>
