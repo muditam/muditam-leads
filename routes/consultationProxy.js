@@ -31,7 +31,6 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     }
 
     const courseDuration = consultationDetails.closing?.courseDuration || "Not provided";
-
     const daysToAdd = 90;
 
     // Compute the goal date as current date + daysToAdd and format it
@@ -51,8 +50,44 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     let defaultImprovement = 0.8; // default improvement for Only Supplements
     let goalHba1c = (presalesHba1c - defaultImprovement).toFixed(1);
 
-    const gender = customer.gender || "Not specified";
-    
+    const presalesGender = consultationDetails.presales?.gender || "Not specified";
+
+    // Get selected products from consultation details (if any)
+    const selectedProducts = consultationDetails.consultation?.selectedProducts || [];
+
+    // Map selected product names to their details (image URL and description)
+    const productDetailsMap = {
+      "Karela Jamun Fizz": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
+        description: "Control blood sugar levels"
+      },
+      "Liver Fix": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/lf_2.webp?v=1744809598",
+        description: "Support liver health"
+      }
+    };
+
+    // Generate the HTML for each product card
+    let productCardsHtml = "";
+    selectedProducts.forEach(product => {
+      const details = productDetailsMap[product];
+      if (!details) return;
+      productCardsHtml += `
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 20px; margin: 10px 0; background: #fff; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <img src="${details.image}" alt="${product}" style="height: 120px; width: auto; object-fit: contain;" />
+          <div style="flex-grow: 1; margin-left: 20px;">
+            <h2 style="margin: 0 0 5px; font-size: 22px;">${product}</h2>
+            <p style="margin: 0 0 10px; font-size: 16px; color: #555;">${details.description}</p>
+            <hr style="border: none; height: 1px; background-color: #ccc; margin: 10px 0;" />
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 14px; font-weight: bold; color: #333;">${customer.lookingFor || "Condition"}</span>
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988" alt="tag" style="height: 30px;" />
+            </div>
+          </div>
+        </div>
+      `;
+    });
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -124,7 +159,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
             @media only screen and (max-width: 767px) {
               .dmp-heading{
-                font-size: 50px; 
+                font-size: 45px; 
                 line-height: 60px;
                 letter-spacing: 3px;
               }
@@ -232,7 +267,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               gap: 10px;
             }
             .option-box { 
-            display: flex;
+              display: flex;
               align-items: center;
               background-color: #F4F4F4;
               padding: 5px 10px;
@@ -246,6 +281,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               font-size: 32px;
               font-weight: 400;
               color: #C0C0C0;
+              text-align: center;
             }
             .Your-dce-sp{
               font-size: 40px;
@@ -253,22 +289,25 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               line-height: 30px;
             }
             .customer-dmp-top{
-              text-align: left;
-              padding: 10px;
+              text-align: left; 
+              margin: 0;
             }
             .customer-dmp{
               font-size: 18px;
             }
             .customer-dmp-1{
-              margin-top: -5px;
+              margin-top: 0px;
               font-size: 22px;
               color: #543087;
             }
             .customer-dmp-2{
               background-color: #F4F4F4;
               color: black;
-                box-shadow: 0 0 4px 0;
-                border-radius: 15px;
+              box-shadow: 0 0 4px 0;
+              border-radius: 15px;
+            }
+            .Your-dce-d{
+              padding: 10px;
             }
           </style>
         </head>
@@ -278,7 +317,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               <div class="overlay">
                 <h1 class="dmp-heading-h1">${customer.name}'s</h1>
                 <h2 class="dmp-heading">DIABETES<br> MANAGEMENT<br> PLAN</h2>
-                <div class="duration-badge">${courseDuration}</div>
+                <div class="duration-badge">${consultationDetails.closing && consultationDetails.closing.courseDuration ? consultationDetails.closing.courseDuration : "Not provided"}</div>
               </div>
             </div>
           </div>
@@ -324,14 +363,17 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             </div> 
           </div>
 
-          <div><p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p>
+          <div class="Your-dce-d">
+            <p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p>
             
             <hr style="height: 1px; background-color: #C0C0C0; width: 70%;">
 
             <div class="customer-dmp-top"><p class="customer-dmp">${customer.name}'s</p></div>
             <p class="customer-dmp-1">Diabetes Management Plan</p>
-            <span class="customer-dmp-2">${customer.age}/${gender}</span>
-            </div>
+            <span class="customer-dmp-2">${customer.age}/${presalesGender}</span>
+          </div>
+
+          ${productCardsHtml}
 
           <script>
             var currentHba1c = ${presalesHba1c};
