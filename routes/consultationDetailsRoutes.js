@@ -32,7 +32,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// POST a new consultation detail or update existing one for the same customerId
 router.post("/", async (req, res) => {
   try {
     const { customerId, presales, consultation, closing } = req.body;
@@ -40,16 +39,25 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "customerId is required" });
     }
 
-    // Build an update object based on what is sent in the payload.
+    // Build an update object using dot notation for the presales subdocument.
     const updateData = {};
+
     if (presales) {
-      updateData.presales = presales;
+      // Iterate over each key in the presales object, e.g., leadStatus, hba1c, etc.
+      Object.keys(presales).forEach((key) => {
+        updateData[`presales.${key}`] = presales[key];
+      });
     }
     if (consultation) {
-      updateData.consultation = consultation;
+      // If you want a similar approach for consultation, you can do:
+      Object.keys(consultation).forEach((key) => {
+        updateData[`consultation.${key}`] = consultation[key];
+      });
     }
     if (closing) {
-      updateData.closing = closing;
+      Object.keys(closing).forEach((key) => {
+        updateData[`closing.${key}`] = closing[key];
+      });
     }
 
     const options = { new: true, upsert: true, runValidators: true };
@@ -68,6 +76,8 @@ router.post("/", async (req, res) => {
     res.status(500).json({ message: "Error saving consultation detail", error: error.message });
   }
 });
+
+
 
 // PUT to update a consultation detail by ID
 router.put("/:id", async (req, res) => {

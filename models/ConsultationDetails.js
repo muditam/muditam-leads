@@ -17,7 +17,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       dietType: { type: String },
       weight: { type: Number },
       sittingTime: { type: String },
-      exerciseRoutine: { type: String },
+      exerciseRoutine: { type: String }, 
       outsideMeals: { type: String },
       timeOfSleep: { type: String },
       notes: { type: String },
@@ -70,7 +70,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
 
     // Data coming from Closing.js
     closing: {
-      consultationStatus: { type: String }, // New field for Consultation Status
+      consultationStatus: { type: String },  
       expectedResult: { type: String },       // Could be the option id or descriptive text
       preferredDiet: { type: String },
       courseDuration: { type: String },
@@ -83,10 +83,25 @@ const ConsultationDetailsSchema = new mongoose.Schema(
         preferredDate2: { type: String },
       },
     },
+    
+    followups: [
+      {
+        date: { type: String },
+        takingSupplements: { type: String }, // "Yes" or "No"
+        sendingGlucometerPhotos: { type: String }, // "Yes" or "No"
+        currentSugar: {
+          fasting: { type: String },
+          pp: { type: String },
+        },
+        hba1cTestDone: { type: String }, // "Yes" or "No"
+        hba1cValue: { type: String }, // if hba1cTestDone is "Yes"
+        drop: { type: String }, // "Yes" or "No"
+      }
+    ],
   },
   {
     timestamps: true,
-  }
+  } 
 );
 
 module.exports = mongoose.model("ConsultationDetails", ConsultationDetailsSchema);

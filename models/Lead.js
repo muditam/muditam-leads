@@ -5,7 +5,7 @@ const LeadSchema = new mongoose.Schema({
   time: String,
   name: String,
   contactNumber: String, 
-  leadSource: String,
+  leadSource: String, 
   enquiryFor: String, 
   customerType: String,
   agentAssigned: String,

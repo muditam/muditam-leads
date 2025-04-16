@@ -1,9 +1,9 @@
 const express = require("express");
 const Customer = require("../models/Customer");
-const Employee = require("../models/Employee");  // To get assigned employees for "Assigned To" dropdown
+const Employee = require("../models/Employee");  // Used for "Assigned To" dropdown if needed
 const router = express.Router();
 
-// Create a new customer
+// Create a new customer with duplicate phone check
 router.post("/api/customers", async (req, res) => {
   const { name, phone, age, location, lookingFor, assignedTo, followUpDate } = req.body;
   
@@ -12,6 +12,12 @@ router.post("/api/customers", async (req, res) => {
   }
 
   try {
+    // Check if a customer with the same phone already exists
+    const existingCustomer = await Customer.findOne({ phone });
+    if (existingCustomer) {
+      return res.status(400).json({ message: "Phone number already exists." });
+    }
+
     const newCustomer = new Customer({
       name,
       phone,
@@ -30,37 +36,64 @@ router.post("/api/customers", async (req, res) => {
   }
 });
 
-// Fetch all customers or filter by some criteria
+// Get customers with pagination and optional filters
 router.get("/api/customers", async (req, res) => {
-  const { page = 1, limit = 30, filters = '{}', assignedTo } = req.query;
+  // Parse pagination parameters and filters
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 30;
+  const filters = req.query.filters || '{}';
   const filterCriteria = JSON.parse(filters);
+  const assignedTo = req.query.assignedTo;
 
   const query = {};
-
-  // Apply filtering based on query params
-  if (filterCriteria.name) query.name = { $regex: filterCriteria.name, $options: 'i' };
-  if (filterCriteria.phone) query.phone = filterCriteria.phone;
-  if (filterCriteria.location) query.location = { $regex: filterCriteria.location, $options: 'i' };
-  if (assignedTo) query.assignedTo = assignedTo;
+  if (filterCriteria.name) {
+    query.name = { $regex: filterCriteria.name, $options: "i" };
+  }
+  if (filterCriteria.phone) {
+    query.phone = filterCriteria.phone;
+  }
+  if (filterCriteria.location) {
+    query.location = { $regex: filterCriteria.location, $options: "i" };
+  }
+  if (assignedTo) {
+    query.assignedTo = assignedTo;
+  }
 
   try {
     const totalCustomers = await Customer.countDocuments(query);
-    const customers = await Customer.find(query)
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+
+    const customers = await Customer.aggregate([
+      { $match: query },
+      { $sort: { createdAt: -1 } }, // Sort by creation date descending
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: "consultationdetails", // Ensure this collection name is correct
+          localField: "_id",
+          foreignField: "customerId",
+          as: "consultation",
+        },
+      },
+      {
+        $addFields: {
+          presales: { $arrayElemAt: ["$consultation.presales", 0] },
+          closing: { $arrayElemAt: ["$consultation.closing", 0] },
+        },
+      },
+    ]);
 
     res.status(200).json({
       customers,
       totalCustomers,
       totalPages: Math.ceil(totalCustomers / limit),
-      currentPage: Number(page),
+      currentPage: page,
     });
   } catch (error) {
-    console.error('Error fetching customers:', error);
-    res.status(500).json({ message: 'Error fetching customers', error });
+    console.error("Error fetching customers:", error);
+    res.status(500).json({ message: "Error fetching customers", error });
   }
 });
-
 
 // Fetch a single customer by ID
 router.get("/api/customers/:id", async (req, res) => {
@@ -83,15 +116,11 @@ router.put("/api/customers/:id", async (req, res) => {
   const { name, phone, age, location, lookingFor, assignedTo, followUpDate } = req.body;
 
   try {
-    const updatedCustomer = await Customer.findByIdAndUpdate(id, {
-      name,
-      phone,
-      age,
-      location,
-      lookingFor,
-      assignedTo,
-      followUpDate,
-    }, { new: true });
+    const updatedCustomer = await Customer.findByIdAndUpdate(
+      id,
+      { name, phone, age, location, lookingFor, assignedTo, followUpDate },
+      { new: true }
+    );
 
     if (!updatedCustomer) {
       return res.status(404).json({ message: "Customer not found" });
