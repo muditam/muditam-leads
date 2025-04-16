@@ -13,6 +13,10 @@ function formatMonthDay(dateObj) {
 router.get("/proxy/consultation/:id", async (req, res) => {
   const customerId = req.params.id;
 
+  if (req.headers.accept && req.headers.accept.includes("application/json")) {
+    return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
+  }
+
   try {
     // Fetch customer data using customerId
     const customer = await Customer.findById(customerId).lean();
@@ -27,6 +31,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     }
 
     const courseDuration = consultationDetails.closing?.courseDuration || "Not provided";
+
+    const daysToAdd = 90;
 
     // Compute the goal date as current date + daysToAdd and format it
     const goalDate = new Date();
@@ -45,6 +51,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     let defaultImprovement = 0.8; // default improvement for Only Supplements
     let goalHba1c = (presalesHba1c - defaultImprovement).toFixed(1);
 
+    const gender = customer.gender || "Not specified";
+    
     const html = `
       <!DOCTYPE html>
       <html>
@@ -324,7 +332,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             <p class="customer-dmp-1">Diabetes Management Plan</p>
             <span class="customer-dmp-2">${customer.age}/${gender}</span>
             </div>
-            
+
           <script>
             var currentHba1c = ${presalesHba1c};
             function updateGoalHba1c(selected) {
