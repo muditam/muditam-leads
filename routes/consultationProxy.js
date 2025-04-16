@@ -234,6 +234,34 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             .option-box input {
               margin-right: 5px;
             }  
+            .Your-dce{
+              font-size: 32px;
+              font-weight: 400;
+              color: #C0C0C0;
+            }
+            .Your-dce-sp{
+              font-size: 40px;
+              font-weight: 600;
+              line-height: 30px;
+            }
+            .customer-dmp-top{
+              text-align: left;
+              padding: 10px;
+            }
+            .customer-dmp{
+              font-size: 18px;
+            }
+            .customer-dmp-1{
+              margin-top: -5px;
+              font-size: 22px;
+              color: #543087;
+            }
+            .customer-dmp-2{
+              background-color: #F4F4F4;
+              color: black;
+                box-shadow: 0 0 4px 0;
+                border-radius: 15px;
+            }
           </style>
         </head>
         <body>
@@ -287,6 +315,16 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               </label>
             </div> 
           </div>
+
+          <div><p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p>
+            
+            <hr style="height: 1px; background-color: #C0C0C0; width: 70%;">
+
+            <div class="customer-dmp-top"><p class="customer-dmp">${customer.name}'s</p></div>
+            <p class="customer-dmp-1">Diabetes Management Plan</p>
+            <span class="customer-dmp-2">${customer.age}/${gender}</span>
+            </div>
+            
           <script>
             var currentHba1c = ${presalesHba1c};
             function updateGoalHba1c(selected) {
@@ -310,8 +348,6 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         </body>
       </html>
     `;
-
-
     res.setHeader("Content-Type", "text/html");
     res.send(html);
   } catch (error) {
