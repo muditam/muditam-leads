@@ -233,8 +233,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
             .option-box input {
               margin-right: 5px;
-            }
-              
+            }  
           </style>
         </head>
         <body>
@@ -287,9 +286,6 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 <span>With Diet, Lifestyle modifications & Supplements</span>
               </label>
             </div> 
-            
-            
-            </div>
           </div>
           <script>
             var currentHba1c = ${presalesHba1c};
