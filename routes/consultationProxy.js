@@ -57,65 +57,65 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
     // Map selected product names to their details (image URL and description)
     // Map selected product names to their details (image URL and description)
-const productDetailsMap = {
-  "Karela Jamun Fizz": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
-    description: "Control blood sugar levels"
-  },
-  "Liver Fix": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/lf_2.webp?v=1744809988",
-    description: "Support liver health"
-  },
-  "Sugar Defend Pro": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/SDP_2_4fdc364f-3197-4867-9f63-0022dcac2586.webp?v=1744875711",
-    description: "Blood sugar control"
-  },
-  "Vasant Kusmakar Ras": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/VKR.webp?v=1744875711",
-    description: "Metabolic fire balance"
-  },
-  "Stress & Sleep": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/S_S_9a0d9003-3f5f-4514-8a5a-4c014b5dea06.webp?v=1744875711",
-    description: "Calming sleep"
-  },
-  "Chandraprabha Vati": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/CPV_309f6255-286c-4c40-8d44-eea07f5a5e36.webp?v=1744875711",
-    description: "Urinary tract health"
-  },
-  "Heart Defend Pro": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HDP_2.webp?v=1744875711",
-    description: "Cardio support"
-  },
-  "Performance Forever": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PF_2.webp?v=1744875711",
-    description: "Endurance booster"
-  },
-  "Power Gut": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PG_2_c7332d00-50b9-476e-aeb3-005babd4b95d.webp?v=1744875711",
-    description: "Digestive balance"
-  },
-  "Blood Test": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
-    description: "Body Check-Up"
-  },
-  "Shilajit with Gold": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Shilajit_3.webp?v=1744875711",
-    description: "Cellular rejuvenation"
-  }
-};
+    const productDetailsMap = {
+      "Karela Jamun Fizz": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
+        description: "Control blood sugar levels"
+      },
+      "Liver Fix": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/lf_2.webp?v=1744809988",
+        description: "Support liver health"
+      },
+      "Sugar Defend Pro": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/SDP_2_4fdc364f-3197-4867-9f63-0022dcac2586.webp?v=1744875711",
+        description: "Blood sugar control"
+      },
+      "Vasant Kusmakar Ras": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/VKR.webp?v=1744875711",
+        description: "Metabolic fire balance"
+      },
+      "Stress & Sleep": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/S_S_9a0d9003-3f5f-4514-8a5a-4c014b5dea06.webp?v=1744875711",
+        description: "Calming sleep"
+      },
+      "Chandraprabha Vati": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/CPV_309f6255-286c-4c40-8d44-eea07f5a5e36.webp?v=1744875711",
+        description: "Urinary tract health"
+      },
+      "Heart Defend Pro": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HDP_2.webp?v=1744875711",
+        description: "Cardio support"
+      },
+      "Performance Forever": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PF_2.webp?v=1744875711",
+        description: "Endurance booster"
+      },
+      "Power Gut": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PG_2_c7332d00-50b9-476e-aeb3-005babd4b95d.webp?v=1744875711",
+        description: "Digestive balance"
+      },
+      "Blood Test": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
+        description: "Body Check-Up"
+      },
+      "Shilajit with Gold": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Shilajit_3.webp?v=1744875711",
+        description: "Cellular rejuvenation"
+      }
+    };
 
-const conditionMap = {
-  "Karela Jamun Fizz":          "Diabetes",
-  "Sugar Defend Pro":           "Diabetes",
-  "Vasant Kusmakar Ras":        "Diabetes",
-  "Liver Fix":                  "Liver",
-  "Stress & Sleep":             "Sleep",
-  "Chandraprabha Vati":         "Kidney",
-  "Heart Defend Pro":           "Heart",
-  "Performance Forever":        "Vitality",
-  "Power Gut":                  "Gut",
-  "Shilajit with Gold":         "Immunity",  
-};
+    const conditionMap = {
+      "Karela Jamun Fizz": "Diabetes",
+      "Sugar Defend Pro": "Diabetes",
+      "Vasant Kusmakar Ras": "Diabetes",
+      "Liver Fix": "Liver",
+      "Stress & Sleep": "Sleep",
+      "Chandraprabha Vati": "Kidney",
+      "Heart Defend Pro": "Heart",
+      "Performance Forever": "Vitality",
+      "Power Gut": "Gut",
+      "Shilajit with Gold": "Immunity",
+    };
 
 
     // Generate the HTML for each product card
@@ -168,10 +168,10 @@ const conditionMap = {
     // Generate add-ons section based on freebies
     const freebies = consultationDetails.closing?.freebie || [];
     const addOnMap = {
-      "Dumbbells":              "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/dumbells.webp?v=1744881971",
-      "Glucometer +10 strips":  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Glucometer_1.webp?v=1744881970",
-      "Glucometer +25 strips":  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/25_strip_glucometer.webp?v=1744882266",
-      "Diet Plan":              "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Diet_plan.webp?v=1744881970"
+      "Dumbbells": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/dumbells.webp?v=1744881971",
+      "Glucometer +10 strips": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Glucometer_1.webp?v=1744881970",
+      "Glucometer +25 strips": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/25_strip_glucometer.webp?v=1744882266",
+      "Diet Plan": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Diet_plan.webp?v=1744881970"
     };
     let addOnsHtml = "";
     if (freebies.length) {
@@ -265,36 +265,7 @@ const conditionMap = {
               margin-top: 10px;
               font-size: 50px;
             }
-            @media only screen and (max-width: 767px) {
-              .dmp-heading{
-                font-size: 45px; 
-                line-height: 60px;
-                letter-spacing: 3px;
-              }
-              .dmp-heading-h1{
-                font-size: 30px;
-                font-weight: 400;
-                margin: 0 auto 10px;
-              }
-              .duration-badge {
-                font-size: 25px;
-                padding: 5px 15px;
-              }
-                .addons-container {
-                flex-direction: column;
-                gap: 5px;
-              }
-                .risks-container {
-                flex-wrap: nowrap;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-                scroll-snap-type: x mandatory;
-                scroll-behavior: smooth;
-              }
-              .risk-item {
-                scroll-snap-align: start;
-              }
-            }
+            
             .additional-image {
               text-align: center;
               margin-top: 20px;
@@ -435,43 +406,81 @@ const conditionMap = {
               display: flex;
               gap: 20px;
             }
-            .risks-section {
-              margin-top: 40px;
-            }
-            .risks-section h3 {
-              font-size: 26px;
-              font-weight: bold;
-              margin-bottom: 10px;
-            }
-            .risks-section p {
-              font-size: 14px;
-              margin-bottom: 20px;
-            }
-
-            .risks-container {
-              display: flex;
-              flex-wrap: wrap;
-              gap: 10px;
-            }
-            .risk-item {
-              flex: 0 0 100px;
-              height: 100px;
-              background: #F4F4F4;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              border-radius: 8px;
-              text-align: center;
-            }
-            .risk-item img {
-              width: 50px;
-              height: 50px;
-            }
-            .risk-item p {
-              margin: 5px 0 0;
-              font-size: 12px;
-              line-height: 1.2;
+             /* Risks section */
+  .risks-section {
+    margin-top: 40px;
+    padding: 0 20px;
+  }
+  .risks-section h3 {
+    font-size: 26px;
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  .risks-section p {
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  .risks-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+  }
+  .risk-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100px;
+    margin: 0 5px;
+  }
+  .risk-item {
+    width: 100px;
+    height: 100px;
+    background: #F4F4F4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+  }
+  .risk-item img {
+    width: 50px;
+    height: 50px;
+  }
+  .risk-block p {
+    margin: 5px 0 0;
+    font-size: 12px;
+    line-height: 1.2;
+    text-align: center;
+  }
+              @media only screen and (max-width: 767px) {
+              .dmp-heading{
+                font-size: 45px; 
+                line-height: 60px;
+                letter-spacing: 3px;
+              }
+              .dmp-heading-h1{
+                font-size: 30px;
+                font-weight: 400;
+                margin: 0 auto 10px;
+              }
+              .duration-badge {
+                font-size: 25px;
+                padding: 5px 15px;
+              }
+                .addons-container {
+                flex-direction: column;
+                gap: 5px;
+              }
+              .risks-container {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scroll-snap-type: x mandatory;
+                scroll-behavior: smooth;
+              }
+              .risk-item {
+                scroll-snap-align: start;
+              }
             }
           </style>
         </head>
@@ -547,33 +556,45 @@ const conditionMap = {
               health complications increases, such as:
             </p>
             <div class="risks-container">
-              <div class="risk-item">
-                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Heart.png?v=1744884197" alt="Heart Disease" />
+              <div class="risk-block">
+                <div class="risk-item">
+                  <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Heart.png?v=1744884197" alt="Heart Disease" />
+                </div>
                 <p>Heart<br>Disease</p>
               </div>
-              <div class="risk-item">
-                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Nerve.png?v=1744884197" alt="Kidney Damage" />
+              <div class="risk-block">
+                <div class="risk-item">
+                  <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Nerve.png?v=1744884197" alt="Kidney Damage" />
+                </div>
                 <p>Kidney<br>Damage</p>
               </div>
-              <div class="risk-item">
-                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Nerve.png?v=1744884197" alt="Nerve Damage" />
+              <div class="risk-block">
+                <div class="risk-item">
+                  <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Nerve.png?v=1744884197" alt="Nerve Damage" />
+                </div>
                 <p>Nerve<br>Damage</p>
               </div>
-              <div class="risk-item">
-                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Foot.png?v=1744884197" alt="Foot Complications" />
+              <div class="risk-block">
+                <div class="risk-item">
+                  <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Foot.png?v=1744884197" alt="Foot Complications" />
+                </div>
                 <p>Foot<br>Complications</p>
               </div>
-              <div class="risk-item">
-                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/vision.png?v=1744884197" alt="Vision Problems" />
+              <div class="risk-block">
+                <div class="risk-item">
+                  <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/vision.png?v=1744884197" alt="Vision Problems" />
+                </div>
                 <p>Vision<br>Problems</p>
               </div>
-              <div class="risk-item">
-                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/infection.png?v=1744884197" alt="Frequent Infections" />
+              <div class="risk-block">
+                <div class="risk-item">
+                  <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/infection.png?v=1744884197" alt="Frequent Infections" />
+                </div>
                 <p>Frequent<br>Infections</p>
               </div>
             </div>
           </div>
-          
+
           <script>
             var currentHba1c = ${presalesHba1c};
             function updateGoalHba1c(selected) {
