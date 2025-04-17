@@ -407,51 +407,90 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               gap: 20px;
             }
              /* Risks section */
-  .risks-section {
-    margin-top: 40px;
-    padding: 0 20px;
-  }
-  .risks-section h3 {
-    font-size: 26px;
-    font-weight: bold;
-    margin-bottom: 10px;
-  }
-  .risks-section p {
-    font-size: 14px;
-    margin-bottom: 20px;
-  }
-  .risks-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-  }
-  .risk-block {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 100px;
-    margin: 0 5px;
-  }
-  .risk-item {
-    width: 100px;
-    height: 100px;
-    background: #F4F4F4;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px;
-  }
-  .risk-item img {
-    width: 50px;
-    height: 50px;
-  }
-  .risk-block p {
-    margin: 5px 0 0;
-    font-size: 12px;
-    line-height: 1.2;
-    text-align: center;
-  }
+            .risks-section {
+              margin-top: 40px;
+              padding: 0 20px;
+            }
+            .risks-section h3 {
+              font-size: 26px;
+              font-weight: bold;
+              margin-bottom: 10px;
+            }
+            .risks-section p {
+              font-size: 14px;
+              margin-bottom: 20px;
+            }
+            .risks-container {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 10px; 
+            }
+            .risk-block {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              width: 100px;
+              margin: 0 5px;
+            }
+            .risk-item {
+              width: 100px;
+              height: 100px;
+              background: #F4F4F4;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              border-radius: 8px;
+            }
+            .risk-item img {
+              width: 50px;
+              height: 50px;
+            }
+            .risk-block p {
+              margin: 5px 0 0;
+              font-size: 12px;
+              line-height: 1.2;
+              text-align: center;
+            }
+
+            .kit-section .kit-items.desktop { display: flex; gap: 40px; }
+            .kit-section .kit-items.mobile { display: none; }
+
+               .kit-section {
+                margin: 40px 20px;
+              }
+              .kit-section h3 {
+                font-size: 26px;
+                font-weight: bold;
+                margin-bottom: 10px;
+              }
+              .kit-section p.intro {
+                font-size: 14px;
+                margin-bottom: 20px;
+              }
+
+              /* --- Desktop two columns --- */
+              .kit-section .kit-items.desktop .col {
+                flex: 1;
+              }
+              .kit-section .kit-items.desktop ul,
+              .kit-section .kit-items.mobile ul {
+                list-style: none;
+                padding: 0;
+                margin: 0;
+              }
+              .kit-section li {
+                display: flex;
+                align-items: flex-start;
+                gap: 10px;
+                margin-bottom: 12px;
+                font-size: 14px;
+              }
+              .kit-section li img.check {
+                width: 16px;
+                height: 16px;
+                flex-shrink: 0;
+                margin-top: 3px;
+              }
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 45px; 
@@ -594,6 +633,85 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               </div>
             </div>
           </div>
+
+          <div class="kit-section">
+          <h3>What’s in the Customized Kit?</h3>
+          <p class="intro">Inclusions:</p>
+
+          <!-- DESKTOP: two columns -->
+          <div class="kit-items desktop">
+            <div class="col">
+              <ul>
+                <li>
+                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                  A customised kit with Ayurvedic supplements tailored to your health needs
+                </li>
+                <li>
+                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                  Personalised diabetes expert support to help you stay on track with your health goals
+                </li>
+                <li>
+                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                  Timely follow‑up calls to track progress and adjust your plan as needed
+                </li>
+                <li>
+                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                  Daily live yoga sessions to support your sugar control and mental well‑being
+                </li>
+              </ul>
+            </div>
+            <div class="col">
+              <ul>
+                <li>
+                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                  A free one‑on‑one consultation with our doctor to understand your condition better
+                </li>
+                <li>
+                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                  A customised Ayurvedic diet plan designed specifically for your body and lifestyle
+                </li>
+                <li>
+                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                  Constant WhatsApp support for any queries, reminders, or motivation
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- MOBILE: single column -->
+          <div class="kit-items mobile">
+            <ul>
+              <li>
+                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                A customised kit with Ayurvedic supplements tailored to your health needs
+              </li>
+              <li>
+                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                Personalised diabetes expert support to help you stay on track with your health goals
+              </li>
+              <li>
+                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                Timely follow‑up calls to track progress and adjust your plan as needed
+              </li>
+              <li>
+                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                Daily live yoga sessions to support your sugar control and mental well‑being
+              </li>
+              <li>
+                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                A free one‑on‑one consultation with our doctor to understand your condition better
+              </li>
+              <li>
+                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                A customised Ayurvedic diet plan designed specifically for your body and lifestyle
+              </li>
+              <li>
+                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
+                Constant WhatsApp support for any queries, reminders, or motivation
+              </li>
+            </ul>
+          </div>
+        </div>
 
           <script>
             var currentHba1c = ${presalesHba1c};
