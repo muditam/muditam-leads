@@ -10,6 +10,6 @@ const CustomerSchema = new mongoose.Schema({
   followUpDate: { type: Date, required: true },
   createdAt: { type: Date, default: Date.now },
   dateAndTime: { type: Date, default: () => new Date() },
-});
+}); 
 
 module.exports = mongoose.model("Customer", CustomerSchema);

@@ -71,10 +71,10 @@ const ConsultationDetailsSchema = new mongoose.Schema(
     // Data coming from Closing.js
     closing: {
       consultationStatus: { type: String },  
-      expectedResult: { type: String },       // Could be the option id or descriptive text
+      expectedResult: { type: String },        
       preferredDiet: { type: String },
       courseDuration: { type: String },
-      freebie: [{ type: String }],            // Now an array to support multi-select
+      freebie: [{ type: String }],            
       bloodTest: { type: String },
       bloodTestDetails: {
         address: { type: String },

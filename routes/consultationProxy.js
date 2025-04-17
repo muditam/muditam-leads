@@ -56,37 +56,146 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     const selectedProducts = consultationDetails.consultation?.selectedProducts || [];
 
     // Map selected product names to their details (image URL and description)
-    const productDetailsMap = {
-      "Karela Jamun Fizz": {
-        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
-        description: "Control blood sugar levels"
-      },
-      "Liver Fix": {
-        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/lf_2.webp?v=1744809598",
-        description: "Support liver health"
-      }
-    };
+    // Map selected product names to their details (image URL and description)
+const productDetailsMap = {
+  "Karela Jamun Fizz": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
+    description: "Control blood sugar levels"
+  },
+  "Liver Fix": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/lf_2.webp?v=1744809988",
+    description: "Support liver health"
+  },
+  "Sugar Defend Pro": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/SDP_2_4fdc364f-3197-4867-9f63-0022dcac2586.webp?v=1744875711",
+    description: "Blood sugar control"
+  },
+  "Vasant Kusmakar Ras": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/VKR.webp?v=1744875711",
+    description: "Metabolic fire balance"
+  },
+  "Stress & Sleep": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/S_S_9a0d9003-3f5f-4514-8a5a-4c014b5dea06.webp?v=1744875711",
+    description: "Calming sleep"
+  },
+  "Chandraprabha Vati": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/CPV_309f6255-286c-4c40-8d44-eea07f5a5e36.webp?v=1744875711",
+    description: "Urinary tract health"
+  },
+  "Heart Defend Pro": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HDP_2.webp?v=1744875711",
+    description: "Cardio support"
+  },
+  "Performance Forever": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PF_2.webp?v=1744875711",
+    description: "Endurance booster"
+  },
+  "Power Gut": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PG_2_c7332d00-50b9-476e-aeb3-005babd4b95d.webp?v=1744875711",
+    description: "Digestive balance"
+  },
+  "Blood Test": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
+    description: "Body Check-Up"
+  },
+  "Shilajit with Gold": {
+    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Shilajit_3.webp?v=1744875711",
+    description: "Cellular rejuvenation"
+  }
+};
+
+const conditionMap = {
+  "Karela Jamun Fizz":          "Diabetes",
+  "Sugar Defend Pro":           "Diabetes",
+  "Vasant Kusmakar Ras":        "Diabetes",
+  "Liver Fix":                  "Liver",
+  "Stress & Sleep":             "Sleep",
+  "Chandraprabha Vati":         "Kidney",
+  "Heart Defend Pro":           "Heart",
+  "Performance Forever":        "Vitality",
+  "Power Gut":                  "Gut",
+  "Shilajit with Gold":         "Immunity",  
+};
+
 
     // Generate the HTML for each product card
     let productCardsHtml = "";
     selectedProducts.forEach(product => {
       const details = productDetailsMap[product];
       if (!details) return;
+
+      const condition = conditionMap[product] || "Condition";
+
       productCardsHtml += `
-        <div style="display: flex; align-items: center; justify-content: space-between; padding: 20px; margin: 10px 0; background: #fff; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-          <img src="${details.image}" alt="${product}" style="height: 120px; width: auto; object-fit: contain;" />
-          <div style="flex-grow: 1; margin-left: 20px;">
-            <h2 style="margin: 0 0 5px; font-size: 22px;">${product}</h2>
-            <p style="margin: 0 0 10px; font-size: 16px; color: #555;">${details.description}</p>
-            <hr style="border: none; height: 1px; background-color: #ccc; margin: 10px 0;" />
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              <span style="font-size: 14px; font-weight: bold; color: #333;">${customer.lookingFor || "Condition"}</span>
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988" alt="tag" style="height: 30px;" />
+    <div
+      style="
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 20px;
+        margin: 10px 0;
+        background: #fff;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      "
+    > 
+      <img
+        src="${details.image}"
+        alt="${product}"
+        style="height: 120px; width: auto; object-fit: contain;"
+      />
+ 
+      <div style="flex: 1; margin: 0 20px;">
+        <h2 style="margin: 0 0 5px; font-size: 22px;">${product}</h2>
+        <p style="margin: 0 0 10px; font-size: 16px; color: #555;">
+          ${details.description}
+        </p>
+        <hr style="border: none; height: 1px; background-color: #ccc; margin: 10px 0;" />
+        <span style="font-size: 14px; font-weight: bold; color: #333;">
+          ${condition}
+        </span>
+      </div>
+ 
+      <img
+        src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988"
+        alt="tag"
+        style="height: 30px; margin-left: 20px;"
+      />
+    </div>
+  `;
+    });
+
+    // Generate add-ons section based on freebies
+    const freebies = consultationDetails.closing?.freebie || [];
+    const addOnMap = {
+      "Dumbbells":              "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/dumbells.webp?v=1744881971",
+      "Glucometer +10 strips":  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Glucometer_1.webp?v=1744881970",
+      "Glucometer +25 strips":  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/25_strip_glucometer.webp?v=1744882266",
+      "Diet Plan":              "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Diet_plan.webp?v=1744881970"
+    };
+    let addOnsHtml = "";
+    if (freebies.length) {
+      addOnsHtml += `
+        <div class="addons-section">
+          <h3 style="font-size:24px;margin-top:40px;margin-bottom:20px;">Complimentary Add‑ons for You</h3>
+          <div class="addons-container">
+      `;
+      freebies.forEach(item => {
+        const imgUrl = addOnMap[item];
+        if (imgUrl) {
+          addOnsHtml += `
+            <div class="addon-item" style="flex:1;padding:10px;text-align:center;">
+              <img src="${imgUrl}" alt="${item}" style="max-width:100%;height:auto;"/>
+              <p style="margin-top:8px;font-size:14px;">${item}</p>
             </div>
+          `;
+        }
+      });
+      addOnsHtml += `
           </div>
         </div>
       `;
-    });
+    }
 
     const html = `
       <!DOCTYPE html>
@@ -171,6 +280,9 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .duration-badge {
                 font-size: 25px;
                 padding: 5px 15px;
+              }
+                .addons-container {
+                flex-direction: column;
               }
             }
             .additional-image {
@@ -309,6 +421,10 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             .Your-dce-d{
               padding: 10px;
             }
+              .addons-container {
+              display: flex;
+              gap: 20px;
+            }
           </style>
         </head>
         <body>
@@ -374,6 +490,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
 
           ${productCardsHtml}
+          ${addOnsHtml}
 
           <script>
             var currentHba1c = ${presalesHba1c};
