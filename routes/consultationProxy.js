@@ -177,7 +177,7 @@ const conditionMap = {
     if (freebies.length) {
       addOnsHtml += `
         <div class="addons-section">
-          <h3 style="font-size:24px;margin-top:40px;margin-bottom:20px;">Complimentary Add‑ons for You</h3>
+          <h3 style="font-size:26px;margin-top:30px;margin-bottom:20px;">Complimentary Add‑ons for You</h3>
           <div class="addons-container">
       `;
       freebies.forEach(item => {
@@ -186,7 +186,6 @@ const conditionMap = {
           addOnsHtml += `
             <div class="addon-item" style="flex:1;padding:10px;text-align:center;">
               <img src="${imgUrl}" alt="${item}" style="max-width:100%;height:auto;"/>
-              <p style="margin-top:8px;font-size:14px;">${item}</p>
             </div>
           `;
         }
@@ -283,6 +282,17 @@ const conditionMap = {
               }
                 .addons-container {
                 flex-direction: column;
+                gap: 5px;
+              }
+                .risks-container {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scroll-snap-type: x mandatory;
+                scroll-behavior: smooth;
+              }
+              .risk-item {
+                scroll-snap-align: start;
               }
             }
             .additional-image {
@@ -425,6 +435,44 @@ const conditionMap = {
               display: flex;
               gap: 20px;
             }
+            .risks-section {
+              margin-top: 40px;
+            }
+            .risks-section h3 {
+              font-size: 26px;
+              font-weight: bold;
+              margin-bottom: 10px;
+            }
+            .risks-section p {
+              font-size: 14px;
+              margin-bottom: 20px;
+            }
+
+            .risks-container {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 10px;
+            }
+            .risk-item {
+              flex: 0 0 100px;
+              height: 100px;
+              background: #F4F4F4;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              border-radius: 8px;
+              text-align: center;
+            }
+            .risk-item img {
+              width: 50px;
+              height: 50px;
+            }
+            .risk-item p {
+              margin: 5px 0 0;
+              font-size: 12px;
+              line-height: 1.2;
+            }
           </style>
         </head>
         <body>
@@ -492,6 +540,40 @@ const conditionMap = {
           ${productCardsHtml}
           ${addOnsHtml}
 
+          <div class="risks-section">
+            <h3>Risks of Uncontrolled Sugar Levels</h3>
+            <p>
+              If blood sugar isn’t well controlled, the risk of serious
+              health complications increases, such as:
+            </p>
+            <div class="risks-container">
+              <div class="risk-item">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Heart.png?v=1744884197" alt="Heart Disease" />
+                <p>Heart<br>Disease</p>
+              </div>
+              <div class="risk-item">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Nerve.png?v=1744884197" alt="Kidney Damage" />
+                <p>Kidney<br>Damage</p>
+              </div>
+              <div class="risk-item">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Nerve.png?v=1744884197" alt="Nerve Damage" />
+                <p>Nerve<br>Damage</p>
+              </div>
+              <div class="risk-item">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Foot.png?v=1744884197" alt="Foot Complications" />
+                <p>Foot<br>Complications</p>
+              </div>
+              <div class="risk-item">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/vision.png?v=1744884197" alt="Vision Problems" />
+                <p>Vision<br>Problems</p>
+              </div>
+              <div class="risk-item">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/infection.png?v=1744884197" alt="Frequent Infections" />
+                <p>Frequent<br>Infections</p>
+              </div>
+            </div>
+          </div>
+          
           <script>
             var currentHba1c = ${presalesHba1c};
             function updateGoalHba1c(selected) {
