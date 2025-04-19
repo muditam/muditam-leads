@@ -85,6 +85,54 @@ const variantMap = {
     "3 months": "44842989027638",
     "4 months": "44850265915702",
   },
+  "Vasant Kusmakar Ras": {
+    "1 month": "48319092949302",
+    "2 months": "48791244603702",
+    "3 months": "48319093014838",
+    "4 months": "48319093014838",
+  },
+  "Liver Fix": {
+    "1 month": "48209288757558",
+    "2 months": "48209288790326",
+    "3 months": "48209288823094",
+    "4 months": "48209288855862",
+  },
+  "Stress & Sleep": {
+    "1 month": "48352977518902",
+    "2 months": "48352977518902",
+    "3 months": "48352977551670",
+    "4 months": "48352977486134",
+  },
+  "Chandraprabha Vati": {
+    "1 month": "48212219298102",
+    "2 months": "48212219265334",
+    "3 months": "48212219330870",
+    "4 months": "48212219363638",
+  },
+  "Heart Defend Pro": {
+    "1 month": "48207232336182",
+    "2 months": "48207232368950",
+    "3 months": "48207232401718",
+    "4 months": "48207232434486",
+  },
+  "Performance Forever": {
+    "1 month": "48204586352950",
+    "2 months": "48204586320182",
+    "3 months": "48204586385718",
+    "4 months": "48204586418486",
+  },
+  "Shilajit with Gold": {
+    "1 month": "51280956916022",
+    "2 months": "51280956948790",
+    "3 months": "51280956981558",
+    "4 months": "51280957014326",
+  },
+  "Power Gut": {
+    "1 month": "51200287670582",
+    "2 months": "51200287703350",
+    "3 months": "51200287736118",
+    "4 months": "51200287768886",
+  },
 };
 
 // GET route for App Proxy using customer ID directly
@@ -392,8 +440,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               margin: 5px 0 0;
               color: #848484 !important;
               font-weight: 600; 
-            }
-            /* Bar + pointer images section */
+            } 
             .bar-section {
               width: 100%;
               max-width: 500px;
@@ -428,8 +475,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               right: 0;
               font-size: 14px;
               text-align: right;
-            }
-            /* Goal Section */
+            } 
             .goal-section {
               text-align: center;
               margin: 20px auto;
@@ -778,7 +824,6 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .payment-breakup-amg .pb-cta.book small{font-size:12px}
               .payment-breakup-amg .pb-cta.pay p{font-size:18px}
             }
-
           </style>
         </head>
         <body>
