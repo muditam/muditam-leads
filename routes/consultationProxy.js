@@ -145,13 +145,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     const specialDiscount = 70;
     const discount       = Math.round(totalPrice * 0.10);
     const finalPrice     = totalPrice - discount - specialDiscount;
-
-    const chosenProd = selectedProducts.find(p => variantMap[p]);
-    const variantId  = chosenProd
-      ? variantMap[chosenProd][courseDuration]
-      : null;
-    const payUrl = variantId
-      ? `https://www.muditam.com/cart/${variantId}:1`
+ 
+    const variantIds = selectedProducts.reduce((arr, prod) => {
+      const m = variantMap[prod];
+      if (m && m[courseDuration]) arr.push(m[courseDuration]);
+      return arr;
+    }, []);
+    const payUrl = variantIds.length
+      ? `https://www.muditam.com/cart/${variantIds.map(id => id + ":1").join(",")}`
       : "#";
 
     // Map selected product names to their details (image URL and description)
