@@ -491,6 +491,76 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 flex-shrink: 0;
                 margin-top: 3px;
               }
+                 .turning-section-amg {
+                  text-align: center;
+                  padding: 60px 20px;
+                  font-family: 'Poppins', sans-serif;
+                }
+                .turning-section-amg h2 {
+                  margin: 0;
+                  font-size: 36px;
+                  font-weight: 700;
+                  color: #B0B0B0;
+                  line-height: 1;
+                }
+                .subtitle-amg {
+                  margin: 8px 0 40px;
+                  font-size: 20px;
+                  color: #666;
+                }
+
+                .rating-cards-amg {
+                  display: flex;
+                  justify-content: center;
+                  gap: 24px;
+                }
+
+                .rating-card-amg {
+                  display: flex;
+                  align-items: center;
+                  background: #F4F4F4;
+                  border-radius: 16px;
+                  padding: 16px 24px;
+                  min-width: 300px;
+                  box-sizing: border-box;
+                }
+                .center-amg {
+                  background: #FFFFFF;
+                  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+                }
+
+                .logo-amg {
+                  width: 50px;
+                  height: 50px;
+                  object-fit: contain;
+                }
+                .sep-amg {
+                  width: 1px;
+                  height: 50px;
+                  background: #CCCCCC;
+                  margin: 0 24px;
+                }
+                .content-amg {
+                  text-align: left;
+                }
+                .name-amg {
+                  display: none;
+                  font-size: 16px;
+                  font-weight: 600;
+                  margin: 0 0 4px;
+                  color: #222;
+                }
+                .score-amg {
+                  font-size: 32px;
+                  font-weight: 700;
+                  margin: 0;
+                  color: #222;
+                }
+                .caption-amg {
+                  font-size: 14px;
+                  color: #777;
+                  margin-top: 4px;
+                }
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 45px; 
@@ -520,7 +590,46 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .risk-item {
                 scroll-snap-align: start;
               }
+                .kit-section .kit-items.desktop { display: none; }
+              .kit-section .kit-items.mobile { display: block; }
+              .rating-cards-amg {
+                flex-direction: column;
+                align-items: center;
+                gap: 16px;
+              }
+              .rating-card-amg {
+                flex-direction: column;
+                align-items: center;
+                width: 100%;
+                max-width: 280px;
+                padding: 12px 16px;
+                min-width: auto;
+              }
+              .center-amg {
+                padding: 14px 18px;
+              }
+              .logo-amg {
+                margin-top: -35px;
+              }
+              .sep-amg {
+                display: none;
+              }
+              .content-amg {
+                text-align: center;
+                margin-top: 8px;
+              }
+              .name-amg {
+                display: block;
+                font-size: 14px;
+              }
+              .score-amg {
+                font-size: 28px;
+              }
+              .caption-amg {
+                font-size: 12px;
+              }
             }
+
           </style>
         </head>
         <body>
@@ -712,6 +821,52 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             </ul>
           </div>
         </div>
+
+        <div class="turning-section-amg">
+        <h2>TURNING POINTS</h2>
+        <p class="subtitle-amg">Stories of Health & Hope</p>
+
+        <div class="rating-cards-amg">
+          <!-- Google card -->
+          <div class="rating-card-amg">
+            <img class="logo-amg"
+                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Google_f0d1f0d3-8ea4-4586-9bde-9ec454630757.webp?v=1744889830"
+                alt="Google"/>
+            <div class="sep-amg"></div>
+            <div class="content-amg">
+              <p class="name-amg">Google</p>
+              <p class="score-amg">4.9</p>
+              <p class="caption-amg">Star rating</p>
+            </div>
+          </div>
+
+          <!-- Muditam card (center, white) -->
+          <div class="rating-card-amg center-amg">
+            <img class="logo-amg"
+                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Amazon_6e5a70ec-05a4-41b6-aaba-8d787f437759.webp?v=1744890065"
+                alt="Muditam"/>
+            <div class="sep-amg"></div>
+            <div class="content-amg">
+              <p class="name-amg">Muditam</p>
+              <p class="score-amg">4.9</p>
+              <p class="caption-amg">Star rating</p>
+            </div>
+          </div>
+
+          <!-- Amazon card -->
+          <div class="rating-card-amg">
+            <img class="logo-amg"
+                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Google_f0d1f0d3-8ea4-4586-9bde-9ec454630757.webp?v=1744889830"
+                alt="Amazon"/>
+            <div class="sep-amg"></div>
+            <div class="content-amg">
+              <p class="name-amg">Amazon</p>
+              <p class="score-amg">4.8</p>
+              <p class="caption-amg">Star rating</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
           <script>
             var currentHba1c = ${presalesHba1c};
