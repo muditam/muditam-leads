@@ -34,7 +34,57 @@ const priceMap = {
     "3 months": 3600,
     "4 months": 6400,
   },
-  
+  "Stress & Sleep": {
+    "1 month": 799,
+    "2 months": 1395,
+    "3 months": 2200,
+    "4 months": 2750,
+  },
+  "Chandraprabha Vati": {
+    "1 month": 525,
+    "2 months": 999,
+    "3 months": 1350,
+    "4 months": 1600,
+  },
+  "Power Gut": {
+    "1 month": 1515,
+    "2 months": 2695,
+    "3 months": 3595,
+    "4 months": 4200,
+  },
+  "Heart Defend Pro": {
+    "1 month": 1950,
+    "2 months": 3600,
+    "3 months": 4500,
+    "4 months": 5400,
+  },
+  "Performance Forever": {
+    "1 month": 999,
+    "2 months": 1799,
+    "3 months": 2499,
+    "4 months": 3199,
+  },
+  "Shilajit with Gold": {
+    "1 month": 1295,
+    "2 months": 2495,
+    "3 months": 3495,
+    "4 months": 4495,
+  },
+};
+
+const variantMap = {
+  "Karela Jamun Fizz": {
+    "1 month": "44827667169590",
+    "2 months": "44850184978742",
+    "3 months": "44827667202358",
+    "4 months": "44827667136822",
+  },
+  "Sugar Defend Pro": {
+    "1 month": "44842989060406",
+    "2 months": "44842989093174",
+    "3 months": "44842989027638",
+    "4 months": "44850265915702",
+  },
 };
 
 // GET route for App Proxy using customer ID directly
@@ -95,6 +145,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     const specialDiscount = 70;
     const discount       = Math.round(totalPrice * 0.10);
     const finalPrice     = totalPrice - discount - specialDiscount;
+
+    const chosenProd = selectedProducts.find(p => variantMap[p]);
+    const variantId  = chosenProd
+      ? variantMap[chosenProd][courseDuration]
+      : null;
+    const payUrl = variantId
+      ? `https://www.muditam.com/cart/${variantId}:1`
+      : "#";
 
     // Map selected product names to their details (image URL and description)
     // Map selected product names to their details (image URL and description)
@@ -534,7 +592,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               }
                  .turning-section-amg {
                   text-align: center;
-                  padding: 20px;
+                  padding: 8px;
                   font-family: 'Poppins', sans-serif;
                 }
                 .turning-section-amg h2 {
@@ -602,49 +660,49 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   color: #777;
                   margin-top: 4px;
                 }
-                   .payment-breakup-amg {
-        max-width:420px;margin:40px auto;border:1px solid #E0E0E0;
-        border-radius:8px;overflow:hidden;background:#FFF;
-        font-family:'Poppins',sans-serif;
-      }
-      .payment-breakup-amg h3 {
-        margin:0;padding:20px 24px 12px;
-        font-size:22px;font-weight:600;color:#222;
-      }
-      .payment-breakup-amg .pb-line {
-        margin:0 24px;border:none;height:1px;
-        background:#E0E0E0;
-      }
-      .payment-breakup-amg .pb-row {
-        display:flex;justify-content:space-between;
-        padding:12px 24px;font-size:16px;color:#333;
-        align-items:center;
-      }
-      .payment-breakup-amg .pb-row.pb-final .pb-amount {
-        font-weight:700;
-      }
-      .payment-breakup-amg .pb-amount { font-weight:500 }
-      .payment-breakup-amg .pb-cta {
-        width:calc(100% - 48px);margin:16px auto;
-        padding:14px 0;border-radius:999px;text-align:center;
-        cursor:pointer;
-      }
-      .payment-breakup-amg .pb-cta.book {
-        background:#ECDFFF;color:#222;
-      }
-      .payment-breakup-amg .pb-cta.book p {
-        margin:0;font-size:18px;font-weight:500;
-      }
-      .payment-breakup-amg .pb-cta.book small {
-        display:block;margin-top:4px;
-        font-size:14px;color:#555;
-      }
-      .payment-breakup-amg .pb-cta.pay {
-        background:#0984E3;color:#FFF;
-      }
-      .payment-breakup-amg .pb-cta.pay p {
-        margin:0;font-size:20px;font-weight:600;
-      }
+                .payment-breakup-amg {
+                max-width:420px;margin:40px auto;border:1px solid #E0E0E0;
+                border-radius:8px;overflow:hidden;background:#FFF;
+                font-family:'Poppins',sans-serif;
+              }
+              .payment-breakup-amg h3 {
+                margin:0;padding:20px 24px 12px;
+                font-size:22px;font-weight:600;color:#222;
+              }
+              .payment-breakup-amg .pb-line {
+                margin:0 24px;border:none;height:1px;
+                background:#E0E0E0;
+              }
+              .payment-breakup-amg .pb-row {
+                display:flex;justify-content:space-between;
+                padding:12px 24px;font-size:16px;color:#333;
+                align-items:center;
+              }
+              .payment-breakup-amg .pb-row.pb-final .pb-amount {
+                font-weight:700;
+              }
+              .payment-breakup-amg .pb-amount { font-weight:500 }
+              .payment-breakup-amg .pb-cta {
+                width:calc(100% - 48px);margin:16px auto;
+                padding:14px 0;border-radius:999px;text-align:center;
+                cursor:pointer;
+              }
+              .payment-breakup-amg .pb-cta.book {
+                background:#ECDFFF;color:#222;
+              }
+              .payment-breakup-amg .pb-cta.book p {
+                margin:0;font-size:18px;font-weight:500;
+              }
+              .payment-breakup-amg .pb-cta.book small {
+                display:block;margin-top:4px;
+                font-size:14px;color:#555;
+              }
+              .payment-breakup-amg .pb-cta.pay {
+                background:#0984E3;color:#FFF;
+              }
+              .payment-breakup-amg .pb-cta.pay p {
+                margin:0;font-size:20px;font-weight:600;
+              }
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 45px; 
@@ -676,8 +734,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               }
                 .kit-section .kit-items.desktop { display: none; }
               .kit-section .kit-items.mobile { display: block; }
-              .rating-cards-amg {
-                flex-direction: column;
+              .rating-cards-amg { 
                 align-items: center;
                 gap: 16px;
               }
@@ -988,9 +1045,9 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       </div>
       <hr class="pb-line" />
 
-      <div class="pb-cta pay">
-        <p>Pay Now ₹${finalPrice}/–</p>
-      </div>
+      <a class="pb-cta pay" href="${payUrl}">
+      <p>Pay Now ₹${finalPrice}/–</p>
+    </a>
     </div>
 
           <script>
