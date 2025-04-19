@@ -685,7 +685,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .payment-breakup-amg .pb-cta {
                 width:calc(100% - 48px);margin:16px auto;
                 padding:14px 0;border-radius:999px;text-align:center;
-                cursor:pointer;
+                cursor:pointer;text-decoration:none;display:block;
               }
               .payment-breakup-amg .pb-cta.book {
                 background:#ECDFFF;color:#222;
@@ -769,13 +769,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .caption-amg {
                 font-size: 12px;
               }
-                .payment-breakup-amg{margin:24px 16px}
-        .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
-        .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
-        .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
-        .payment-breakup-amg .pb-cta.book p{font-size:16px}
-        .payment-breakup-amg .pb-cta.book small{font-size:12px}
-        .payment-breakup-amg .pb-cta.pay p{font-size:18px}
+              .payment-breakup-amg{margin:24px 16px}
+              .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
+              .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
+              .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
+              .payment-breakup-amg .pb-cta.book p{font-size:16px}
+              .payment-breakup-amg .pb-cta.book small{font-size:12px}
+              .payment-breakup-amg .pb-cta.pay p{font-size:18px}
             }
 
           </style>
