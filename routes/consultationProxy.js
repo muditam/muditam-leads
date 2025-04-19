@@ -9,6 +9,34 @@ function formatMonthDay(dateObj) {
   return `${month} ${day}`;
 }
 
+const priceMap = {
+  "Karela Jamun Fizz": {
+    "1 month": 1350,
+    "2 months": 2650,
+    "3 months": 3800,
+    "4 months": 4500,
+  },
+  "Sugar Defend Pro": {
+    "1 month": 1495,
+    "2 months": 2700,
+    "3 months": 3500,
+    "4 months": 4200,
+  },
+  "Vasant Kusmakar Ras": {
+    "1 month": 2995,
+    "2 months": 4200,
+    "3 months": 5800,
+    "4 months": 6500,
+  },
+  "Liver Fix": {
+    "1 month": 1550,
+    "2 months": 2900,
+    "3 months": 3600,
+    "4 months": 6400,
+  },
+  
+};
+
 // GET route for App Proxy using customer ID directly
 router.get("/proxy/consultation/:id", async (req, res) => {
   const customerId = req.params.id;
@@ -54,6 +82,19 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
     // Get selected products from consultation details (if any)
     const selectedProducts = consultationDetails.consultation?.selectedProducts || [];
+
+    let totalPrice = 0;
+    selectedProducts.forEach((prod) => {
+      const pricing = priceMap[prod] || {};
+      totalPrice += pricing[courseDuration] || 0;
+    });
+    // fallback if nothing matched:
+    if (totalPrice === 0) totalPrice = 0;
+
+    // 6) COMPUTE DISCOUNT & FINAL
+    const specialDiscount = 70;
+    const discount       = Math.round(totalPrice * 0.10);
+    const finalPrice     = totalPrice - discount - specialDiscount;
 
     // Map selected product names to their details (image URL and description)
     // Map selected product names to their details (image URL and description)
@@ -493,7 +534,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               }
                  .turning-section-amg {
                   text-align: center;
-                  padding: 60px 20px;
+                  padding: 20px;
                   font-family: 'Poppins', sans-serif;
                 }
                 .turning-section-amg h2 {
@@ -561,6 +602,49 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   color: #777;
                   margin-top: 4px;
                 }
+                   .payment-breakup-amg {
+        max-width:420px;margin:40px auto;border:1px solid #E0E0E0;
+        border-radius:8px;overflow:hidden;background:#FFF;
+        font-family:'Poppins',sans-serif;
+      }
+      .payment-breakup-amg h3 {
+        margin:0;padding:20px 24px 12px;
+        font-size:22px;font-weight:600;color:#222;
+      }
+      .payment-breakup-amg .pb-line {
+        margin:0 24px;border:none;height:1px;
+        background:#E0E0E0;
+      }
+      .payment-breakup-amg .pb-row {
+        display:flex;justify-content:space-between;
+        padding:12px 24px;font-size:16px;color:#333;
+        align-items:center;
+      }
+      .payment-breakup-amg .pb-row.pb-final .pb-amount {
+        font-weight:700;
+      }
+      .payment-breakup-amg .pb-amount { font-weight:500 }
+      .payment-breakup-amg .pb-cta {
+        width:calc(100% - 48px);margin:16px auto;
+        padding:14px 0;border-radius:999px;text-align:center;
+        cursor:pointer;
+      }
+      .payment-breakup-amg .pb-cta.book {
+        background:#ECDFFF;color:#222;
+      }
+      .payment-breakup-amg .pb-cta.book p {
+        margin:0;font-size:18px;font-weight:500;
+      }
+      .payment-breakup-amg .pb-cta.book small {
+        display:block;margin-top:4px;
+        font-size:14px;color:#555;
+      }
+      .payment-breakup-amg .pb-cta.pay {
+        background:#0984E3;color:#FFF;
+      }
+      .payment-breakup-amg .pb-cta.pay p {
+        margin:0;font-size:20px;font-weight:600;
+      }
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 45px; 
@@ -628,6 +712,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .caption-amg {
                 font-size: 12px;
               }
+                .payment-breakup-amg{margin:24px 16px}
+        .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
+        .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
+        .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
+        .payment-breakup-amg .pb-cta.book p{font-size:16px}
+        .payment-breakup-amg .pb-cta.book small{font-size:12px}
+        .payment-breakup-amg .pb-cta.pay p{font-size:18px}
             }
 
           </style>
@@ -843,7 +934,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <!-- Muditam card (center, white) -->
           <div class="rating-card-amg center-amg">
             <img class="logo-amg"
-                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Amazon_6e5a70ec-05a4-41b6-aaba-8d787f437759.webp?v=1744890065"
+                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam.webp?v=1744890066"
                 alt="Muditam"/>
             <div class="sep-amg"></div>
             <div class="content-amg">
@@ -856,7 +947,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <!-- Amazon card -->
           <div class="rating-card-amg">
             <img class="logo-amg"
-                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Google_f0d1f0d3-8ea4-4586-9bde-9ec454630757.webp?v=1744889830"
+                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Amazon_46a9086d-3c17-4de5-8583-c6076b7cac6a.webp?v=1744890090"
                 alt="Amazon"/>
             <div class="sep-amg"></div>
             <div class="content-amg">
@@ -867,6 +958,40 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
         </div>
       </div>
+
+      <!-- Payment Breakup Section -->
+    <div class="payment-breakup-amg">
+      <h3>Payment Breakup</h3>
+      <hr class="pb-line" />
+
+      <div class="pb-row">
+        <span>Diabetes Management Plan Price:</span>
+        <span class="pb-amount">₹${totalPrice}</span>
+      </div>
+      <hr class="pb-line" />
+
+      <div class="pb-row">
+        <span>Discount:</span>
+        <span class="pb-amount">₹${discount}</span>
+      </div>
+      <hr class="pb-line" />
+
+      <div class="pb-row">
+        <span>Special Discount:</span>
+        <span class="pb-amount">₹${specialDiscount}</span>
+      </div>
+      <hr class="pb-line" />
+
+      <div class="pb-row pb-final">
+        <span>Final Price:</span>
+        <span class="pb-amount">₹${finalPrice}</span>
+      </div>
+      <hr class="pb-line" />
+
+      <div class="pb-cta pay">
+        <p>Pay Now ₹${finalPrice}/–</p>
+      </div>
+    </div>
 
           <script>
             var currentHba1c = ${presalesHba1c};
