@@ -180,36 +180,28 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
     // Get selected products from consultation details (if any)
     const selectedProducts = consultationDetails.consultation?.selectedProducts || [];
-    const discountCodes    = consultationDetails.closing?.discountCodes || [];
 
     let totalPrice = 0;
-    selectedProducts.forEach((prod) => {
-      const pricing = priceMap[prod] || {};
-      totalPrice += pricing[courseDuration] || 0;
+    selectedProducts.forEach(prod => {
+      totalPrice += (priceMap[prod]?.[courseDuration] || 0);
     });
-    // fallback if nothing matched:
-    if (totalPrice === 0) totalPrice = 0;
 
-    // 6) COMPUTE DISCOUNT & FINAL
-    const codeToValue = { LMS100: 100, LMS500: 500, LMS1000: 1000 };
-    const couponCodes = consultationDetails.closing?.discountCodes || [];
-    const couponDiscount = couponCodes.reduce(
-      (sum, code) => sum + (codeToValue[code] || 0),
-      0
-    );
- 
-    // 6) Final price
+    // Sum up coupon discounts that were saved
+    const usedCodes     = details.closing?.discountCodes || [];
+    const couponDiscount = usedCodes.reduce((sum, c) => sum + (couponValueMap[c]||0), 0);
+
     const finalPrice = totalPrice - couponDiscount;
 
-    // 7) Build Shopify cart URL with all variants + first discount code
+    // Build cart+discount URL
     const variantIds = selectedProducts
-      .map((prod) => variantMap[prod]?.[courseDuration])
+      .map(prod => variantMap[prod]?.[courseDuration])
       .filter(Boolean);
+
     let payUrl = "#";
     if (variantIds.length) {
-      const items = variantIds.map((id) => `${id}:1`).join(",");
-      const discountParam = couponCodes[0] ? `?discount=${couponCodes[0]}` : "";
-      payUrl = `https://www.muditam.com/cart/${items}${discountParam}`;
+      const items = variantIds.map(id => `${id}:1`).join(",");
+      const firstCode = usedCodes[0] ? `?discount=${usedCodes[0]}` : "";
+      payUrl = `https://www.muditam.com/cart/${items}${firstCode}`;
     }
 
     // Map selected product names to their details (image URL and description)
@@ -1088,11 +1080,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       </div>
       <hr class="pb-line" />
 
-      <div class="pb-row">
-        <span>Special Discount:</span>
-        <span class="pb-amount">₹${specialDiscount}</span>
-      </div>
-      <hr class="pb-line" />
+   
 
       <div class="pb-row pb-final">
         <span>Final Price:</span>
