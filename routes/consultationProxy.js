@@ -118,7 +118,7 @@ const variantMap = {
   "Performance Forever": {
     "1 month": "48204586352950",
     "2 months": "48204586320182",
-    "3 months": "48204586385718", 
+    "3 months": "48204586385718",
     "4 months": "48204586418486",
   },
   "Shilajit with Gold": {
@@ -133,6 +133,12 @@ const variantMap = {
     "3 months": "51200287736118",
     "4 months": "51200287768886",
   },
+};
+
+const couponValueMap = {
+  LMS100: 100,
+  LMS500: 500,
+  LMS1000: 1000,
 };
 
 // GET route for App Proxy using customer ID directly
@@ -182,27 +188,33 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     const selectedProducts = consultationDetails.consultation?.selectedProducts || [];
 
     let totalPrice = 0;
-    selectedProducts.forEach(prod => {
-      totalPrice += (priceMap[prod]?.[courseDuration] || 0);
+    selectedProducts.forEach((prod) => {
+      const pricing = priceMap[prod] || {};
+      totalPrice += pricing[courseDuration] || 0;
     });
+    // fallback if nothing matched:
+    if (totalPrice === 0) totalPrice = 0;
 
-    // Sum up coupon discounts that were saved
-    const usedCodes     = details.closing?.discountCodes || [];
-    const couponDiscount = usedCodes.reduce((sum, c) => sum + (couponValueMap[c]||0), 0);
-
+    const codes = consultationDetails.closing?.discountCodes || [];
+    // sum up their ₹ amounts
+    const couponDiscount = codes.reduce(
+      (sum, code) => sum + (couponValueMap[code] || 0),
+      0
+    );
+    // final price after subtracting coupon total
     const finalPrice = totalPrice - couponDiscount;
 
-    // Build cart+discount URL
+    // collect all selected variants for the cart
     const variantIds = selectedProducts
       .map(prod => variantMap[prod]?.[courseDuration])
       .filter(Boolean);
 
-    let payUrl = "#";
-    if (variantIds.length) {
-      const items = variantIds.map(id => `${id}:1`).join(",");
-      const firstCode = usedCodes[0] ? `?discount=${usedCodes[0]}` : "";
-      payUrl = `https://www.muditam.com/cart/${items}${firstCode}`;
-    }
+    // build cart permalink, appending ?discount=CODE1,CODE2
+    const cartPath = variantIds.map(id => `${id}:1`).join(",");
+    const discountParam = codes.length ? `?discount=${codes.join(",")}` : "";
+    const payUrl = variantIds.length
+      ? `https://www.muditam.com/cart/${cartPath}${discountParam}`
+      : "#";
 
     // Map selected product names to their details (image URL and description)
     // Map selected product names to their details (image URL and description)
@@ -1063,35 +1075,33 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         </div>
       </div>
 
-      <!-- Payment Breakup Section -->
-    <div class="payment-breakup-amg">
-      <h3>Payment Breakup</h3>
-      <hr class="pb-line" />
+      <!-- Payment Breakup Section --> 
+      <div class="payment-breakup-amg">
+        <h3>Payment Breakup</h3>
+        <hr class="pb-line" />
 
-      <div class="pb-row">
-        <span>Diabetes Management Plan Price:</span>
-        <span class="pb-amount">₹${totalPrice}</span>
+        <div class="pb-row">
+          <span>Diabetes Management Plan Price:</span>
+          <span class="pb-amount">₹${totalPrice}</span>
+        </div>
+        <hr class="pb-line" />
+
+        <div class="pb-row">
+          <span>Coupon Discount (${codes.join(", ") || "None"}):</span>
+          <span class="pb-amount">₹${couponDiscount}</span>
+        </div>
+        <hr class="pb-line" />
+
+        <div class="pb-row pb-final">
+          <span>Final Price:</span>
+          <span class="pb-amount">₹${finalPrice}</span>
+        </div>
+        <hr class="pb-line" />
+
+        <a class="pb-cta pay" href="${payUrl}">
+          <p>Pay Now ₹${finalPrice}/–</p>
+        </a>
       </div>
-      <hr class="pb-line" />
-
-      <div class="pb-row">
-        <span>Discount:</span>
-        <span class="pb-amount">₹${couponDiscount}</span>
-      </div>
-      <hr class="pb-line" />
-
-   
-
-      <div class="pb-row pb-final">
-        <span>Final Price:</span>
-        <span class="pb-amount">₹${finalPrice}</span>
-      </div>
-      <hr class="pb-line" />
-
-      <a class="pb-cta pay" href="${payUrl}">
-      <p>Pay Now ₹${finalPrice}/–</p>
-    </a>
-    </div>
 
           <script>
             var currentHba1c = ${presalesHba1c};
