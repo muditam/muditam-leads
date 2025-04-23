@@ -82,6 +82,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
         preferredDate1: { type: String },
         preferredDate2: { type: String },
       },
+      discountCodes: [{ type: String }],
     },
     
     followups: [

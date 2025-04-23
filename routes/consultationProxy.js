@@ -118,7 +118,7 @@ const variantMap = {
   "Performance Forever": {
     "1 month": "48204586352950",
     "2 months": "48204586320182",
-    "3 months": "48204586385718",
+    "3 months": "48204586385718", 
     "4 months": "48204586418486",
   },
   "Shilajit with Gold": {
@@ -180,6 +180,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
     // Get selected products from consultation details (if any)
     const selectedProducts = consultationDetails.consultation?.selectedProducts || [];
+    const discountCodes    = consultationDetails.closing?.discountCodes || [];
 
     let totalPrice = 0;
     selectedProducts.forEach((prod) => {
@@ -190,18 +191,26 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     if (totalPrice === 0) totalPrice = 0;
 
     // 6) COMPUTE DISCOUNT & FINAL
-    const specialDiscount = 70;
-    const discount       = Math.round(totalPrice * 0.10);
-    const finalPrice     = totalPrice - discount - specialDiscount;
+    const codeToValue = { LMS100: 100, LMS500: 500, LMS1000: 1000 };
+    const couponCodes = consultationDetails.closing?.discountCodes || [];
+    const couponDiscount = couponCodes.reduce(
+      (sum, code) => sum + (codeToValue[code] || 0),
+      0
+    );
  
-    const variantIds = selectedProducts.reduce((arr, prod) => {
-      const m = variantMap[prod];
-      if (m && m[courseDuration]) arr.push(m[courseDuration]);
-      return arr;
-    }, []);
-    const payUrl = variantIds.length
-      ? `https://www.muditam.com/cart/${variantIds.map(id => id + ":1").join(",")}`
-      : "#";
+    // 6) Final price
+    const finalPrice = totalPrice - couponDiscount;
+
+    // 7) Build Shopify cart URL with all variants + first discount code
+    const variantIds = selectedProducts
+      .map((prod) => variantMap[prod]?.[courseDuration])
+      .filter(Boolean);
+    let payUrl = "#";
+    if (variantIds.length) {
+      const items = variantIds.map((id) => `${id}:1`).join(",");
+      const discountParam = couponCodes[0] ? `?discount=${couponCodes[0]}` : "";
+      payUrl = `https://www.muditam.com/cart/${items}${discountParam}`;
+    }
 
     // Map selected product names to their details (image URL and description)
     // Map selected product names to their details (image URL and description)
@@ -1075,7 +1084,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
       <div class="pb-row">
         <span>Discount:</span>
-        <span class="pb-amount">₹${discount}</span>
+        <span class="pb-amount">₹${couponDiscount}</span>
       </div>
       <hr class="pb-line" />
 
