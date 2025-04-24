@@ -399,7 +399,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
             .overlay { 
               color: #fff;
-              padding: 20px 30px;
+              padding: 20px 20px 20px 0px;
               border-radius: 8px;
               max-width: 90%;  
               text-align: left;
@@ -440,7 +440,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               margin: 20px 0; 
               padding: 10px;
               font-family: 'Poppins', sans-serif;
-              text-align: left;
+              text-align: center;
             }
             .results-expected-p {
               font-size: 32px;
@@ -492,6 +492,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             .goal-section {
               text-align: center;
               margin: 20px auto;
+              width: 47%;
             }
             .goal-date {
               font-size: 24px;
@@ -515,20 +516,69 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               font-size: 18px;
             }
             .expected-options { 
-              justify-content: center;
-              gap: 10px;
-            }
-            .option-box { 
               display: flex;
-              align-items: center;
-              background-color: #F4F4F4;
-              padding: 5px 10px;
-              border-radius: 4px;
+              flex-direction: column;
+              gap: 10px; 
+            }
+           .option-box {
+            display: flex;
+            align-items: center;
+            background-color: #ffffff;
+            padding: 14px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: border-color 0.2s;
+          }
+            
+            /* Custom radio styles */
+            .option-box input[type="radio"] {
+              -webkit-appearance: none;
+              appearance: none;
+              width: 20px;
+              height: 20px;
+              border: 2px solid #ccc;
+              border-radius: 50%;
+              margin-right: 12px;
+              position: relative;
               cursor: pointer;
             }
-            .option-box input {
-              margin-right: 5px;
-            }  
+
+            .option-box input[type="radio"]::after {
+              content: "";
+              position: absolute;
+              width: 10px;
+              height: 10px;
+              border-radius: 50%;
+              background: #05AFFF;
+              top: 4px;
+              left: 4px;
+              transform: scale(0);
+              transition: transform 0.2s ease-in-out;
+            }
+
+            .option-box input[type="radio"]:checked {
+              border-color: #05AFFF;
+            }
+
+            .option-box input[type="radio"]:checked::after {
+              transform: scale(1);
+            }
+
+            /* Hover & focus */
+            .option-box:hover {
+              border-color: #bbb;
+            }
+            .option-box input[type="radio"]:focus {
+              outline: none;
+              box-shadow: 0 0 0 3px rgba(5, 175, 255, 0.3);
+            }
+
+            /* Label text */
+            .option-box span {
+              font-size: 16px;
+              color: #333;
+            }
             .Your-dce{
               font-size: 32px;
               font-weight: 400;
@@ -765,7 +815,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               }
               @media only screen and (max-width: 767px) {
               .dmp-heading{
-                font-size: 45px; 
+                font-size: 42px; 
                 line-height: 60px;
                 letter-spacing: 3px;
               }
@@ -826,6 +876,12 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .score-amg {
                 font-size: 28px;
               }
+                .results-expected {  
+              text-align: left;
+            }
+              .goal-section {
+              width: 98%;
+            }
               .caption-amg {
                 font-size: 12px;
               }
@@ -874,21 +930,37 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             <div class="current-bar-info">
               <p>${currentDateString}: ${currentHba1c}%</p>
             </div>
-            <p class="select-option-label">Select an option to see expected results</p>
-            <div class="expected-options">
-              <label class="option-box">
-                <input type="checkbox" name="expectedOption" value="only" onchange="updateGoalHba1c(this)" />
-                <span>Only Supplements</span>
-              </label>
-              <label class="option-box">
-                <input type="checkbox" name="expectedOption" value="diet" onchange="updateGoalHba1c(this)" />
-                <span>With Diet & Supplements</span>
-              </label>
-              <label class="option-box">
-                <input type="checkbox" name="expectedOption" value="lifestyle" onchange="updateGoalHba1c(this)" />
-                <span>With Diet, Lifestyle modifications & Supplements</span>
-              </label>
-            </div> 
+            <p class="select-option-label">Select an option to see expected results</p>  
+              <div class="expected-options">
+                <label class="option-box">
+                  <input
+                    type="radio"
+                    name="expectedOption"
+                    value="only"
+                    onchange="updateGoalHba1c(this)"
+                    checked
+                  />
+                  <span>Only Supplements</span>
+                </label>
+                <label class="option-box">
+                  <input
+                    type="radio"
+                    name="expectedOption"
+                    value="diet"
+                    onchange="updateGoalHba1c(this)"
+                  />
+                  <span>With Diet &amp; Supplements</span>
+                </label>
+                <label class="option-box">
+                  <input
+                    type="radio"
+                    name="expectedOption"
+                    value="lifestyle"
+                    onchange="updateGoalHba1c(this)"
+                  />
+                  <span>With Diet, Lifestyle modifications &amp; Supplements</span>
+                </label>
+              </div> 
           </div>
 
           <div class="Your-dce-d">
