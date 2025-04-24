@@ -293,7 +293,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 20px;
+        padding: 0 0 10px;
         margin: 10px 0;
         background: #fff;
         border-radius: 10px;
@@ -329,10 +329,10 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     // Generate add-ons section based on freebies
     const freebies = consultationDetails.closing?.freebie || [];
     const addOnMap = {
-      "Dumbbells": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/dumbells.webp?v=1744881971",
-      "Glucometer +10 strips": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Glucometer_1.webp?v=1744881970",
-      "Glucometer +25 strips": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/25_strip_glucometer.webp?v=1744882266",
-      "Diet Plan": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Diet_plan.webp?v=1744881970"
+      "Dumbbells": "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_829.webp?v=1745492244",
+      "Glucometer +10 strips": "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_830.webp?v=1745492244",
+      "Glucometer +25 strips": "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_832.webp?v=1745492244",
+      "Diet Plan": "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_828.webp?v=1745492244"
     };
     let addOnsHtml = "";
     if (freebies.length) {
@@ -527,6 +527,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             padding: 14px 16px;
             border-radius: 8px;
             cursor: pointer;
+            text-align: left;
             border: 1px solid transparent;
             transition: border-color 0.2s;
           }
@@ -633,6 +634,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               margin-bottom: 20px;
             }
             .risks-container {
+            display: flex;
               flex-wrap: nowrap;
               overflow-x: auto;
               -webkit-overflow-scrolling: touch;
@@ -972,46 +974,52 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <div class="goal-section">
             <p class="goal-date">${goalDateString}</p>
             <p class="goal-hba1c" id="goalHba1cDisplay">${goalHba1c}%</p>
-            <!-- Goal pointer image (if needed) -->
+            <!-- Dynamic bar image -->
             <div class="goal-pointer-image">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HbA1c_Bar.webp?v=1744635117" alt="Goal Pointer" style="width:90%;height:60px;">
+              <img
+                id="goalBarImage"
+                src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_837.webp?v=1745493610"
+                alt="Goal Pointer"
+                style="width:90%;height:60px;"
+              />
             </div>
-            <!-- Current bar info: current date and current Hba1c -->
+            <!-- Current bar info -->
             <div class="current-bar-info">
               <p>${currentDateString}: ${currentHba1c}%</p>
             </div>
-            <p class="select-option-label">Select an option to see expected results</p>  
-              <div class="expected-options">
-                <label class="option-box">
-                  <input
-                    type="radio"
-                    name="expectedOption"
-                    value="only"
-                    onchange="updateGoalHba1c(this)"
-                    checked
-                  />
-                  <span>Only Supplements</span>
-                </label>
-                <label class="option-box">
-                  <input
-                    type="radio"
-                    name="expectedOption"
-                    value="diet"
-                    onchange="updateGoalHba1c(this)"
-                  />
-                  <span>With Diet &amp; Supplements</span>
-                </label>
-                <label class="option-box">
-                  <input
-                    type="radio"
-                    name="expectedOption"
-                    value="lifestyle"
-                    onchange="updateGoalHba1c(this)"
-                  />
-                  <span>With Diet, Lifestyle modifications &amp; Supplements</span>
-                </label>
-              </div> 
+            <p class="select-option-label">Select an option to see expected results</p>
+            <div class="expected-options">
+              <label class="option-box">
+                <input
+                  type="radio"
+                  name="expectedOption"
+                  value="only"
+                  onchange="updateGoalHba1c(this)"
+                  checked
+                />
+                <span>Only Supplements</span>
+              </label>
+              <label class="option-box">
+                <input
+                  type="radio"
+                  name="expectedOption"
+                  value="diet"
+                  onchange="updateGoalHba1c(this)"
+                />
+                <span>With Diet &amp; Supplements</span>
+              </label>
+              <label class="option-box">
+                <input
+                  type="radio"
+                  name="expectedOption"
+                  value="lifestyle"
+                  onchange="updateGoalHba1c(this)"
+                />
+                <span>With Diet, Lifestyle modifications &amp; Supplements</span>
+              </label>
+            </div>
           </div>
+
 
           <div class="Your-dce-d">
             <p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p>
@@ -1026,7 +1034,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
 
           <div class="bottom-section">
-  <div class="main-content">
+        <div class="main-content">
           ${productCardsHtml}
           ${addOnsHtml}
 
@@ -1045,7 +1053,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               </div>
               <div class="risk-block">
                 <div class="risk-item">
-                  <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Nerve.png?v=1744884197" alt="Kidney Damage" />
+                  <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Kidneys_1.png?v=1745492819" alt="Kidney Damage" />
                 </div>
                 <p>Kidney<br>Damage</p>
               </div>
@@ -1105,9 +1113,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <p>Pay Now ₹${finalPrice}/–</p>
         </a>
       </div>
-
       </div>
-</div>
+    </div>
           <div class="kit-section">
           <h3>What’s in the Customized Kit?</h3>
           <p class="intro">Inclusions:</p>
@@ -1235,23 +1242,31 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
       
 
-          <script>
+          <script> 
             var currentHba1c = ${presalesHba1c};
+
             function updateGoalHba1c(selected) {
-              // Uncheck all other checkboxes
-              var checkboxes = document.querySelectorAll('input[name="expectedOption"]');
-              checkboxes.forEach(function(box) {
-                box.checked = false;
-              });
+              // uncheck all
+              document
+                .querySelectorAll('input[name="expectedOption"]')
+                .forEach(box => box.checked = false);
               selected.checked = true;
+
+              // calculate new goal
               var newGoal;
+              var barImage = document.getElementById("goalBarImage");
+
               if (selected.value === "only") {
                 newGoal = currentHba1c - 0.8;
+                barImage.src = "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_837.webp?v=1745493610";
               } else if (selected.value === "diet") {
                 newGoal = currentHba1c - 1.5;
+                barImage.src = "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_838.webp?v=1745493609";
               } else if (selected.value === "lifestyle") {
                 newGoal = currentHba1c - 2.5;
+                barImage.src = "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_839.webp?v=1745493609";
               }
+
               document.getElementById("goalHba1cDisplay").textContent = newGoal.toFixed(1) + "%";
             }
           </script>
