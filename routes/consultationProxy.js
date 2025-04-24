@@ -1569,7 +1569,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
         </div>
 
-        div class="heading-section-cpreb main-cpreb">
+        <div class="heading-section-cpreb main-cpreb">
           <h1>Why India Trusts</h1>
           <h2>MUDITAM?</h2>
         </div>
