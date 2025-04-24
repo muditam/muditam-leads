@@ -345,7 +345,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         const imgUrl = addOnMap[item];
         if (imgUrl) {
           addOnsHtml += `
-            <div class="addon-item" style="flex:1;padding:10px;text-align:center;">
+            <div class="addon-item" style="flex:1;text-align:center;">
               <img src="${imgUrl}" alt="${item}" style="max-width:100%;height:auto;"/>
             </div>
           `;
@@ -597,11 +597,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
             .customer-dmp{
               font-size: 25px;
+              margin-bottom: 0px;
             }
             .customer-dmp-1{
               margin-top: 0px;
               font-size: 40px;
               color: #543087;
+              margin-bottom: 15px;
             }
             .customer-dmp-2{
               background-color: #F4F4F4;
@@ -614,14 +616,12 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             .Your-dce-d{
               padding: 10px;
             }
-              .addons-container {
-              display: flex;
+              .addons-container { 
               gap: 20px;
             }
              /* Risks section */
             .risks-section {
-              margin-top: 40px;
-              padding: 0 20px;
+              margin-top: 0px; 
             }
             .risks-section h3 {
               font-size: 26px;
@@ -774,7 +774,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   margin-top: 4px;
                 }
                 .payment-breakup-amg {
-                max-width:420px;margin:40px auto;border:1px solid #E0E0E0;
+                max-width:420px;margin:10px auto;border:1px solid #E0E0E0;
                 border-radius:8px;overflow:hidden;background:#FFF;
                 font-family:'Poppins',sans-serif;
               }
@@ -823,7 +823,10 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   max-width: 1200px;
                 }
                 .main-content {
-                  flex: 0 0 65%;
+                  flex: 0 0 55%;
+                  border: 1px solid #E0E0E0;
+                  padding: 15px;
+                  border-radius: 10px;
                 }
                 .sidebar {
                   flex: 0 0 35%;
@@ -901,11 +904,16 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
               .bottom-section {
                   flex-direction: column;
+                  width: 95%;
                 }
+                  .customer-dmp-top{
+              text-align: left; 
+              margin: 0 auto;
+              width: 95%;
+            }
               .caption-amg {
                 font-size: 12px;
-              }
-              .payment-breakup-amg{margin:24px 16px}
+              } 
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
