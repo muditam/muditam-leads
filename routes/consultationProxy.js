@@ -1568,7 +1568,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             Customer support is so sweet and helpful. They actually followed up and motivated me every week. This was a very wholesome experience.
           </div>
         </div>
-
+      </div>
+      
         <div class="heading-section-cpreb main-cpreb">
           <h1>Why India Trusts</h1>
           <h2>MUDITAM?</h2>
