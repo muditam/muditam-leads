@@ -523,7 +523,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
            .option-box {
             display: flex;
             align-items: center;
-            background-color: #ffffff;
+            background-color: #f4f4f4;
             padding: 14px 16px;
             border-radius: 8px;
             cursor: pointer;
@@ -551,8 +551,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               height: 10px;
               border-radius: 50%;
               background: #05AFFF;
-              top: 4px;
-              left: 4px;
+              top: 3px;
+              left: 3px;
               transform: scale(0);
               transition: transform 0.2s ease-in-out;
             }
@@ -592,21 +592,24 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
             .customer-dmp-top{
               text-align: left; 
-              margin: 0;
+              margin: 0 auto;
+              width: 80%;
             }
             .customer-dmp{
-              font-size: 18px;
+              font-size: 25px;
             }
             .customer-dmp-1{
               margin-top: 0px;
-              font-size: 22px;
+              font-size: 40px;
               color: #543087;
             }
             .customer-dmp-2{
               background-color: #F4F4F4;
               color: black;
               box-shadow: 0 0 4px 0;
-              border-radius: 15px;
+              border-radius: 25px;
+              font-size: 18px;
+              padding: 5px 20px;
             }
             .Your-dce-d{
               padding: 10px;
@@ -813,6 +816,20 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .payment-breakup-amg .pb-cta.pay p {
                 margin:0;font-size:20px;font-weight:600;
               }
+                .bottom-section {
+                  display: flex;
+                  gap: 20px;
+                  margin: 20px auto;
+                  max-width: 1200px;
+                }
+                .main-content {
+                  flex: 0 0 65%;
+                }
+                .sidebar {
+                  flex: 0 0 35%;
+                }
+
+
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 42px; 
@@ -882,6 +899,9 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .goal-section {
               width: 98%;
             }
+              .bottom-section {
+                  flex-direction: column;
+                }
               .caption-amg {
                 font-size: 12px;
               }
@@ -966,13 +986,17 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <div class="Your-dce-d">
             <p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p>
             
-            <hr style="height: 1px; background-color: #C0C0C0; width: 70%;">
+            <hr style="height: 1px; background-color: #C0C0C0; width: 80%;">
 
-            <div class="customer-dmp-top"><p class="customer-dmp">${customer.name}'s</p></div>
+            <div class="customer-dmp-top">
+            <p class="customer-dmp">${customer.name}'s</p>
             <p class="customer-dmp-1">Diabetes Management Plan</p>
             <span class="customer-dmp-2">${customer.age}/${presalesGender}</span>
+            </div>
           </div>
 
+          <div class="bottom-section">
+  <div class="main-content">
           ${productCardsHtml}
           ${addOnsHtml}
 
@@ -1021,7 +1045,39 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               </div>
             </div>
           </div>
+          </div>
 
+          <!-- Payment Breakup Section --> 
+          <div class="sidebar">
+      <div class="payment-breakup-amg">
+        <h3>Payment Breakup</h3>
+        <hr class="pb-line" />
+
+        <div class="pb-row">
+          <span>Diabetes Management Plan Price:</span>
+          <span class="pb-amount">₹${totalPrice}</span>
+        </div>
+        <hr class="pb-line" />
+
+        <div class="pb-row">
+          <span>Coupon Discount (${codes.join(", ") || "None"}):</span>
+          <span class="pb-amount">₹${couponDiscount}</span>
+        </div>
+        <hr class="pb-line" />
+
+        <div class="pb-row pb-final">
+          <span>Final Price:</span>
+          <span class="pb-amount">₹${finalPrice}</span>
+        </div>
+        <hr class="pb-line" />
+
+        <a class="pb-cta pay" href="${payUrl}">
+          <p>Pay Now ₹${finalPrice}/–</p>
+        </a>
+      </div>
+
+      </div>
+</div>
           <div class="kit-section">
           <h3>What’s in the Customized Kit?</h3>
           <p class="intro">Inclusions:</p>
@@ -1147,33 +1203,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         </div>
       </div>
 
-      <!-- Payment Breakup Section --> 
-      <div class="payment-breakup-amg">
-        <h3>Payment Breakup</h3>
-        <hr class="pb-line" />
-
-        <div class="pb-row">
-          <span>Diabetes Management Plan Price:</span>
-          <span class="pb-amount">₹${totalPrice}</span>
-        </div>
-        <hr class="pb-line" />
-
-        <div class="pb-row">
-          <span>Coupon Discount (${codes.join(", ") || "None"}):</span>
-          <span class="pb-amount">₹${couponDiscount}</span>
-        </div>
-        <hr class="pb-line" />
-
-        <div class="pb-row pb-final">
-          <span>Final Price:</span>
-          <span class="pb-amount">₹${finalPrice}</span>
-        </div>
-        <hr class="pb-line" />
-
-        <a class="pb-cta pay" href="${payUrl}">
-          <p>Pay Now ₹${finalPrice}/–</p>
-        </a>
-      </div>
+      
 
           <script>
             var currentHba1c = ${presalesHba1c};
