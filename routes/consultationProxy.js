@@ -291,7 +291,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     <div
       style="
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: space-between;
         padding: 20px;
         margin: 10px 0;
@@ -405,12 +405,12 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               text-align: left;
             }
             .dmp-heading{
-              font-size: 120px;
+              font-size: 90px;
               font-weight: 500;
               margin: 0;
               font-family: 'Bebas Neue', cursive;
               letter-spacing: 5px;
-              line-height: 120px;
+              line-height: 90px;
             }
             .dmp-heading-h1{
               font-size: 60px;
@@ -633,9 +633,11 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               margin-bottom: 20px;
             }
             .risks-container {
-              display: flex;
-              flex-wrap: wrap;
-              gap: 10px; 
+              flex-wrap: nowrap;
+              overflow-x: auto;
+              -webkit-overflow-scrolling: touch;
+              scroll-snap-type: x mandatory;
+              scroll-behavior: smooth;
             }
             .risk-block {
               display: flex;
@@ -668,7 +670,11 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             .kit-section .kit-items.mobile { display: none; }
 
                .kit-section {
-                margin: 40px 20px;
+                    margin: 0 auto 30px;
+                    width: 80%;
+                    border: 2px solid #E0E0E0;
+                    padding: 15px;
+                    border-radius: 10px;
               }
               .kit-section h3 {
                 font-size: 26px;
@@ -833,6 +839,9 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 }
 
 
+
+
+
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 42px; 
@@ -853,11 +862,17 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 gap: 5px;
               }
               .risks-container {
+              display: flex;
                 flex-wrap: nowrap;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
                 scroll-snap-type: x mandatory;
                 scroll-behavior: smooth;
+                 scrollbar-width: none; 
+                 -ms-overflow-style: none;
+              }
+                 .risks-container::-webkit-scrollbar {
+                display: none;
               }
               .risk-item {
                 scroll-snap-align: start;
@@ -910,6 +925,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               text-align: left; 
               margin: 0 auto;
               width: 95%;
+            }
+              .customer-dmp-1{
+              font-size: 23px;
+              }
+              .customer-dmp-2 { 
+                font-size: 14px;
+                padding: 5px 10px;
             }
               .caption-amg {
                 font-size: 12px;
