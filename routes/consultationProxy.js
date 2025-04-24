@@ -216,8 +216,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       ? `https://www.muditam.com/cart/${cartPath}${discountParam}`
       : "#";
 
-    // Map selected product names to their details (image URL and description)
-    // Map selected product names to their details (image URL and description)
+    // Map selected product names to their details (image URL and description) 
     const productDetailsMap = {
       "Karela Jamun Fizz": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
@@ -293,7 +292,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 0 10px;
+        padding: 0 10px 10px 0;
         margin: 10px 0;
         background: #fff;
         border-radius: 10px;
@@ -345,7 +344,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         const imgUrl = addOnMap[item];
         if (imgUrl) {
           addOnsHtml += `
-            <div class="addon-item" style="flex:1;text-align:center;">
+            <div class="addon-item" style="flex:1;padding:10px;text-align:center;">
               <img src="${imgUrl}" alt="${item}" style="max-width:100%;height:auto;"/>
             </div>
           `;
@@ -840,7 +839,88 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   flex: 0 0 35%;
                 }
 
+                .card-cpre {
+                  background: #fff;
+                  border-radius: 12px;
+                  box-shadow: 0 0 4px rgba(0, 0, 0, 0.12);
+                  padding: 16px;
+                  display: flex;
+                  flex-direction: column;
+                  scroll-snap-align: start;
+                }
+                .card-header-cpre {
+                  display: flex;
+                  align-items: center;
+                  gap: 12px;
+                  margin-bottom: 8px;
+                }
+                .avatar-cpre img {
+                  width: 50px;
+                  height: 50px;
+                  border-radius: 50%;
+                  border: 2px solid #eee;
+                  object-fit: cover;
+                }
+                .user-info-cpre { display: flex; flex-direction: column; }
+                .name-cpre {
+                  font-weight: bold;
+                  color: #333;
+                  font-size: 16px;
+                }
+                .location-cpre {
+                  display: flex;
+                  align-items: center;
+                  gap: 4px;
+                  font-size: 13px;
+                  color: #777;
+                }
+                .location-cpre img {
+                  display: inline-block;
+                }
+                .divider-cpre {
+                  height: 0.5px;
+                  background: #C0C0C0;
+                  margin: 4px 0;
+                }
+                .stars-cpre span { margin-right: 2px; }
+                .description-cpre {
+                  font-size: 14px;
+                  color: #444;
+                  line-height: 1.4;
+                }
 
+                /* Horizontal scrollable row */
+                .cards-scroll-cpre {
+                  display: flex;
+                  gap: 10px;
+                  overflow-x: auto;
+                  padding-bottom: 8px;
+                  scroll-snap-type: x mandatory;
+                  -webkit-overflow-scrolling: touch;
+                  width: 100%;
+                  max-width: 1000px;
+                  margin-bottom: 32px;
+                }
+                .cards-scroll-cpre::-webkit-scrollbar {
+                  height: 6px;
+                  display: none;
+                }
+                .cards-scroll-cpre .card-cpre {
+                  flex: 0 0 220px;
+                  max-width: 324px;
+                  max-height: 320px;
+                  margin: 3px;
+                }
+
+                /* Separator above a vertical list (if used) */
+                .main-cpre::before {
+                  content: '';
+                  display: block;
+                  height: 1px;
+                  width: 90vw;
+                  background-color: #C0C0C0;
+                  margin: 5px auto 12px auto;
+                }
 
 
 
@@ -935,9 +1015,17 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 font-size: 14px;
                 padding: 5px 10px;
             }
+                .main-content { 
+                  padding: 10px; 
+                }
               .caption-amg {
                 font-size: 12px;
               } 
+                 .cards-scroll-cpre .card-cpre {
+                  flex: 0 0 340px;
+                  max-width: 340px;
+                  max-height: 309px;
+                }
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
@@ -1240,7 +1328,72 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         </div>
       </div>
 
-      
+      <div class="cards-scroll-cpre">
+  <div class="card-cpre">
+    <div class="card-header-cpre">
+      <div class="avatar-cpre">
+        <img src="https://i.pravatar.cc/150?img=47" alt="">
+      </div>
+      <div class="user-info-cpre">
+        <div class="name-cpre">Priya Sharma</div>
+        <div class="location-cpre">
+          <img height="12" width="12" src="https://img.icons8.com/ios/50/marker--v1.png" alt="marker"/> Mumbai
+        </div>
+      </div>
+    </div>
+    <div class="divider-cpre"></div>
+    <div class="stars-cpre">
+      <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
+    </div>
+    <div class="description-cpre">
+      I've been using this product for over a month and I love it! Excellent results and fast delivery.
+    </div>
+  </div>
+
+
+
+  <div class="card-cpre">
+    <div class="card-header-cpre">
+      <div class="avatar-cpre">
+        <img src="https://i.pravatar.cc/150?img=12" alt="">
+      </div>
+      <div class="user-info-cpre">
+        <div class="name-cpre">Rahul Verma</div>
+        <div class="location-cpre">
+          <img height="12" width="12" src="https://img.icons8.com/ios/50/marker--v1.png" alt="marker"/> Delhi
+        </div>
+      </div>
+    </div>
+    <div class="divider-cpre"></div>
+    <div class="stars-cpre">
+      <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
+    </div>
+    <div class="description-cpre">
+      This is the best purchase I’ve made this year. Quality is top notch and service was superb.
+    </div>
+  </div>
+
+  <div class="card-cpre">
+    <div class="card-header-cpre">
+      <div class="avatar-cpre">
+        <img src="https://i.pravatar.cc/150?img=88" alt="">
+      </div>
+      <div class="user-info-cpre">
+        <div class="name-cpre">Sneha Gupta</div>
+        <div class="location-cpre">
+          <img height="12" width="12" src="https://img.icons8.com/ios/50/marker--v1.png" alt="marker"/> Bengaluru
+        </div>
+      </div>
+    </div>
+    <div class="divider-cpre"></div>
+    <div class="stars-cpre">
+      <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
+    </div>
+    <div class="description-cpre">
+      Super easy to use and results showed up within days. Will definitely buy again!
+    </div>
+  </div>
+</div>
 
           <script> 
             var currentHba1c = ${presalesHba1c};
