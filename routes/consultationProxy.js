@@ -945,8 +945,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 display: flex;
                 flex-direction: column;
                 gap: 16px;
-                width: 100%;
-                max-width: 1000px;
+                width: 80%;
+                margin: 0 auto; 
               }
 
               /* Card base */
@@ -1047,6 +1047,106 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 background-color: #C0C0C0;
                 margin: 5px auto 12px auto;
               }
+
+              .expert {
+                padding-left: 20%;
+                padding-right: 20%;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                font-family: "Poppins", sans-serif;
+              }
+
+              /* Heading */
+              .heading-section {
+                text-align: center;
+                max-width: 184px;
+                max-height: 110px;
+              }
+              .heading-section h1 {
+                font-size: 32px;
+                color: #5D5D5D;
+                font-weight: 200;
+                margin: 0;
+              }
+              .heading-section h2 {
+                font-size: 50px;
+                color: #C0C0C0;
+                font-weight: 600;
+                line-height: 1;
+                margin: 0;
+              }
+
+              /* Expert container */
+              .expert-container {
+                display: flex;
+                align-items: flex-start;
+                width: 100%;
+                max-width: 1000px;
+                margin-top: 20px;
+                flex-wrap: wrap;
+              }
+
+              /* Left column: avatar + quick details */
+              .expert-left {
+                flex: 0 0 200px;
+                text-align: center;
+              }
+              .expert-left .avatar {
+                width: 150px;
+                height: 150px;
+                margin: 0 auto 16px;
+                overflow: hidden;
+                border-radius: 50%;
+                border: 3px solid #ddd;
+              }
+              .expert-left .avatar img {
+                width: 100%;
+                height: 100%;
+                max-width: 236px;
+                max-height: 236px;
+                object-fit: cover;
+              }
+              .expert-details {
+                font-size: 16px;
+                color: #333;
+                line-height: 1.4;
+                margin-bottom: 8px;
+              }
+              .expert-details h3 {
+                margin-bottom: 8px;
+              }
+              .expert-details p {
+                font-style: regular;
+                font-size: 14px;
+                margin: 0;
+              }
+
+              /* Right column: longer bio/description */
+              .expert-description {
+                flex: 1;
+                font-size: 15px;
+                color: #444;
+                line-height: 1.3;
+              }
+
+              .expert-details h1 {
+                color: #543087;
+                font-style: bold;
+                font-size: 30px;
+                margin: 0;
+              }
+              .btnn {
+                padding: 15px 50px;
+                border-radius: 22px;
+                cursor: pointer;
+                border: none;
+                background: #0984E3;
+                color: white;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+                margin-top: 20px;
+              }
+
 
 
               @media only screen and (max-width: 767px) {
@@ -1203,6 +1303,39 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                     max-height: 309px;
                     margin: 0;
                   }
+                    .expert-container {
+                      flex-direction: column;
+                      align-items: center;
+                      text-align: center;
+                    }
+                    .expert-left {
+                      flex: none;
+                    }
+                    .expert-description {
+                      margin-top: 24px;
+                      max-width: 442px;
+                      max-height: 299;
+                    }
+                    .expert-description {
+                      flex: 1;
+                      font-size: 14px;
+                      line-height: 1.3;
+                    }
+                    
+                    .btnn {
+                      padding: 12px 45px;
+                      border-radius: 22px;
+                      cursor: pointer;
+                      border: none;
+                      background: #0984E3;
+                      color: white;
+                      font-size: 14px;
+                      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+                    }
+                    .expert{
+                        padding: 0;
+                    }
+
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
@@ -1210,6 +1343,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .payment-breakup-amg .pb-cta.book small{font-size:12px}
               .payment-breakup-amg .pb-cta.pay p{font-size:18px}
             }
+              @media (min-width: 601px) {
+                .btnn {
+                  margin-left: 20px;
+                  margin-top: 0;
+                  align-self: flex-start;  
+                }
+              }
           </style>
         </head>
         <body>
@@ -1569,7 +1709,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
         </div>
       </div>
-      
+
         <div class="heading-section-cpreb main-cpreb">
           <h1>Why India Trusts</h1>
           <h2>MUDITAM?</h2>
@@ -1651,6 +1791,34 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             </div>
           </div>
         </div>
+
+        <section class="expert">
+    <div class="heading-section">
+      <h1>Know Your</h1>
+      <h2>EXPERT</h2>
+    </div>
+
+    <div class="expert-container">
+      <div class="expert-left">
+        <div class="avatar">
+          <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
+        </div>
+        <div class="expert-details">
+          <p>Hi <b>Abhay</b>, This is</p>
+          <h1>MANSVI</h1>
+          <p>Diabetes Expert</p>
+        </div>
+      </div>
+      <div class="expert-description">
+        I’ve helped 5,960+ people manage their Type 2 Diabetes naturally and safely.</br></br>
+        With over 5 years of experience, I specialise in helping people manage blood sugar levels, cholesterol, and lifestyle-related health concerns using a blend of Ayurveda and Functional Nutrition. I work closely with each person to personalise their plan — guiding them step-by-step with supplements, diet changes, and lifestyle support.</br>
+        </br>You're not alone in this — I’ll be with you throughout the journey
+      </div>
+    </div>
+
+    <!-- Button below the expert details and aligned left on large screens -->
+    <button class="btnn"><b>Call Now</b></button>
+  </section>
 
           <script> 
             var currentHba1c = ${presalesHba1c};
