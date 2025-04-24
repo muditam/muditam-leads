@@ -842,8 +842,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .cards-scroll-cpre {
                 display: flex;
                 justify-content: space-between;
-                width: 80%;
-                margin: 0 auto 32px;
+                width: 68%;
+                margin: 20px auto;
               }
 
               .cards-scroll-cpre .card-cpre {
@@ -905,6 +905,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
               .stars-cpre span {
                 margin-right: 2px;
+                font-size: 22px;
               }
 
               .description-cpre {
@@ -1350,7 +1351,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         <div class="card-cpre">
           <div class="card-header-cpre">
             <div class="avatar-cpre">
-              <img src="https://i.pravatar.cc/150?img=47" alt="">
+              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/fggfku.png?v=1745497170" alt="">
             </div>
             <div class="user-info-cpre">
               <div class="name-cpre">Priya Sharma</div>
@@ -1364,14 +1365,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
           </div>
           <div class="description-cpre">
-            I've been using this product for over a month and I love it! Excellent results and fast delivery.
+            Maine 3 saal se sugar control karne ki koshish ki, par kuch kaam nahi aaya. Muditam ka plan follow karne ke baad 2 mahine mein sugar 280 se 130 tak aaya.Thank you so much!
           </div>
         </div>
 
         <div class="card-cpre">
           <div class="card-header-cpre">
             <div class="avatar-cpre">
-              <img src="https://i.pravatar.cc/150?img=12" alt="">
+              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mask_group.png?v=1745497171" alt="">
             </div>
             <div class="user-info-cpre">
               <div class="name-cpre">Rahul Verma</div>
@@ -1385,14 +1386,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
           </div>
           <div class="description-cpre">
-            This is the best purchase I’ve made this year. Quality is top notch and service was superb.
+            Honestly, I wasn’t sure if Ayurveda would work. But with Muditam’s diet plan + supplements, my HbA1c came down from 9.1 to 6.5 in just 4 months.Lifesaver.
           </div>
         </div>
 
         <div class="card-cpre">
           <div class="card-header-cpre">
             <div class="avatar-cpre">
-              <img src="https://i.pravatar.cc/150?img=88" alt="">
+              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/h.i.png?v=1745497170" alt="">
             </div>
             <div class="user-info-cpre">
               <div class="name-cpre">Sneha Gupta</div>
@@ -1406,7 +1407,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
           </div>
           <div class="description-cpre">
-            Super easy to use and results showed up within days. Will definitely buy again!
+            Customer support is so sweet and helpful. They actually followed up and motivated me every week. This was a very wholesome experience.
           </div>
         </div>
 
