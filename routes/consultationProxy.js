@@ -924,6 +924,130 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 margin: 5px auto 12px auto;
               }   
 
+              .heading-section-cpreb.main-cpreb {
+                text-align: center; 
+              }
+              .heading-section-cpreb.main-cpreb h1 {
+                font-size: 32px;
+                color: #5D5D5D;
+                font-weight: 200;
+                margin-bottom: -30px;
+              }
+              .heading-section-cpreb.main-cpreb h2 {
+                font-size: 50px;
+                color: #C0C0C0;
+                line-height: 51px;
+                font-weight: bold;
+              }
+
+              /* Cards list (vertical) */
+              .cards-list-cpreb {
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+                width: 100%;
+                max-width: 1000px;
+              }
+
+              /* Card base */
+              .card-cpreb {
+                background: #fff;
+                border-radius: 12px;
+                box-shadow: 0 0 4px rgba(0,0,0,0.12);
+                padding: 16px;
+                display: flex;
+                flex-direction: column;
+              }
+              .card-header-cpreb {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 8px;
+              }
+              .avatar-cpreb img {
+                width: 50px;
+                height: 50px;
+                border-radius: 50%;
+                border: 2px solid #eee;
+                object-fit: cover;
+              }
+              .user-info-cpreb { display: flex; flex-direction: column; }
+              .name-cpreb {
+                font-weight: bold;
+                color: #333;
+                font-size: 16px;
+              }
+              .location-cpreb {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                font-size: 13px;
+                color: #777;
+              }
+              .divider-cpreb {
+                height: 0.5px;
+                background: #C0C0C0;
+                margin: 4px 0;
+              }
+              .stars-cpreb {
+                color: orange;
+                font-size: 1.25rem;
+                margin-bottom: 8px;
+              }
+              .stars-cpreb span { margin-right: 2px; }
+              .description-cpreb {
+                font-size: 14px;
+                color: #444;
+                line-height: 1.4;
+              }
+
+              /* Review images */
+              .review-images-cpreb {
+                display: flex;
+                gap: 10px;
+                margin-top: 10px;
+              }
+              .review-images-cpreb img {
+                width: 165px;
+                height: 165px;
+                object-fit: cover;
+                border-radius: 4px;
+                border: 1px solid #ccc;
+              }
+
+              /* Horizontal scrollable row (if needed) */
+              .cards-scroll-cpreb {
+                display: flex;
+                gap: 10px;
+                overflow-x: auto;
+                padding-bottom: 8px;
+                scroll-snap-type: x mandatory;
+                -webkit-overflow-scrolling: touch;
+                width: 100%;
+                max-width: 1000px;
+                margin-bottom: 32px;
+              }
+              .cards-scroll-cpreb::-webkit-scrollbar {
+                height: 6px;
+                display: none;
+              }
+              .cards-scroll-cpreb .card-cpreb {
+                flex: 0 0 220px;
+                max-width: 324px;
+                max-height: 320px;
+                margin: 3px;
+              }
+
+              /* Separator above a vertical list */
+              .main-cpreb::before {
+                content: '';
+                display: block;
+                height: 1px;
+                width: 90vw;
+                background-color: #C0C0C0;
+                margin: 5px auto 12px auto;
+              }
+
 
               @media only screen and (max-width: 767px) {
               .dmp-heading{
@@ -1045,6 +1169,40 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   max-height: 309px;
                   margin: 0;
                 }
+                  .heading-section-cpreb.main-cpreb {
+                    text-align: left;
+                    width: 100%;
+                    padding-left: 10px;
+                  }
+                  .heading-section-cpreb.main-cpreb h1 {
+                    font-size: 32px;
+                  }
+                  .heading-section-cpreb.main-cpreb h2 {
+                    font-size: 40px;
+                    line-height: 41px;
+                  }
+
+                  .review-images-cpreb {
+                    gap: 10px;
+                    margin-top: 10px;
+                  }
+                  .review-images-cpreb img {
+                    width: 123px;
+                    height: 100px;
+                  }
+
+                  .cards-scroll-cpreb {
+                    flex-wrap: nowrap;
+                    scrollbar-width: none;
+                    -ms-overflow-style: none;
+                    scroll-behavior: smooth;
+                  }
+                  .cards-scroll-cpreb .card-cpreb {
+                    flex: 0 0 340px;
+                    max-width: 340px;
+                    max-height: 309px;
+                    margin: 0;
+                  }
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
@@ -1408,6 +1566,88 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
           <div class="description-cpre">
             Customer support is so sweet and helpful. They actually followed up and motivated me every week. This was a very wholesome experience.
+          </div>
+        </div>
+
+        div class="heading-section-cpreb main-cpreb">
+          <h1>Why India Trusts</h1>
+          <h2>MUDITAM?</h2>
+        </div>
+
+        <div class="cards-list-cpreb">
+          <div class="card-cpreb">
+            <div class="card-header-cpreb">
+              <div class="avatar-cpreb">
+                <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mask_group-2.png?v=1745499024" alt="">
+              </div>
+              <div class="user-info-cpreb">
+                <div class="name-cpreb">Meena Taneja</div>
+                <div class="location-cpreb">
+                  <img height="12" width="12" src="https://img.icons8.com/ios/50/marker--v1.png" alt="marker"/> Ghaziabad
+                </div>
+              </div>
+            </div>
+            <div class="divider-cpreb"></div>
+            <div class="stars-cpreb">
+              <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
+            </div>
+            <div class="description-cpreb">
+              2 saal se sugar control nahi ho rahi thi. Fasting ab  roz 110 ke aas-paas hai. Karela Jamun Fizz ne kamaal kar diya.
+            </div>
+            <div class="review-images-cpreb">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5747_Medium_84cabab8-8e28-4d4b-b978-0e7f0303f420.jpg?v=1734173390" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5745_Medium_d1d58fe6-815f-48c1-b4b5-e6643bed7eb5.jpg?v=1734173390" alt="Customer Photo">
+            </div>
+          </div>
+
+          <div class="card-cpreb">
+            <div class="card-header-cpreb">
+              <div class="avatar-cpreb">
+                <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/gkiu.png?v=1745499024" alt="">
+              </div>
+              <div class="user-info-cpreb">
+                <div class="name-cpreb">Ramesh Joshi</div>
+                <div class="location-cpreb">
+                  <img height="12" width="12" src="https://img.icons8.com/ios/50/marker--v1.png" alt="marker"/> Ahmedabad
+                </div>
+              </div>
+            </div>
+            <div class="divider-cpreb"></div>
+            <div class="stars-cpreb">
+              <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
+            </div>
+            <div class="description-cpreb">
+              Sugar 300 se 130 aa gaya within 2 months. No allopathy, just Muditam. Feeling light, energetic, and finally hopeful.
+            </div>
+            <div class="review-images-cpreb">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5748_Medium_d7c64b53-76a6-4517-9c74-575b5280d875.jpg?v=1734173390" alt="Customer Photo"> 
+            </div>
+          </div>
+
+          <div class="card-cpreb">
+            <div class="card-header-cpreb">
+              <div class="avatar-cpreb">
+                <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mask_group-1.png?v=1745499024" alt="">
+              </div>
+              <div class="user-info-cpreb">
+                <div class="name-cpreb">Aarav Bansal</div>
+                <div class="location-cpreb">
+                  <img height="12" width="12" src="https://img.icons8.com/ios/50/marker--v1.png" alt="marker"/> Noida
+                </div>
+              </div>
+            </div>
+            <div class="divider-cpreb"></div>
+            <div class="stars-cpreb">
+              <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
+            </div>
+            <div class="description-cpreb">
+              Mera Liver Phle Bohot fatty the fir maine Liver Fix liya or muditam ke doctors ki salah mani ab liver bhi thik hogya or mai accha feel krta hu.
+            </div>
+            <div class="review-images-cpreb">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5738_Medium_b8d29404-d325-439c-8e8d-1c8461766e1e.jpg?v=1734174436" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5736_Medium_90399e08-a751-4195-891b-fda732dce066.jpg?v=1734174436" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5739_Medium_42ce787f-a9ce-4e84-964d-352142bf9ad0.jpg?v=1734174436" alt="Customer Photos">
+            </div>
           </div>
         </div>
 
