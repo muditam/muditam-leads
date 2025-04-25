@@ -367,7 +367,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <!-- Prevent search engines from indexing this page -->
           <meta name="robots" content="noindex, nofollow">
           
-          <style>
+          <style> 
             body { 
               margin: 0; 
               padding: 0; 
@@ -390,12 +390,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               }
             }
             .container {
-              min-height: 100vh;
+              min-height: 75vh;
               display: flex;
               align-items: center; 
               text-align: center;
               padding: 20px;
               box-sizing: border-box;
+              margin-left: 100px;
             }
             .overlay { 
               color: #fff;
@@ -406,16 +407,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
             .dmp-heading{
               font-size: 90px;
-              font-weight: 500;
-              margin: 0;
-              font-family: 'Bebas Neue', cursive;
-              letter-spacing: 5px;
+              font-weight: 600;
+              margin: 0;  
               line-height: 90px;
             }
             .dmp-heading-h1{
               font-size: 60px;
               font-weight: 400;
-              margin: 0 auto 10px;
+              margin: 0 auto 0px;
             }
             .duration-badge {
               display: inline-block;
@@ -718,15 +717,15 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   font-family: 'Poppins', sans-serif;
                 }
                 .turning-section-amg h2 {
-                  margin: 0;
+                  margin: 8px 0 40px;
                   font-size: 36px;
                   font-weight: 700;
                   color: #B0B0B0;
                   line-height: 1;
                 }
                 .subtitle-amg {
-                  margin: 8px 0 40px;
-                  font-size: 20px;
+                  margin: 0;
+                  font-size: 25px;
                   color: #666;
                 }
 
@@ -1359,13 +1358,12 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 42px; 
-                line-height: 60px;
-                letter-spacing: 3px;
+                line-height: 60px; 
               }
               .dmp-heading-h1{
                 font-size: 30px;
                 font-weight: 400;
-                margin: 0 auto 10px;
+                margin: 0 auto 0px;
               }
               .duration-badge {
                 font-size: 25px;
@@ -1598,6 +1596,12 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                         .list-section { 
                       width: 95%; 
                       }
+                      .container { 
+                      margin-left: 0px;
+                    }
+                      .dmp-heading-span {
+                        font-size: 14px; 
+                    }
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
@@ -1630,8 +1634,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
           <!-- Results Expected Section -->
           <div class="results-expected">
-            <p class="results-expected-p">Results Expected in</p>
-            <h3 class="results-expected-h3">90 Days</h3>
+            <p class="results-expected-p">Results Expected in <h3 class="results-expected-h3">90 Days</h3></p>
           </div>
           <!-- Goal Section -->
           <div class="goal-section">
@@ -1658,7 +1661,6 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   name="expectedOption"
                   value="only"
                   onchange="updateGoalHba1c(this)"
-                  checked
                 />
                 <span>Only Supplements</span>
               </label>
@@ -1668,6 +1670,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   name="expectedOption"
                   value="diet"
                   onchange="updateGoalHba1c(this)"
+                  checked
                 />
                 <span>With Diet &amp; Supplements</span>
               </label>
@@ -1853,8 +1856,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         </div>
 
         <div class="turning-section-amg">
-        <h2>TURNING POINTS</h2>
-        <p class="subtitle-amg">Stories of Health & Hope</p>
+        <p class="subtitle-amg">Why India Trusts</p>
+        <h2>Muditam?</h2>
 
         <div class="rating-cards-amg">
           <!-- Google card -->
@@ -1964,8 +1967,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       </div>
 
         <div class="heading-section-cpreb main-cpreb">
-          <h1>Why India Trusts</h1>
-          <h2>MUDITAM?</h2>
+          <h2>Happy Customers</h2>
+          <h1>50,000+</h1>
         </div>
 
         <div class="cards-list-cpreb">
