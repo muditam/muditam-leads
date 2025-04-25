@@ -1587,10 +1587,12 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                       transform: rotate(90deg);
                     }
 
-
                       .dropdown-item label {
                         font-size: 23px;
                         font-weight: 600; 
+                      }
+                        .list-section { 
+                      width: 95%; 
                       }
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
