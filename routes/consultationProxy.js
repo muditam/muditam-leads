@@ -1146,7 +1146,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               }
 
               .faq-cpreb {
-                width: 80%
+                width: 80%;
                 margin: 30px auto;
                 padding: 0 20px;
                 font-family: "Poppins", sans-serif;
@@ -1480,7 +1480,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                     .footer-cta {
                       font-size: 1.25rem;
                     }
-                      
+
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
