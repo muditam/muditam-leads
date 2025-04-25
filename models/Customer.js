@@ -8,6 +8,7 @@ const CustomerSchema = new mongoose.Schema({
   lookingFor: { type: String, required: true },
   assignedTo: { type: String, required: true },
   followUpDate: { type: Date, required: true },
+  leadSource: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   dateAndTime: { type: Date, default: () => new Date() },
 }); 
