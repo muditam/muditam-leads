@@ -856,8 +856,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 background: #fff;
                 border-radius: 12px;
                 box-shadow: 0 0 4px rgba(0, 0, 0, 0.12);
-                padding: 16px;
-                display: flex;
+                padding: 16px; 
                 flex-direction: column;
                 justify-content: center;
               }
@@ -1221,6 +1220,49 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 animation: fadeIn 0.2s ease-in;
               }
 
+              .site-footer {
+                background-color: #000;
+                color: #fff;
+                text-align: center;
+                padding: 60px 20px;
+                font-family: "Poppins", sans-serif;
+              }
+
+              .footer-content {
+                max-width: 600px;
+                margin: 0 auto;
+              }
+ 
+              .footer-logo img {
+                max-width: 200px;
+                width: 100%;
+                height: auto;
+                margin-bottom: 16px;
+              }
+ 
+              .footer-tagline {
+                font-size: 1rem;
+                opacity: 0.8;
+                margin-bottom: 8px;
+              }
+ 
+              .footer-cta {
+                font-size: 1.5rem;
+                font-weight: 600;
+                margin: 16px 0;
+              }
+ 
+              .footer-copy {
+                font-size: 0.875rem;
+                opacity: 0.6;
+                margin-top: 24px;
+              }
+
+
+
+
+
+
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 42px; 
@@ -1432,6 +1474,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                       font-size: 0.9rem;
                     }
 
+                    .footer-logo img {
+                      max-width: 160px;
+                    }
+                    .footer-cta {
+                      font-size: 1.25rem;
+                    }
+                      
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
@@ -1967,6 +2016,24 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
         </div>
       </section>
+
+      <footer class="site-footer">
+        <div class="footer-content">
+          <div class="footer-logo">
+            <img
+              src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/new_logo_orange_leaf_1_4e0e0f89-08a5-4264-9d2b-0cfe9535d553.png?v=1727508866"
+              alt="Muditam Logo"
+            />
+          </div>
+          <p class="footer-tagline">
+            Proven by Science. Rooted in Ayurveda. Trusted by 50,000+.
+          </p>
+          <h2 class="footer-cta">Now it’s your turn.</h2>
+          <p class="footer-copy">
+            Copyright © 2025 Muditam Ayurveda Pvt. Ltd.
+          </p>
+        </div>
+      </footer>
 
           <script> 
             var currentHba1c = ${presalesHba1c};
