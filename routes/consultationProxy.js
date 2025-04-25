@@ -1226,6 +1226,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 text-align: center;
                 padding: 60px 20px;
                 font-family: "Poppins", sans-serif;
+                margin-top: 20px;
               }
 
               .footer-content {
@@ -2115,7 +2116,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
             </div>
             <div class="expert-details">
-              <p>Hi, This is</p>
+              <p>Hi <strong>${customer.name}</strong>,, This is</p>
               <h1>MANSVI</h1>
               <p>Diabetes Expert</p>
               <!-- Button below the expert details and aligned left on large screens -->

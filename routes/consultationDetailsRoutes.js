@@ -77,8 +77,6 @@ router.post("/", async (req, res) => {
   }
 });
 
-
-
 // PUT to update a consultation detail by ID
 router.put("/:id", async (req, res) => {
   try {
