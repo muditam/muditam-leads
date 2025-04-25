@@ -7,7 +7,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
 
     // Data coming from Presales.js
     presales: {
-      leadStatus: { type: String, default: "New Lead" }, // New field for Lead Status
+      leadStatus: { type: String, default: "New Lead" }, 
       hba1c: { type: String },
       lastTestDone: { type: String },
       fastingSugar: { type: String },
@@ -53,8 +53,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       gutIssues: { type: String },
       energyLevels: { type: String },
       sleepQuality: { type: String },
-      sugarCravings: { type: String },
-      durationOfDiabetes: { type: String },
+      sugarCravings: { type: String }, 
       // Call checklist from Consultation.js
       checklist: {
         openingCustomerDetails: { type: Boolean, default: false },

@@ -1258,6 +1258,92 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 margin-top: 24px;
               }
 
+              .list-section {
+                font-family: "Poppins", sans-serif;
+                font-weight: 400;
+                font-style: normal;
+                width: 80%;
+                margin: 0 auto;
+                }
+
+                .dropdown-item {
+                  border-bottom: 1px solid gray;
+                  overflow: hidden;
+                }
+
+                .dropdown-item input[type="checkbox"] {
+                  display: none;
+                }
+
+                .dropdown-item label {
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  padding: 15px 0px;
+                  cursor: pointer;
+                  font-weight: 550; 
+                  font-size: 23px;
+                  color: #000;      
+                }
+
+                .dropdown-item label img {
+                  width: 18px;
+                  height: 18px;
+                  transform: rotate(90deg);
+                }
+
+                .dropdown-item input[type="checkbox"]:checked + label img {
+                  transform: rotate(270deg);
+                }
+
+                .dropdown-content {
+                  max-height: 0;
+                  overflow: hidden;
+                  padding: 0 10px;
+                }
+
+                .dropdown-item input[type="checkbox"]:checked ~ .dropdown-content {
+                  max-height: 500px;
+                  padding:  2px 20px 0;
+                  margin-top: 0;
+                }
+
+                .dropdown-title {
+                  font-size: 18px;
+                  font-weight: 550;
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  color: #000;     
+                }
+
+                .dropdown-description {
+                  font-size: 15px;
+                  color: #515151;
+                  margin-top: 2px;
+                  font-weight: 400; 
+                }
+
+                .dropdown-title img {
+                  margin-left: 10px;
+                  width: 18px;
+                  height: 18px;
+                }
+
+                .dropdown-description h3 {
+                  font-size: 18px;
+                  font-weight: 550;
+                  color: #000;
+                  margin-bottom: 1px;
+                }
+
+                .dropdown-description p {
+                  font-size: 15px;
+                  font-weight: 400;
+                  color: #515151;
+                  margin-bottom: 10px;
+                  padding-left: 18px;
+                }
 
 
 
@@ -1481,6 +1567,31 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                       font-size: 1.25rem;
                     }
 
+                        .dropdown-description h3 {
+                        font-size: 14px;
+                        font-weight: 600; 
+                        
+                      }
+
+                      .dropdown-description p {
+                        font-size: 14px;
+                        font-weight: 400;
+                      }
+
+                      .dropdown-title {
+                        font-size: 14px;
+                        font-weight: 600;
+                      }
+
+                  .dropdown-item img {
+                      transform: rotate(90deg);
+                    }
+
+
+                      .dropdown-item label {
+                        font-size: 23px;
+                        font-weight: 600; 
+                      }
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
@@ -2002,7 +2113,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
             </div>
             <div class="expert-details">
-              <p>Hi <b>Abhay</b>, This is</p>
+              <p>Hi, This is</p>
               <h1>MANSVI</h1>
               <p>Diabetes Expert</p>
               <!-- Button below the expert details and aligned left on large screens -->
@@ -2016,6 +2127,42 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
         </div>
       </section>
+
+      <div class="list-section">
+    <div class="dropdown-item">
+      <input type="checkbox" id="item1">
+      <label for="item1">
+        Payment Options:
+        <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988" alt="Arrow Icon" />
+      </label>
+      <div class="dropdown-content">
+        <div class="dropdown-description">
+          <h3>1. Partial Payment (Recommended)</h3>
+          <p>Book your order now with a small amount. Pay the remaining balance at the time of delivery.</p>
+          <h3>2. Prepaid</h3>
+          <p>Make the full payment online before dispatch. Fast and hassle-free delivery.</p>
+          <h3>3. Cash on Delivery</h3>
+          <p>Want to pay at delivery? Connect with your expert to activate COD for your order. Note: Complete COD is not available where blood test is included.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="dropdown-item">
+      <input type="checkbox" id="item2">
+      <label for="item2">
+        Disclaimer:
+        <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988" alt="Arrow Icon" />
+      </label>
+      <div class="dropdown-content">
+        <div class="dropdown-description">
+          <p>1. If you choose partial payment and go ahead with the blood test, the remaining blood test amount must be paid—even if the rest of the order is cancelled.</p>
+          <p>2. A 100% refund on your product order amount is available only before your order is dispatched.</p>
+          <p>3. Expected results are based on completing the 90-day kit, regardless of the number of days shared in your quotation.</p>
+          <p>4. Results may vary depending on your existing complications, other health conditions, and how well you follow the suggested diet and lifestyle.</p>
+        </div>
+      </div>
+    </div>
+  </div>
 
       <footer class="site-footer">
         <div class="footer-content">
