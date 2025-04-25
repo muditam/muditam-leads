@@ -363,10 +363,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <title>Consultation Plan for ${customer.name}</title>
-          <link
-            rel="stylesheet"
-            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
-          /> 
+          <!-- Prevent search engines from indexing this page -->
           <meta name="robots" content="noindex, nofollow">
           
           <style>
@@ -1150,33 +1147,41 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               }
 
               .faq-cpreb {
-                max-width: 700px;
-                margin: 40px auto;
-                padding:   0 20px;
+                width: 80%
+                margin: 30px auto;
+                padding: 0 20px;
                 font-family: "Poppins", sans-serif;
               }
               .faq-heading-cpreb {
                 text-align: center;
-                font-size: 2rem;
-                color: #666;
+                font-size: 30px;
+                color: #5D5D5D;
+                font-weight: 400;
+                margin-bottom: 1.5rem;
+              }
+                .faq-heading-cpreb-s {
+                text-align: center;
+                font-size: 40px;
+                color: #C0C0C0;
+                font-weight: 600;
                 margin-bottom: 1.5rem;
               }
 
-              /* Each accordion item */
+              /* Accordion Item */
               .faq-item-cpreb {
                 border-bottom: 1px solid #ddd;
                 margin-bottom: 8px;
               }
 
-              /* Hide default marker */
+              /* Question (Summary) */
               .faq-item-cpreb summary {
                 list-style: none;
                 cursor: pointer;
                 position: relative;
                 padding-left: 2rem;
-                font-size: 1.1rem;
+                font-size: 18px;
                 font-weight: 600;
-                color: #333;
+                color: #000000;
               }
               .faq-item-cpreb summary::-webkit-details-marker {
                 display: none;
@@ -1184,23 +1189,23 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
               /* Plus icon */
               .faq-item-cpreb summary::before {
-                content: "\f067";            
-                font-family: "Font Awesome 6 Free";
-                font-weight: 900;
+                content: "+";
                 position: absolute;
                 left: 0;
                 top: 0;
-                color: #6200ea;
+                font-weight: bold;
                 font-size: 1rem;
                 line-height: 1;
+                color: #000;
               }
 
-              /* When open, switch to minus */
+              /* Minus icon when open */
               .faq-item-cpreb[open] summary::before {
-                content: "\f068";            
+                content: "−";
+                color: #000;
               }
 
-              /* The answer text */
+              /* Answer Text */
               .faq-answer-cpreb {
                 margin: 0.5rem 0 1rem 2rem;
                 color: #444;
@@ -1208,15 +1213,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 line-height: 1.5;
               }
 
-              /* Smooth open/close */
-              .faq-item-cpreb[open] .faq-answer-cpreb {
-                animation: fadeIn 0.2s ease-in;
-              }
+              /* Fade-in Animation */
               @keyframes fadeIn {
                 from { opacity: 0; }
                 to   { opacity: 1; }
               }
-
+              .faq-item-cpreb[open] .faq-answer-cpreb {
+                animation: fadeIn 0.2s ease-in;
+              }
 
               @media only screen and (max-width: 767px) {
               .dmp-heading{
@@ -1409,20 +1413,25 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                       width: 95%; 
                   }
                       .faq-cpreb {
-                    padding: 0 12px;
-                  }
-                  .faq-item-cpreb summary {
-                    font-size: 1rem;
-                    padding-left: 1.5rem;
-                  }
-                  .faq-item-cpreb summary::before {
-                    font-size: 0.9rem;
-                    left: 0;
-                  }
-                  .faq-answer-cpreb {
-                    margin-left: 1.5rem;
-                    font-size: 0.9rem;
-                  }
+                      padding: 0 12px;
+                      width: 95%;
+                    }
+                    .faq-heading-cpreb {
+                      font-size: 1.75rem;
+                      margin-bottom: 1rem;
+                    }
+                    .faq-item-cpreb summary {
+                      font-size: 1rem;
+                      padding-left: 1.5rem;
+                    }
+                    .faq-item-cpreb summary::before {
+                      font-size: 0.9rem;
+                      left: 0;
+                    }
+                    .faq-answer-cpreb {
+                      margin-left: 1.5rem;
+                      font-size: 0.9rem;
+                    }
 
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
@@ -1876,89 +1885,89 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         </div>
 
         <section class="faq-cpreb">
-          <h2 class="faq-heading-cpreb">Frequently Asked Questions</h2>
+        <h2 class="faq-heading-cpreb">Frequently<br> <span class="faq-heading-cpreb-s">Asked Questions</span></h2>
 
-          <details class="faq-item-cpreb">
-            <summary class="faq-question-cpreb">
-              How is Muditam different from other diabetes or Ayurvedic brands?
-            </summary>
-            <p class="faq-answer-cpreb">
-              We don’t just sell supplements. Muditam follows the Triwellness Approach — Ayurveda + Nutrition + Modern Science.
-              Along with natural supplements, you get a personalised diet plan, expert doctor consultation,
-              and support from a Diabetes Coach.
-            </p>
-          </details>
+        <details class="faq-item-cpreb">
+          <summary class="faq-question-cpreb">
+            How is Muditam different from other diabetes or Ayurvedic brands?
+          </summary>
+          <p class="faq-answer-cpreb">
+            We don’t just sell supplements. Muditam follows the Triwellness Approach — Ayurveda + Nutrition + Modern Science.
+            Along with natural supplements, you get a personalised diet plan, expert doctor consultation,
+            and support from a Diabetes Coach.
+          </p>
+        </details>
 
-          <details class="faq-item-cpreb">
-            <summary class="faq-question-cpreb">
-              How do I get started? What’s the process?
-            </summary>
-            <p class="faq-answer-cpreb">
-              It’s super simple:
-              <br/>✅ You share your sugar levels, lifestyle & goals
-              <br/>✅ Our experts create a customised kit
-              <br/>✅ You get doctor consultation, diet plan, supplements & daily support
-              <br/>✅ We monitor your progress and guide you step-by-step
-            </p>
-          </details>
+        <details class="faq-item-cpreb">
+          <summary class="faq-question-cpreb">
+            How do I get started? What’s the process?
+          </summary>
+          <p class="faq-answer-cpreb">
+            It’s super simple:
+            <br/>✅ You share your sugar levels, lifestyle & goals
+            <br/>✅ Our experts create a customised kit
+            <br/>✅ You get doctor consultation, diet plan, supplements & daily support
+            <br/>✅ We monitor your progress and guide you step-by-step
+          </p>
+        </details>
 
-          <details class="faq-item-cpreb">
-            <summary class="faq-question-cpreb">
-              Do I have to take these supplements lifelong?
-            </summary>
-            <p class="faq-answer-cpreb">
-              No. Once your sugar levels stabilize and your lifestyle improves, our team helps you taper off
-              supplements naturally and safely. Our goal is health freedom, not dependency.
-            </p>
-          </details>
+        <details class="faq-item-cpreb">
+          <summary class="faq-question-cpreb">
+            Do I have to take these supplements lifelong?
+          </summary>
+          <p class="faq-answer-cpreb">
+            No. Once your sugar levels stabilize and your lifestyle improves, our team helps you taper off
+            supplements naturally and safely. Our goal is health freedom, not dependency.
+          </p>
+        </details>
 
-          <details class="faq-item-cpreb">
-            <summary class="faq-question-cpreb">
-              Are Muditam products safe? Any side effects?
-            </summary>
-            <p class="faq-answer-cpreb">
-              Absolutely. Our products are made from pure Ayurvedic ingredients, with no chemicals or steroids.
-              They are tested for quality and backed by 50,000+ success stories. We’ve seen zero side effects.
-            </p>
-          </details>
+        <details class="faq-item-cpreb">
+          <summary class="faq-question-cpreb">
+            Are Muditam products safe? Any side effects?
+          </summary>
+          <p class="faq-answer-cpreb">
+            Absolutely. Our products are made from pure Ayurvedic ingredients, with no chemicals or steroids.
+            They are tested for quality and backed by 50,000+ success stories. We’ve seen zero side effects.
+          </p>
+        </details>
 
-          <details class="faq-item-cpreb">
-            <summary class="faq-question-cpreb">
-              How long will it take to see results?
-            </summary>
-            <p class="faq-answer-cpreb">
-              Most users report improvements like better sugar control, more energy, and reduced cravings in 3–4 weeks.
-              Full reversal may take 3–6 months, depending on your condition. We’re with you at every step.
-            </p>
-          </details>
-        </section>
-        
-              <section class="expert">
-          <div class="heading-section">
-            <h1>Know Your</h1>
-            <h2>EXPERT</h2>
-          </div>
+        <details class="faq-item-cpreb">
+          <summary class="faq-question-cpreb">
+            How long will it take to see results?
+          </summary>
+          <p class="faq-answer-cpreb">
+            Most users report improvements like better sugar control, more energy, and reduced cravings in 3–4 weeks.
+            Full reversal may take 3–6 months, depending on your condition. We’re with you at every step.
+          </p>
+        </details>
+      </section>
+      
+            <section class="expert">
+        <div class="heading-section">
+          <h1>Know Your</h1>
+          <h2>EXPERT</h2>
+        </div>
 
-          <div class="expert-container">
-            <div class="expert-left">
-              <div class="avatar">
-                <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
-              </div>
-              <div class="expert-details">
-                <p>Hi <b>Abhay</b>, This is</p>
-                <h1>MANSVI</h1>
-                <p>Diabetes Expert</p>
-                <!-- Button below the expert details and aligned left on large screens -->
-          <button class="btnn"><b>Call Now</b></button>
-              </div>
+        <div class="expert-container">
+          <div class="expert-left">
+            <div class="avatar">
+              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
             </div>
-            <div class="expert-description">
-              I’ve helped 5,960+ people manage their Type 2 Diabetes naturally and safely.</br></br>
-              With over 5 years of experience, I specialise in helping people manage blood sugar levels, cholesterol, and lifestyle-related health concerns using a blend of Ayurveda and Functional Nutrition. I work closely with each person to personalise their plan — guiding them step-by-step with supplements, diet changes, and lifestyle support.</br>
-              </br>You're not alone in this — I’ll be with you throughout the journey
+            <div class="expert-details">
+              <p>Hi <b>Abhay</b>, This is</p>
+              <h1>MANSVI</h1>
+              <p>Diabetes Expert</p>
+              <!-- Button below the expert details and aligned left on large screens -->
+        <button class="btnn"><b>Call Now</b></button>
             </div>
           </div>
-        </section>
+          <div class="expert-description">
+            I’ve helped 5,960+ people manage their Type 2 Diabetes naturally and safely.</br></br>
+            With over 5 years of experience, I specialise in helping people manage blood sugar levels, cholesterol, and lifestyle-related health concerns using a blend of Ayurveda and Functional Nutrition. I work closely with each person to personalise their plan — guiding them step-by-step with supplements, diet changes, and lifestyle support.</br>
+            </br>You're not alone in this — I’ll be with you throughout the journey
+          </div>
+        </div>
+      </section>
 
           <script> 
             var currentHba1c = ${presalesHba1c};
