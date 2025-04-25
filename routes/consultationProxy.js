@@ -362,6 +362,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         <head> 
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
+          <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689" />
           <title>Consultation Plan for ${customer.name}</title>
           <!-- Prevent search engines from indexing this page -->
           <meta name="robots" content="noindex, nofollow">
@@ -827,7 +828,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   display: flex;
                   gap: 20px;
                   margin: 20px auto;
-                  max-width: 1200px;
+                  width: 80%;
                 }
                 .main-content {
                   flex: 0 0 55%;
@@ -2116,7 +2117,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
             </div>
             <div class="expert-details">
-              <p>Hi <strong>${customer.name}</strong>,, This is</p>
+              <p>Hi <strong>${customer.name}</strong>, This is</p>
               <h1>MANSVI</h1>
               <p>Diabetes Expert</p>
               <!-- Button below the expert details and aligned left on large screens -->
