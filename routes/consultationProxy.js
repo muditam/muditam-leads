@@ -337,7 +337,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     if (freebies.length) {
       addOnsHtml += `
         <div class="addons-section">
-          <h3 style="font-size:26px;margin-top:30px;margin-bottom:20px;">Complimentary Add‑ons for You</h3>
+          <h3 style="font-size:26px;margin-top:30px;margin-bottom:20px;">Free Gift's For You</h3>
           <div class="addons-container">
       `;
       freebies.forEach(item => {
@@ -345,7 +345,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         if (imgUrl) {
           addOnsHtml += `
             <div class="addon-item" style="flex:1;padding:10px;text-align:center;">
-              <img src="${imgUrl}" alt="${item}" style="max-width:100%;height:auto;"/>
+              <img src="${imgUrl}" alt="${item}" style="max-width:100%;height:auto;box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);"/>
             </div>
           `;
         }
@@ -374,7 +374,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               font-family: 'Poppins', sans-serif;
             }
             .wrapper {
-              min-height: 100vh;
+              min-height: 75vh;
               background-size: cover;
               background-repeat: no-repeat;
               background-position: center center;
@@ -682,6 +682,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 font-size: 26px;
                 font-weight: bold;
                 margin-bottom: 10px;
+                margin-top: 0px;
               }
               .kit-section p.intro {
                 font-size: 14px;
@@ -1180,6 +1181,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 padding-left: 2rem;
                 font-size: 18px;
                 font-weight: 600;
+                padding-bottom: 10px;
                 color: #000000;
               }
               .faq-item-cpreb summary::-webkit-details-marker {
@@ -1472,8 +1474,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   margin: 0;
                 }
                   .heading-section-cpreb.main-cpreb {
-                    text-align: left;
-                    width: 100%;
+                    text-align: left; 
                     padding-left: 10px;
                   }
                   .heading-section-cpreb.main-cpreb h1 {
@@ -1776,8 +1777,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       </div>
     </div>
           <div class="kit-section">
-          <h3>What’s in the Customized Kit?</h3>
-          <p class="intro">Inclusions:</p>
+          <h3>What’s Included</h3> 
 
           <!-- DESKTOP: two columns -->
           <div class="kit-items desktop">

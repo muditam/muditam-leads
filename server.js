@@ -734,18 +734,14 @@ app.get('/api/leads/retention', async (req, res) => {
 
   // Add filters based on query parameters
   for (const key in filterParams) {
-    if (filterParams[key] && filterParams[key] !== "") {
-      // If the filter is already an array (multiple values sent by axios), use $in
+    if (filterParams[key] && filterParams[key] !== "") { 
       if (Array.isArray(filterParams[key])) {
         query[key] = { $in: filterParams[key] };
-      } else {
-        // For fields that are arrays in the database, you might expect a comma-separated string.
-        // Here we split by comma and use $in to check if any of the values match.
+      } else { 
         if (["productPitched", "productsOrdered"].includes(key)) {
           const arr = filterParams[key].split(",").map(item => item.trim());
           query[key] = { $in: arr };
-        } else {
-          // For normal string fields, use a regex for partial, case-insensitive match
+        } else { 
           query[key] = { $regex: filterParams[key], $options: "i" };
         }
       }
@@ -784,7 +780,7 @@ app.get('/api/leads/retention', async (req, res) => {
         repeatDosageOrdered: 1,
         retentionStatus: 1,
         rtRemark: 1,
-      }).sort({ _id: -1 });
+      }).sort({ lastOrderDate: -1 });
       const leadsWithReminder = leads.map((lead) => ({
         ...lead._doc,
         rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
@@ -822,7 +818,7 @@ app.get('/api/leads/retention', async (req, res) => {
         retentionStatus: 1,
         rtRemark: 1,
       })
-        .sort({ _id: -1 })
+        .sort({ lastOrderDate: -1 })
         .skip(skip)
         .limit(limitNumber);
 
