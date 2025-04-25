@@ -745,8 +745,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   min-width: 300px;
                   box-sizing: border-box;
                 }
-                .center-amg {
-                  background: #FFFFFF;
+                .center-amg { 
                   box-shadow: 0 4px 12px rgba(0,0,0,0.08);
                 }
 
@@ -1349,7 +1348,11 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   padding-left: 18px;
                 }
 
-
+                .dmp-heading-span{
+                font-size: 15px;
+                  font-weight: 400;
+                  color:rgb(255, 255, 255);
+                }
 
 
 
@@ -1468,9 +1471,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   display: none;
                 }
                 .cards-scroll-cpre .card-cpre {
-                  flex: 0 0 340px;
-                  max-width: 340px;
-                  max-height: 309px;
+                  flex: 0 0 310px; 
                   margin: 0;
                 }
                   .heading-section-cpreb.main-cpreb {
@@ -1612,7 +1613,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <div class="wrapper">
             <div class="container">
               <div class="overlay">
-                <h1 class="dmp-heading-h1">${customer.name}'s</h1>
+                <h1 class="dmp-heading-h1">${customer.name}'s</h1>   
+            <span class="dmp-heading-span">(Age- ${customer.age},${presalesGender})</span> 
                 <h2 class="dmp-heading">DIABETES<br> MANAGEMENT<br> PLAN</h2>
                 <div class="duration-badge">${consultationDetails.closing && consultationDetails.closing.courseDuration ? consultationDetails.closing.courseDuration : "Not provided"}</div>
               </div>
@@ -1683,15 +1685,11 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
 
           <div class="Your-dce-d">
-            <p class="Your-dce">Your<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p>
+            <p class="Your-dce">${customer.name}<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p>
             
             <hr style="height: 1px; background-color: #C0C0C0; width: 80%;">
 
-            <div class="customer-dmp-top">
-            <p class="customer-dmp">${customer.name}'s</p>
-            <p class="customer-dmp-1">Diabetes Management Plan</p>
-            <span class="customer-dmp-2">${customer.age}/${presalesGender}</span>
-            </div>
+             
           </div>
 
           <div class="bottom-section">
