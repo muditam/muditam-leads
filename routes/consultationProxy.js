@@ -1168,9 +1168,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               }
 
               /* Accordion Item */
-              .faq-item-cpreb {
-                border-bottom: 1px solid #ddd;
-                margin-bottom: 8px;
+              .faq-item-cpreb { 
+                margin-bottom: 10px;
               }
 
               /* Question (Summary) */
