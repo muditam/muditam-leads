@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const ConsultationDetails = require("../models/ConsultationDetails");
 const Customer = require("../models/Customer");
+const Employee = require("../models/Employee");
 
 function formatMonthDay(dateObj) {
   const month = dateObj.toLocaleString("en-US", { month: "long" });
@@ -301,7 +302,7 @@ selectedProducts.forEach(product => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 10px 10px 0;
+        padding: 10px;
         margin: 10px 0;
         background: #fff;
         border-radius: 10px;
@@ -364,6 +365,41 @@ selectedProducts.forEach(product => {
         </div>
       `;
     }
+
+    // Fetch assigned expert
+let expert = null;
+if (consultationDetails.presales?.assignExpert) {
+  expert = await Employee.findById(consultationDetails.presales.assignExpert).lean();
+}
+
+// Default fallback
+let expertName = "MANSVI",
+    expertImage = "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346",
+    expertBio = `
+      I’ve helped 5,960+ people manage their Type 2 Diabetes naturally and safely.<br><br>
+      With over 5 years of experience, I specialise in helping people manage blood sugar levels, cholesterol, and lifestyle-related health concerns using a blend of Ayurveda and Functional Nutrition. I work closely with each person to personalise their plan — guiding them step-by-step with supplements, diet changes, and lifestyle support.<br><br>
+      You're not alone in this — I’ll be with you throughout the journey
+    `;
+
+if (expert) {
+  expertName = expert.name.toUpperCase();
+  switch (expert.name) {
+    case "Asha Kaushik":
+      expertImage = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Asha_Kaushik.webp?v=1727526933";
+      expertBio = `
+        Asha is currently working as a Diabetes Expert at Muditam Ayurveda. She holds a BSc. (Hons.) in Food Technology from Delhi University and is further enhancing her expertise with a Master’s in Food and Nutrition from IGNOU. She has also completed a certification course in Food and Nutrition. Asha is adept in healthy diet promotion and nutrition education and is dedicated to providing holistic health solutions to her patients.
+      `;
+      break;
+    case "Devanshi Priyanka":
+      expertImage = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Devanshi_Priyanka.webp?v=1727961048";
+      expertBio = `
+        Devanshi is currently serving as a Diabetes Expert at Muditam. She has enhanced her expertise through internships in food technology and biosafety labs in Delhi. Before joining Muditam Ayurveda, Devanshi worked as a clinical dietitian at a well-known dietician clinic. She holds a B.Tech. in Biotechnology from Banasthali Vidyapith, Rajasthan, and is committed to providing personalized health solutions to her patients.
+      `;
+      break;
+    // …add more experts here as needed…
+  }
+}
+
 
     const html = `
       <!DOCTYPE html>
@@ -649,6 +685,10 @@ selectedProducts.forEach(product => {
               scroll-snap-type: x mandatory;
               scroll-behavior: smooth;
             }
+              .risks-container::-webkit-scrollbar {
+                display: none;
+              }
+
             .risk-block {
               display: flex;
               flex-direction: column;
@@ -1031,7 +1071,7 @@ selectedProducts.forEach(product => {
               .heading-section h1 {
                 font-size: 32px;
                 color: #5D5D5D;
-                font-weight: 200;
+                font-weight: 400;
                 margin: 0;
               }
               .heading-section h2 {
@@ -1354,9 +1394,7 @@ selectedProducts.forEach(product => {
                  scrollbar-width: none; 
                  -ms-overflow-style: none;
               }
-                 .risks-container::-webkit-scrollbar {
-                display: none;
-              }
+                 
               .risk-item {
                 scroll-snap-align: start;
               }
@@ -1572,6 +1610,9 @@ selectedProducts.forEach(product => {
                       .dmp-heading-span {
                         font-size: 14px; 
                     }
+                      .heading-section h2 {
+                        font-size: 40px; 
+                      }
                    
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
@@ -1581,15 +1622,21 @@ selectedProducts.forEach(product => {
               .payment-breakup-amg .pb-cta.pay p{font-size:18px}
             }
               
-            
           </style>
         </head>
         <body>
+        <header style="text-align:center; padding:20px 0;">
+          <img
+            src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_Logo-01-01.png?v=1725434339"
+            alt="Muditam Logo"
+            style="max-height:60px; width:auto;"
+          />
+        </header>
           <div class="wrapper">
             <div class="container">
               <div class="overlay">
                 <h1 class="dmp-heading-h1">${customer.name}'s</h1>   
-            <span class="dmp-heading-span">(Age- ${customer.age},${presalesGender})</span> 
+                <span class="dmp-heading-span">(Age- ${customer.age},${presalesGender})</span> 
                 <h2 class="dmp-heading">DIABETES<br> MANAGEMENT<br> PLAN</h2>
                 <div class="duration-badge">${consultationDetails.closing && consultationDetails.closing.courseDuration ? consultationDetails.closing.courseDuration : "Not provided"}</div>
               </div>
@@ -2016,7 +2063,7 @@ selectedProducts.forEach(product => {
         </details>
       </section>
       
-            <section class="expert">
+      <section class="expert">
         <div class="heading-section">
           <h1>Know Your</h1>
           <h2>EXPERT</h2>
@@ -2025,20 +2072,18 @@ selectedProducts.forEach(product => {
         <div class="expert-container">
           <div class="expert-left">
             <div class="avatar">
-              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
+              <img src="${expertImage}" alt="${expertName} Avatar" />
             </div>
             <div class="expert-details">
               <p>Hi <strong>${customer.name}</strong>, This is</p>
-              <h1>MANSVI</h1>
+              <h1>${expertName}</h1>
               <p>Diabetes Expert</p>
               <!-- Button below the expert details and aligned left on large screens -->
         <button class="btnn"><b>Call Now</b></button>
             </div>
           </div>
           <div class="expert-description">
-            I’ve helped 5,960+ people manage their Type 2 Diabetes naturally and safely.</br></br>
-            With over 5 years of experience, I specialise in helping people manage blood sugar levels, cholesterol, and lifestyle-related health concerns using a blend of Ayurveda and Functional Nutrition. I work closely with each person to personalise their plan — guiding them step-by-step with supplements, diet changes, and lifestyle support.</br>
-            </br>You're not alone in this — I’ll be with you throughout the journey
+          ${expertBio}
           </div>
         </div>
       </section>
