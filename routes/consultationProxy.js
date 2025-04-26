@@ -366,12 +366,12 @@ selectedProducts.forEach(product => {
       `;
     }
 
-    const expertObj = consultationDetails.presales.assignExpert;
+    const expertObj  = consultationDetails.presales.assignExpert;
     const expertName = expertObj?.name || "MANSVI";
 
     const expertImageMap = {
-      "Asha Kaushik": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Asha_Kaushik.webp?v=1727526933",
-      "Devanshi Priyanka": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Devanshi_Priyanka.webp?v=1727961048",
+      "Asha Kaushik":    "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Asha_Kaushik.webp?v=1727526933",
+      "Devanshi Priyanka":"https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Devanshi_Priyanka.webp?v=1727961048",
     };
 
     const expertBioMap = {
@@ -383,8 +383,8 @@ selectedProducts.forEach(product => {
       `,
     };
 
-    const expertImage = expertImageMap[expertName] || expertImageMap["Asha Kaushik"];
-    const expertDescription = expertBioMap[expertName] || expertBioMap["Asha Kaushik"];
+    const expertImage       = expertImageMap[expertName]       || expertImageMap["Asha Kaushik"];
+    const expertDescription = expertBioMap[expertName]        || expertBioMap["Asha Kaushik"];
 
     const html = `
       <!DOCTYPE html>
