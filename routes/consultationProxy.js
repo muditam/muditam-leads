@@ -149,21 +149,6 @@ const couponValueMap = {
   LMS1000: 1000,
 };
 
-const expertProfiles = {
-  "Asha Kaushik": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Asha_Kaushik.webp?v=1727526933",
-    bio: `
-      Asha is currently working as a Diabetes Expert at Muditam Ayurveda. She holds a BSc. (Hons.) in Food Technology from Delhi University and is further enhancing her expertise with a Master’s in Food and Nutrition from IGNOU. She has also completed a certification course in Food and Nutrition. Asha is adept in healthy diet promotion and nutrition education and is dedicated to providing holistic health solutions to her patients.
-    `
-  },
-  "Devanshi Priyanka": {
-    image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Devanshi_Priyanka.webp?v=1727961048",
-    bio: `
-      Devanshi is currently serving as a Diabetes Expert at Muditam. She has enhanced her expertise through internships in food technology and biosafety labs in Delhi. Before joining Muditam Ayurveda, Devanshi worked as a clinical dietitian at a well-known dietician clinic. She holds a B.Tech. in Biotechnology from Banasthali Vidyapith, Rajasthan, and is committed to providing personalized health solutions to her patients.
-    `
-  }
-};
-
 // GET route for App Proxy using customer ID directly
 router.get("/proxy/consultation/:id", async (req, res) => {
   const customerId = req.params.id;
@@ -183,17 +168,6 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     const consultationDetails = await ConsultationDetails.findOne({ customerId }).lean();
     if (!consultationDetails) {
       return res.status(404).send("Consultation details not found.");
-    }
-
-    let expertDoc = null, expertName = "Our Expert", expertImage = "", expertBio = "";
-    if (details.presales?.assignExpert) {
-      expertDoc = await Employee.findById(details.presales.assignExpert).lean();
-      expertName = expertDoc?.name || expertName;
-      const profile = expertProfiles[expertName];
-      if (profile) {
-        expertImage = profile.image;
-        expertBio   = profile.bio;
-      }
     }
 
     const courseDuration = consultationDetails.closing?.courseDuration || "Not provided";
@@ -2058,30 +2032,32 @@ selectedProducts.forEach(product => {
         </details>
       </section>
       
-      <section class="expert" style="padding:40px 20px; background:#f9f9f9;">
-          <div class="heading-section" style="text-align:center; margin-bottom:20px;">
-            <h1 style="margin:0;font-size:32px;color:#5D5D5D;">Know Your</h1>
-            <h2 style="margin:0;font-size:50px;color:#C0C0C0;line-height:1;">EXPERT</h2>
-          </div>
-          <div class="expert-container" style="display:flex; align-items:center; max-width:800px; margin:0 auto; flex-wrap:wrap;">
-            <div class="expert-left" style="flex:0 0 200px; text-align:center; margin-bottom:20px;">
-              <div class="avatar" style="width:150px; height:150px; margin:0 auto 16px; border-radius:50%; overflow:hidden; border:3px solid #ddd;">
-                <img src="${expertImage}" alt="${expertName}" style="width:100%; height:100%; object-fit:cover;"/>
-              </div>
-              <div class="expert-details" style="font-size:16px; color:#333; line-height:1.4;">
-                <p>Hi <strong>${customer.name}</strong>, this is</p>
-                <h1 style="margin:0;font-size:30px;color:#543087;">${expertName}</h1>
-                <p style="margin:4px 0 0;font-style:italic;">Diabetes Expert</p>
-                <button class="btnn" style="margin-top:16px;padding:12px 30px;border:none;border-radius:22px;background:#0984E3;color:#fff;cursor:pointer;">
-                  Call Now
-                </button>
-              </div>
+      <section class="expert">
+        <div class="heading-section">
+          <h1>Know Your</h1>
+          <h2>EXPERT</h2>
+        </div>
+
+        <div class="expert-container">
+          <div class="expert-left">
+            <div class="avatar">
+              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
             </div>
-            <div class="expert-description" style="flex:1; font-size:15px; color:#444; line-height:1.5; padding:0 20px;">
-              ${expertBio}
+            <div class="expert-details">
+              <p>Hi <strong>${customer.name}</strong>, This is</p>
+              <h1>MANSVI</h1>
+              <p>Diabetes Expert</p>
+              <!-- Button below the expert details and aligned left on large screens -->
+        <button class="btnn"><b>Call Now</b></button>
             </div>
           </div>
-        </section>
+          <div class="expert-description">
+            I’ve helped 5,960+ people manage their Type 2 Diabetes naturally and safely.</br></br>
+            With over 5 years of experience, I specialise in helping people manage blood sugar levels, cholesterol, and lifestyle-related health concerns using a blend of Ayurveda and Functional Nutrition. I work closely with each person to personalise their plan — guiding them step-by-step with supplements, diet changes, and lifestyle support.</br>
+            </br>You're not alone in this — I’ll be with you throughout the journey
+          </div>
+        </div>
+      </section>
 
       <div class="list-section">
     <div class="dropdown-item">
