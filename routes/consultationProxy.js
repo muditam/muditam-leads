@@ -285,16 +285,18 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     };
 
 
-    // Generate the HTML for each product card
-    let productCardsHtml = "";
-    selectedProducts.forEach(product => {
-      const details = productDetailsMap[product];
-      if (!details) return;
+    // … inside your router, where you build productCardsHtml …
+let productCardsHtml = "";
+selectedProducts.forEach(product => {
+  const details = productDetailsMap[product];
+  if (!details) return;
 
-      const condition = conditionMap[product] || "Condition";
+  const condition = conditionMap[product] || "Condition";
 
-      productCardsHtml += `
-    <div
+  productCardsHtml += `
+    <div 
+      class="product-card" 
+      data-product="${product}"
       style="
         display: flex;
         align-items: center;
@@ -303,7 +305,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         margin: 10px 0;
         background: #fff;
         border-radius: 10px;
-        box-shadow: 0 1px 4px 0 rgb(0 0 0 / 1%), 0 1px 10px 0 rgba(0, 0, 0, 0.15);
+        box-shadow: 0 1px 4px rgba(0,0,0,0.1), 0 1px 10px rgba(0,0,0,0.15);
+        cursor: pointer;
       "
     > 
       <img
@@ -311,26 +314,23 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         alt="${product}"
         style="height: 120px; width: auto; object-fit: contain;"
       />
- 
       <div style="flex: 1; margin: 0 10px 0 0;">
-        <h2 style="margin: 0 0 5px; font-size: 18px; white-space: nowrap;">${product}</h2>
-        <p style="margin: 0 0 10px; font-size: 15px; color: #555;">
+        <h2 style="margin:0;font-size:18px;white-space:nowrap;">${product}</h2>
+        <p style="margin:0 0 10px;font-size:15px;color:#555;">
           ${details.description}
         </p>
-        <hr style="border: none; height: 1px; background-color: #ccc; margin: 10px 0;" />
-        <span style="font-size: 13px; font-weight: bold; color: #333;">
-          ${condition}
-        </span>
+        <hr style="border:none;height:1px;background:#ccc;margin:10px 0;" />
+        <span style="font-size:13px;font-weight:bold;color:#333;">${condition}</span>
       </div>
- 
       <img
         src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988"
         alt="tag"
-        style="height: 30px;"
+        style="height:30px;"
       />
     </div>
   `;
-    });
+});
+
 
     // Generate add-ons section based on freebies
     const freebies = consultationDetails.closing?.freebie || [];
@@ -501,18 +501,19 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .goal-section .goal-info {
               display: flex;
               align-items: baseline;
+              justify-content: center;
               gap: 10px;
             }
             .goal-section .goal-info p {
               margin: 0;
             }
             .goal-date {
-              font-size: 24px;
+              font-size: 14px;
               font-weight: 500;
               margin: 10px 0 0;
             }
             .goal-hba1c {
-              color: green;
+              color: #03AD31;
               font-size: 32px;
               margin: 10px 0 0;
               font-weight: 600;
@@ -521,7 +522,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             .current-bar-info {
               text-align: right;
               font-size: 14px;
-              margin-top: 10px;
+              margin-top: -10px;
+              margin-right: 15px;
             }
             .select-option-label {
               margin: 20px 0 10px;
@@ -558,10 +560,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             }
 
             .option-box input[type="radio"]:checked {
-              border-color: #03AD31;
-              background-color: #03AD31;
+              border-color: #03AD31; 
             }
                 
+            .option-box:has(input[type="radio"]:checked) {
+              border-color: #03AD31; 
+              background-color: #03AD31; 
+                }
 
             .option-box input[type="radio"]:checked::after {
               transform: scale(1);
@@ -669,50 +674,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               text-align: center;
             }
 
-            .kit-section .kit-items.desktop { display: flex; gap: 40px; }
-            .kit-section .kit-items.mobile { display: none; }
-
-               .kit-section {
-                    margin: 0 auto 30px;
-                    width: 80%;
-                    border: 2px solid #E0E0E0;
-                    padding: 15px;
-                    border-radius: 10px;
-              }
-              .kit-section h3 {
-                font-size: 26px;
-                font-weight: bold;
-                margin-bottom: 10px;
-                margin-top: 0px;
-              }
-              .kit-section p.intro {
-                font-size: 14px;
-                margin-bottom: 20px;
-              }
-
-              /* --- Desktop two columns --- */
-              .kit-section .kit-items.desktop .col {
-                flex: 1;
-              }
-              .kit-section .kit-items.desktop ul,
-              .kit-section .kit-items.mobile ul {
-                list-style: none;
-                padding: 0;
-                margin: 0;
-              }
-              .kit-section li {
-                display: flex;
-                align-items: flex-start;
-                gap: 10px;
-                margin-bottom: 12px;
-                font-size: 14px;
-              }
-              .kit-section li img.check {
-                width: 16px;
-                height: 16px;
-                flex-shrink: 0;
-                margin-top: 3px;
-              }
+             
                  .turning-section-amg {
                   text-align: center;
                   padding: 8px;
@@ -1195,8 +1157,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 left: 0;
                 top: 0;
                 font-weight: bold;
-                font-size: 1rem;
-                line-height: 1;
+                font-size: 1rem; 
                 color: #000;
               }
 
@@ -1284,8 +1245,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                   justify-content: space-between;
                   align-items: center;
                   padding: 15px 0px;
-                  cursor: pointer;
-                  font-weight: 550; 
+                  cursor: pointer; 
                   font-size: 23px;
                   color: #000;      
                 }
@@ -1313,8 +1273,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 }
 
                 .dropdown-title {
-                  font-size: 18px;
-                  font-weight: 550;
+                  font-size: 18px; 
                   display: flex;
                   align-items: center;
                   justify-content: space-between;
@@ -1335,10 +1294,10 @@ router.get("/proxy/consultation/:id", async (req, res) => {
                 }
 
                 .dropdown-description h3 {
-                  font-size: 18px;
-                  font-weight: 550;
+                  font-size: 18px; 
                   color: #000;
                   margin-bottom: 1px;
+                  margin-top: 0;
                 }
 
                 .dropdown-description p {
@@ -1391,8 +1350,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               .risk-item {
                 scroll-snap-align: start;
               }
-                .kit-section .kit-items.desktop { display: none; }
-              .kit-section .kit-items.mobile { display: block; }
+                 
               .rating-cards-amg { 
                 align-items: center;
                 gap: 16px;
@@ -1634,6 +1592,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_914.jpg?v=1745648444" alt="Additional Visual">
             </picture>
           </div>
+
           <!-- Results Expected Section -->
           <div class="results-expected">
             <p class="results-expected-p">Results Expected in <span class="results-expected-h3">90 Days</span></p>
@@ -1648,9 +1607,9 @@ router.get("/proxy/consultation/:id", async (req, res) => {
             <div class="goal-pointer-image">
               <img
                 id="goalBarImage"
-                src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_837.webp?v=1745493610"
+                src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_916.webp?v=1745650473"
                 alt="Goal Pointer"
-                style="width:90%;height:60px;"
+                style="width:90%;height:75px;"
               />
             </div>
             <!-- Current bar info -->
@@ -1702,6 +1661,9 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <div class="bottom-section">
         <div class="main-content">
           ${productCardsHtml}
+          <!-- placeholder for the expanded detail -->
+<div id="expandedProductDetail" style="margin-top: 20px;"></div>
+
           ${addOnsHtml}
 
           <div class="risks-section">
@@ -1753,111 +1715,44 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
           <!-- Payment Breakup Section --> 
           <div class="sidebar">
-      <div class="payment-breakup-amg">
-        <h3>Payment Breakup</h3>
-        <hr class="pb-line" />
+            <div class="payment-breakup-amg">
+              <h3>Payment Breakup</h3>
+              <hr class="pb-line" />
 
-        <div class="pb-row">
-          <span>Diabetes Management Plan Price:</span>
-          <span class="pb-amount">₹${totalPrice}</span>
-        </div>
-        <hr class="pb-line" />
+              <div class="pb-row">
+                <span>Diabetes Management Plan Price:</span>
+                <span class="pb-amount">₹${totalPrice}</span>
+              </div>
+              <hr class="pb-line" />
 
-        <div class="pb-row">
-          <span>Coupon Discount (${codes.join(", ") || "None"}):</span>
-          <span class="pb-amount">₹${couponDiscount}</span>
-        </div>
-        <hr class="pb-line" />
+              <div class="pb-row">
+                <span>Coupon Discount (${codes.join(", ") || "None"}):</span>
+                <span class="pb-amount">₹${couponDiscount}</span>
+              </div>
+              <hr class="pb-line" />
 
-        <div class="pb-row pb-final">
-          <span>Final Price:</span>
-          <span class="pb-amount">₹${finalPrice}</span>
-        </div>
-        <hr class="pb-line" />
+              <div class="pb-row pb-final">
+                <span>Final Price:</span>
+                <span class="pb-amount">₹${finalPrice}</span>
+              </div>
+              <hr class="pb-line" />
 
-        <a class="pb-cta pay" href="${payUrl}">
-          <p>Pay Now ₹${finalPrice}/–</p>
-        </a>
-      </div>
-      </div>
-    </div>
-          <div class="kit-section">
-          <h3>What’s Included</h3> 
-
-          <!-- DESKTOP: two columns -->
-          <div class="kit-items desktop">
-            <div class="col">
-              <ul>
-                <li>
-                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                  A customised kit with Ayurvedic supplements tailored to your health needs
-                </li>
-                <li>
-                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                  Personalised diabetes expert support to help you stay on track with your health goals
-                </li>
-                <li>
-                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                  Timely follow‑up calls to track progress and adjust your plan as needed
-                </li>
-                <li>
-                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                  Daily live yoga sessions to support your sugar control and mental well‑being
-                </li>
-              </ul>
+              <a class="pb-cta pay" href="${payUrl}">
+                <p>Pay Now ₹${finalPrice}/–</p>
+              </a>
             </div>
-            <div class="col">
-              <ul>
-                <li>
-                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                  A free one‑on‑one consultation with our doctor to understand your condition better
-                </li>
-                <li>
-                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                  A customised Ayurvedic diet plan designed specifically for your body and lifestyle
-                </li>
-                <li>
-                  <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                  Constant WhatsApp support for any queries, reminders, or motivation
-                </li>
-              </ul>
             </div>
           </div>
-
-          <!-- MOBILE: single column -->
-          <div class="kit-items mobile">
-            <ul>
-              <li>
-                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                A customised kit with Ayurvedic supplements tailored to your health needs
-              </li>
-              <li>
-                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                Personalised diabetes expert support to help you stay on track with your health goals
-              </li>
-              <li>
-                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                Timely follow‑up calls to track progress and adjust your plan as needed
-              </li>
-              <li>
-                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                Daily live yoga sessions to support your sugar control and mental well‑being
-              </li>
-              <li>
-                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                A free one‑on‑one consultation with our doctor to understand your condition better
-              </li>
-              <li>
-                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                A customised Ayurvedic diet plan designed specifically for your body and lifestyle
-              </li>
-              <li>
-                <img class="check" src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/checked_6.png?v=1744888769" alt="✓"/>
-                Constant WhatsApp support for any queries, reminders, or motivation
-              </li>
-            </ul>
+        
+          <!-- Additional Image Section -->
+          <div class="additional-image">
+            <picture>
+              <source media="(min-width: 768px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_919.webp?v=1745652479">
+              <source media="(max-width: 767px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_918.webp?v=1745652478">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_919.webp?v=1745652479" alt="Additional Visual">
+            </picture>
           </div>
-        </div>
+
 
         <div class="turning-section-amg">
         <p class="subtitle-amg">Why India Trusts</p>
@@ -2190,35 +2085,93 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </p>
         </div>
       </footer>
+ 
+          <script>
+  document.addEventListener("DOMContentLoaded", function() {
+    // 1) Your existing HbA1c update logic
+    var currentHba1c = ${presalesHba1c};
 
-          <script> 
-            var currentHba1c = ${presalesHba1c};
+    function updateGoalHba1c(selected) {
+      document
+        .querySelectorAll('input[name="expectedOption"]')
+        .forEach(box => box.checked = false);
+      selected.checked = true;
 
-            function updateGoalHba1c(selected) {
-              // uncheck all
-              document
-                .querySelectorAll('input[name="expectedOption"]')
-                .forEach(box => box.checked = false);
-              selected.checked = true;
+      var newGoal;
+      var barImage = document.getElementById("goalBarImage");
 
-              // calculate new goal
-              var newGoal;
-              var barImage = document.getElementById("goalBarImage");
+      if (selected.value === "only") {
+        newGoal = currentHba1c - 0.8;
+        barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_917.webp?v=1745650473";
+      } else if (selected.value === "diet") {
+        newGoal = currentHba1c - 1.5;
+        barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_916.webp?v=1745650473";
+      } else if (selected.value === "lifestyle") {
+        newGoal = currentHba1c - 2.5;
+        barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_915.webp?v=1745650473";
+      }
 
-              if (selected.value === "only") {
-                newGoal = currentHba1c - 0.8;
-                barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_917.webp?v=1745650473";
-              } else if (selected.value === "diet") {
-                newGoal = currentHba1c - 1.5;
-                barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_916.webp?v=1745650473";
-              } else if (selected.value === "lifestyle") {
-                newGoal = currentHba1c - 2.5;
-                barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_915.webp?v=1745650473";
-              }
+      document.getElementById("goalHba1cDisplay").textContent = newGoal.toFixed(1) + "%";
+    }
 
-              document.getElementById("goalHba1cDisplay").textContent = newGoal.toFixed(1) + "%";
-            }
-          </script>
+    // 2) Map each product name to its expanded‐detail data
+    const expandedDetails = {
+      "Karela Jamun Fizz": {
+        firstImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/singlebottle.webp?v=1745416945",
+        bullets: [
+          "Blend of 11 Ayurvedic Herbs",
+          "World’s First Non‐Bitter Karela Juice"
+        ],
+        secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+      },
+      "Liver Fix": {
+        firstImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2bottle_87456661-622f-4818-955e-0c7d4469e8fe.webp?v=1743686509",
+        bullets: [
+          "No Bloating & Gas",
+          "Improved Digestion"
+        ],
+        secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+      }
+      // …add more products here as needed…
+    };
+
+    // 3) Hook up the click handlers
+    const detailContainer = document.getElementById("expandedProductDetail");
+    document.querySelectorAll(".product-card").forEach(card => {
+      card.addEventListener("click", () => {
+        const name = card.dataset.product;
+        const info = expandedDetails[name];
+        if (!info) return;
+
+        // toggle off if clicking the same card again
+        if (detailContainer.dataset.current === name) {
+          detailContainer.innerHTML = "";
+          detailContainer.dataset.current = "";
+          return;
+        }
+
+        detailContainer.dataset.current = name;
+
+        // *** corrected concatenation block ***
+        detailContainer.innerHTML =
+          '<div style="background: #f9f9f9; padding: 20px; border-radius: 8px; ' +
+            'box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-top: 20px;">' +
+            '<img src="' + info.firstImage + '" alt="' + name + '" ' +
+              'style="max-width:200px; display:block; margin:0 auto 10px;" />' +
+            '<ul style="list-style: disc; margin: 0 0 20px 20px;">' +
+              info.bullets.map(b => '<li>' + b + '</li>').join('') +
+            '</ul>' +
+            '<img src="' + info.secondImage + '" alt="' + name + ' detail" ' +
+              'style="max-width:100%; display:block; margin:0 auto;" />' +
+          '</div>';
+        // *** end corrected block ***
+
+        detailContainer.scrollIntoView({ behavior: "smooth" });
+      });
+    });
+  });
+</script>
+
         </body>
       </html>
     `;
