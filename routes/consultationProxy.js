@@ -366,6 +366,26 @@ selectedProducts.forEach(product => {
       `;
     }
 
+    const expertObj = consultationDetails.presales.assignExpert;
+    const expertName = expertObj?.name || "MANSVI";
+
+    const expertImageMap = {
+      "Asha Kaushik": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Asha_Kaushik.webp?v=1727526933",
+      "Devanshi Priyanka": "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Devanshi_Priyanka.webp?v=1727961048",
+    };
+
+    const expertBioMap = {
+      "Asha Kaushik": `
+        <p>Asha is currently working as a Diabetes Expert at Muditam Ayurveda. She holds a BSc. (Hons.) in Food Technology from Delhi University and is further enhancing her expertise with a Master’s in Food and Nutrition from IGNOU. She has also completed a certification course in Food and Nutrition. Asha is adept in healthy diet promotion and nutrition education and is dedicated to providing holistic health solutions to her patients.</p>
+      `,
+      "Devanshi Priyanka": `
+        <p>Devanshi is currently serving as a Diabetes Expert at Muditam. She has enhanced her expertise through internships in food technology and biosafety labs in Delhi. Before joining Muditam Ayurveda, Devanshi worked as a clinical dietitian at a well-known dietician clinic. She holds a B.Tech. in Biotechnology from Banasthali Vidyapith, Rajasthan, and is committed to providing personalized health solutions to her patients.</p>
+      `,
+    };
+
+    const expertImage = expertImageMap[expertName] || expertImageMap["Asha Kaushik"];
+    const expertDescription = expertBioMap[expertName] || expertBioMap["Asha Kaushik"];
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -2041,20 +2061,22 @@ selectedProducts.forEach(product => {
         <div class="expert-container">
           <div class="expert-left">
             <div class="avatar">
-              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mansvi_Ahuja.webp?v=1738855346" alt="Expert Avatar">
+               <img
+                    src="${expertImage}"
+                    alt="Avatar" 
+                    style="width:150px;height:150px;border-radius:50%;object-fit:cover;"
+                  />
             </div>
             <div class="expert-details">
               <p>Hi <strong>${customer.name}</strong>, This is</p>
-              <h1>MANSVI</h1>
+              <h1>${expertName}</h1>
               <p>Diabetes Expert</p>
               <!-- Button below the expert details and aligned left on large screens -->
         <button class="btnn"><b>Call Now</b></button>
             </div>
           </div>
           <div class="expert-description">
-            I’ve helped 5,960+ people manage their Type 2 Diabetes naturally and safely.</br></br>
-            With over 5 years of experience, I specialise in helping people manage blood sugar levels, cholesterol, and lifestyle-related health concerns using a blend of Ayurveda and Functional Nutrition. I work closely with each person to personalise their plan — guiding them step-by-step with supplements, diet changes, and lifestyle support.</br>
-            </br>You're not alone in this — I’ll be with you throughout the journey
+          ${expertDescription}
           </div>
         </div>
       </section>
