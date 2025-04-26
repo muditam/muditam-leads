@@ -2087,90 +2087,97 @@ selectedProducts.forEach(product => {
       </footer>
  
           <script>
-  document.addEventListener("DOMContentLoaded", function() {
-    // 1) Your existing HbA1c update logic
-    var currentHba1c = ${presalesHba1c};
+            document.addEventListener("DOMContentLoaded", () => {
+              // 1) Your existing HbA1c update logic
+              const currentHba1c = ${presalesHba1c}; // still coming from server
 
-    function updateGoalHba1c(selected) {
-      document
-        .querySelectorAll('input[name="expectedOption"]')
-        .forEach(box => box.checked = false);
-      selected.checked = true;
+              function updateGoalHba1c(selected) {
+                document.querySelectorAll('input[name="expectedOption"]')
+                  .forEach(box => box.checked = false);
+                selected.checked = true;
 
-      var newGoal;
-      var barImage = document.getElementById("goalBarImage");
+                let newGoal, barImage = document.getElementById("goalBarImage");
+                if (selected.value === "only") {
+                  newGoal = currentHba1c - 0.8;
+                  barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_917.webp?v=1745650473";
+                } else if (selected.value === "diet") {
+                  newGoal = currentHba1c - 1.5;
+                  barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_916.webp?v=1745650473";
+                } else if (selected.value === "lifestyle") {
+                  newGoal = currentHba1c - 2.5;
+                  barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_915.webp?v=1745650473";
+                }
+                document.getElementById("goalHba1cDisplay").textContent = newGoal.toFixed(1) + "%";
+              }
 
-      if (selected.value === "only") {
-        newGoal = currentHba1c - 0.8;
-        barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_917.webp?v=1745650473";
-      } else if (selected.value === "diet") {
-        newGoal = currentHba1c - 1.5;
-        barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_916.webp?v=1745650473";
-      } else if (selected.value === "lifestyle") {
-        newGoal = currentHba1c - 2.5;
-        barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_915.webp?v=1745650473";
-      }
+              // 2) Expanded-detail data for each product
+              const expandedDetails = {
+                "Karela Jamun Fizz": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/singlebottle.webp?v=1745416945",
+                  bullets:     ["Blend of 11 Ayurvedic Herbs", "World’s First Non-Bitter Karela Juice"],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Liver Fix": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2bottle_87456661-622f-4818-955e-0c7d4469e8fe.webp?v=1743686509",
+                  bullets:     ["No Bloating & Gas", "Improved Digestion"],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                }
+                // …add more products here as needed…
+              };
 
-      document.getElementById("goalHba1cDisplay").textContent = newGoal.toFixed(1) + "%";
-    }
+              // 3) Attach click-to-expand behavior
+              document.querySelectorAll(".product-card").forEach(card => {
+                card.addEventListener("click", () => {
+                  // If the very next sibling is already an expanded panel for this card, just remove it & bail
+                  const next = card.nextElementSibling;
+                  if (next && next.classList.contains("expanded-detail") && next.dataset.product === card.dataset.product) {
+                    next.remove();
+                    return;
+                  }
+                  // Otherwise remove any other open detail panels
+                  document.querySelectorAll(".expanded-detail").forEach(el => el.remove());
 
-    // 2) Map each product name to its expanded‐detail data
-    const expandedDetails = {
-      "Karela Jamun Fizz": {
-        firstImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/singlebottle.webp?v=1745416945",
-        bullets: [
-          "Blend of 11 Ayurvedic Herbs",
-          "World’s First Non‐Bitter Karela Juice"
-        ],
-        secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
-      },
-      "Liver Fix": {
-        firstImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2bottle_87456661-622f-4818-955e-0c7d4469e8fe.webp?v=1743686509",
-        bullets: [
-          "No Bloating & Gas",
-          "Improved Digestion"
-        ],
-        secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
-      }
-      // …add more products here as needed…
-    };
+                  const name = card.dataset.product;
+                  const info = expandedDetails[name];
+                  if (!info) return;
 
-    // 3) Hook up the click handlers
-    const detailContainer = document.getElementById("expandedProductDetail");
-    document.querySelectorAll(".product-card").forEach(card => {
-      card.addEventListener("click", () => {
-        const name = card.dataset.product;
-        const info = expandedDetails[name];
-        if (!info) return;
+                  // Build a new detail panel using DOM API
+                  const detailEl = document.createElement("div");
+                  detailEl.className = "expanded-detail";
+                  detailEl.dataset.product = name;
+                  detailEl.style.cssText = "background:#f9f9f9;padding:20px;border-radius:8px;margin-top:10px;";
 
-        // toggle off if clicking the same card again
-        if (detailContainer.dataset.current === name) {
-          detailContainer.innerHTML = "";
-          detailContainer.dataset.current = "";
-          return;
-        }
+                  // first image
+                  const img1 = document.createElement("img");
+                  img1.src = info.firstImage;
+                  img1.alt = name;
+                  img1.style.cssText = "max-width:200px;display:block;margin:0 auto 10px;";
+                  detailEl.appendChild(img1);
 
-        detailContainer.dataset.current = name;
+                  // bullets
+                  const ul = document.createElement("ul");
+                  ul.style.cssText = "list-style:disc;margin:0 0 20px 20px;";
+                  info.bullets.forEach(txt => {
+                    const li = document.createElement("li");
+                    li.textContent = txt;
+                    ul.appendChild(li);
+                  });
+                  detailEl.appendChild(ul);
 
-        // *** corrected concatenation block ***
-        detailContainer.innerHTML =
-          '<div style="background: #f9f9f9; padding: 20px; border-radius: 8px; ' +
-            'box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-top: 20px;">' +
-            '<img src="' + info.firstImage + '" alt="' + name + '" ' +
-              'style="max-width:200px; display:block; margin:0 auto 10px;" />' +
-            '<ul style="list-style: disc; margin: 0 0 20px 20px;">' +
-              info.bullets.map(b => '<li>' + b + '</li>').join('') +
-            '</ul>' +
-            '<img src="' + info.secondImage + '" alt="' + name + ' detail" ' +
-              'style="max-width:100%; display:block; margin:0 auto;" />' +
-          '</div>';
-        // *** end corrected block ***
+                  // second image
+                  const img2 = document.createElement("img");
+                  img2.src = info.secondImage;
+                  img2.alt = name + " detail";
+                  img2.style.cssText = "max-width:100%;display:block;margin:0 auto;";
+                  detailEl.appendChild(img2);
 
-        detailContainer.scrollIntoView({ behavior: "smooth" });
-      });
-    });
-  });
-</script>
+                  // insert it immediately after the clicked card
+                  card.parentNode.insertBefore(detailEl, card.nextSibling);
+                  detailEl.scrollIntoView({ behavior: "smooth" });
+                });
+              });
+            });
+            </script>
 
         </body>
       </html>
