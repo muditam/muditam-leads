@@ -9,6 +9,13 @@ function formatMonthDay(dateObj) {
   return `${month} ${day}`;
 }
 
+function formatDayMonthYear(dateObj) {
+  const day   = dateObj.getDate();
+  const month = dateObj.toLocaleString("en-US", { month: "long" });
+  const year  = dateObj.getFullYear();
+  return `${day} ${month} ${year}`;
+}
+
 const priceMap = {
   "Karela Jamun Fizz": {
     "1 month": 1350,
@@ -168,11 +175,11 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     // Compute the goal date as current date + daysToAdd and format it
     const goalDate = new Date();
     goalDate.setDate(goalDate.getDate() + daysToAdd);
-    const goalDateString = formatMonthDay(goalDate) + " Goal";
+    const goalDateString = `${formatDayMonthYear(goalDate)} Goal`;
 
     // Compute current date string
     const currentDate = new Date();
-    const currentDateString = formatMonthDay(currentDate);
+    const currentDateString = formatDayMonthYear(currentDate);
 
     // Retrieve presales Hba1c (default to 8.0 if not provided)
     let presalesHba1c = parseFloat(consultationDetails.presales?.hba1c) || 8.0;
@@ -442,14 +449,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               text-align: center;
             }
             .results-expected-p {
-              font-size: 32px;
+              font-size: 25px;
               color: #5D5D5D !important;
               font-weight: 400;
               margin: 0;
             }
             .results-expected-h3 {
-              font-size: 40px;
-              margin: 5px 0 0;
+              font-size: 35px; 
               color: #848484 !important;
               font-weight: 600; 
             } 
@@ -1627,14 +1633,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           <!-- Additional Image Section -->
           <div class="additional-image">
             <picture>
-              <source media="(min-width: 768px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/d.webp?v=1744625952">
-              <source media="(max-width: 767px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/m.webp?v=1744625953">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/d.webp?v=1744625952" alt="Additional Visual">
+              <source media="(min-width: 768px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_914.jpg?v=1745648444">
+              <source media="(max-width: 767px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_911.jpg?v=1745648443">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_914.jpg?v=1745648444" alt="Additional Visual">
             </picture>
           </div>
           <!-- Results Expected Section -->
           <div class="results-expected">
-            <p class="results-expected-p">Results Expected in <h3 class="results-expected-h3">90 Days</h3></p>
+            <p class="results-expected-p">Results Expected in <span class="results-expected-h3">90 Days</span></p>
           </div>
           <!-- Goal Section -->
           <div class="goal-section">
