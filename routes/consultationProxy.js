@@ -227,19 +227,19 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     const productDetailsMap = {
       "Karela Jamun Fizz": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
-        description: "Control blood sugar levels"
+        description: "Sugar Balance"
       },
       "Liver Fix": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/lf_2.webp?v=1744809988",
-        description: "Support liver health"
+        description: "liver health"
       },
       "Sugar Defend Pro": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/SDP_2_4fdc364f-3197-4867-9f63-0022dcac2586.webp?v=1744875711",
-        description: "Blood sugar control"
+        description: "Sugar control"
       },
       "Vasant Kusmakar Ras": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/VKR.webp?v=1744875711",
-        description: "Metabolic fire balance"
+        description: "Metabolic balance"
       },
       "Stress & Sleep": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/S_S_9a0d9003-3f5f-4514-8a5a-4c014b5dea06.webp?v=1744875711",
@@ -247,7 +247,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       },
       "Chandraprabha Vati": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/CPV_309f6255-286c-4c40-8d44-eea07f5a5e36.webp?v=1744875711",
-        description: "Urinary tract health"
+        description: "Kidney health"
       },
       "Heart Defend Pro": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HDP_2.webp?v=1744875711",
@@ -267,7 +267,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       },
       "Shilajit with Gold": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Shilajit_3.webp?v=1744875711",
-        description: "Cellular rejuvenation"
+        description: "Boosts immunity"
       }
     };
 
@@ -312,13 +312,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         style="height: 120px; width: auto; object-fit: contain;"
       />
  
-      <div style="flex: 1; margin: 0 20px 0 0;">
-        <h2 style="margin: 0 0 5px; font-size: 19px; white-space: nowrap;">${product}</h2>
-        <p style="margin: 0 0 10px; font-size: 16px; color: #555;">
+      <div style="flex: 1; margin: 0 10px 0 0;">
+        <h2 style="margin: 0 0 5px; font-size: 18px; white-space: nowrap;">${product}</h2>
+        <p style="margin: 0 0 10px; font-size: 15px; color: #555;">
           ${details.description}
         </p>
         <hr style="border: none; height: 1px; background-color: #ccc; margin: 10px 0;" />
-        <span style="font-size: 14px; font-weight: bold; color: #333;">
+        <span style="font-size: 13px; font-weight: bold; color: #333;">
           ${condition}
         </span>
       </div>
@@ -442,20 +442,19 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               width: 100%;
               height: auto;
             }
-            .results-expected { 
-              margin: 20px 0; 
+            .results-expected {  
               padding: 10px;
               font-family: 'Poppins', sans-serif;
               text-align: center;
             }
             .results-expected-p {
-              font-size: 25px;
+              font-size: 22px;
               color: #5D5D5D !important;
               font-weight: 400;
               margin: 0;
             }
             .results-expected-h3 {
-              font-size: 35px; 
+              font-size: 30px; 
               color: #848484 !important;
               font-weight: 600; 
             } 
@@ -498,6 +497,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               text-align: center;
               margin: 20px auto;
               width: 47%;
+            }
+              .goal-section .goal-info {
+              display: flex;
+              align-items: baseline;
+              gap: 10px;
+            }
+            .goal-section .goal-info p {
+              margin: 0;
             }
             .goal-date {
               font-size: 24px;
@@ -543,29 +550,18 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               appearance: none;
               width: 20px;
               height: 20px;
-              border: 2px solid #ccc;
+              border: 4px solid #ffffff;
               border-radius: 50%;
               margin-right: 12px;
               position: relative;
               cursor: pointer;
             }
 
-            .option-box input[type="radio"]::after {
-              content: "";
-              position: absolute;
-              width: 10px;
-              height: 10px;
-              border-radius: 50%;
-              background: #05AFFF;
-              top: 3px;
-              left: 3px;
-              transform: scale(0);
-              transition: transform 0.2s ease-in-out;
-            }
-
             .option-box input[type="radio"]:checked {
-              border-color: #05AFFF;
+              border-color: #03AD31;
+              background-color: #03AD31;
             }
+                
 
             .option-box input[type="radio"]:checked::after {
               transform: scale(1);
@@ -1644,8 +1640,10 @@ router.get("/proxy/consultation/:id", async (req, res) => {
           </div>
           <!-- Goal Section -->
           <div class="goal-section">
+          <div class="goal-info">
             <p class="goal-date">${goalDateString}</p>
             <p class="goal-hba1c" id="goalHba1cDisplay">${goalHba1c}%</p>
+            </div>
             <!-- Dynamic bar image -->
             <div class="goal-pointer-image">
               <img
@@ -2209,13 +2207,13 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
               if (selected.value === "only") {
                 newGoal = currentHba1c - 0.8;
-                barImage.src = "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_837.webp?v=1745493610";
+                barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_917.webp?v=1745650473";
               } else if (selected.value === "diet") {
                 newGoal = currentHba1c - 1.5;
-                barImage.src = "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_838.webp?v=1745493609";
+                barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_916.webp?v=1745650473";
               } else if (selected.value === "lifestyle") {
                 newGoal = currentHba1c - 2.5;
-                barImage.src = "https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Group_839.webp?v=1745493609";
+                barImage.src = "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_915.webp?v=1745650473";
               }
 
               document.getElementById("goalHba1cDisplay").textContent = newGoal.toFixed(1) + "%";
