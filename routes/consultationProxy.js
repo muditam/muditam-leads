@@ -296,7 +296,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         margin: 10px 0;
         background: #fff;
         border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        box-shadow: 0 1px 4px 0 rgb(0 0 0 / 1%), 0 1px 10px 0 rgba(0, 0, 0, 0.15);
       "
     > 
       <img
@@ -305,8 +305,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         style="height: 120px; width: auto; object-fit: contain;"
       />
  
-      <div style="flex: 1; margin: 0 20px;">
-        <h2 style="margin: 0 0 5px; font-size: 22px;">${product}</h2>
+      <div style="flex: 1; margin: 0 20px 0 0;">
+        <h2 style="margin: 0 0 5px; font-size: 19px; white-space: nowrap;">${product}</h2>
         <p style="margin: 0 0 10px; font-size: 16px; color: #555;">
           ${details.description}
         </p>
@@ -319,7 +319,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       <img
         src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988"
         alt="tag"
-        style="height: 30px; margin-left: 20px;"
+        style="height: 30px;"
       />
     </div>
   `;
@@ -1358,7 +1358,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
               @media only screen and (max-width: 767px) {
               .dmp-heading{
                 font-size: 42px; 
-                line-height: 60px; 
+                line-height: 45px; 
               }
               .dmp-heading-h1{
                 font-size: 30px;
@@ -1967,8 +1967,8 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       </div>
 
         <div class="heading-section-cpreb main-cpreb">
+        <h1>50,000+</h1>
           <h2>Happy Customers</h2>
-          <h1>50,000+</h1>
         </div>
 
         <div class="cards-list-cpreb">
