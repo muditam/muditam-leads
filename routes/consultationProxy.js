@@ -2142,24 +2142,20 @@ selectedProducts.forEach(product => {
 
                 card.addEventListener("click", () => {
 
+                  const next = card.nextElementSibling;
+                    if (next && next.classList.contains("expanded-detail")) {
+                      tagImg.classList.remove("rotated");
+                      next.remove();
+                      return;
+                    }
+
                   document.querySelectorAll(".expanded-detail").forEach(panel => {
                     const prevCard = panel.previousElementSibling;
                     prevCard.querySelector(".tag-icon")?.classList.remove("rotated");
                     panel.remove();
                   });
 
-                  // If the very next sibling is already an expanded panel for this card, just remove it & bail
-                  const next = card.nextElementSibling;
-                  if (next && next.classList.contains("expanded-detail") && next.dataset.product === card.dataset.product) {
-                    next.remove();
-                    return;
-                  }
-
                   tagImg.classList.add("rotated");
-
-                  // Otherwise remove any other open detail panels
-                  // document.querySelectorAll(".expanded-detail").forEach(el => el.remove());
-
                   const name = card.dataset.product;
                   const info = expandedDetails[name];
                   if (!info) return;
