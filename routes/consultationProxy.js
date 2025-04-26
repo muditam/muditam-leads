@@ -323,9 +323,11 @@ selectedProducts.forEach(product => {
         <span style="font-size:13px;font-weight:bold;color:#333;">${condition}</span>
       </div>
       <img
-        src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988"
+      class="tag-icon"
+        src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130_1.png?v=1745659898"
         alt="tag"
         style="height:30px;"
+        style="height:30px; transition: transform 0.3s;"
       />
     </div>
   `;
@@ -560,7 +562,7 @@ selectedProducts.forEach(product => {
             }
 
             .option-box input[type="radio"]:checked {
-              border-color: #03AD31; 
+              border-color:rgb(255, 255, 255); 
             }
                 
             .option-box:has(input[type="radio"]:checked) {
@@ -891,9 +893,9 @@ selectedProducts.forEach(product => {
                 text-align: center; 
               }
               .heading-section-cpreb.main-cpreb h1 {
-                font-size: 32px;
+                font-size: 40px;
                 color: #5D5D5D;
-                font-weight: 200;
+                font-weight: 400;
                 margin-bottom: -30px;
               }
               .heading-section-cpreb.main-cpreb h2 {
@@ -1313,6 +1315,14 @@ selectedProducts.forEach(product => {
                   font-weight: 400;
                   color:rgb(255, 255, 255);
                 }
+                .tag-icon.rotated {
+                  transform: rotate(180deg);
+                }
+
+
+
+
+
 
 
 
@@ -1437,10 +1447,10 @@ selectedProducts.forEach(product => {
                     padding-left: 10px;
                   }
                   .heading-section-cpreb.main-cpreb h1 {
-                    font-size: 32px;
+                    font-size: 25px;
                   }
                   .heading-section-cpreb.main-cpreb h2 {
-                    font-size: 40px;
+                    font-size: 32px;
                     line-height: 41px;
                   }
 
@@ -1562,6 +1572,7 @@ selectedProducts.forEach(product => {
                       .dmp-heading-span {
                         font-size: 14px; 
                     }
+                   
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
               .payment-breakup-amg .pb-cta{margin:12px auto;width:calc(100% - 32px);padding:12px 0}
@@ -2127,15 +2138,27 @@ selectedProducts.forEach(product => {
 
               // 3) Attach click-to-expand behavior
               document.querySelectorAll(".product-card").forEach(card => {
+                const tagImg = card.querySelector(".tag-icon");
+
                 card.addEventListener("click", () => {
+
+                  document.querySelectorAll(".expanded-detail").forEach(panel => {
+                    const prevCard = panel.previousElementSibling;
+                    prevCard.querySelector(".tag-icon")?.classList.remove("rotated");
+                    panel.remove();
+                  });
+
                   // If the very next sibling is already an expanded panel for this card, just remove it & bail
                   const next = card.nextElementSibling;
                   if (next && next.classList.contains("expanded-detail") && next.dataset.product === card.dataset.product) {
                     next.remove();
                     return;
                   }
+
+                  tagImg.classList.add("rotated");
+
                   // Otherwise remove any other open detail panels
-                  document.querySelectorAll(".expanded-detail").forEach(el => el.remove());
+                  // document.querySelectorAll(".expanded-detail").forEach(el => el.remove());
 
                   const name = card.dataset.product;
                   const info = expandedDetails[name];
