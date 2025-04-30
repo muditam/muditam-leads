@@ -325,7 +325,7 @@ selectedProducts.forEach(product => {
       </div>
       <img
       class="tag-icon"
-        src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130_1.png?v=1745659898"
+        src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130_2.png?v=1746007801"
         alt="tag"
         style="height:30px;"
         style="height:30px; transition: transform 0.3s;"
@@ -426,6 +426,7 @@ selectedProducts.forEach(product => {
               font-size: 60px;
               font-weight: 400;
               margin: 0 auto 0px;
+              text-transform: capitalize;
             }
             .duration-badge {
               display: inline-block;
@@ -435,6 +436,7 @@ selectedProducts.forEach(product => {
               border-radius: 10px;
               margin-top: 10px;
               font-size: 50px;
+              text-transform: capitalize;
             }
             
             .additional-image {
@@ -599,6 +601,8 @@ selectedProducts.forEach(product => {
               font-weight: 400;
               color: #C0C0C0;
               text-align: center;
+              text-transform: capitalize;
+              margin: 0;
             }
             .Your-dce-sp{
               font-size: 40px;
@@ -1599,7 +1603,7 @@ selectedProducts.forEach(product => {
           <img
             src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_Logo-01-01.png?v=1725434339"
             alt="Muditam Logo"
-            style="max-height:50px; width:auto;"
+            style="max-height:35px; width:auto;"
           />
         </header>
           <div class="wrapper">
@@ -1832,7 +1836,7 @@ selectedProducts.forEach(product => {
         <div class="card-cpre">
           <div class="card-header-cpre">
             <div class="avatar-cpre">
-              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/fggfku.png?v=1745497170" alt="">
+              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mask_group.png?v=1745497171" alt="">
             </div>
             <div class="user-info-cpre">
               <div class="name-cpre">Priya Sharma</div>
@@ -1853,7 +1857,7 @@ selectedProducts.forEach(product => {
         <div class="card-cpre">
           <div class="card-header-cpre">
             <div class="avatar-cpre">
-              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mask_group.png?v=1745497171" alt="">
+            <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/fggfku.png?v=1745497170" alt="">
             </div>
             <div class="user-info-cpre">
               <div class="name-cpre">Rahul Verma</div>
@@ -1874,7 +1878,7 @@ selectedProducts.forEach(product => {
         <div class="card-cpre">
           <div class="card-header-cpre">
             <div class="avatar-cpre">
-              <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/h.i.png?v=1745497170" alt="">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ramesh-sharma.jpg?v=1746005511" alt="">
             </div>
             <div class="user-info-cpre">
               <div class="name-cpre">Sneha Gupta</div>
@@ -1902,10 +1906,10 @@ selectedProducts.forEach(product => {
           <div class="card-cpreb">
             <div class="card-header-cpreb">
               <div class="avatar-cpreb">
-                <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mask_group-2.png?v=1745499024" alt="">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Ramesh-bkgrnd.webp?v=1746005511" alt="">
               </div>
               <div class="user-info-cpreb">
-                <div class="name-cpreb">Meena Taneja</div>
+                <div class="name-cpreb">Rajesh Aggarwal</div>
                 <div class="location-cpreb">
                   <img height="12" width="12" src="https://img.icons8.com/ios/50/marker--v1.png" alt="marker"/> Ghaziabad
                 </div>
@@ -1920,14 +1924,14 @@ selectedProducts.forEach(product => {
             </div>
             <div class="review-images-cpreb">
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5747_Medium_84cabab8-8e28-4d4b-b978-0e7f0303f420.jpg?v=1734173390" alt="Customer Photo">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Apr_30_2025_01_48_11_PM.png?v=1746001120" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Apr_30_2025_01_48_11_PM.webp?v=1746005811" alt="Customer Photo">
             </div>
           </div>
 
           <div class="card-cpreb">
             <div class="card-header-cpreb">
               <div class="avatar-cpreb">
-                <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/gkiu.png?v=1745499024" alt="">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/INnZycvFWeBbT13XZGCwPHOqQ7fQV884lRiPniw2Q0CJ15Q17Q7dMUB.jpg?v=1746005511" alt="">
               </div>
               <div class="user-info-cpreb">
                 <div class="name-cpreb">Ramesh Joshi</div>
@@ -1941,17 +1945,17 @@ selectedProducts.forEach(product => {
               <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
             </div>
             <div class="description-cpreb">
-              Sugar 300 se 130 aa gaya within 2 months. No allopathy, just Muditam. Feeling light, energetic, and finally hopeful.
+              Sugar 300 se 127 aa gaya within 2 months. No allopathy, just Muditam. Feeling light, energetic, and finally hopeful.
             </div>
             <div class="review-images-cpreb">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5748_Medium_d7c64b53-76a6-4517-9c74-575b5280d875.jpg?v=1734173390" alt="Customer Photo"> 
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ChatGPT_Image_Apr_30_2025_03_05_05_PM.webp?v=1746005811" alt="Customer Photo"> 
             </div>
           </div>
 
           <div class="card-cpreb">
             <div class="card-header-cpreb">
               <div class="avatar-cpreb">
-                <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/Mask_group-1.png?v=1745499024" alt="">
+                <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1552294645472.jpg?v=1746005554" alt="">
               </div>
               <div class="user-info-cpreb">
                 <div class="name-cpreb">Aarav Bansal</div>
@@ -2152,54 +2156,54 @@ selectedProducts.forEach(product => {
               // 2) Expanded-detail data for each product 
               const expandedDetails = {
                 "Karela Jamun Fizz": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/6_be53ea27-dc20-4edb-baad-026268ad8b76.webp?v=1745926849",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_52d21a25-221b-488b-b9cf-381cd8b2485e.webp?v=1745926849",
                   bullets:     ["Blend of 11 Ayurvedic Herbs", "World’s First Non-Bitter Karela Juice"],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/4_18ec86f1-e1f1-41e5-af33-f765f92c0ffa.webp?v=1745926849"
                 },
                 "Liver Fix": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_45eee17c-385b-4755-be01-13d2aa0dd895_1.webp?v=1745911908",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/3_d1495f7b-a13c-4f41-9867-5cd17f1692e4.webp?v=1745669315",
                   bullets:     ["Effervescent blend of Milk Thistle, NAC, Kutki & Ayurvedic herbs for faster absorption", "Effervescent, fast-absorbing, and tastier than bitter liver tonics."],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/8_63af8b3f-5cae-43c4-95b9-9519f1daaac2.webp?v=1745669313"
                 },
                 "Sugar Defend Pro": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_964e678f-e679-415e-b754-6a989f45bc6b.webp?v=1739770331",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_69b3b8f9-c6b4-462d-b555-50ccf5a9e6ee.webp?v=1739770331",
                   bullets:     ["Clinically-backed blend of Magnesium, Berberine, ALA & Chromium", "Targets insulin resistance for stronger blood sugar control"],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_7.png?v=1746008387"
                 },
                 "Vasant Kusmakar Ras": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/8_ca5515b3-b84c-43ca-b346-ae77b9977d56.webp?v=1739627631",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/3_bb30e34f-b58b-4a8a-8aaa-a3a4f7b044ff.webp?v=1739627631",
                   bullets:     ["Classical Ayurvedic formulation enriched with Gold, Pearl & Silver Bhasma", "High-potency Rasayana known for deep cellular nourishment & rejuvenation"],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_8.png?v=1746008512"
                 },
                 "Stress & Sleep": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_0416159f-a8f1-4895-b917-b079637d6992.webp?v=1739626378",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_675f8485-aa3d-4f84-84e2-3462be51b6f7.webp?v=1739626378",
                   bullets:     ["Combines KSM-66 Ashwagandha, Valerian Root, Brahmi & Melatonin", "Non-habit forming blend that supports relaxation and quality sleep"],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_10.png?v=1746009253"
                 },
                 "Chandraprabha Vati": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_ff5711c6-441d-4063-b5e8-8276f1a4cb4e.webp?v=1739626540",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_d7874463-a826-4882-b7e3-916928e5f44b.webp?v=1739626540",
                   bullets:     ["Classical Ayurvedic formulation with Shilajit, Guggul, and Lauha Bhasma", "Supports kidney health, urinary tract function, and fluid balance naturally"],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_11.png?v=1746009383"
                 },
                 "Power Gut": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/4_4fcc37cf-2c16-4562-9398-d95fb5052b9a.webp?v=1742451985",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_839803f1-be6a-4e61-b515-26fef8d9c24d.webp?v=1742451985",
                   bullets:     ["4 Clinically researched probiotic strains with added prebiotics", "Fortified with Jamun, Amla & essential minerals for enhanced gut support."],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_7245a59e-0aa2-4d9b-8898-fe4e11b9dd42.webp?v=1742451985"
                 },
                 "Heart Defend Pro": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_e26383b2-d0f8-4a25-8f3b-b1d9e599c16b.webp?v=1739626227",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_7cfc10e3-2316-43bf-8c83-01ff166a6b32.webp?v=1739626227",
                   bullets:     ["Combines CoQ10, Arjuna, Aged Garlic & Phytosterols for targeted heart support", "Designed to naturally manage cholesterol, boost circulation & heart function"],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_12.png?v=1746009769"
                 },
                 "Performance Forever": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_75fe0b2c-b0ec-4ae0-8d0a-e7594e687fc1.webp?v=1739626055",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_65938fe6-c662-4f81-8b1c-ecb685f32565.webp?v=1739626055",
                   bullets:     ["Powered by Gokshur, Safed Musli & Korean Ginseng for lasting stamina", "Ashwagandha-enriched formula to support strength and performance naturally"],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_13.png?v=1746009984"
                 },
                 "Shilajit with Gold": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_4a678e34-048b-499b-bb20-75b0ea15635a.webp?v=1742451898",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/3_93373f2d-4618-4852-9292-1c6e098269c6.webp?v=1735212913",
                   bullets:     ["Contains >70% Fulvic Acid for maximum absorption", "Fortified with Svarna Bhasma for enhanced potency"],
-                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/8_2e0bf5d6-01a3-4d2e-8765-26756e96d2d9.webp?v=1735212913"
                 }
               };
 
