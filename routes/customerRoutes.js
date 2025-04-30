@@ -65,7 +65,7 @@ router.get("/api/customers", async (req, res) => {
 
     const customers = await Customer.aggregate([
       { $match: query },
-      { $sort: { createdAt: -1 } }, // Sort by creation date descending
+      { $sort: { createdAt: -1 } },  
       { $skip: (page - 1) * limit },
       { $limit: limit },
       {

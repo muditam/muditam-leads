@@ -1606,7 +1606,7 @@ selectedProducts.forEach(product => {
             <div class="container">
               <div class="overlay">
                 <h1 class="dmp-heading-h1">${customer.name}'s</h1>   
-                <span class="dmp-heading-span">(Age- ${customer.age},${presalesGender})</span> 
+                <span class="dmp-heading-span">(Age: ${customer.age},${presalesGender})</span> 
                 <h2 class="dmp-heading">DIABETES<br> MANAGEMENT<br> PLAN</h2>
                 <div class="duration-badge">${consultationDetails.closing && consultationDetails.closing.courseDuration ? consultationDetails.closing.courseDuration : "Not provided"}</div>
               </div>
@@ -1754,7 +1754,7 @@ selectedProducts.forEach(product => {
               <hr class="pb-line" />
 
               <div class="pb-row">
-                <span>Coupon Discount (${codes.join(", ") || "None"}):</span>
+                <span>Special Discount:</span>
                 <span class="pb-amount">₹${couponDiscount}</span>
               </div>
               <hr class="pb-line" />
@@ -1916,11 +1916,11 @@ selectedProducts.forEach(product => {
               <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
             </div>
             <div class="description-cpreb">
-              2 saal se sugar control nahi ho rahi thi. Fasting ab  roz 110 ke aas-paas hai. Karela Jamun Fizz ne kamaal kar diya.
+              2 saal se sugar control nahi ho rahi thi. Fasting ab  roz 100 ke aas-paas hai. Karela Jamun Fizz ne kamaal kar diya.
             </div>
             <div class="review-images-cpreb">
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5747_Medium_84cabab8-8e28-4d4b-b978-0e7f0303f420.jpg?v=1734173390" alt="Customer Photo">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5745_Medium_d1d58fe6-815f-48c1-b4b5-e6643bed7eb5.jpg?v=1734173390" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Apr_30_2025_01_48_11_PM.png?v=1746001120" alt="Customer Photo">
             </div>
           </div>
 
@@ -1965,12 +1965,12 @@ selectedProducts.forEach(product => {
               <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
             </div>
             <div class="description-cpreb">
-              Mera Liver Phle Bohot fatty the fir maine Liver Fix liya or muditam ke doctors ki salah mani ab liver bhi thik hogya or mai accha feel krta hu.
+              Phle mujhe Sugar bohot high rhti thi kuch kha bhi nhi pata tha, Muditam ki salah se paise Karela Jamun Fizz liya phle mahine e mujhe frk dikha.
             </div>
             <div class="review-images-cpreb">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5738_Medium_b8d29404-d325-439c-8e8d-1c8461766e1e.jpg?v=1734174436" alt="Customer Photo">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5736_Medium_90399e08-a751-4195-891b-fda732dce066.jpg?v=1734174436" alt="Customer Photo">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5739_Medium_42ce787f-a9ce-4e84-964d-352142bf9ad0.jpg?v=1734174436" alt="Customer Photos">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5741_Medium_844703af-153f-47eb-9085-bf1e394776b5.jpg?v=1734173390" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5742_Medium_41c12738-7ddc-44b1-b9a1-a5b0c97a7501.jpg?v=1734173391" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5744_Medium_3134c226-ff4a-4d40-a45d-f1de1571a218.jpg?v=1734173392" alt="Customer Photos">
             </div>
           </div>
         </div>
@@ -2068,12 +2068,10 @@ selectedProducts.forEach(product => {
         <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130.png?v=1744809988" alt="Arrow Icon" />
       </label>
       <div class="dropdown-content">
-        <div class="dropdown-description">
-          <h3>1. Partial Payment (Recommended)</h3>
-          <p>Book your order now with a small amount. Pay the remaining balance at the time of delivery.</p>
-          <h3>2. Prepaid</h3>
+        <div class="dropdown-description"> 
+          <h3>1. Prepaid</h3>
           <p>Make the full payment online before dispatch. Fast and hassle-free delivery.</p>
-          <h3>3. Cash on Delivery</h3>
+          <h3>2. Cash on Delivery</h3>
           <p>Want to pay at delivery? Connect with your expert to activate COD for your order. Note: Complete COD is not available where blood test is included.</p>
         </div>
       </div>
@@ -2151,19 +2149,58 @@ selectedProducts.forEach(product => {
             document.addEventListener("DOMContentLoaded", () => {
                
 
-              // 2) Expanded-detail data for each product
+              // 2) Expanded-detail data for each product 
               const expandedDetails = {
                 "Karela Jamun Fizz": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/singlebottle.webp?v=1745416945",
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/6_be53ea27-dc20-4edb-baad-026268ad8b76.webp?v=1745926849",
                   bullets:     ["Blend of 11 Ayurvedic Herbs", "World’s First Non-Bitter Karela Juice"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
                 },
                 "Liver Fix": {
-                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2bottle_87456661-622f-4818-955e-0c7d4469e8fe.webp?v=1743686509",
-                  bullets:     ["No Bloating & Gas", "Improved Digestion"],
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_45eee17c-385b-4755-be01-13d2aa0dd895_1.webp?v=1745911908",
+                  bullets:     ["Effervescent blend of Milk Thistle, NAC, Kutki & Ayurvedic herbs for faster absorption", "Effervescent, fast-absorbing, and tastier than bitter liver tonics."],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Sugar Defend Pro": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_964e678f-e679-415e-b754-6a989f45bc6b.webp?v=1739770331",
+                  bullets:     ["Clinically-backed blend of Magnesium, Berberine, ALA & Chromium", "Targets insulin resistance for stronger blood sugar control"],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Vasant Kusmakar Ras": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/8_ca5515b3-b84c-43ca-b346-ae77b9977d56.webp?v=1739627631",
+                  bullets:     ["Classical Ayurvedic formulation enriched with Gold, Pearl & Silver Bhasma", "High-potency Rasayana known for deep cellular nourishment & rejuvenation"],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Stress & Sleep": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_0416159f-a8f1-4895-b917-b079637d6992.webp?v=1739626378",
+                  bullets:     ["Combines KSM-66 Ashwagandha, Valerian Root, Brahmi & Melatonin", "Non-habit forming blend that supports relaxation and quality sleep"],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Chandraprabha Vati": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_ff5711c6-441d-4063-b5e8-8276f1a4cb4e.webp?v=1739626540",
+                  bullets:     ["Classical Ayurvedic formulation with Shilajit, Guggul, and Lauha Bhasma", "Supports kidney health, urinary tract function, and fluid balance naturally"],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Power Gut": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/4_4fcc37cf-2c16-4562-9398-d95fb5052b9a.webp?v=1742451985",
+                  bullets:     ["4 Clinically researched probiotic strains with added prebiotics", "Fortified with Jamun, Amla & essential minerals for enhanced gut support."],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Heart Defend Pro": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_e26383b2-d0f8-4a25-8f3b-b1d9e599c16b.webp?v=1739626227",
+                  bullets:     ["Combines CoQ10, Arjuna, Aged Garlic & Phytosterols for targeted heart support", "Designed to naturally manage cholesterol, boost circulation & heart function"],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Performance Forever": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_75fe0b2c-b0ec-4ae0-8d0a-e7594e687fc1.webp?v=1739626055",
+                  bullets:     ["Powered by Gokshur, Safed Musli & Korean Ginseng for lasting stamina", "Ashwagandha-enriched formula to support strength and performance naturally"],
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
+                },
+                "Shilajit with Gold": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_4a678e34-048b-499b-bb20-75b0ea15635a.webp?v=1742451898",
+                  bullets:     ["Contains >70% Fulvic Acid for maximum absorption", "Fortified with Svarna Bhasma for enhanced potency"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_785.png?v=1745653313"
                 }
-                // …add more products here as needed…
               };
 
               // 3) Attach click-to-expand behavior
@@ -2200,7 +2237,7 @@ selectedProducts.forEach(product => {
                   const img1 = document.createElement("img");
                   img1.src = info.firstImage;
                   img1.alt = name;
-                  img1.style.cssText = "max-width:200px;display:block;margin:0 auto 10px;";
+                  img1.style.cssText = "max-width:350px;display:block;margin:0 auto 10px;";
                   detailEl.appendChild(img1);
 
                   // bullets
