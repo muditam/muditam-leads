@@ -228,39 +228,39 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     const productDetailsMap = {
       "Karela Jamun Fizz": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
-        description: "Sugar Balance"
+        description: "Unique Blend of 11 Herbs"
       },
       "Liver Fix": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/lf_2.webp?v=1744809988",
-        description: "liver health"
+        description: "Supports Liver Wellness, Aids Detoxification"
       },
       "Sugar Defend Pro": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/SDP_2_4fdc364f-3197-4867-9f63-0022dcac2586.webp?v=1744875711",
-        description: "Sugar control"
+        description: "Supports Energy Balance, Works Holistically"
       },
       "Vasant Kusmakar Ras": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/VKR.webp?v=1744875711",
-        description: "Metabolic balance"
+        description: "Ayurvedic Formulation, For Daily Vitality"
       },
       "Stress & Sleep": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/S_S_9a0d9003-3f5f-4514-8a5a-4c014b5dea06.webp?v=1744875711",
-        description: "Calming sleep"
+        description: "Non-Addictive Formula, Promotes Restful Sleep"
       },
       "Chandraprabha Vati": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/CPV_309f6255-286c-4c40-8d44-eea07f5a5e36.webp?v=1744875711",
-        description: "Kidney health"
+        description: "Focus on kidney wellness for a balanced lifestyle"
       },
       "Heart Defend Pro": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/HDP_2.webp?v=1744875711",
-        description: "Cardio support"
+        description: "Promotes Cardiovascular Well-being"
       },
       "Performance Forever": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PF_2.webp?v=1744875711",
-        description: "Endurance booster"
+        description: "Enhances Strength and Energy Levels"
       },
       "Power Gut": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PG_2_c7332d00-50b9-476e-aeb3-005babd4b95d.webp?v=1744875711",
-        description: "Digestive balance"
+        description: "Supports Gut Health with Probiotic Formula"
       },
       "Blood Test": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
@@ -268,7 +268,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       },
       "Shilajit with Gold": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Shilajit_3.webp?v=1744875711",
-        description: "Boosts immunity"
+        description: "Supports Vitality and Muscle Recovery"
       }
     };
 
@@ -2157,52 +2157,42 @@ selectedProducts.forEach(product => {
               const expandedDetails = {
                 "Karela Jamun Fizz": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/5_52d21a25-221b-488b-b9cf-381cd8b2485e.webp?v=1745926849",
-                  bullets:     ["Blend of 11 Ayurvedic Herbs", "World’s First Non-Bitter Karela Juice"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/4_18ec86f1-e1f1-41e5-af33-f765f92c0ffa.webp?v=1745926849"
                 },
                 "Liver Fix": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/3_d1495f7b-a13c-4f41-9867-5cd17f1692e4.webp?v=1745669315",
-                  bullets:     ["Effervescent blend of Milk Thistle, NAC, Kutki & Ayurvedic herbs for faster absorption", "Effervescent, fast-absorbing, and tastier than bitter liver tonics."],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/8_63af8b3f-5cae-43c4-95b9-9519f1daaac2.webp?v=1745669313"
                 },
                 "Sugar Defend Pro": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_69b3b8f9-c6b4-462d-b555-50ccf5a9e6ee.webp?v=1739770331",
-                  bullets:     ["Clinically-backed blend of Magnesium, Berberine, ALA & Chromium", "Targets insulin resistance for stronger blood sugar control"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_7.png?v=1746008387"
                 },
                 "Vasant Kusmakar Ras": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/3_bb30e34f-b58b-4a8a-8aaa-a3a4f7b044ff.webp?v=1739627631",
-                  bullets:     ["Classical Ayurvedic formulation enriched with Gold, Pearl & Silver Bhasma", "High-potency Rasayana known for deep cellular nourishment & rejuvenation"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_8.png?v=1746008512"
                 },
                 "Stress & Sleep": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_675f8485-aa3d-4f84-84e2-3462be51b6f7.webp?v=1739626378",
-                  bullets:     ["Combines KSM-66 Ashwagandha, Valerian Root, Brahmi & Melatonin", "Non-habit forming blend that supports relaxation and quality sleep"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_10.png?v=1746009253"
                 },
                 "Chandraprabha Vati": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_d7874463-a826-4882-b7e3-916928e5f44b.webp?v=1739626540",
-                  bullets:     ["Classical Ayurvedic formulation with Shilajit, Guggul, and Lauha Bhasma", "Supports kidney health, urinary tract function, and fluid balance naturally"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_11.png?v=1746009383"
                 },
                 "Power Gut": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_839803f1-be6a-4e61-b515-26fef8d9c24d.webp?v=1742451985",
-                  bullets:     ["4 Clinically researched probiotic strains with added prebiotics", "Fortified with Jamun, Amla & essential minerals for enhanced gut support."],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_7245a59e-0aa2-4d9b-8898-fe4e11b9dd42.webp?v=1742451985"
                 },
                 "Heart Defend Pro": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_7cfc10e3-2316-43bf-8c83-01ff166a6b32.webp?v=1739626227",
-                  bullets:     ["Combines CoQ10, Arjuna, Aged Garlic & Phytosterols for targeted heart support", "Designed to naturally manage cholesterol, boost circulation & heart function"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_12.png?v=1746009769"
                 },
                 "Performance Forever": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/1_65938fe6-c662-4f81-8b1c-ecb685f32565.webp?v=1739626055",
-                  bullets:     ["Powered by Gokshur, Safed Musli & Korean Ginseng for lasting stamina", "Ashwagandha-enriched formula to support strength and performance naturally"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_13.png?v=1746009984"
                 },
                 "Shilajit with Gold": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/3_93373f2d-4618-4852-9292-1c6e098269c6.webp?v=1735212913",
-                  bullets:     ["Contains >70% Fulvic Acid for maximum absorption", "Fortified with Svarna Bhasma for enhanced potency"],
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/8_2e0bf5d6-01a3-4d2e-8765-26756e96d2d9.webp?v=1735212913"
                 }
               };
@@ -2244,15 +2234,7 @@ selectedProducts.forEach(product => {
                   img1.style.cssText = "max-width:350px;display:block;margin:0 auto 10px;";
                   detailEl.appendChild(img1);
 
-                  // bullets
-                  const ul = document.createElement("ul");
-                  ul.style.cssText = "list-style:disc;margin:0 0 20px 20px;";
-                  info.bullets.forEach(txt => {
-                    const li = document.createElement("li");
-                    li.textContent = txt;
-                    ul.appendChild(li);
-                  });
-                  detailEl.appendChild(ul);
+                 
 
                   // second image
                   const img2 = document.createElement("img");
