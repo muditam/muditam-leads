@@ -144,9 +144,15 @@ const variantMap = {
 };
 
 const couponValueMap = {
-  LMS100: 100,
-  LMS500: 500,
-  LMS1000: 1000,
+  DOCTORSPECIAL100: 100,
+  DOCTORSPECIAL500: 500,
+  DOCTORSPECIAL1000: 1000,
+};
+
+const percentageCouponMap = {
+  DOCTORSPECIAL5:  0.05,
+  DOCTORSPECIAL10: 0.10,
+  DOCTORSPECIAL12: 0.12,
 };
 
 // GET route for App Proxy using customer ID directly
@@ -203,14 +209,22 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     // fallback if nothing matched:
     if (totalPrice === 0) totalPrice = 0;
 
-    const codes = consultationDetails.closing?.discountCodes || [];
     // sum up their ₹ amounts
-    const couponDiscount = codes.reduce(
-      (sum, code) => sum + (couponValueMap[code] || 0),
-      0
-    );
+    let couponDiscount = 0;
+    const codes = consultationDetails.closing?.discountCodes || [];
+
+    codes.forEach(code => {
+      if (couponValueMap[code]) {
+        // fixed-amount coupon
+        couponDiscount += couponValueMap[code];
+      } else if (percentageCouponMap[code]) {
+        // percentage coupon
+        couponDiscount += totalPrice * percentageCouponMap[code];
+      }
+    });
+
     // final price after subtracting coupon total
-    const finalPrice = totalPrice - couponDiscount;
+    const finalPrice = Math.max(0, totalPrice - couponDiscount);
 
     // collect all selected variants for the cart
     const variantIds = selectedProducts
