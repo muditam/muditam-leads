@@ -720,7 +720,8 @@ selectedProducts.forEach(product => {
                 .subtitle-amg {
                   margin: 0;
                   font-size: 25px;
-                  color: #666;
+                  color: #000000;
+                  font-weight: 500;
                 }
 
                 .rating-cards-amg {
@@ -921,17 +922,12 @@ selectedProducts.forEach(product => {
                 text-align: center; 
               }
               .heading-section-cpreb.main-cpreb h1 {
-                font-size: 40px;
-                color: #5D5D5D;
-                font-weight: 400;
+                font-size: 35px;
+                color:rgb(0, 0, 0);
+                font-weight: 500;
                 margin-bottom: -30px;
               }
-              .heading-section-cpreb.main-cpreb h2 {
-                font-size: 50px;
-                color: #C0C0C0;
-                line-height: 51px;
-                font-weight: bold;
-              }
+              
 
               /* Cards list (vertical) */
               .cards-list-cpreb {
@@ -1107,10 +1103,9 @@ selectedProducts.forEach(product => {
               .expert-details h3 {
                 margin-bottom: 8px;
               }
-              .expert-details p {
-                font-style: regular;
-                font-size: 14px;
-                margin: 0;
+              .expert-details p {  
+                line-height: 10px;
+                margin-bottom: 30px;
               }
 
               /* Right column: longer bio/description */
@@ -1122,10 +1117,10 @@ selectedProducts.forEach(product => {
               }
 
               .expert-details h1 {
-                color: #543087;
-                font-style: bold;
-                font-size: 30px;
-                margin: 0;
+                color: #543087; 
+                font-size: 30px;               
+                line-height: 20px;
+                margin-top: -10px;
               }
               .btnn {
                 padding: 15px 50px;
@@ -1136,6 +1131,7 @@ selectedProducts.forEach(product => {
                 color: white;
                 box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
                 margin-top: 20px;
+                text-decoration: none;
               }
 
               .faq-cpreb {
@@ -1146,9 +1142,9 @@ selectedProducts.forEach(product => {
               }
               .faq-heading-cpreb {
                 text-align: center;
-                font-size: 30px;
-                color: #5D5D5D;
-                font-weight: 400;
+                font-size: 28px;
+                color:rgb(0, 0, 0);
+                font-weight: 500;
                 margin-bottom: 1.5rem;
               }
                 .faq-heading-cpreb-s {
@@ -1601,22 +1597,20 @@ selectedProducts.forEach(product => {
                         font-size: 40px; 
                       }
 
-                      .mobile-pay-wrapper {
-                        position: sticky;
-                        bottom: 0;
-                        left: 0;
-                        width: 100%;
-                        background: #ECDFFF;      
-                        padding: 10px 0;           
-                        box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
-                        z-index: 100;
-                      }
-                      .mobile-pay-wrapper .pb-cta.pay {
-                        width: 90%;
-                        margin: 0 auto;
-                        display: block;
-                        border-radius: 999px;   
-                      }
+                      .mobile-pay-wrapper { 
+                      position: static;
+                      width: 100%;
+                      transition: none;
+                    }
+                    .mobile-pay-wrapper.is-fixed { 
+                      position: fixed;
+                      bottom: 0;
+                      left: 0;
+                      right: 0;
+                      width: 100%;
+                      z-index: 999;
+                      box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
+                    }
                    
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
@@ -1815,7 +1809,7 @@ selectedProducts.forEach(product => {
 
 
         <div class="turning-section-amg">
-        <p class="subtitle-amg">Why India Trusts <h2>Muditam?</h2></p>
+        <p class="subtitle-amg">Why India Trusts Muditam?</p>
 
         <div class="rating-cards-amg">
           <!-- Google card -->
@@ -1925,7 +1919,7 @@ selectedProducts.forEach(product => {
       </div>
 
         <div class="heading-section-cpreb main-cpreb">
-        <h1>50,000+ <h2>Happy Customers</h2></h1> 
+        <h1>50,000+ Happy Customers</h1> 
         </div>
 
         <div class="cards-list-cpreb">
@@ -2006,7 +2000,7 @@ selectedProducts.forEach(product => {
         </div>
 
         <section class="faq-cpreb">
-        <h2 class="faq-heading-cpreb">Frequently <span class="faq-heading-cpreb-s">Asked Questions</span></h2>
+        <h2 class="faq-heading-cpreb">Frequently Asked Questions</h2>
 
         <details class="faq-item-cpreb">
           <summary class="faq-question-cpreb">
@@ -2175,6 +2169,22 @@ selectedProducts.forEach(product => {
         });
       </script>
  
+      <script>
+        document.addEventListener("DOMContentLoaded", () => {
+          const payWrapper = document.querySelector(".mobile-pay-wrapper");
+          // When the wrapper’s top edge is at or above the bottom of the viewport,
+          // add the .is-fixed class; remove it when it scrolls back up.
+          window.addEventListener("scroll", () => {
+            const rect = payWrapper.getBoundingClientRect();
+            if (rect.top <= window.innerHeight) {
+              payWrapper.classList.add("is-fixed");
+            } else {
+              payWrapper.classList.remove("is-fixed");
+            }
+          });
+        });
+      </script>
+
           <script>
             document.addEventListener("DOMContentLoaded", () => {
                
