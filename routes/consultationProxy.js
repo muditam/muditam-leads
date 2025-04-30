@@ -612,15 +612,15 @@ selectedProducts.forEach(product => {
             }
             .Your-dce{
               font-size: 32px;
-              font-weight: 400;
+              font-weight: 600;
               color: #C0C0C0;
               text-align: center;
               text-transform: capitalize;
               margin: 0;
             }
             .Your-dce-sp{
-              font-size: 40px;
-              font-weight: 600;
+              font-size: 28px;
+              font-weight: 400;
               line-height: 30px;
             }
             .customer-dmp-top{
@@ -1697,11 +1697,7 @@ selectedProducts.forEach(product => {
 
 
           <div class="Your-dce-d">
-            <p class="Your-dce">${customer.name}<br><span class="Your-dce-sp">Diabetes Care</span><br>Essentials</p>
-            
-            <hr style="height: 1px; background-color: #C0C0C0; width: 80%;">
-
-             
+            <p class="Your-dce">${customer.name}'s<br><span class="Your-dce-sp">Diabetes Care Essentials</span></p>
           </div>
 
           <div class="bottom-section">
