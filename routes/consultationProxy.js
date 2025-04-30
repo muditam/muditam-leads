@@ -242,7 +242,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     const productDetailsMap = {
       "Karela Jamun Fizz": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/KJF_1.webp?v=1744809598",
-        description: "Unique Blend of 11 Herbs"
+        description: "Mix of 11 Herbs Proven to reduce Blood Glucose"
       },
       "Liver Fix": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/lf_2.webp?v=1744809988",
@@ -399,7 +399,7 @@ selectedProducts.forEach(product => {
               font-family: 'Poppins', sans-serif;
             }
             .wrapper {
-              min-height: 75vh;
+              min-height: 65vh;
               background-size: cover;
               background-repeat: no-repeat;
               background-position: center center;
@@ -415,7 +415,7 @@ selectedProducts.forEach(product => {
               }
             }
             .container {
-              min-height: 75vh;
+              min-height: 65vh;
               display: flex;
               align-items: center; 
               text-align: center;
@@ -712,7 +712,7 @@ selectedProducts.forEach(product => {
                 }
                 .turning-section-amg h2 {
                   margin: 8px 0 40px;
-                  font-size: 36px;
+                  font-size: 32px;
                   font-weight: 700;
                   color: #B0B0B0;
                   line-height: 1;
@@ -1801,8 +1801,7 @@ selectedProducts.forEach(product => {
 
 
         <div class="turning-section-amg">
-        <p class="subtitle-amg">Why India Trusts</p>
-        <h2>Muditam?</h2>
+        <p class="subtitle-amg">Why India Trusts <h2>Muditam?</h2></p>
 
         <div class="rating-cards-amg">
           <!-- Google card -->
@@ -1871,7 +1870,7 @@ selectedProducts.forEach(product => {
         <div class="card-cpre">
           <div class="card-header-cpre">
             <div class="avatar-cpre">
-            <img src="https://cdn.shopify.com/s/files/1/0929/2323/2544/files/fggfku.png?v=1745497170" alt="">
+            <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ramesh-sharma.jpg?v=1746005511" alt="">
             </div>
             <div class="user-info-cpre">
               <div class="name-cpre">Rahul Verma</div>
@@ -1892,10 +1891,10 @@ selectedProducts.forEach(product => {
         <div class="card-cpre">
           <div class="card-header-cpre">
             <div class="avatar-cpre">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/ramesh-sharma.jpg?v=1746005511" alt="">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/f7036841a415a7e3654776f2d62333fb.jpg?v=1746014173" alt="">
             </div>
             <div class="user-info-cpre">
-              <div class="name-cpre">Sneha Gupta</div>
+              <div class="name-cpre">Preeti Thakkar</div>
               <div class="location-cpre">
                 <img height="12" width="12" src="https://img.icons8.com/ios/50/marker--v1.png" alt="marker"/> Bengaluru
               </div>
@@ -1912,8 +1911,7 @@ selectedProducts.forEach(product => {
       </div>
 
         <div class="heading-section-cpreb main-cpreb">
-        <h1>50,000+</h1>
-          <h2>Happy Customers</h2>
+        <h1>50,000+ <h2>Happy Customers</h2></h1> 
         </div>
 
         <div class="cards-list-cpreb">
@@ -1994,7 +1992,7 @@ selectedProducts.forEach(product => {
         </div>
 
         <section class="faq-cpreb">
-        <h2 class="faq-heading-cpreb">Frequently<br> <span class="faq-heading-cpreb-s">Asked Questions</span></h2>
+        <h2 class="faq-heading-cpreb">Frequently <span class="faq-heading-cpreb-s">Asked Questions</span></h2>
 
         <details class="faq-item-cpreb">
           <summary class="faq-question-cpreb">
