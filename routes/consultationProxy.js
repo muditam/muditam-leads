@@ -1053,13 +1053,12 @@ selectedProducts.forEach(product => {
               /* Heading */
               .heading-section {
                 text-align: center;
-                max-width: 184px;
                 max-height: 110px;
               }
               .heading-section h1 {
                 font-size: 32px;
-                color: #5D5D5D;
-                font-weight: 400;
+                color: #000000;
+                font-weight: 500;
                 margin: 0;
               }
               .heading-section h2 {
@@ -1601,6 +1600,23 @@ selectedProducts.forEach(product => {
                       .heading-section h2 {
                         font-size: 40px; 
                       }
+
+                      .mobile-pay-wrapper {
+                        position: sticky;
+                        bottom: 0;
+                        left: 0;
+                        width: 100%;
+                        background: #ECDFFF;      
+                        padding: 10px 0;           
+                        box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
+                        z-index: 100;
+                      }
+                      .mobile-pay-wrapper .pb-cta.pay {
+                        width: 90%;
+                        margin: 0 auto;
+                        display: block;
+                        border-radius: 999px;   
+                      }
                    
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
               .payment-breakup-amg .pb-row{padding:10px 16px;font-size:14px}
@@ -1709,7 +1725,7 @@ selectedProducts.forEach(product => {
           ${addOnsHtml}
 
           <div class="risks-section">
-            <h3>Risks of Uncontrolled Sugar Levels</h3>
+            <h3>Risks of High Sugar Levels</h3>
             <p>
               If blood sugar isn’t well controlled, the risk of serious
               health complications increases, such as:
@@ -1779,9 +1795,11 @@ selectedProducts.forEach(product => {
               </div>
               <hr class="pb-line" />
 
+              <div class="mobile-pay-wrapper">
               <a class="pb-cta pay" href="${payUrl}">
                 <p>Pay Now ₹${finalPrice}/–</p>
               </a>
+              </div>
             </div>
             </div>
           </div>
@@ -2047,8 +2065,8 @@ selectedProducts.forEach(product => {
       
       <section class="expert">
         <div class="heading-section">
-          <h1>Know Your</h1>
-          <h2>EXPERT</h2>
+          <h1>Know Your Expert</h1>
+          
         </div>
 
         <div class="expert-container">
@@ -2061,7 +2079,7 @@ selectedProducts.forEach(product => {
               <h1>MANSVI</h1>
               <p>Diabetes Expert</p>
               <!-- Button below the expert details and aligned left on large screens -->
-        <button class="btnn"><b>Call Now</b></button>
+        <a href="tel:8989174741" class="btnn"><b>Call Now</b></a>
             </div>
           </div>
           <div class="expert-description">
