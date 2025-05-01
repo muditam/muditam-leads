@@ -316,7 +316,7 @@ selectedProducts.forEach(product => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 10px;
+        padding: 10px 10px 10px 0;
         margin: 10px 0;
         background: #fff;
         border-radius: 10px;
@@ -327,11 +327,11 @@ selectedProducts.forEach(product => {
       <img
         src="${details.image}"
         alt="${product}"
-        style="height: 120px; width: auto; object-fit: contain;"
+        style="height: 100px; width: auto; object-fit: contain;"
       />
       <div style="flex: 1; margin: 0 10px 0 0;">
         <h2 style="margin:0;font-size:18px;white-space:nowrap;">${product}</h2>
-        <p style="margin:0 0 10px;font-size:15px;color:#555;">
+        <p style="margin:0 0 10px;font-size:14px;color:#555;">
           ${details.description}
         </p>
         <hr style="border:none;height:1px;background:#ccc;margin:10px 0;" />
@@ -341,8 +341,8 @@ selectedProducts.forEach(product => {
       class="tag-icon"
         src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_130_2.png?v=1746007801"
         alt="tag"
-        style="height:30px;"
-        style="height:30px; transition: transform 0.3s;"
+        style="height:25px;"
+        style="height:25px; transition: transform 0.3s;"
       />
     </div>
   `;
@@ -718,8 +718,8 @@ selectedProducts.forEach(product => {
                   line-height: 1;
                 }
                 .subtitle-amg {
-                  margin: 0;
-                  font-size: 25px;
+                  margin: 0 auto 25px;
+                  font-size: 35px;
                   color: #000000;
                   font-weight: 500;
                 }
@@ -924,8 +924,7 @@ selectedProducts.forEach(product => {
               .heading-section-cpreb.main-cpreb h1 {
                 font-size: 35px;
                 color:rgb(0, 0, 0);
-                font-weight: 500;
-                margin-bottom: -30px;
+                font-weight: 500; 
               }
               
 
@@ -1052,7 +1051,7 @@ selectedProducts.forEach(product => {
                 max-height: 110px;
               }
               .heading-section h1 {
-                font-size: 32px;
+                font-size: 35px;
                 color: #000000;
                 font-weight: 500;
                 margin: 0;
@@ -1142,7 +1141,7 @@ selectedProducts.forEach(product => {
               }
               .faq-heading-cpreb {
                 text-align: center;
-                font-size: 28px;
+                font-size: 35px;
                 color:rgb(0, 0, 0);
                 font-weight: 500;
                 margin-bottom: 1.5rem;
@@ -1537,7 +1536,7 @@ selectedProducts.forEach(product => {
                       width: 95%;
                     }
                     .faq-heading-cpreb {
-                      font-size: 1.75rem;
+                      font-size: 25px;
                       margin-bottom: 1rem;
                     }
                     .faq-item-cpreb summary {
@@ -1565,10 +1564,16 @@ selectedProducts.forEach(product => {
                         font-weight: 600; 
                         
                       }
+                        .heading-section h1 {
+                        font-size: 25px; 
+                      }
 
                       .dropdown-description p {
                         font-size: 14px;
                         font-weight: 400;
+                      }
+                        .subtitle-amg { 
+                        font-size: 25px; 
                       }
 
                       .dropdown-title {
@@ -1609,7 +1614,7 @@ selectedProducts.forEach(product => {
                       right: 0;
                       width: 100%;
                       z-index: 999;
-                      box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
+                      background-color: white;
                     }
                    
               .payment-breakup-amg h3{padding:16px 16px 8px;font-size:20px}
@@ -1943,7 +1948,7 @@ selectedProducts.forEach(product => {
               2 saal se sugar control nahi ho rahi thi. Fasting ab  roz 100 ke aas-paas hai. Karela Jamun Fizz ne kamaal kar diya.
             </div>
             <div class="review-images-cpreb">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5747_Medium_84cabab8-8e28-4d4b-b978-0e7f0303f420.jpg?v=1734173390" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_2025_04_30T13_40_02_784Z.png?v=1746076534" alt="Customer Photo">
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Apr_30_2025_01_48_11_PM.webp?v=1746005811" alt="Customer Photo">
             </div>
           </div>
@@ -1992,7 +1997,7 @@ selectedProducts.forEach(product => {
               Phle mujhe Sugar bohot high rhti thi kuch kha bhi nhi pata tha, Muditam ki salah se paise Karela Jamun Fizz liya phle mahine e mujhe frk dikha.
             </div>
             <div class="review-images-cpreb">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5741_Medium_844703af-153f-47eb-9085-bf1e394776b5.jpg?v=1734173390" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_2294.heic?v=1746076533" alt="Customer Photo">
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5742_Medium_41c12738-7ddc-44b1-b9a1-a5b0c97a7501.jpg?v=1734173391" alt="Customer Photo">
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_5744_Medium_3134c226-ff4a-4d40-a45d-f1de1571a218.jpg?v=1734173392" alt="Customer Photos">
             </div>
@@ -2267,7 +2272,7 @@ selectedProducts.forEach(product => {
                   const img1 = document.createElement("img");
                   img1.src = info.firstImage;
                   img1.alt = name;
-                  img1.style.cssText = "max-width:350px;display:block;margin:0 auto 10px;";
+                  img1.style.cssText = "max-width:100%;display:block;margin:0 auto 10px;";
                   detailEl.appendChild(img1);
 
                  
