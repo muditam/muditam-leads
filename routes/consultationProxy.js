@@ -330,7 +330,7 @@ selectedProducts.forEach(product => {
         style="height: 100px; width: auto; object-fit: contain;"
       />
       <div style="flex: 1; margin: 0 10px 0 0;">
-        <h2 style="margin:0;font-size:18px;white-space:nowrap;">${product}</h2>
+        <h2 style="margin:0;font-size:17px;white-space:nowrap;">${product}</h2>
         <p style="margin:0 0 10px;font-size:14px;color:#555;">
           ${details.description}
         </p>
@@ -1212,7 +1212,7 @@ selectedProducts.forEach(product => {
                 background-color: #000;
                 color: #fff;
                 text-align: center;
-                padding: 60px 20px;
+                padding: 20px 20px 60px;
                 font-family: "Poppins", sans-serif;
                 margin-top: 20px;
               }
@@ -1421,7 +1421,7 @@ selectedProducts.forEach(product => {
             }
               .bottom-section {
                   flex-direction: column;
-                  width: 95%;
+                  width: 98%;
                 }
                   .customer-dmp-top{
               text-align: left; 
@@ -1468,6 +1468,7 @@ selectedProducts.forEach(product => {
                   }
                   .heading-section-cpreb.main-cpreb h1 {
                     font-size: 25px;
+                    text-align: center;
                   }
                   .heading-section-cpreb.main-cpreb h2 {
                     font-size: 32px;
@@ -1532,7 +1533,7 @@ selectedProducts.forEach(product => {
                       width: 95%; 
                   }
                       .faq-cpreb {
-                      padding: 0 12px;
+                      padding: 0 2px;
                       width: 95%;
                     }
                     .faq-heading-cpreb {
@@ -1994,7 +1995,7 @@ selectedProducts.forEach(product => {
               <span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span>
             </div>
             <div class="description-cpreb">
-              Phle mujhe Sugar bohot high rhti thi kuch kha bhi nhi pata tha, Muditam ki salah se paise Karela Jamun Fizz liya phle mahine e mujhe frk dikha.
+              Phle mujhe Sugar bohot high rhti thi kuch kha bhi nhi pata tha, Muditam ki salah se maine Karela Jamun Fizz liya phle mahine se mujhe frk dikhne lga.
             </div>
             <div class="review-images-cpreb">
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/IMG_2294.heic?v=1746076533" alt="Customer Photo">
