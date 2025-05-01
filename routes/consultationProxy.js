@@ -32,9 +32,9 @@ const priceMap = {
   },
   "Vasant Kusmakar Ras": {
     "1 month": 2995,
-    "2 months": 4200,
+    "2 months": 2995,
     "3 months": 5800,
-    "4 months": 6500,
+    "4 months": 5800,
   },
   "Liver Fix": {
     "1 month": 1550,
@@ -95,7 +95,7 @@ const variantMap = {
   },
   "Vasant Kusmakar Ras": {
     "1 month": "48319092949302",
-    "2 months": "48791244603702",
+    "2 months": "48319092949302",
     "3 months": "48319093014838",
     "4 months": "48319093014838",
   },
@@ -459,7 +459,7 @@ selectedProducts.forEach(product => {
               width: 100%;
             }
             .additional-image img {
-              width: 100%;
+              width: 80%;
               height: auto;
             }
             .results-expected {  
@@ -613,7 +613,7 @@ selectedProducts.forEach(product => {
             .Your-dce{
               font-size: 32px;
               font-weight: 600;
-              color: #C0C0C0;
+              color:rgb(0, 0, 0);
               text-align: center;
               text-transform: capitalize;
               margin: 0;
@@ -1496,6 +1496,10 @@ selectedProducts.forEach(product => {
                     max-height: 309px;
                     margin: 0;
                   }
+                    .additional-image img {
+                      width: 98%;
+                      height: auto;
+                    }
                     .expert-container {
                       flex-direction: column;
                       align-items: center;
@@ -1950,7 +1954,7 @@ selectedProducts.forEach(product => {
             </div>
             <div class="review-images-cpreb">
               <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_2025_04_30T13_40_02_784Z.png?v=1746076534" alt="Customer Photo">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Apr_30_2025_01_48_11_PM.webp?v=1746005811" alt="Customer Photo">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_2025_05_01T06_36_10_887Z.png?v=1746081456" alt="Customer Photo">
             </div>
           </div>
 

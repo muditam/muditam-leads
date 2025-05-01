@@ -723,41 +723,52 @@ app.delete('/api/leads/:id', async (req, res) => {
   }
 });
 
-
  
 app.get('/api/leads/retention', async (req, res) => {
-  // Extract pagination and "all" flag; all other query keys are considered filters
   const { page, limit, all, ...filterParams } = req.query;
-  
-  // Base query always includes salesStatus "Sales Done"
   let query = { salesStatus: "Sales Done" };
 
-  // Add filters based on query parameters
-  for (const key in filterParams) {
-    if (filterParams[key] && filterParams[key] !== "") { 
-      if (Array.isArray(filterParams[key])) {
-        query[key] = { $in: filterParams[key] };
-      } else { 
-        if (["productPitched", "productsOrdered"].includes(key)) {
-          const arr = filterParams[key].split(",").map(item => item.trim());
-          query[key] = { $in: arr };
-        } else { 
-          query[key] = { $regex: filterParams[key], $options: "i" };
-        }
-      }
-    }
-  }
 
-  // Function to calculate follow-up reminder
   const calculateReminder = (nextFollowupDate) => {
     const today = new Date();
     const followupDate = new Date(nextFollowupDate);
+    if (!nextFollowupDate) return null;
     const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
     if (diffInDays < 0) return "Follow-up Missed";
     if (diffInDays === 0) return "Today";
     if (diffInDays === 1) return "Tomorrow";
     return "Later";
   };
+
+
+  // Remove the condition for `rtFollowupReminder`
+  for (const key in filterParams) {
+    if (filterParams[key] && filterParams[key] !== "") {
+      if (key === "lastOrderDateFrom" || key === "lastOrderDateTo") {
+        if (filterParams.lastOrderDateFrom || filterParams.lastOrderDateTo) {
+          query.lastOrderDate = {};
+          if (filterParams.lastOrderDateFrom) {
+            query.lastOrderDate.$gte = filterParams.lastOrderDateFrom;
+          }
+          if (filterParams.lastOrderDateTo) {
+            query.lastOrderDate.$lte = filterParams.lastOrderDateTo;
+          }
+        }
+      } else if (key !== "rtFollowupReminder") {
+        if (Array.isArray(filterParams[key])) {
+          query[key] = { $in: filterParams[key] };
+        } else {
+          if (["productPitched", "productsOrdered"].includes(key)) {
+            const arr = filterParams[key].split(",").map(item => item.trim());
+            query[key] = { $in: arr };
+          } else {
+            query[key] = { $regex: filterParams[key], $options: "i" };
+          }
+        }
+      }
+    }
+  }
+
 
   try {
     if (all === "true") {
@@ -781,10 +792,12 @@ app.get('/api/leads/retention', async (req, res) => {
         retentionStatus: 1,
         rtRemark: 1,
       }).sort({ lastOrderDate: -1 });
+     
       const leadsWithReminder = leads.map((lead) => ({
         ...lead._doc,
         rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
       }));
+
 
       return res.status(200).json({
         leads: leadsWithReminder,
@@ -796,7 +809,6 @@ app.get('/api/leads/retention', async (req, res) => {
       const pageNumber = parseInt(page) || 1;
       const limitNumber = parseInt(limit) || 50;
       const skip = (pageNumber - 1) * limitNumber;
-
       const totalLeads = await Lead.countDocuments(query);
       const leads = await Lead.find(query, {
         name: 1,
@@ -822,10 +834,12 @@ app.get('/api/leads/retention', async (req, res) => {
         .skip(skip)
         .limit(limitNumber);
 
+
       const leadsWithReminder = leads.map((lead) => ({
         ...lead._doc,
         rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
       }));
+
 
       return res.status(200).json({
         leads: leadsWithReminder,

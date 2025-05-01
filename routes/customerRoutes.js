@@ -37,62 +37,154 @@ router.post("/api/customers", async (req, res) => {
   }
 });
 
-// Get customers with pagination and optional filters
 router.get("/api/customers", async (req, res) => {
-  // Parse pagination parameters and filters
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = parseInt(req.query.limit, 10) || 30;
-  const filters = req.query.filters || '{}';
-  const filterCriteria = JSON.parse(filters);
-  const assignedTo = req.query.assignedTo;
-
-  const query = {};
-  if (filterCriteria.name) {
-    query.name = { $regex: filterCriteria.name, $options: "i" };
-  }
-  if (filterCriteria.phone) {
-    query.phone = filterCriteria.phone;
-  }
-  if (filterCriteria.location) {
-    query.location = { $regex: filterCriteria.location, $options: "i" };
-  }
-  if (assignedTo) {
-    query.assignedTo = assignedTo;
-  }
-
   try {
-    const totalCustomers = await Customer.countDocuments(query);
+    // 1. Parse incoming query params
+    const page    = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit   = Math.max(1, parseInt(req.query.limit, 10) || 20);
+    const filters = JSON.parse(req.query.filters || "{}");
+    const status  = req.query.status || "";               // "", "Open","Won","Lost"
+    const tags    = JSON.parse(req.query.tags || "[]");    // ["Missed",…,"Sales Done"]
+    const sortBy  = req.query.sortBy || "";                // "asc","desc","newest","oldest"
+    const assignedTo = req.query.assignedTo;               // optional
 
-    const customers = await Customer.aggregate([
-      { $match: query },
-      { $sort: { createdAt: -1 } },  
-      { $skip: (page - 1) * limit },
-      { $limit: limit },
+    // 2. Build root-level match (only fields on Customer)
+    const rootMatch = {};
+    if (filters.name)     rootMatch.name     = { $regex: filters.name,     $options: "i" };
+    if (filters.phone)    rootMatch.phone    = filters.phone;
+    if (filters.location) rootMatch.location = { $regex: filters.location, $options: "i" };
+    if (assignedTo)       rootMatch.assignedTo = assignedTo;
+
+    // 3. Build post-lookup match for status & tags
+    const postMatch = {};
+
+    // 3a. Status filters on presales.leadStatus
+    if (status === "Open") {
+      postMatch["presales.leadStatus"] = {
+        $in: [
+          "New Lead",
+          "CONS Scheduled",
+          "CONS Done",
+          "Call Back Later",
+          "On Follow Up",
+          "CNP",
+          "Switch Off"
+        ]
+      };
+    } else if (status === "Won") {
+      postMatch["presales.leadStatus"] = "Sales Done";
+    } else if (status === "Lost") {
+      postMatch["presales.leadStatus"] = {
+        $in: [
+          "General Query",
+          "Fake Lead",
+          "Invalid Number",
+          "Not Interested",
+          "Ordered from Other Sources",
+          "Budget issue"
+        ]
+      };
+    }
+
+    // 3b. Tag filters on followUpDate and Sales Done
+    const orClauses = [];
+    const today    = new Date(); today.setHours(0,0,0,0);
+    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
+
+    if (tags.includes("Missed")) {
+      orClauses.push({ followUpDate: { $lt: today } });
+    }
+    if (tags.includes("Today")) {
+      orClauses.push({ followUpDate: { $gte: today, $lt: tomorrow } });
+    }
+    if (tags.includes("Tomorrow")) {
+      const afterTomorrow = new Date(tomorrow);
+      afterTomorrow.setDate(afterTomorrow.getDate()+1);
+      orClauses.push({ followUpDate: { $gte: tomorrow, $lt: afterTomorrow } });
+    }
+    if (tags.includes("Later")) {
+      orClauses.push({ followUpDate: { $gt: tomorrow } });
+    }
+    if (tags.includes("CONS Scheduled")) {
+      orClauses.push({ "presales.leadStatus": "CONS Scheduled" });
+    }
+    if (tags.includes("CONS Done")) {
+      orClauses.push({ "presales.leadStatus": "CONS Done" });
+    }
+    if (tags.includes("Sales Done")) {
+      orClauses.push({ "presales.leadStatus": "Sales Done" });
+    }
+    if (orClauses.length) {
+      postMatch.$or = orClauses;
+    }
+
+    // 4. Decide sort stage
+    let sortStage = { createdAt: -1 }; // default newest first
+    if (sortBy === "asc")   sortStage = { name: 1 };
+    if (sortBy === "desc")  sortStage = { name: -1 };
+    if (sortBy === "oldest")sortStage = { createdAt: 1 };
+
+    // 5. Build aggregation pipelines
+    const pipeline = [
+      { $match: rootMatch },
       {
         $lookup: {
-          from: "consultationdetails", // Ensure this collection name is correct
+          from: "consultationdetails",
           localField: "_id",
           foreignField: "customerId",
-          as: "consultation",
-        },
+          as: "consultation"
+        }
       },
       {
         $addFields: {
           presales: { $arrayElemAt: ["$consultation.presales", 0] },
-          closing: { $arrayElemAt: ["$consultation.closing", 0] },
-        },
+          closing:  { $arrayElemAt: ["$consultation.closing", 0] }
+        }
       },
+      { $match: postMatch },
+      { $sort: sortStage },
+      { $skip: (page - 1) * limit },
+      { $limit: limit }
+    ];
+
+    const countPipeline = [
+      { $match: rootMatch },
+      {
+        $lookup: {
+          from: "consultationdetails",
+          localField: "_id",
+          foreignField: "customerId",
+          as: "consultation"
+        }
+      },
+      {
+        $addFields: {
+          presales: { $arrayElemAt: ["$consultation.presales", 0] }
+        }
+      },
+      { $match: postMatch },
+      { $count: "total" }
+    ];
+
+    // 6. Execute both
+    const [customers, countResult] = await Promise.all([
+      Customer.aggregate(pipeline),
+      Customer.aggregate(countPipeline)
     ]);
 
-    res.status(200).json({
+    const total = (countResult[0] && countResult[0].total) || 0;
+
+    // 7. Reply
+    res.json({
       customers,
-      totalCustomers,
-      totalPages: Math.ceil(totalCustomers / limit),
-      currentPage: page,
+      totalCustomers: total,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page
     });
-  } catch (error) {
-    console.error("Error fetching customers:", error);
-    res.status(500).json({ message: "Error fetching customers", error });
+
+  } catch (err) {
+    console.error("Error fetching customers:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 
@@ -135,7 +227,7 @@ router.put("/api/customers/:id", async (req, res) => {
     console.error("Error updating customer:", error);
     res.status(500).json({ message: "Error updating customer", error });
   }
-});
+}); 
 
 // Delete a customer
 router.delete("/api/customers/:id", async (req, res) => {
