@@ -78,6 +78,24 @@ const priceMap = {
     "3 months": 3495,
     "4 months": 4495,
   },
+  "HbA1c - Blood Test": {
+    "1 month": 300,
+    "2 months": 300,
+    "3 months": 300,
+    "4 months": 300,
+  },
+  "Full Body Checkup - Blood Test": {
+    "1 month": 900,
+    "2 months": 900,
+    "3 months": 900,
+    "4 months": 900,
+  },
+  "Lipid + HbA1c + Liver - Blood Test": {
+    "1 month": 650,
+    "2 months": 650,
+    "3 months": 650,
+    "4 months": 650,
+  },
 };
 
 const variantMap = {
@@ -140,6 +158,24 @@ const variantMap = {
     "2 months": "51200287703350",
     "3 months": "51200287736118",
     "4 months": "51200287768886",
+  },
+  "HbA1c - Blood Test": { 
+    "1 month": "51848104247606",
+    "2 months": "51848104247606",
+    "3 months": "51848104247606",
+    "4 months": "51848104247606",
+  },
+  "Full Body Checkup - Blood Test": {
+    "1 month": "51848105722166",
+    "2 months": "51848105722166",
+    "3 months": "51848105722166",
+    "4 months": "51848105722166",
+  },
+  "Lipid + HbA1c + Liver - Blood Test": {
+    "1 month": "51848108310838",
+    "2 months": "51848108310838",
+    "3 months": "51848108310838",
+    "4 months": "51848108310838",
   },
 };
 
@@ -276,7 +312,15 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PG_2_c7332d00-50b9-476e-aeb3-005babd4b95d.webp?v=1744875711",
         description: "Supports Gut Health with Probiotic Formula"
       },
-      "Blood Test": {
+      "HbA1c - Blood Test": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
+        description: "Body Check-Up"
+      },
+      "Full Body Checkup - Blood Test": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
+        description: "Body Check-Up"
+      },
+      "Lipid + HbA1c + Liver - Blood Test": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
         description: "Body Check-Up"
       },
