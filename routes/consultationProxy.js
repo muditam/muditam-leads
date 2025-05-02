@@ -350,7 +350,7 @@ selectedProducts.forEach(product => {
   const details = productDetailsMap[product];
   if (!details) return;
 
-  const condition = conditionMap[product] || "Condition";
+  const condition = conditionMap[product] || "Symptoms Based ";
 
   productCardsHtml += `
     <div 

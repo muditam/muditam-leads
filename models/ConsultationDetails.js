@@ -21,7 +21,8 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       outsideMeals: { type: String },
       timeOfSleep: { type: String },
       notes: { type: String },
-      assignExpert: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" }, 
+      assignExpert: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" },  
+      doctorCons:   { type: String },
       file: { type: String }, // Stores file path or URL
       // Call checklist from Presales.js
       checklist: {
@@ -54,6 +55,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       energyLevels: { type: String },
       sleepQuality: { type: String },
       sugarCravings: { type: String }, 
+      notesCons:     { type: String },
       // Call checklist from Consultation.js
       checklist: {
         openingCustomerDetails: { type: Boolean, default: false },
@@ -87,15 +89,15 @@ const ConsultationDetailsSchema = new mongoose.Schema(
     followups: [
       {
         date: { type: String },
-        takingSupplements: { type: String }, // "Yes" or "No"
-        sendingGlucometerPhotos: { type: String }, // "Yes" or "No"
+        takingSupplements: { type: String },  
+        sendingGlucometerPhotos: { type: String },  
         currentSugar: {
           fasting: { type: String },
           pp: { type: String },
         },
-        hba1cTestDone: { type: String }, // "Yes" or "No"
-        hba1cValue: { type: String }, // if hba1cTestDone is "Yes"
-        drop: { type: String }, // "Yes" or "No"
+        hba1cTestDone: { type: String }, 
+        hba1cValue: { type: String },  
+        drop: { type: String },  
       }
     ],
   },

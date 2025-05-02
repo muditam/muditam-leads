@@ -5,9 +5,9 @@ const router = express.Router();
 
 // Create a new customer with duplicate phone check
 router.post("/api/customers", async (req, res) => {
-  const { name, phone, age, location, lookingFor, assignedTo, followUpDate, leadSource } = req.body;
+  const { name, phone, age, location, lookingFor, assignedTo, followUpDate, leadSource, leadDate } = req.body;
   
-  if (!name || !phone || !age || !location || !lookingFor || !assignedTo || !followUpDate || !leadSource) {
+  if (!name || !phone || !age || !location || !lookingFor || !assignedTo || !followUpDate || !leadSource || !leadDate ) {
     return res.status(400).json({ message: "All fields are required." });
   }
 
@@ -27,6 +27,7 @@ router.post("/api/customers", async (req, res) => {
       assignedTo,
       followUpDate,
       leadSource,
+      leadDate,
     });
 
     await newCustomer.save();
