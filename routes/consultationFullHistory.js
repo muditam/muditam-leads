@@ -14,12 +14,12 @@ router.get("/", async (req, res) => {
     if (!customerId) {
       return res.status(400).json({ message: "customerId is required" });
     }
-    const consultation = await ConsultationDetails.findOne({ customerId });
+    const consultation = await ConsultationDetails.findOne({ customerId }).populate("presales.assignExpert", "fullName").lean();
     if (!consultation) {
       return res.status(404).json({ message: "No consultation details found for this customer." });
     }
     // Convert Mongoose document to a plain JS object.
-    const data = consultation.toObject();
+    const data = consultation;
 
     // Remove checklist fields if present.
     if (data.presales && data.presales.checklist) {
