@@ -19,7 +19,7 @@ router.post("/api/customers", async (req, res) => {
     }
 
     const newCustomer = new Customer({
-      name,
+      name, 
       phone,
       age,
       location,
@@ -51,10 +51,19 @@ router.get("/api/customers", async (req, res) => {
 
     // 2. Build root-level match (only fields on Customer)
     const rootMatch = {};
+
+    if (filters.search) {
+           const regex = new RegExp(filters.search, "i");
+           rootMatch.$or = [
+             { name:  { $regex: regex } },
+             { phone: { $regex: regex } },
+           ];
+         } else {
     if (filters.name)     rootMatch.name     = { $regex: filters.name,     $options: "i" };
     if (filters.phone)    rootMatch.phone    = filters.phone;
     if (filters.location) rootMatch.location = { $regex: filters.location, $options: "i" };
     if (assignedTo)       rootMatch.assignedTo = assignedTo;
+      }
 
     // 3. Build post-lookup match for status & tags
     const postMatch = {};

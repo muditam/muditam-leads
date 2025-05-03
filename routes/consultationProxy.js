@@ -84,13 +84,13 @@ const priceMap = {
     "3 months": 300,
     "4 months": 300,
   },
-  "Full Body Checkup - Blood Test": {
+  "Full Body Checkup": {
     "1 month": 900,
     "2 months": 900,
     "3 months": 900,
     "4 months": 900,
   },
-  "Lipid + HbA1c + Liver - Blood Test": {
+  "Lipid + HbA1c + Liver": {
     "1 month": 650,
     "2 months": 650,
     "3 months": 650,
@@ -165,13 +165,13 @@ const variantMap = {
     "3 months": "51848104247606",
     "4 months": "51848104247606",
   },
-  "Full Body Checkup - Blood Test": {
+  "Full Body Checkup": {
     "1 month": "51848105722166",
     "2 months": "51848105722166",
     "3 months": "51848105722166",
     "4 months": "51848105722166",
   },
-  "Lipid + HbA1c + Liver - Blood Test": {
+  "Lipid + HbA1c + Liver": {
     "1 month": "51848108310838",
     "2 months": "51848108310838",
     "3 months": "51848108310838",
@@ -316,11 +316,11 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
         description: "Body Check-Up"
       },
-      "Full Body Checkup - Blood Test": {
+      "Full Body Checkup": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
         description: "Body Check-Up"
       },
-      "Lipid + HbA1c + Liver - Blood Test": {
+      "Lipid + HbA1c + Liver": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
         description: "Body Check-Up"
       },
