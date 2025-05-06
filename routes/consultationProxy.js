@@ -33,7 +33,7 @@ const priceMap = {
   "Vasant Kusmakar Ras": {
     "1 month": 2995,
     "2 months": 2995,
-    "3 months": 5800,
+    "3 months": 2995,
     "4 months": 5800,
   },
   "Liver Fix": {
