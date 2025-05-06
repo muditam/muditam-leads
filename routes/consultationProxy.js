@@ -114,7 +114,7 @@ const variantMap = {
   "Vasant Kusmakar Ras": {
     "1 month": "48319092949302",
     "2 months": "48319092949302",
-    "3 months": "48319093014838",
+    "3 months": "48319092949302",
     "4 months": "48319093014838",
   },
   "Liver Fix": {
