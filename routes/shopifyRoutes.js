@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 
-const { SHOPIFY_STORE_NAME, SHOPIFY_ACCESS_TOKEN } = process.env;
+const { SHOPIFY_STORE_NAME, SHOPIFY_ACCESS_TOKEN } = process.env; 
 
 const normalizePhone = (phoneStr) => phoneStr.replace(/\D/g, '');
 
@@ -47,8 +47,12 @@ router.get('/customerDetails', async (req, res) => {
     const orderDetails = orders.map(order => ({
       id: order.id,
       created_at: order.created_at,
+      totalAmount: order.total_price,
       itemCount: order.line_items.reduce((acc, item) => acc + Number(item.quantity || 0), 0),
       deliveryStatus: order.fulfillment_status || "Not fulfilled",
+      shippingAddress: order.shipping_address
+        ? `${order.shipping_address.address1 || ""}${order.shipping_address.address2 ? ", " + order.shipping_address.address2 : ""}, ${order.shipping_address.city || ""}, ${order.shipping_address.province || ""}, ${order.shipping_address.country || ""}, ${order.shipping_address.zip || ""}`
+        : "Not available",
       lineItems: order.line_items.map(item => ({
         title: item.title,
         variant: item.variant_title,

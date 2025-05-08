@@ -44,10 +44,11 @@ router.get("/api/customers", async (req, res) => {
     const page    = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit   = Math.max(1, parseInt(req.query.limit, 10) || 20);
     const filters = JSON.parse(req.query.filters || "{}");
-    const status  = req.query.status || "";               // "", "Open","Won","Lost"
-    const tags    = JSON.parse(req.query.tags || "[]");    // ["Missed",…,"Sales Done"]
-    const sortBy  = req.query.sortBy || "";                // "asc","desc","newest","oldest"
-    const assignedTo = req.query.assignedTo;               // optional
+    const status  = req.query.status || "";              
+    const tags    = JSON.parse(req.query.tags || "[]");     
+    const sortBy  = req.query.sortBy || "";                
+    const assignedTo = req.query.assignedTo;          
+    const createdAt = req.query.createdAt;      
 
     // 2. Build root-level match (only fields on Customer)
     const rootMatch = {};
@@ -62,8 +63,19 @@ router.get("/api/customers", async (req, res) => {
     if (filters.name)     rootMatch.name     = { $regex: filters.name,     $options: "i" };
     if (filters.phone)    rootMatch.phone    = filters.phone;
     if (filters.location) rootMatch.location = { $regex: filters.location, $options: "i" };
-    if (assignedTo)       rootMatch.assignedTo = assignedTo;
-      }
+    if (assignedTo) {
+      const assignedArray = assignedTo.split(',').map((a) => a.trim());
+      rootMatch.assignedTo = assignedArray.length === 1 ? assignedArray[0] : { $in: assignedArray };
+    }
+   
+    if (createdAt) {
+      const dateStart = new Date(createdAt);
+      dateStart.setHours(0, 0, 0, 0);
+      const dateEnd = new Date(createdAt);
+      dateEnd.setHours(23, 59, 59, 999);
+      rootMatch.createdAt = { $gte: dateStart, $lte: dateEnd };
+    }
+  }
 
     // 3. Build post-lookup match for status & tags
     const postMatch = {};
@@ -191,7 +203,7 @@ router.get("/api/customers", async (req, res) => {
       totalPages: Math.ceil(total / limit),
       currentPage: page
     });
-
+ 
   } catch (err) {
     console.error("Error fetching customers:", err);
     res.status(500).json({ message: "Server error", error: err.message });
