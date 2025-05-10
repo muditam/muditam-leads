@@ -113,8 +113,21 @@ router.get("/api/customers", async (req, res) => {
     const today    = new Date(); today.setHours(0,0,0,0);
     const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
 
+    const deadStatuses = [
+      "Switch Off",
+      "General Query",
+      "Fake Lead",
+      "Invalid Number",
+      "Not Interested"
+    ];
+    
     if (tags.includes("Missed")) {
-      orClauses.push({ followUpDate: { $lt: today } });
+      orClauses.push({
+        $and: [
+          { followUpDate: { $lt: today } },
+          { "presales.leadStatus": { $nin: deadStatuses } }
+        ]
+      });
     }
     if (tags.includes("Today")) {
       orClauses.push({ followUpDate: { $gte: today, $lt: tomorrow } });
@@ -136,6 +149,12 @@ router.get("/api/customers", async (req, res) => {
     if (tags.includes("Sales Done")) {
       orClauses.push({ "presales.leadStatus": "Sales Done" });
     }
+    if (tags.includes("CNP")) {
+      orClauses.push({ "presales.leadStatus": "CNP" });
+    }
+    if (tags.includes("On Follow Up")) {
+      orClauses.push({ "presales.leadStatus": "On Follow Up" });
+    }    
     if (orClauses.length) {
       postMatch.$or = orClauses;
     }

@@ -8,6 +8,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
     // Data coming from Presales.js
     presales: {
       leadStatus: { type: String, default: "New Lead" }, 
+      subLeadStatus: { type: String },
       hba1c: { type: String },
       lastTestDone: { type: String },
       fastingSugar: { type: String },

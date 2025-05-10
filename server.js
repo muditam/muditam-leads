@@ -353,7 +353,7 @@ app.post('/api/shipway/neworder', async (req, res) => {
 });
 
 // Cron job to update shipment status every hour
-cron.schedule('0 * * * *', async () => { 
+cron.schedule('0 0 * * *', async () => { 
   try {
     const orders = await Order.find({});
     for (const order of orders) {
@@ -1229,7 +1229,6 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
     res.status(500).json({ message: "Error fetching transfer requests", error: error.message });
   }
 });
-
 
 
 // Start Server
