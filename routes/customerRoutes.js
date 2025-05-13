@@ -121,7 +121,7 @@ router.get("/api/customers", async (req, res) => {
       "Not Interested"
     ];
     
-    if (tags.includes("Missed")) {
+    if (tags.includes("Missed")) { 
       orClauses.push({
         $and: [
           { followUpDate: { $lt: today } },
@@ -154,7 +154,10 @@ router.get("/api/customers", async (req, res) => {
     }
     if (tags.includes("On Follow Up")) {
       orClauses.push({ "presales.leadStatus": "On Follow Up" });
-    }    
+    }   
+    if (tags.includes("New Lead")) {
+      orClauses.push({ "presales.leadStatus": "New Lead" });
+    }  
     if (orClauses.length) {
       postMatch.$or = orClauses;
     }
