@@ -29,14 +29,67 @@ const LeadSchema = new mongoose.Schema({
   lastOrderDate: String,
   repeatDosageOrdered: String,
   retentionStatus: String,
+  communicationMethod: String,
+  preferredLanguage: String,
   rtRemark: String, 
   rowColor: String,  
+  images: [
+    {
+      url: String,      
+      date: Date,        
+      tag: String,      
+    }
+  ],  
   rtSubcells: [
     {
       date: String,
       value: String,
     }
-  ]
+  ],
+
+  details: {
+    hba1c: String,
+    lastTestDone: String,
+    fastingSugar: String,
+    ppSugar: String,
+    durationOfDiabetes: String,
+    gender: String,
+    dietType: String,
+    weight: Number,
+    sittingTime: String,
+    exerciseRoutine: String,
+    outsideMeals: String,
+    timeOfSleep: String,
+    currentMedications: [String],
+    sideEffects: String,
+    suddenSugarFluctuations: String,
+    familyHistory: String,
+    monitorBloodSugar: String,
+    sugarCravings: String,
+    symptoms: [String],
+    otherConditions: [String],
+    stressLevel: String,
+    painInLiver: String,
+    gutIssues: String,
+    energyLevels: String,
+    sleepQuality: String,
+  },
+
+  followUps: [
+    {
+      date: String,
+      takingSupplements: String,
+      sendingGlucometerPhotos: String,
+      currentSugar: {
+        fasting: String,
+        pp: String,
+      },
+      hba1cTestDone: String,
+      hba1cValue: String,
+      drop: String,
+      note: String,
+    }
+  ],  
 });
 
 const Lead = mongoose.model('Lead', LeadSchema);

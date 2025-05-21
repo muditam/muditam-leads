@@ -14,7 +14,7 @@ const TransferRequest = require('./models/TransferRequests');
 const shopifyProductsRoute = require("./services/shopifyProducts");
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
-const razorpayRoutes = require("./services/razorpay");
+const razorpayRoutes = require("./services/razorpay"); 
 const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
@@ -34,6 +34,9 @@ const consultationProxyRoutes = require("./routes/consultationProxy");
 const consultationFullHistoryRoute = require("./routes/consultationFullHistory");
 const consultationFollowupRoute = require("./routes/consultationFollowup");
 const duplicateNumbersRoutes = require("./routes/duplicateNumbersRoutes");
+const ordersDatesRoute = require("./routes/orders-dates");
+const shopifyUploadRouter = require("./routes/shopifyUploadRouter");
+const detailsRoutes = require("./routes/details");
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -111,6 +114,12 @@ app.use("/api/consultation-followup", consultationFollowupRoute);
 app.use("/api/leads", duplicateNumbersRoutes);
 app.use("/api/duplicate-leads", duplicateNumbersRoutes);
 
+app.use(ordersDatesRoute);
+
+app.use(shopifyUploadRouter);
+
+app.use("/api/details", detailsRoutes);
+ 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -872,6 +881,25 @@ app.get('/api/leads/retentions', async (req, res) => {
   } catch (error) {
     console.error('Error fetching retention leads:', error);
     res.status(500).json({ message: 'Error fetching retention leads', error });
+  }
+});
+
+// Express route to update images of a lead by lead id
+app.patch('/api/leads/:id/images', async (req, res) => {
+  const leadId = req.params.id;
+  const { images } = req.body; // array of { url, date, tag } objects
+
+  try {
+    const lead = await Lead.findById(leadId);
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });
+
+    lead.images = images; // replace images array
+    await lead.save();
+
+    res.json({ message: 'Images updated', lead });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
