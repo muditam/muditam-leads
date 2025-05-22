@@ -35,7 +35,7 @@ const consultationFullHistoryRoute = require("./routes/consultationFullHistory")
 const consultationFollowupRoute = require("./routes/consultationFollowup");
 const duplicateNumbersRoutes = require("./routes/duplicateNumbersRoutes");
 const ordersDatesRoute = require("./routes/orders-dates");
-const shopifyUploadRouter = require("./routes/shopifyUploadRouter");
+const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 
 const app = express(); 
@@ -116,7 +116,7 @@ app.use("/api/duplicate-leads", duplicateNumbersRoutes);
 
 app.use(ordersDatesRoute);
 
-app.use(shopifyUploadRouter);
+app.use(uploadToWasabi);
 
 app.use("/api/details", detailsRoutes);
  
