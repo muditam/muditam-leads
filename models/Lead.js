@@ -90,6 +90,23 @@ const LeadSchema = new mongoose.Schema({
       note: String,
     }
   ],  
+  reachoutLogs: [
+    {
+      timestamp: { type: Date, default: Date.now },
+      method: { type: String, enum: ["WhatsApp", "Call", "Both"] }, 
+      status: {
+        type: String,
+        enum: [
+          "CNP",
+          "Followup Done",
+          "Order Placed",
+          "Call Back Later",
+          "Busy",
+          "Switch Off",
+        ],
+      },
+    },
+  ],  
 });
 
 const Lead = mongoose.model('Lead', LeadSchema);

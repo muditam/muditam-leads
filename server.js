@@ -903,6 +903,48 @@ app.patch('/api/leads/:id/images', async (req, res) => {
   }
 });
 
+// Example in Express (Node.js)
+app.post('/api/leads/:id/reachout-log', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { timestamp, method, status } = req.body;
+
+    if (!timestamp) return res.status(400).json({ message: "Missing timestamp" });
+
+    const lead = await Lead.findById(id);
+    if (!lead) return res.status(404).json({ message: "Lead not found" });
+
+    lead.reachoutLogs = lead.reachoutLogs || [];
+
+    // Update if existing timestamp match
+    const existing = lead.reachoutLogs.find(log => log.timestamp?.toISOString() === new Date(timestamp).toISOString());
+    if (existing) {
+      if (method) existing.method = method;
+      if (status) existing.status = status;
+    } else {
+      lead.reachoutLogs.push({ timestamp, method, status });
+    }
+
+    await lead.save();
+    res.status(200).json({ message: "Reachout log updated" });
+  } catch (err) {
+    console.error("Reachout Log Save Error:", err);
+    res.status(500).json({ message: "Internal server error", error: err.message });
+  }
+});
+
+
+app.get("/api/leads/:id/reachout-logs", async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.id, "reachoutLogs");
+    if (!lead) return res.status(404).json({ message: "Lead not found" });
+
+    res.status(200).json(lead.reachoutLogs);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching logs", error: error.message });
+  }
+});
+
 
 app.get('/api/leads/new-orders', async (req, res) => {
   try {
