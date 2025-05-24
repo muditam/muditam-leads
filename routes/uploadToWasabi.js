@@ -22,7 +22,7 @@ const wasabi = new AWS.S3({
 router.post('/api/upload-to-wasabi', upload.array('images'), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ message: 'No files uploaded.' });
+      return res.status(400).json({ message: 'No files uploaded.' }); 
     }
 
     const uploadedUrls = [];
@@ -45,15 +45,9 @@ router.post('/api/upload-to-wasabi', upload.array('images'), async (req, res) =>
       // Delete the temp file from local uploads folder
       fs.unlinkSync(file.path);
 
-      const signedUrl = wasabi.getSignedUrl('getObject', {
-        Bucket: process.env.WASABI_BUCKET,
-        Key: fileName,
-        Expires: 60 * 60 * 24 * 7, // valid for 1 hour
-      });
-
       uploadedUrls.push({
-        url: signedUrl,
-        key: fileName,
+        url: data.Location,
+        key: data.Key,
       });
     }
 

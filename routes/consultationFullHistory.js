@@ -2,7 +2,7 @@ const express = require("express");
 const ConsultationDetails = require("../models/ConsultationDetails");
 
 const router = express.Router();
-
+ 
 /**
  * GET /api/consultation-full-history?customerId=...
  * Returns all data from the ConsultationDetails document for the given customer,

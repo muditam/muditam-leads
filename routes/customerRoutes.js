@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require('mongoose');
 const Customer = require("../models/Customer");
 const Employee = require("../models/Employee");  // Used for "Assigned To" dropdown if needed
 const router = express.Router();
@@ -134,7 +135,7 @@ router.get("/api/customers", async (req, res) => {
     }
     if (tags.includes("Tomorrow")) {
       const afterTomorrow = new Date(tomorrow);
-      afterTomorrow.setDate(afterTomorrow.getDate()+1);
+      afterTomorrow.setDate(afterTomorrow.getDate()+1); 
       orClauses.push({ followUpDate: { $gte: tomorrow, $lt: afterTomorrow } });
     }
     if (tags.includes("Later")) {
@@ -231,6 +232,133 @@ router.get("/api/customers", async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+ 
+
+router.get("/api/customers/counts", async (req, res) => {
+  try {
+    const { role, userId, userName } = req.query;
+
+    // Validate userId if present
+    let objectUserId = null;
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+      objectUserId = new mongoose.Types.ObjectId(userId);
+    } 
+
+    // Define your statuses here:
+    const openStatuses = [
+      "New Lead",
+      "CONS Scheduled",
+      "CONS Done",
+      "Call Back Later",
+      "On Follow Up",
+      "CNP",
+      "Switch Off",
+    ];
+    const wonStatuses = [
+      "Sales Done",
+    ];
+    const lostStatuses = [
+      "General Query",
+      "Fake Lead",
+      "Invalid Number",
+      "Not Interested",
+      "Ordered from Other Sources",
+      "Budget issue",
+    ];
+
+    const rootMatch = {};
+
+    if (role === "Sales Agent" && userName) {
+      rootMatch.assignedTo = userName;
+    }
+
+    const pipeline = [
+      { $match: rootMatch },
+      {
+        $lookup: {
+          from: "consultationdetails",
+          localField: "_id",
+          foreignField: "customerId",
+          as: "consultation",
+        },
+      },
+      {
+        $addFields: {
+          leadStatus: {
+            $cond: [
+              { $gt: [{ $size: "$consultation" }, 0] },
+              { $ifNull: [{ $arrayElemAt: ["$consultation.presales.leadStatus", 0] }, null] },
+              null,
+            ],
+          },
+          assignExpert: {
+            $cond: [
+              { $gt: [{ $size: "$consultation" }, 0] },
+              { $ifNull: [{ $arrayElemAt: ["$consultation.presales.assignExpert", 0] }, null] },
+              null,
+            ],
+          },
+          assignedToField: "$assignedTo",
+        },
+      },
+      ...(role === "Retention Agent"
+        ? [
+            {
+              $match: {
+                $or: [
+                  ...(userName ? [{ assignedToField: userName }] : []),
+                  ...(objectUserId ? [{ assignExpert: objectUserId }] : []),
+                ],
+              },
+            },
+          ]
+        : []),
+      {
+        $match: {
+          leadStatus: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          openCount: {
+            $sum: {
+              $cond: [{ $in: ["$leadStatus", openStatuses] }, 1, 0],
+            },
+          },
+          wonCount: {
+            $sum: {
+              $cond: [{ $in: ["$leadStatus", wonStatuses] }, 1, 0],
+            },
+          },
+          lostCount: {
+            $sum: {
+              $cond: [{ $in: ["$leadStatus", lostStatuses] }, 1, 0],
+            },
+          },
+        },
+      },
+    ];
+
+    const result = await Customer.aggregate(pipeline);
+
+    if (result.length === 0) {
+      return res.json({ openCount: 0, wonCount: 0, lostCount: 0 });
+    }
+
+    res.json({
+      openCount: result[0].openCount,
+      wonCount: result[0].wonCount,
+      lostCount: result[0].lostCount,
+    });
+  } catch (err) {
+    console.error("Error fetching counts:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+
+
 
 // Fetch a single customer by ID
 router.get("/api/customers/:id", async (req, res) => {
@@ -288,5 +416,8 @@ router.delete("/api/customers/:id", async (req, res) => {
     res.status(500).json({ message: "Error deleting customer", error });
   }
 });
+
+
+
 
 module.exports = router;

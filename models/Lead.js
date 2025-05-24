@@ -5,7 +5,7 @@ const LeadSchema = new mongoose.Schema({
   time: String,
   name: String,
   contactNumber: String, 
-  leadSource: String, 
+  leadSource: String,  
   enquiryFor: String, 
   customerType: String,
   agentAssigned: String,
@@ -48,6 +48,7 @@ const LeadSchema = new mongoose.Schema({
   ],
 
   details: {
+    age: Number,
     hba1c: String,
     lastTestDone: String,
     fastingSugar: String,
@@ -97,6 +98,7 @@ const LeadSchema = new mongoose.Schema({
       status: {
         type: String,
         enum: [
+          "OC",
           "CNP",
           "Followup Done",
           "Order Placed",

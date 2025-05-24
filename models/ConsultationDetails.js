@@ -93,12 +93,13 @@ const ConsultationDetailsSchema = new mongoose.Schema(
         takingSupplements: { type: String },  
         sendingGlucometerPhotos: { type: String },  
         currentSugar: {
-          fasting: { type: String },
+          fasting: { type: String }, 
           pp: { type: String },
         },
         hba1cTestDone: { type: String }, 
         hba1cValue: { type: String },  
-        drop: { type: String },  
+        drop: { type: String }, 
+        rtNotes: { type: String }, 
       }
     ],
   },
