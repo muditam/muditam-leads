@@ -1489,6 +1489,87 @@ app.get('/api/reachout-logs/count', async (req, res) => {
   }
 });
 
+// Assuming you have Express app and Lead model
+app.get('/api/reachout-logs/disposition-summary', async (req, res) => {
+  const { startDate, endDate, healthExpertAssigned } = req.query;
+
+  if (!healthExpertAssigned) {
+    return res.status(400).json({ error: "healthExpertAssigned is required" });
+  }
+
+  try {
+    const dispositionCounts = await Lead.aggregate([
+      { $match: { healthExpertAssigned } },  // Only match agent at lead level
+      { $unwind: "$reachoutLogs" },          // Break apart logs
+      {                                      // Now filter logs inside the date window
+        $match: {
+          "reachoutLogs.timestamp": {
+            $gte: new Date(startDate),
+            $lte: new Date(endDate),
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$reachoutLogs.status",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const countsObject = dispositionCounts.reduce((acc, curr) => {
+      acc[curr._id] = curr.count;
+      return acc;
+    }, {});
+
+    res.json(countsObject);
+  } catch (error) {
+    console.error("Error fetching disposition summary:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get('/api/reachout-logs/disposition-count', async (req, res) => {
+  try {
+    const { startDate, endDate, healthExpertAssigned } = req.query;
+
+    const matchStage = {};
+
+    if (startDate && endDate) {
+      matchStage['reachoutLogs.timestamp'] = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    if (healthExpertAssigned) {
+      matchStage.healthExpertAssigned = healthExpertAssigned;
+    }
+
+    const pipeline = [
+      { $unwind: "$reachoutLogs" },
+      { $match: matchStage },
+      {
+        $group: {
+          _id: "$reachoutLogs.status",
+          count: { $sum: 1 },
+        },
+      },
+    ];
+
+    const result = await Lead.aggregate(pipeline);
+
+    const formattedResult = result.reduce((acc, item) => {
+      acc[item._id] = item.count;
+      return acc;
+    }, {});
+
+    res.json(formattedResult);
+  } catch (err) {
+    console.error("Error fetching disposition counts:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
  
 // Start Server
 app.listen(PORT, () => {

@@ -105,6 +105,7 @@ const LeadSchema = new mongoose.Schema({
           "Call Back Later",
           "Busy",
           "Switch Off",
+          "Drop On Intro",
         ],
       },
     },
