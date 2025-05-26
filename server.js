@@ -37,6 +37,7 @@ const duplicateNumbersRoutes = require("./routes/duplicateNumbersRoutes");
 const ordersDatesRoute = require("./routes/orders-dates");
 const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
+const escalationRoutes = require('./routes/escalation.routes');
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -119,6 +120,8 @@ app.use(ordersDatesRoute);
 app.use(uploadToWasabi);
 
 app.use("/api/details", detailsRoutes);
+
+app.use('/api/escalations', escalationRoutes);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -1443,14 +1446,14 @@ app.get('/api/reachout-logs/count', async (req, res) => {
     let end = endDate ? new Date(endDate) : new Date();
     end.setHours(23, 59, 59, 999);
 
-    const matchStage = healthExpertAssigned
-      ? { healthExpertAssigned }
-      : {};
+    const matchStage = healthExpertAssigned ? { healthExpertAssigned } : {};
 
+    // Aggregate unique leads count per method
     const result = await Lead.aggregate([
       { $match: matchStage },
       {
         $project: {
+          contactNumber: 1,
           reachoutLogs: {
             $filter: {
               input: { $ifNull: ["$reachoutLogs", []] },
@@ -1468,19 +1471,57 @@ app.get('/api/reachout-logs/count', async (req, res) => {
       { $unwind: "$reachoutLogs" },
       {
         $group: {
-          _id: "$reachoutLogs.method",
+          _id: {
+            contactNumber: "$contactNumber",
+            method: "$reachoutLogs.method",
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$_id.method",
           count: { $sum: 1 }
         }
       }
     ]);
 
-    // Count totals per method
+    // Aggregate total unique leads contacted by any method
+    const uniqueLeadsResult = await Lead.aggregate([
+      { $match: matchStage },
+      {
+        $project: {
+          contactNumber: 1,
+          reachoutLogs: {
+            $filter: {
+              input: { $ifNull: ["$reachoutLogs", []] },
+              as: "log",
+              cond: {
+                $and: [
+                  { $gte: ["$$log.timestamp", start] },
+                  { $lte: ["$$log.timestamp", end] }
+                ]
+              }
+            }
+          }
+        }
+      },
+      { $unwind: "$reachoutLogs" },
+      {
+        $group: {
+          _id: "$contactNumber"
+        }
+      },
+      {
+        $count: "totalUniqueLeads"
+      }
+    ]);
+    const totalCount = uniqueLeadsResult.length > 0 ? uniqueLeadsResult[0].totalUniqueLeads : 0;
+
+    // Format counts by method, default to 0 if missing
     const counts = { WhatsApp: 0, Call: 0, Both: 0 };
     result.forEach((item) => {
       if (item._id) counts[item._id] = item.count;
     });
-
-    const totalCount = counts.WhatsApp + counts.Call + counts.Both;
 
     res.json({ totalCount, ...counts });
   } catch (err) {
@@ -1488,6 +1529,7 @@ app.get('/api/reachout-logs/count', async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+
 
 // Assuming you have Express app and Lead model
 app.get('/api/reachout-logs/disposition-summary', async (req, res) => {

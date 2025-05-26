@@ -65,4 +65,35 @@ router.get("/api/shopify/orders-dates", async (req, res) => {
   }
 });
 
+// Update Shopify Order Note
+router.put("/api/shopify/orders/:orderId/note", async (req, res) => {
+  const { orderId } = req.params;
+  const { note } = req.body;
+
+  if (!orderId || !note) {
+    return res.status(400).json({ error: "Missing orderId or note in request" });
+  }
+
+  const headers = {
+    "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+    "Content-Type": "application/json",
+  };
+
+  try {
+    const url = `https://${SHOPIFY_STORE_NAME}/admin/api/${SHOPIFY_API_VERSION}/orders/${orderId}.json`;
+
+    const response = await axios.put(
+      url,
+      { order: { id: orderId, note } },
+      { headers }
+    );
+
+    return res.json({ success: true, order: response.data.order });
+  } catch (error) {
+    console.error("Failed to update order note:", error.response?.data || error.message);
+    return res.status(500).json({ error: "Failed to update order note on Shopify." });
+  }
+});
+
+
 module.exports = router;
