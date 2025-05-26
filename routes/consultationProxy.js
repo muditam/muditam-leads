@@ -1697,9 +1697,9 @@ selectedProducts.forEach(product => {
           <!-- Additional Image Section -->
           <div class="additional-image">
             <picture>
-              <source media="(min-width: 768px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_914.jpg?v=1745648444">
-              <source media="(max-width: 767px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_911.jpg?v=1745648443">
-              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_914.jpg?v=1745648444" alt="Additional Visual">
+              <source media="(min-width: 768px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Desktop.png?v=1748094598">
+              <source media="(max-width: 767px)" srcset="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Mobile.png?v=1748094683">
+              <img src="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Desktop.png?v=1748094598" alt="Additional Visual">
             </picture>
           </div>
 
