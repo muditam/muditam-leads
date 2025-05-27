@@ -7,7 +7,7 @@ const EscalationSchema = new mongoose.Schema({
   contactNumber: String,
   agentName: String,
   query: String,
-  attachedFileUrl: String,
+  attachedFileUrls: [String],
   status: { type: String, default: 'Open' },
   assignedTo: String,
   remark: String,

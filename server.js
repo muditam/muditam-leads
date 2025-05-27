@@ -1573,34 +1573,51 @@ app.get('/api/reachout-logs/disposition-summary', async (req, res) => {
 
 app.get('/api/reachout-logs/disposition-count', async (req, res) => {
   try {
-    const { startDate, endDate, healthExpertAssigned } = req.query;
+    const { startDate: startDateRaw, endDate: endDateRaw, healthExpertAssigned } = req.query;
 
-    const matchStage = {};
-
-    if (startDate && endDate) {
-      matchStage['reachoutLogs.timestamp'] = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
-    }
-
+    const matchRoot = {};
     if (healthExpertAssigned) {
-      matchStage.healthExpertAssigned = healthExpertAssigned;
+      matchRoot.healthExpertAssigned = healthExpertAssigned;
     }
 
+    let startDate, endDate;
+    if (startDateRaw && endDateRaw) {
+      startDate = new Date(startDateRaw);
+      startDate.setHours(0, 0, 0, 0); // start of day
+
+      endDate = new Date(endDateRaw);
+      endDate.setHours(23, 59, 59, 999); // end of day
+    }
+
+    // Pipeline steps:
     const pipeline = [
-      { $unwind: "$reachoutLogs" },
-      { $match: matchStage },
-      {
-        $group: {
-          _id: "$reachoutLogs.status",
-          count: { $sum: 1 },
-        },
-      },
+      { $match: matchRoot },        // Match root documents first
+      { $unwind: "$reachoutLogs" }, // Unwind array
     ];
+
+    // If date filters are provided, apply match on unwinded subfield:
+    if (startDate && endDate) {
+      pipeline.push({
+        $match: {
+          "reachoutLogs.timestamp": {
+            $gte: startDate,
+            $lte: endDate,
+          },
+        },
+      });
+    }
+
+    // Then group by disposition status
+    pipeline.push({
+      $group: {
+        _id: "$reachoutLogs.status",
+        count: { $sum: 1 },
+      },
+    });
 
     const result = await Lead.aggregate(pipeline);
 
+    // Format result to key: count map
     const formattedResult = result.reduce((acc, item) => {
       acc[item._id] = item.count;
       return acc;
@@ -1612,6 +1629,9 @@ app.get('/api/reachout-logs/disposition-count', async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+
+
  
 // Start Server
 app.listen(PORT, () => {

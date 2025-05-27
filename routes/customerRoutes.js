@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Customer = require("../models/Customer");
 const Employee = require("../models/Employee");  // Used for "Assigned To" dropdown if needed
 const router = express.Router();
+const { Parser } = require("json2csv");
 
 // Create a new customer with duplicate phone check
 router.post("/api/customers", async (req, res) => {
@@ -357,6 +358,69 @@ router.get("/api/customers/counts", async (req, res) => {
   }
 });
 
+// ✅ PLACE THIS BEFORE THE /:id ROUTE!
+router.get("/api/customers/export-csv", async (req, res) => {
+  try {
+    const { filters = "{}", status = "", tags = "[]" } = req.query;
+    const filtersObj = JSON.parse(filters);
+    const tagsArray = JSON.parse(tags);
+
+    const query = {};
+
+    if (filtersObj.search) {
+      const searchRegex = new RegExp(filtersObj.search, "i");
+      query.$or = [
+        { name: searchRegex },
+        { phone: searchRegex },
+        { location: searchRegex },
+      ];
+    }
+
+    if (status) {
+      query["presales.leadStatus"] = status;
+    }
+
+    if (tagsArray.length > 0) {
+      query.tags = { $in: tagsArray };
+    }
+
+    const customers = await Customer.find(query).lean().limit(100000);
+
+    const fields = [
+      { label: "Name", value: "name" },
+      { label: "Phone", value: "phone" },
+      { label: "Age", value: "age" },
+      { label: "Location", value: "location" },
+      { label: "Looking For", value: "lookingFor" },
+      { label: "Assigned To", value: "assignedTo" },
+      {
+        label: "Follow Up Date",
+        value: (row) =>
+          row.followUpDate ? new Date(row.followUpDate).toLocaleDateString() : "",
+      },
+      { label: "Lead Source", value: "leadSource" },
+      {
+        label: "Created At",
+        value: (row) =>
+          row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "",
+      },
+      {
+        label: "Lead Status",
+        value: (row) => row.presales?.leadStatus || "",
+      },
+    ];
+
+    const json2csvParser = new Parser({ fields });
+    const csv = json2csvParser.parse(customers);
+
+    res.header("Content-Type", "text/csv");
+    res.attachment("customers.csv");
+    res.send(csv);
+  } catch (err) {
+    console.error("CSV export error:", err);
+    res.status(500).send("Internal Server Error");
+  }
+});
 
 
 

@@ -5,24 +5,25 @@ const Lead = require("../models/Lead"); // Adjust the path based on your project
 // GET /api/leads/retention/active-counts
 router.get("/active-counts", async (req, res) => {
   try {
-    // Build the query without date filters
     const matchQuery = {
       salesStatus: "Sales Done",
       $or: [
         { retentionStatus: "Active" },
         { retentionStatus: { $exists: false } },
+        { retentionStatus: null },
+        { retentionStatus: "" },
       ],
     };
 
-    // Aggregate by healthExpertAssigned and count active leads
     const results = await Lead.aggregate([
       { $match: matchQuery },
       {
         $group: {
-          _id: "$healthExpertAssigned", // Group by agent's name
-          activeCount: { $sum: 1 },       // Count matching leads
+          _id: { $ifNull: ["$healthExpertAssigned", "Unassigned"] },
+          activeCount: { $sum: 1 },
         },
       },
+      { $sort: { activeCount: -1 } },
     ]);
 
     res.status(200).json(results);

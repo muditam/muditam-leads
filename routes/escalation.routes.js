@@ -27,21 +27,22 @@ router.get('/', async (req, res) => {
 });
 
 // Add escalation with optional file upload
-router.post('/', upload.single('attachedFile'), async (req, res) => {
+router.post('/', upload.array('attachedFiles'), async (req, res) => {
   try {
-    let fileUrl = '';
+    const fileUrls = [];
 
-    if (req.file) {
-      const params = {
-        Bucket: process.env.WASABI_BUCKET,
-        Key: `escalations/${Date.now()}_${req.file.originalname}`,
-        Body: req.file.buffer,
-        ContentType: req.file.mimetype,
-        ACL: 'public-read',
-      };
-
-      const data = await s3.upload(params).promise();
-      fileUrl = data.Location;
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const params = {
+          Bucket: process.env.WASABI_BUCKET,
+          Key: `escalations/${Date.now()}_${file.originalname}`,
+          Body: file.buffer,
+          ContentType: file.mimetype,
+          ACL: 'public-read',
+        };
+        const data = await s3.upload(params).promise();
+        fileUrls.push(data.Location);
+      }
     }
 
     const escalation = new Escalation({
@@ -51,7 +52,7 @@ router.post('/', upload.single('attachedFile'), async (req, res) => {
       contactNumber: req.body.contactNumber,
       agentName: req.body.agentName,
       query: req.body.query,
-      attachedFileUrl: fileUrl,
+      attachedFileUrls: fileUrls, // plural array here
       status: req.body.status || 'Open',
       assignedTo: req.body.assignedTo || '',
       remark: req.body.remark || '',
