@@ -264,41 +264,68 @@ const fetchOrdersFromShipway = async (page, startDate, endDate) => {
 };
 
 const syncOrdersForDateRange = async (startDate, endDate) => {
-  console.log(`Syncing orders from Shipway API for date range ${startDate} to ${endDate}...`);
+  console.log(`Starting sync of Shipway orders from ${startDate} to ${endDate}...`);
   let page = 1;
   let totalFetched = 0;
-  const rowsPerPage = 100;  
+  const rowsPerPage = 100;
 
   while (true) {
     try {
       const orders = await fetchOrdersFromShipway(page, startDate, endDate);
       if (!orders || orders.length === 0) {
+        console.log(`No more orders found on page ${page}. Exiting loop.`);
         break;
       }
+
+      console.log(`Fetched ${orders.length} orders on page ${page}. Processing...`);
+
       for (const order of orders) {
-        // Normalize order_id from Shipway (remove leading '#' if present)
         const normalizedOrderId = order.order_id.replace(/^#/, '');
         const shipmentStatus = statusMapping[order.shipment_status] || order.shipment_status;
-        const orderDate = order.order_date ? new Date(order.order_date) : null; 
+        const orderDate = order.order_date ? new Date(order.order_date) : null;
+ 
+        const contactNumber = order.phone || order.s_phone || "";
+
+        const updateFields = {
+          order_id: normalizedOrderId,
+          shipment_status: shipmentStatus,
+          order_date: orderDate,
+        };
+
+        if (contactNumber) {
+          updateFields.contact_number = contactNumber;
+          console.log(`Updating order ${normalizedOrderId} with contact number: ${contactNumber}`);
+        } else {
+          console.log(`Order ${normalizedOrderId} has NO contact number. Skipping contact update.`);
+        }
+
         const updateResult = await Order.updateOne(
           { order_id: normalizedOrderId },
-          { order_id: normalizedOrderId, shipment_status: shipmentStatus, order_date: orderDate },
+          { $set: updateFields },
           { upsert: true }
         );
-        console.log(`Updated order ${normalizedOrderId}:`, updateResult);
+
+        console.log(`Order ${normalizedOrderId} updated. Mongo result:`, updateResult);
       }
-      totalFetched += orders.length; 
+
+      totalFetched += orders.length;
+
       if (orders.length < rowsPerPage) {
+        console.log(`Fetched last page (${page}). Total orders processed: ${totalFetched}`);
         break;
       }
+
       page++;
-    } catch (error) { 
-      console.error("Error during syncOrdersForDateRange:", error);
+    } catch (error) {
+      console.error(`Error during syncOrdersForDateRange on page ${page}:`, error);
       break;
     }
-  } 
+  }
+
+  console.log(`Completed syncOrdersForDateRange. Total orders fetched and updated: ${totalFetched}`);
   return totalFetched;
 };
+
 
 app.post('/api/shipway/fetch-orders', async (req, res) => {
   try {
@@ -364,13 +391,63 @@ app.post('/api/shipway/neworder', async (req, res) => {
   }
 });
 
+
+app.get('/api/orders/by-shipment-status', async (req, res) => {
+  try {
+    const { shipment_status } = req.query;
+
+    const matchFilter = {};
+    // We only care about most recent orders per contact number
+    if (!shipment_status) {
+      return res.status(400).json({ message: 'shipment_status is required' });
+    }
+
+    const pipeline = [
+      {
+        $sort: { order_date: -1 } // Sort newest first
+      },
+      {
+        $group: {
+          _id: "$contact_number",
+          mostRecentOrder: { $first: "$$ROOT" }
+        }
+      },
+      {
+        $replaceRoot: { newRoot: "$mostRecentOrder" }
+      }
+    ];
+
+    if (shipment_status === 'Delivered') {
+      pipeline.push({ $match: { shipment_status: 'Delivered' } });
+    } else if (shipment_status === 'Undelivered') {
+      pipeline.push({ $match: { shipment_status: { $ne: 'Delivered' } } });
+    }
+
+    const recentOrders = await Order.aggregate(pipeline);
+
+    res.json(recentOrders);
+  } catch (error) {
+    console.error("Error fetching orders by shipment status:", error);
+    res.status(500).json({ message: 'Failed to fetch orders', error: error.message });
+  }
+});
+
+
+
+
 // Cron job to update shipment status every hour
-cron.schedule('0 0 * * *', async () => { 
+cron.schedule('0 8 * * *', async () => { 
   try {
     const orders = await Order.find({});
     for (const order of orders) {
       try { 
         if (!order.order_date) continue;
+
+        // Skip update if status is final
+        if (order.shipment_status === "Delivered" || order.shipment_status === "RTO Delivered") {
+          console.log(`Skipping cron update for order ${order.order_id} with final status: ${order.shipment_status}`);
+          continue;
+        }
         const page = 1;
         const dateStr = order.order_date.toISOString().split("T")[0];
         const ordersFromShipway = await fetchOrdersFromShipway(page, dateStr, dateStr);
@@ -387,7 +464,7 @@ cron.schedule('0 0 * * *', async () => {
   } catch (error) {  
     console.error("Cron job error:", error);
   }
-}); 
+});
 
  
 const upload = multer({

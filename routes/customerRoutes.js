@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require('mongoose');
 const Customer = require("../models/Customer");
 const Employee = require("../models/Employee");  // Used for "Assigned To" dropdown if needed
+const ConsultationDetails = require("../models/ConsultationDetails");
 const router = express.Router();
 const { Parser } = require("json2csv");
 
@@ -386,6 +387,33 @@ router.get("/api/customers/export-csv", async (req, res) => {
 
     const customers = await Customer.find(query).lean().limit(100000);
 
+    // Collect customerIds to fetch ConsultationDetails
+    const customerIds = customers.map(c => c._id);
+    const consultationMap = {};
+
+    const consultations = await ConsultationDetails.find({ customerId: { $in: customerIds } }).lean();
+    consultations.forEach(c => {
+      consultationMap[c.customerId.toString()] = c;
+    });
+
+    const exportData = customers.map(c => {
+      const consult = consultationMap[c._id.toString()];
+      return {
+        name: c.name,
+        phone: c.phone,
+        age: c.age,
+        location: c.location,
+        lookingFor: c.lookingFor,
+        assignedTo: c.assignedTo,
+        followUpDate: c.followUpDate ? new Date(c.followUpDate).toLocaleDateString() : "",
+        leadSource: c.leadSource,
+        leadDate: c.leadDate ? new Date(c.leadDate).toLocaleDateString() : "",
+        createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : "",
+        dateAndTime: c.dateAndTime ? new Date(c.dateAndTime).toLocaleString() : "",
+        presalesLeadStatus: consult?.presales?.leadStatus || "",
+      };
+    });
+
     const fields = [
       { label: "Name", value: "name" },
       { label: "Phone", value: "phone" },
@@ -393,25 +421,16 @@ router.get("/api/customers/export-csv", async (req, res) => {
       { label: "Location", value: "location" },
       { label: "Looking For", value: "lookingFor" },
       { label: "Assigned To", value: "assignedTo" },
-      {
-        label: "Follow Up Date",
-        value: (row) =>
-          row.followUpDate ? new Date(row.followUpDate).toLocaleDateString() : "",
-      },
+      { label: "Follow Up Date", value: "followUpDate" },
       { label: "Lead Source", value: "leadSource" },
-      {
-        label: "Created At",
-        value: (row) =>
-          row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "",
-      },
-      {
-        label: "Lead Status",
-        value: (row) => row.presales?.leadStatus || "",
-      },
+      { label: "Lead Date", value: "leadDate" },
+      { label: "Created At", value: "createdAt" },
+      { label: "Date and Time", value: "dateAndTime" },
+      { label: "Presales Lead Status", value: "presalesLeadStatus" },
     ];
 
     const json2csvParser = new Parser({ fields });
-    const csv = json2csvParser.parse(customers);
+    const csv = json2csvParser.parse(exportData);
 
     res.header("Content-Type", "text/csv");
     res.attachment("customers.csv");
