@@ -209,7 +209,7 @@ app.get('/api/orders', async (req, res) => {
     const ordersWithShipwayStatus = await Promise.all(orders.map(async (order) => {
       const normalizedOrderId = order.order_id.startsWith('#')
         ? order.order_id.slice(1)
-        : order.order_id;
+        : order.order_id; 
       const shipwayOrder = await Order.findOne({ order_id: normalizedOrderId });
       order.shipway_status = shipwayOrder ? shipwayOrder.shipment_status : "Not available";
       return order;

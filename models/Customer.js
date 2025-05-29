@@ -4,7 +4,7 @@ const CustomerSchema = new mongoose.Schema({
   name: { type: String, required: true },
   phone: { type: String, required: true },
   age: { type: Number, required: true },
-  location: { type: String, required: true },
+  location: { type: String },
   lookingFor: { type: String, required: true },
   assignedTo: { type: String, required: true },
   followUpDate: { type: Date, required: true },
