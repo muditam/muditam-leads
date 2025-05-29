@@ -12,7 +12,7 @@ router.get("/active-counts", async (req, res) => {
         { retentionStatus: "Active" },
         { retentionStatus: { $exists: false } },
       ],
-    };
+    };   
 
     // Aggregate by healthExpertAssigned and count active leads
     const results = await Lead.aggregate([
