@@ -46,7 +46,6 @@ const LeadSchema = new mongoose.Schema({
       value: String,
     }
   ],
-
   details: {
     age: Number,
     hba1c: String,
@@ -75,7 +74,6 @@ const LeadSchema = new mongoose.Schema({
     energyLevels: String,
     sleepQuality: String,
   },
-
   followUps: [
     {
       date: String,

@@ -37,6 +37,7 @@ const duplicateNumbersRoutes = require("./routes/duplicateNumbersRoutes");
 const ordersDatesRoute = require("./routes/orders-dates");
 const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
+const escalationRoutes = require('./routes/escalation.routes');
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -119,6 +120,8 @@ app.use(ordersDatesRoute);
 app.use(uploadToWasabi);
 
 app.use("/api/details", detailsRoutes);
+
+app.use('/api/escalations', escalationRoutes);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -261,41 +264,68 @@ const fetchOrdersFromShipway = async (page, startDate, endDate) => {
 };
 
 const syncOrdersForDateRange = async (startDate, endDate) => {
-  console.log(`Syncing orders from Shipway API for date range ${startDate} to ${endDate}...`);
+  console.log(`Starting sync of Shipway orders from ${startDate} to ${endDate}...`);
   let page = 1;
   let totalFetched = 0;
-  const rowsPerPage = 100;  
+  const rowsPerPage = 100;
 
   while (true) {
     try {
       const orders = await fetchOrdersFromShipway(page, startDate, endDate);
       if (!orders || orders.length === 0) {
+        console.log(`No more orders found on page ${page}. Exiting loop.`);
         break;
       }
+
+      console.log(`Fetched ${orders.length} orders on page ${page}. Processing...`);
+
       for (const order of orders) {
-        // Normalize order_id from Shipway (remove leading '#' if present)
         const normalizedOrderId = order.order_id.replace(/^#/, '');
         const shipmentStatus = statusMapping[order.shipment_status] || order.shipment_status;
-        const orderDate = order.order_date ? new Date(order.order_date) : null; 
+        const orderDate = order.order_date ? new Date(order.order_date) : null;
+ 
+        const contactNumber = order.phone || order.s_phone || "";
+
+        const updateFields = {
+          order_id: normalizedOrderId,
+          shipment_status: shipmentStatus,
+          order_date: orderDate,
+        };
+
+        if (contactNumber) {
+          updateFields.contact_number = contactNumber;
+          console.log(`Updating order ${normalizedOrderId} with contact number: ${contactNumber}`);
+        } else {
+          console.log(`Order ${normalizedOrderId} has NO contact number. Skipping contact update.`);
+        }
+
         const updateResult = await Order.updateOne(
           { order_id: normalizedOrderId },
-          { order_id: normalizedOrderId, shipment_status: shipmentStatus, order_date: orderDate },
+          { $set: updateFields },
           { upsert: true }
         );
-        console.log(`Updated order ${normalizedOrderId}:`, updateResult);
+
+        console.log(`Order ${normalizedOrderId} updated. Mongo result:`, updateResult);
       }
-      totalFetched += orders.length; 
+
+      totalFetched += orders.length;
+
       if (orders.length < rowsPerPage) {
+        console.log(`Fetched last page (${page}). Total orders processed: ${totalFetched}`);
         break;
       }
+
       page++;
-    } catch (error) { 
-      console.error("Error during syncOrdersForDateRange:", error);
+    } catch (error) {
+      console.error(`Error during syncOrdersForDateRange on page ${page}:`, error);
       break;
     }
-  } 
+  }
+
+  console.log(`Completed syncOrdersForDateRange. Total orders fetched and updated: ${totalFetched}`);
   return totalFetched;
 };
+
 
 app.post('/api/shipway/fetch-orders', async (req, res) => {
   try {
@@ -361,13 +391,63 @@ app.post('/api/shipway/neworder', async (req, res) => {
   }
 });
 
+
+app.get('/api/orders/by-shipment-status', async (req, res) => {
+  try {
+    const { shipment_status } = req.query;
+
+    const matchFilter = {};
+    // We only care about most recent orders per contact number
+    if (!shipment_status) {
+      return res.status(400).json({ message: 'shipment_status is required' });
+    }
+
+    const pipeline = [
+      {
+        $sort: { order_date: -1 } // Sort newest first
+      },
+      {
+        $group: {
+          _id: "$contact_number",
+          mostRecentOrder: { $first: "$$ROOT" }
+        }
+      },
+      {
+        $replaceRoot: { newRoot: "$mostRecentOrder" }
+      }
+    ];
+
+    if (shipment_status === 'Delivered') {
+      pipeline.push({ $match: { shipment_status: 'Delivered' } });
+    } else if (shipment_status === 'Undelivered') {
+      pipeline.push({ $match: { shipment_status: { $ne: 'Delivered' } } });
+    }
+
+    const recentOrders = await Order.aggregate(pipeline);
+
+    res.json(recentOrders);
+  } catch (error) {
+    console.error("Error fetching orders by shipment status:", error);
+    res.status(500).json({ message: 'Failed to fetch orders', error: error.message });
+  }
+});
+
+
+
+
 // Cron job to update shipment status every hour
-cron.schedule('0 0 * * *', async () => { 
+cron.schedule('0 8 * * *', async () => { 
   try {
     const orders = await Order.find({});
     for (const order of orders) {
       try { 
         if (!order.order_date) continue;
+
+        // Skip update if status is final
+        if (order.shipment_status === "Delivered" || order.shipment_status === "RTO Delivered") {
+          console.log(`Skipping cron update for order ${order.order_id} with final status: ${order.shipment_status}`);
+          continue;
+        }
         const page = 1;
         const dateStr = order.order_date.toISOString().split("T")[0];
         const ordersFromShipway = await fetchOrdersFromShipway(page, dateStr, dateStr);
@@ -384,7 +464,7 @@ cron.schedule('0 0 * * *', async () => {
   } catch (error) {  
     console.error("Cron job error:", error);
   }
-}); 
+});
 
  
 const upload = multer({
@@ -1443,14 +1523,14 @@ app.get('/api/reachout-logs/count', async (req, res) => {
     let end = endDate ? new Date(endDate) : new Date();
     end.setHours(23, 59, 59, 999);
 
-    const matchStage = healthExpertAssigned
-      ? { healthExpertAssigned }
-      : {};
+    const matchStage = healthExpertAssigned ? { healthExpertAssigned } : {};
 
+    // Aggregate unique leads count per method
     const result = await Lead.aggregate([
       { $match: matchStage },
       {
         $project: {
+          contactNumber: 1,
           reachoutLogs: {
             $filter: {
               input: { $ifNull: ["$reachoutLogs", []] },
@@ -1468,19 +1548,57 @@ app.get('/api/reachout-logs/count', async (req, res) => {
       { $unwind: "$reachoutLogs" },
       {
         $group: {
-          _id: "$reachoutLogs.method",
+          _id: {
+            contactNumber: "$contactNumber",
+            method: "$reachoutLogs.method",
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$_id.method",
           count: { $sum: 1 }
         }
       }
     ]);
 
-    // Count totals per method
+    // Aggregate total unique leads contacted by any method
+    const uniqueLeadsResult = await Lead.aggregate([
+      { $match: matchStage },
+      {
+        $project: {
+          contactNumber: 1,
+          reachoutLogs: {
+            $filter: {
+              input: { $ifNull: ["$reachoutLogs", []] },
+              as: "log",
+              cond: {
+                $and: [
+                  { $gte: ["$$log.timestamp", start] },
+                  { $lte: ["$$log.timestamp", end] }
+                ]
+              }
+            }
+          }
+        }
+      },
+      { $unwind: "$reachoutLogs" },
+      {
+        $group: {
+          _id: "$contactNumber"
+        }
+      },
+      {
+        $count: "totalUniqueLeads"
+      }
+    ]);
+    const totalCount = uniqueLeadsResult.length > 0 ? uniqueLeadsResult[0].totalUniqueLeads : 0;
+
+    // Format counts by method, default to 0 if missing
     const counts = { WhatsApp: 0, Call: 0, Both: 0 };
     result.forEach((item) => {
       if (item._id) counts[item._id] = item.count;
     });
-
-    const totalCount = counts.WhatsApp + counts.Call + counts.Both;
 
     res.json({ totalCount, ...counts });
   } catch (err) {
@@ -1488,6 +1606,7 @@ app.get('/api/reachout-logs/count', async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+
 
 // Assuming you have Express app and Lead model
 app.get('/api/reachout-logs/disposition-summary', async (req, res) => {
@@ -1531,34 +1650,51 @@ app.get('/api/reachout-logs/disposition-summary', async (req, res) => {
 
 app.get('/api/reachout-logs/disposition-count', async (req, res) => {
   try {
-    const { startDate, endDate, healthExpertAssigned } = req.query;
+    const { startDate: startDateRaw, endDate: endDateRaw, healthExpertAssigned } = req.query;
 
-    const matchStage = {};
-
-    if (startDate && endDate) {
-      matchStage['reachoutLogs.timestamp'] = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
-    }
-
+    const matchRoot = {};
     if (healthExpertAssigned) {
-      matchStage.healthExpertAssigned = healthExpertAssigned;
+      matchRoot.healthExpertAssigned = healthExpertAssigned;
     }
 
+    let startDate, endDate;
+    if (startDateRaw && endDateRaw) {
+      startDate = new Date(startDateRaw);
+      startDate.setHours(0, 0, 0, 0); // start of day
+
+      endDate = new Date(endDateRaw);
+      endDate.setHours(23, 59, 59, 999); // end of day
+    }
+
+    // Pipeline steps:
     const pipeline = [
-      { $unwind: "$reachoutLogs" },
-      { $match: matchStage },
-      {
-        $group: {
-          _id: "$reachoutLogs.status",
-          count: { $sum: 1 },
-        },
-      },
+      { $match: matchRoot },        // Match root documents first
+      { $unwind: "$reachoutLogs" }, // Unwind array
     ];
+
+    // If date filters are provided, apply match on unwinded subfield:
+    if (startDate && endDate) {
+      pipeline.push({
+        $match: {
+          "reachoutLogs.timestamp": {
+            $gte: startDate,
+            $lte: endDate,
+          },
+        },
+      });
+    }
+
+    // Then group by disposition status
+    pipeline.push({
+      $group: {
+        _id: "$reachoutLogs.status",
+        count: { $sum: 1 },
+      },
+    });
 
     const result = await Lead.aggregate(pipeline);
 
+    // Format result to key: count map
     const formattedResult = result.reduce((acc, item) => {
       acc[item._id] = item.count;
       return acc;
@@ -1570,6 +1706,9 @@ app.get('/api/reachout-logs/disposition-count', async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+
+
  
 // Start Server
 app.listen(PORT, () => {

@@ -2,7 +2,9 @@ const express = require("express");
 const mongoose = require('mongoose');
 const Customer = require("../models/Customer");
 const Employee = require("../models/Employee");  // Used for "Assigned To" dropdown if needed
+const ConsultationDetails = require("../models/ConsultationDetails");
 const router = express.Router();
+const { Parser } = require("json2csv");
 
 // Create a new customer with duplicate phone check
 router.post("/api/customers", async (req, res) => {
@@ -357,6 +359,87 @@ router.get("/api/customers/counts", async (req, res) => {
   }
 });
 
+// ✅ PLACE THIS BEFORE THE /:id ROUTE!
+router.get("/api/customers/export-csv", async (req, res) => {
+  try {
+    const { filters = "{}", status = "", tags = "[]" } = req.query;
+    const filtersObj = JSON.parse(filters);
+    const tagsArray = JSON.parse(tags);
+
+    const query = {};
+
+    if (filtersObj.search) {
+      const searchRegex = new RegExp(filtersObj.search, "i");
+      query.$or = [
+        { name: searchRegex },
+        { phone: searchRegex },
+        { location: searchRegex },
+      ];
+    }
+
+    if (status) {
+      query["presales.leadStatus"] = status;
+    }
+
+    if (tagsArray.length > 0) {
+      query.tags = { $in: tagsArray };
+    }
+
+    const customers = await Customer.find(query).lean().limit(100000);
+
+    // Collect customerIds to fetch ConsultationDetails
+    const customerIds = customers.map(c => c._id);
+    const consultationMap = {};
+
+    const consultations = await ConsultationDetails.find({ customerId: { $in: customerIds } }).lean();
+    consultations.forEach(c => {
+      consultationMap[c.customerId.toString()] = c;
+    });
+
+    const exportData = customers.map(c => {
+      const consult = consultationMap[c._id.toString()];
+      return {
+        name: c.name,
+        phone: c.phone,
+        age: c.age,
+        location: c.location,
+        lookingFor: c.lookingFor,
+        assignedTo: c.assignedTo,
+        followUpDate: c.followUpDate ? new Date(c.followUpDate).toLocaleDateString() : "",
+        leadSource: c.leadSource,
+        leadDate: c.leadDate ? new Date(c.leadDate).toLocaleDateString() : "",
+        createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : "",
+        dateAndTime: c.dateAndTime ? new Date(c.dateAndTime).toLocaleString() : "",
+        presalesLeadStatus: consult?.presales?.leadStatus || "",
+      };
+    });
+
+    const fields = [
+      { label: "Name", value: "name" },
+      { label: "Phone", value: "phone" },
+      { label: "Age", value: "age" },
+      { label: "Location", value: "location" },
+      { label: "Looking For", value: "lookingFor" },
+      { label: "Assigned To", value: "assignedTo" },
+      { label: "Follow Up Date", value: "followUpDate" },
+      { label: "Lead Source", value: "leadSource" },
+      { label: "Lead Date", value: "leadDate" },
+      { label: "Created At", value: "createdAt" },
+      { label: "Date and Time", value: "dateAndTime" },
+      { label: "Presales Lead Status", value: "presalesLeadStatus" },
+    ];
+
+    const json2csvParser = new Parser({ fields });
+    const csv = json2csvParser.parse(exportData);
+
+    res.header("Content-Type", "text/csv");
+    res.attachment("customers.csv");
+    res.send(csv);
+  } catch (err) {
+    console.error("CSV export error:", err);
+    res.status(500).send("Internal Server Error");
+  }
+});
 
 
 

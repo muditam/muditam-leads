@@ -9,22 +9,38 @@ router.post("/save-details", async (req, res) => {
   if (!contactNumber) return res.status(400).json({ message: "Missing contactNumber" });
 
   try {
-    // Only include fields with meaningful values
-    const cleanedDetails = {};
+    const setFields = {};
+    const unsetFields = {};
+
     for (const key in details) {
       const value = details[key];
+      const path = `details.${key}`;
+
       if (
-        value !== "" &&
-        value !== null &&
-        !(Array.isArray(value) && value.length === 0)
+        value === "" ||
+        value === null ||
+        (Array.isArray(value) && value.length === 0)
       ) {
-        cleanedDetails[`details.${key}`] = value;
+        // Mark field to be unset (deleted)
+        unsetFields[path] = "";
+      } else {
+        // Mark field to be set (updated)
+        setFields[path] = value;
       }
+    }
+
+    const updateObj = {};
+    if (Object.keys(setFields).length > 0) updateObj.$set = setFields;
+    if (Object.keys(unsetFields).length > 0) updateObj.$unset = unsetFields;
+
+    if (Object.keys(updateObj).length === 0) {
+      // Nothing to update
+      return res.status(400).json({ message: "No valid details to update" });
     }
 
     const updatedLead = await Lead.findOneAndUpdate(
       { contactNumber },
-      { $set: cleanedDetails },
+      updateObj,
       { new: true, upsert: false }
     );
 
@@ -37,7 +53,7 @@ router.post("/save-details", async (req, res) => {
   }
 });
 
-// Get details
+ 
 // Get details
 router.get("/get-details/:contactNumber", async (req, res) => {
     try {
