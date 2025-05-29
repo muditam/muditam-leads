@@ -43,34 +43,31 @@ router.post("/api/customers", async (req, res) => {
 
 router.get("/api/customers", async (req, res) => {
   try {
-    // 1. Parse incoming query params
-    const page    = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit   = Math.max(1, parseInt(req.query.limit, 10) || 20);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
     const filters = JSON.parse(req.query.filters || "{}");
-    const status  = req.query.status || "";              
-    const tags    = JSON.parse(req.query.tags || "[]");     
-    const sortBy  = req.query.sortBy || "";                
-    const assignedTo = req.query.assignedTo;          
-    const createdAt = req.query.createdAt;      
+    const status = req.query.status || "";
+    const tags = JSON.parse(req.query.tags || "[]");
+    const sortBy = req.query.sortBy || "";
+    const assignedTo = req.query.assignedTo;
+    const createdAt = req.query.createdAt;
+    const userRole = req.query.userRole;
+    const userId = req.query.userId;
+    const userName = req.query.userName;
 
-    // 2. Build root-level match (only fields on Customer)
     const rootMatch = {};
 
     if (filters.search) {
-           const regex = new RegExp(filters.search, "i");
-           rootMatch.$or = [
-             { name:  { $regex: regex } },
-             { phone: { $regex: regex } },
-           ];
-         } else {
-    if (filters.name)     rootMatch.name     = { $regex: filters.name,     $options: "i" };
-    if (filters.phone)    rootMatch.phone    = filters.phone;
+      const regex = new RegExp(filters.search, "i");
+      rootMatch.$or = [{ name: { $regex: regex } }, { phone: { $regex: regex } }];
+    }
+    if (filters.name) rootMatch.name = { $regex: filters.name, $options: "i" };
+    if (filters.phone) rootMatch.phone = filters.phone;
     if (filters.location) rootMatch.location = { $regex: filters.location, $options: "i" };
     if (assignedTo) {
-      const assignedArray = assignedTo.split(',').map((a) => a.trim());
+      const assignedArray = assignedTo.split(",").map(a => a.trim());
       rootMatch.assignedTo = assignedArray.length === 1 ? assignedArray[0] : { $in: assignedArray };
     }
-   
     if (createdAt) {
       const dateStart = new Date(createdAt);
       dateStart.setHours(0, 0, 0, 0);
@@ -78,70 +75,41 @@ router.get("/api/customers", async (req, res) => {
       dateEnd.setHours(23, 59, 59, 999);
       rootMatch.createdAt = { $gte: dateStart, $lte: dateEnd };
     }
-  }
 
-    // 3. Build post-lookup match for status & tags
     const postMatch = {};
 
-    // 3a. Status filters on presales.leadStatus
     if (status === "Open") {
       postMatch["presales.leadStatus"] = {
-        $in: [
-          "New Lead",
-          "CONS Scheduled",
-          "CONS Done",
-          "Call Back Later",
-          "On Follow Up",
-          "CNP",
-          "Switch Off"
-        ]
+        $in: ["New Lead", "CONS Scheduled", "CONS Done", "Call Back Later", "On Follow Up", "CNP", "Switch Off"],
       };
     } else if (status === "Won") {
       postMatch["presales.leadStatus"] = "Sales Done";
     } else if (status === "Lost") {
       postMatch["presales.leadStatus"] = {
-        $in: [
-          "General Query",
-          "Fake Lead",
-          "Invalid Number",
-          "Not Interested",
-          "Ordered from Other Sources",
-          "Budget issue"
-        ]
+        $in: ["General Query", "Fake Lead", "Invalid Number", "Not Interested", "Ordered from Other Sources", "Budget issue"],
       };
     }
 
-    // 3b. Tag filters on followUpDate and Sales Done
     const orClauses = [];
-    const today    = new Date(); today.setHours(0,0,0,0);
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const afterTomorrow = new Date(tomorrow);
+    afterTomorrow.setDate(afterTomorrow.getDate() + 1);
+    const deadStatuses = ["Switch Off", "General Query", "Fake Lead", "Invalid Number", "Not Interested"];
 
-    const deadStatuses = [
-      "Switch Off",
-      "General Query",
-      "Fake Lead",
-      "Invalid Number",
-      "Not Interested"
-    ];
-    
-    if (tags.includes("Missed")) { 
-      orClauses.push({
-        $and: [
-          { followUpDate: { $lt: today } },
-          { "presales.leadStatus": { $nin: deadStatuses } }
-        ]
-      });
+    if (tags.includes("Missed")) {
+      orClauses.push({ $and: [{ followUpDate: { $lt: today } }, { "presales.leadStatus": { $nin: deadStatuses } }] });
     }
     if (tags.includes("Today")) {
       orClauses.push({ followUpDate: { $gte: today, $lt: tomorrow } });
     }
     if (tags.includes("Tomorrow")) {
-      const afterTomorrow = new Date(tomorrow);
-      afterTomorrow.setDate(afterTomorrow.getDate()+1); 
       orClauses.push({ followUpDate: { $gte: tomorrow, $lt: afterTomorrow } });
     }
     if (tags.includes("Later")) {
-      orClauses.push({ followUpDate: { $gt: tomorrow } });
+      orClauses.push({ followUpDate: { $gt: afterTomorrow } });
     }
     if (tags.includes("CONS Scheduled")) {
       orClauses.push({ "presales.leadStatus": "CONS Scheduled" });
@@ -157,21 +125,19 @@ router.get("/api/customers", async (req, res) => {
     }
     if (tags.includes("On Follow Up")) {
       orClauses.push({ "presales.leadStatus": "On Follow Up" });
-    }   
+    }
     if (tags.includes("New Lead")) {
       orClauses.push({ "presales.leadStatus": "New Lead" });
-    }  
+    }
     if (orClauses.length) {
       postMatch.$or = orClauses;
     }
 
-    // 4. Decide sort stage
-    let sortStage = { createdAt: -1 }; // default newest first
-    if (sortBy === "asc")   sortStage = { name: 1 };
-    if (sortBy === "desc")  sortStage = { name: -1 };
-    if (sortBy === "oldest")sortStage = { createdAt: 1 };
+    let sortStage = { createdAt: -1 };
+    if (sortBy === "asc") sortStage = { name: 1 };
+    if (sortBy === "desc") sortStage = { name: -1 };
+    if (sortBy === "oldest") sortStage = { createdAt: 1 };
 
-    // 5. Build aggregation pipelines
     const pipeline = [
       { $match: rootMatch },
       {
@@ -179,20 +145,37 @@ router.get("/api/customers", async (req, res) => {
           from: "consultationdetails",
           localField: "_id",
           foreignField: "customerId",
-          as: "consultation"
-        }
+          as: "consultation",
+        },
       },
       {
         $addFields: {
           presales: { $arrayElemAt: ["$consultation.presales", 0] },
-          closing:  { $arrayElemAt: ["$consultation.closing", 0] }
-        }
+        },
       },
+    ];
+
+    if (userRole === "Sales Agent" && userName) {
+      pipeline.push({ $match: { assignedTo: userName } });
+    }
+
+    if (userRole === "Retention Agent" && userId) {
+      pipeline.push({
+        $match: {
+          $or: [
+            { assignedTo: userName },
+            { "presales.assignExpert": new mongoose.Types.ObjectId(userId) },
+          ],
+        },
+      });
+    }
+
+    pipeline.push(
       { $match: postMatch },
       { $sort: sortStage },
       { $skip: (page - 1) * limit },
       { $limit: limit }
-    ];
+    );
 
     const countPipeline = [
       { $match: rootMatch },
@@ -201,39 +184,52 @@ router.get("/api/customers", async (req, res) => {
           from: "consultationdetails",
           localField: "_id",
           foreignField: "customerId",
-          as: "consultation"
-        }
+          as: "consultation",
+        },
       },
       {
         $addFields: {
-          presales: { $arrayElemAt: ["$consultation.presales", 0] }
-        }
+          presales: { $arrayElemAt: ["$consultation.presales", 0] },
+        },
       },
-      { $match: postMatch },
-      { $count: "total" }
     ];
 
-    // 6. Execute both
+    if (userRole === "Sales Agent" && userName) {
+      countPipeline.push({ $match: { assignedTo: userName } });
+    }
+
+    if (userRole === "Retention Agent" && userId) {
+      countPipeline.push({
+        $match: {
+          $or: [
+            { assignedTo: userName },
+            { "presales.assignExpert": new mongoose.Types.ObjectId(userId) },
+          ],
+        },
+      });
+    }
+
+    countPipeline.push({ $match: postMatch }, { $count: "total" });
+
     const [customers, countResult] = await Promise.all([
       Customer.aggregate(pipeline),
-      Customer.aggregate(countPipeline)
+      Customer.aggregate(countPipeline),
     ]);
 
     const total = (countResult[0] && countResult[0].total) || 0;
 
-    // 7. Reply
     res.json({
       customers,
       totalCustomers: total,
       totalPages: Math.ceil(total / limit),
-      currentPage: page
+      currentPage: page,
     });
- 
   } catch (err) {
     console.error("Error fetching customers:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+
  
 
 router.get("/api/customers/counts", async (req, res) => {
@@ -369,7 +365,7 @@ router.get("/api/customers/export-csv", async (req, res) => {
     const query = {};
 
     if (filtersObj.search) {
-      const searchRegex = new RegExp(filtersObj.search, "i");
+      const searchRegex = new RegExp(filtersObj.search, "i"); 
       query.$or = [
         { name: searchRegex },
         { phone: searchRegex },
@@ -385,7 +381,7 @@ router.get("/api/customers/export-csv", async (req, res) => {
       query.tags = { $in: tagsArray };
     }
 
-    const customers = await Customer.find(query).lean().limit(100000);
+    const customers = await Customer.find(query).lean().limit(10000);
 
     // Collect customerIds to fetch ConsultationDetails
     const customerIds = customers.map(c => c._id);
@@ -499,8 +495,6 @@ router.delete("/api/customers/:id", async (req, res) => {
     res.status(500).json({ message: "Error deleting customer", error });
   }
 });
-
-
 
 
 module.exports = router;
