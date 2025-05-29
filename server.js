@@ -396,32 +396,21 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
   try {
     const { shipment_status } = req.query;
 
-    const matchFilter = {};
-    // We only care about most recent orders per contact number
     if (!shipment_status) {
       return res.status(400).json({ message: 'shipment_status is required' });
     }
 
     const pipeline = [
-      {
-        $sort: { order_date: -1 } // Sort newest first
-      },
+      { $sort: { order_date: -1 } }, // newest first
       {
         $group: {
           _id: "$contact_number",
           mostRecentOrder: { $first: "$$ROOT" }
         }
       },
-      {
-        $replaceRoot: { newRoot: "$mostRecentOrder" }
-      }
+      { $replaceRoot: { newRoot: "$mostRecentOrder" } },
+      { $match: { shipment_status } } // exact match for the provided status
     ];
-
-    if (shipment_status === 'Delivered') {
-      pipeline.push({ $match: { shipment_status: 'Delivered' } });
-    } else if (shipment_status === 'Undelivered') {
-      pipeline.push({ $match: { shipment_status: { $ne: 'Delivered' } } });
-    }
 
     const recentOrders = await Order.aggregate(pipeline);
 
@@ -431,6 +420,7 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch orders', error: error.message });
   }
 });
+
 
 
 
