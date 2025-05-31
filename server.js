@@ -149,20 +149,27 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
       console.error("No orders found in response:", response.data);
       return allOrders;
     }
- 
-    const fetchedOrders = response.data.orders.map(order => ({
-      order_id: order.name,  
-      name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : '',
-      contact_number: order.customer && order.customer.default_address 
-        ? order.customer.default_address.phone.replace(/^\+91/, '').trim()
-        : '',
-      created_at: order.created_at,           
-      total_price: order.total_price,         
-      payment_gateway_names: order.payment_gateway_names, 
-      line_items: order.line_items,           
-      channel_name: order.source_name || 'Unknown',
-      delivery_status: order.fulfillment_status || 'Not Specified' 
-    }));
+
+    const fetchedOrders = response.data.orders.map(order => {
+      let phone = '';
+      if (order.customer && order.customer.default_address && order.customer.default_address.phone) {
+        phone = order.customer.default_address.phone.replace(/^\+91/, '').trim();
+      } else {
+        console.warn(`Order ${order.id} is missing customer phone or address.`);
+      }
+
+      return {
+        order_id: order.name,
+        name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : '',
+        contact_number: phone,
+        created_at: order.created_at,
+        total_price: order.total_price,
+        payment_gateway_names: order.payment_gateway_names,
+        line_items: order.line_items,
+        channel_name: order.source_name || 'Unknown',
+        delivery_status: order.fulfillment_status || 'Not Specified'
+      };
+    });
 
     allOrders = allOrders.concat(fetchedOrders);
 
@@ -172,55 +179,62 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
         .filter(s => s.includes('rel="next"'))
         .map(s => s.match(/<(.*)>; rel="next"/))
         .find(Boolean);
+
     if (nextLink && nextLink[1]) {
       return fetchAllOrders(nextLink[1], accessToken, allOrders);
     }
 
     return allOrders;
   } catch (error) {
-    console.error('Failed to fetch orders:', error);
+    console.error('Failed to fetch orders:', error.response ? error.response.data : error.message);
     throw error;
   }
 }
 
-app.get('/api/orders', async (req, res) => { 
+app.get('/api/orders', async (req, res) => {
   const { startDate, endDate } = req.query;
-   
+
   if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
     return res.status(400).send("Invalid date range: startDate cannot be after endDate.");
   }
-   
+
   const defaultStartDate = "2025-02-01T00:00:00Z";
   const defaultEndDate = new Date().toISOString();
- 
-  const start = startDate ? new Date(startDate).toISOString() : defaultStartDate;
-  const end = endDate ? new Date(endDate).toISOString() : defaultEndDate;
+
+  const startDateObj = startDate ? new Date(startDate) : new Date(defaultStartDate);
+  startDateObj.setHours(0, 0, 0, 0);
+  const start = startDateObj.toISOString();
+
+  const endDateObj = endDate ? new Date(endDate) : new Date(defaultEndDate);
+  endDateObj.setHours(23, 59, 59, 999);
+  const end = endDateObj.toISOString();
 
   const startEncoded = encodeURIComponent(start);
   const endEncoded = encodeURIComponent(end);
 
   const shopifyAPIEndpoint = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?status=any&created_at_min=${startEncoded}&created_at_max=${endEncoded}&limit=250`;
-    
+
   try {
     const orders = await fetchAllOrders(shopifyAPIEndpoint, process.env.SHOPIFY_API_SECRET);
-    
-    // For each Shopify order, normalize the order_id (remove "#" if present) 
-    // and attach the shipment status from the Shipway database.
-    const ordersWithShipwayStatus = await Promise.all(orders.map(async (order) => {
-      const normalizedOrderId = order.order_id.startsWith('#')
-        ? order.order_id.slice(1)
-        : order.order_id; 
-      const shipwayOrder = await Order.findOne({ order_id: normalizedOrderId });
-      order.shipway_status = shipwayOrder ? shipwayOrder.shipment_status : "Not available";
-      return order;
-    }));
+
+    const ordersWithShipwayStatus = await Promise.all(
+      orders.map(async (order) => {
+        const normalizedOrderId = order.order_id.startsWith('#')
+          ? order.order_id.slice(1)
+          : order.order_id;
+        const shipwayOrder = await Order.findOne({ order_id: normalizedOrderId });
+        order.shipway_status = shipwayOrder ? shipwayOrder.shipment_status : "Not available";
+        return order;
+      })
+    );
 
     res.json(ordersWithShipwayStatus);
   } catch (error) {
-    console.error('Error fetching orders from Shopify:', error.response ? error.response.data : error);
+    console.error('Error fetching orders from Shopify:', error.response ? error.response.data : error.message);
     res.status(500).send('Failed to fetch orders');
   }
-});[]
+});
+
 
 const statusMapping = {
   "DEL": "Delivered",

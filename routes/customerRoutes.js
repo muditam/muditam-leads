@@ -354,7 +354,7 @@ router.get("/api/customers/counts", async (req, res) => {
   } catch (err) {
     console.error("Error fetching counts:", err);
     res.status(500).json({ message: "Server error", error: err.message });
-  }
+  } 
 });
  
 
@@ -367,11 +367,11 @@ router.get('/api/customers/export-csv', async (req, res) => {
     const filtersObj = JSON.parse(filters);
     const tagsArray = JSON.parse(tags);
 
-    const query = {};
+    const matchQuery = {};
 
     if (filtersObj.search) {
       const searchRegex = new RegExp(filtersObj.search, 'i');
-      query.$or = [
+      matchQuery.$or = [
         { name: searchRegex },
         { phone: searchRegex },
         { location: searchRegex },
@@ -379,11 +379,11 @@ router.get('/api/customers/export-csv', async (req, res) => {
     }
 
     if (status) {
-      query['presales.leadStatus'] = status;
+      matchQuery['presales.leadStatus'] = status;
     }
 
     if (tagsArray.length > 0) {
-      query.tags = { $in: tagsArray };
+      matchQuery.tags = { $in: tagsArray };
     }
 
     const fields = [
@@ -401,7 +401,35 @@ router.get('/api/customers/export-csv', async (req, res) => {
       { label: 'Presales Lead Status', value: 'presalesLeadStatus' },
     ];
 
-    const customers = await Customer.find(query).lean();
+    const customers = await Customer.aggregate([
+      { $match: matchQuery },
+      {
+        $lookup: {
+          from: 'consultationdetails', // this should match the actual collection name in MongoDB
+          localField: '_id',
+          foreignField: 'customerId',
+          as: 'consultationDetails'
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          phone: 1,
+          age: 1,
+          location: 1,
+          lookingFor: 1,
+          assignedTo: 1,
+          followUpDate: 1,
+          leadSource: 1,
+          leadDate: 1,
+          createdAt: 1,
+          dateAndTime: 1,
+          presalesLeadStatus: {
+            $ifNull: [{ $arrayElemAt: ['$consultationDetails.presales.leadStatus', 0] }, '']
+          }
+        }
+      }
+    ]);
 
     const formattedData = customers.map(c => ({
       name: c.name,
@@ -415,7 +443,7 @@ router.get('/api/customers/export-csv', async (req, res) => {
       leadDate: c.leadDate ? new Date(c.leadDate).toLocaleDateString() : '',
       createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '',
       dateAndTime: c.dateAndTime ? new Date(c.dateAndTime).toLocaleString() : '',
-      presalesLeadStatus: c.presales?.leadStatus || '',
+      presalesLeadStatus: c.presalesLeadStatus || '',
     }));
 
     const parser = new Parser({ fields });
@@ -424,12 +452,12 @@ router.get('/api/customers/export-csv', async (req, res) => {
     res.header('Content-Type', 'text/csv');
     res.attachment('customers.csv');
     res.send(csv);
-
   } catch (err) {
     console.error('CSV export error:', err);
     res.status(500).send('Internal Server Error');
   }
-});  
+});
+  
 
 
 
