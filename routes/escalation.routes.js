@@ -70,19 +70,30 @@ router.post('/', upload.array('attachedFiles'), async (req, res) => {
 // Update escalation (editable fields only)
 router.put('/:id', async (req, res) => {
   try {
-    const updateFields = {
-      status: req.body.status,
-      assignedTo: req.body.assignedTo,
-      remark: req.body.remark,
-      resolvedDate: req.body.resolvedDate,
-    };
+    const updateFields = {};
 
-    const updated = await Escalation.findByIdAndUpdate(req.params.id, updateFields, { new: true });
+    if (req.body.status !== undefined) updateFields.status = req.body.status;
+    if (req.body.assignedTo !== undefined) updateFields.assignedTo = req.body.assignedTo;
+    if (req.body.remark !== undefined) updateFields.remark = req.body.remark;
+    if (req.body.resolvedDate !== undefined) updateFields.resolvedDate = req.body.resolvedDate;
+
+    const updated = await Escalation.findByIdAndUpdate(
+      req.params.id,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Escalation not found' });
+    }
+
     res.json(updated);
   } catch (err) {
+    console.error('Failed to update escalation:', err);
     res.status(500).json({ error: 'Failed to update escalation' });
   }
 });
+
 
 // Delete escalation by ID
 router.delete('/:id', async (req, res) => {
