@@ -82,7 +82,7 @@ router.put('/:id', async (req, res) => {
       { $set: updateFields },
       { new: true }
     );
-
+ 
     if (!updated) {
       return res.status(404).json({ error: 'Escalation not found' });
     }

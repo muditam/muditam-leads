@@ -470,6 +470,139 @@ cron.schedule('0 8 * * *', async () => {
   }
 });
 
+// Utility: Normalize phone (strip +91, spaces etc)
+function normalizePhone(phone) {
+  if (!phone) return "";
+  const cleaned = phone.replace(/\D/g, '').replace(/^91/, '');
+  return cleaned.length === 10 ? cleaned : "";
+}
+
+
+// Function: fetch Shopify customers by phone (phone numbers normalized for matching)
+async function fetchShopifyFirstOrderDateByPhone(phone) {
+  if (!phone) return null;
+
+  const shopifyBase = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04`;
+
+  try {
+    console.log(`Fetching Shopify customer for phone: ${phone}`);
+
+    // Fetch customers by phone
+    const customerRes = await axios.get(`${shopifyBase}/customers.json`, {
+      params: { phone },
+      headers: {
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+        "Content-Type": "application/json",
+      },
+    });
+
+    const customers = customerRes.data.customers;
+
+    if (!customers || customers.length === 0) {
+      console.log(`No Shopify customers found for phone: ${phone}`);
+      return null;
+    }
+
+    const customer = customers[0];
+
+    if (!customer.orders_count || customer.orders_count === 0) {
+      console.log(`Customer ${customer.id} has no orders`);
+      return null;
+    }
+
+    console.log(`Fetching orders for customer ID: ${customer.id}`);
+
+    // Fetch orders for this customer sorted by created_at ascending
+    const ordersRes = await axios.get(`${shopifyBase}/orders.json`, {
+      params: {
+        customer_id: customer.id,
+        status: 'any',
+        limit: 250,
+        order: 'created_at asc',
+      },
+      headers: {
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+        "Content-Type": "application/json",
+      },
+    });
+
+    const orders = ordersRes.data.orders;
+
+    if (!orders || orders.length === 0) {
+      console.log(`No orders found for customer ID: ${customer.id}`);
+      return null;
+    }
+
+    const firstOrderDate = orders[0].created_at.split('T')[0];
+    console.log(`First order date for customer ID ${customer.id} is ${firstOrderDate}`);
+    return firstOrderDate;
+  } catch (error) {
+    console.error("Error fetching Shopify first order date:", error.message);
+    return null;
+  }
+}
+
+app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
+  try {
+    console.log("Starting update of lastOrderDate from Shopify...");
+
+    // Step 1: Get leads with missing lastOrderDate and salesStatus = "Sales Done"
+    const leadsToUpdate = await Lead.find({
+      $and: [
+        {
+          $or: [
+            { lastOrderDate: { $exists: false } },
+            { lastOrderDate: null },
+            { lastOrderDate: "" }
+          ]
+        },
+        { salesStatus: "Sales Done" }
+      ]
+    }, "contactNumber lastOrderDate");
+
+    console.log(`Found ${leadsToUpdate.length} Sales Done leads needing lastOrderDate update`);
+
+    if (!leadsToUpdate.length) {
+      return res.json({ message: "No leads require lastOrderDate update" });
+    }
+
+    // Step 2: Normalize phone numbers and map to lead IDs
+    const phoneToLeadsMap = {};
+
+    leadsToUpdate.forEach((lead) => {
+      const phone = normalizePhone(lead.contactNumber);
+      if (!phone) return;
+      if (!phoneToLeadsMap[phone]) phoneToLeadsMap[phone] = [];
+      phoneToLeadsMap[phone].push(lead._id);
+    });
+
+    // Step 3: Process each unique phone only once
+    let updatedCount = 0;
+
+    for (const phone of Object.keys(phoneToLeadsMap)) {
+      console.log(`Fetching Shopify data for phone: ${phone}`);
+      const firstOrderDate = await fetchShopifyFirstOrderDateByPhone(phone);
+
+      if (firstOrderDate) {
+        // Update all leads with this phone
+        await Lead.updateMany(
+          { _id: { $in: phoneToLeadsMap[phone] } },
+          { lastOrderDate: firstOrderDate }
+        );
+        console.log(`Updated ${phoneToLeadsMap[phone].length} leads for phone ${phone}`);
+        updatedCount += phoneToLeadsMap[phone].length;
+      } else {
+        console.log(`No order date found for phone: ${phone}`);
+      }
+    }
+
+    console.log(`Update completed. Total leads updated: ${updatedCount}`);
+    res.json({ message: `Updated lastOrderDate for ${updatedCount} leads from Shopify` });
+  } catch (error) {
+    console.error("Error updating lastOrderDate from Shopify:", error);
+    res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+}); 
  
 const upload = multer({
   dest: "uploads/",
@@ -1338,6 +1471,8 @@ app.post('/api/leads/transfer-approve', async (req, res) => {
     return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 });
+
+
   
 app.get('/api/leads/:id', async (req, res) => {
   try {
@@ -1384,140 +1519,6 @@ app.get('/api/leads/transfer-requests/all', async (req, res) => {
   }
 });
  
-
-// Utility: Normalize phone (strip +91, spaces etc)
-// function normalizePhone(phone) {
-//   if (!phone) return "";
-//   return phone.replace(/\D/g, '').replace(/^91/, '');
-// }
-
-// // Function: fetch Shopify customers by phone (phone numbers normalized for matching)
-// async function fetchShopifyFirstOrderDateByPhone(phone) {
-//   if (!phone) return null;
-
-//   const shopifyBase = `https://${process.env.SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04`;
-
-//   try {
-//     console.log(`Fetching Shopify customer for phone: ${phone}`);
-
-//     // Fetch customers by phone
-//     const customerRes = await axios.get(`${shopifyBase}/customers.json`, {
-//       params: { phone },
-//       headers: {
-//         "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
-//         "Content-Type": "application/json",
-//       },
-//     });
-
-//     const customers = customerRes.data.customers;
-
-//     if (!customers || customers.length === 0) {
-//       console.log(`No Shopify customers found for phone: ${phone}`);
-//       return null;
-//     }
-
-//     const customer = customers[0];
-
-//     if (!customer.orders_count || customer.orders_count === 0) {
-//       console.log(`Customer ${customer.id} has no orders`);
-//       return null;
-//     }
-
-//     console.log(`Fetching orders for customer ID: ${customer.id}`);
-
-//     // Fetch orders for this customer sorted by created_at ascending
-//     const ordersRes = await axios.get(`${shopifyBase}/orders.json`, {
-//       params: {
-//         customer_id: customer.id,
-//         status: 'any',
-//         limit: 250,
-//         order: 'created_at asc',
-//       },
-//       headers: {
-//         "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
-//         "Content-Type": "application/json",
-//       },
-//     });
-
-//     const orders = ordersRes.data.orders;
-
-//     if (!orders || orders.length === 0) {
-//       console.log(`No orders found for customer ID: ${customer.id}`);
-//       return null;
-//     }
-
-//     const firstOrderDate = orders[0].created_at.split('T')[0];
-//     console.log(`First order date for customer ID ${customer.id} is ${firstOrderDate}`);
-//     return firstOrderDate;
-//   } catch (error) {
-//     console.error("Error fetching Shopify first order date:", error.message);
-//     return null;
-//   }
-// }
-
-// app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
-//   try {
-//     console.log("Starting update of lastOrderDate from Shopify...");
-
-//     // Step 1: Get leads with missing lastOrderDate and salesStatus = "Sales Done"
-//     const leadsToUpdate = await Lead.find({
-//       $and: [
-//         {
-//           $or: [
-//             { lastOrderDate: { $exists: false } },
-//             { lastOrderDate: null },
-//             { lastOrderDate: "" }
-//           ]
-//         },
-//         { salesStatus: "Sales Done" }
-//       ]
-//     }, "contactNumber lastOrderDate");
-
-//     console.log(`Found ${leadsToUpdate.length} Sales Done leads needing lastOrderDate update`);
-
-//     if (!leadsToUpdate.length) {
-//       return res.json({ message: "No leads require lastOrderDate update" });
-//     }
-
-//     // Step 2: Normalize phone numbers and map to lead IDs
-//     const phoneToLeadsMap = {};
-
-//     leadsToUpdate.forEach((lead) => {
-//       const phone = normalizePhone(lead.contactNumber);
-//       if (!phone) return;
-//       if (!phoneToLeadsMap[phone]) phoneToLeadsMap[phone] = [];
-//       phoneToLeadsMap[phone].push(lead._id);
-//     });
-
-//     // Step 3: Process each unique phone only once
-//     let updatedCount = 0;
-
-//     for (const phone of Object.keys(phoneToLeadsMap)) {
-//       console.log(`Fetching Shopify data for phone: ${phone}`);
-//       const firstOrderDate = await fetchShopifyFirstOrderDateByPhone(phone);
-
-//       if (firstOrderDate) {
-//         // Update all leads with this phone
-//         await Lead.updateMany(
-//           { _id: { $in: phoneToLeadsMap[phone] } },
-//           { lastOrderDate: firstOrderDate }
-//         );
-//         console.log(`Updated ${phoneToLeadsMap[phone].length} leads for phone ${phone}`);
-//         updatedCount += phoneToLeadsMap[phone].length;
-//       } else {
-//         console.log(`No order date found for phone: ${phone}`);
-//       }
-//     }
-
-//     console.log(`Update completed. Total leads updated: ${updatedCount}`);
-//     res.json({ message: `Updated lastOrderDate for ${updatedCount} leads from Shopify` });
-//   } catch (error) {
-//     console.error("Error updating lastOrderDate from Shopify:", error);
-//     res.status(500).json({ message: "Internal server error", error: error.message });
-//   }
-// });
-
-
 
 app.get('/api/reachout-logs/count', async (req, res) => {
   try {
