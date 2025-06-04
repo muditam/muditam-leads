@@ -131,6 +131,14 @@ router.get("/api/customers", async (req, res) => {
     if (tags.includes("New Lead")) {
       orClauses.push({ "presales.leadStatus": "New Lead" });
     }
+    if (tags.includes("No Agents")) {
+      orClauses.push({
+        $or: [
+          { "presales.assignExpert": { $exists: false } },
+          { "presales.assignExpert": null }
+        ]
+      });
+    }
     if (orClauses.length) {
       postMatch.$or = orClauses;
     }

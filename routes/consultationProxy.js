@@ -32,7 +32,7 @@ const priceMap = {
   },
   "Vasant Kusmakar Ras": {
     "1 month": 2995,
-    "2 months": 2995,
+    "2 months": 5800,
     "3 months": 2995,
     "4 months": 5800,
   },
@@ -113,7 +113,7 @@ const variantMap = {
   },
   "Vasant Kusmakar Ras": {
     "1 month": "48319092949302",
-    "2 months": "48319092949302",
+    "2 months": "48791244603702",
     "3 months": "48319092949302",
     "4 months": "48319093014838",
   },
