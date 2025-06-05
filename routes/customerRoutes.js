@@ -131,7 +131,7 @@ router.get("/api/customers", async (req, res) => {
     if (tags.includes("New Lead")) {
       orClauses.push({ "presales.leadStatus": "New Lead" });
     }
-    if (tags.includes("No Agents")) {
+    if (tags.includes("No RT Agents")) {
       orClauses.push({
         $or: [
           { "presales.assignExpert": { $exists: false } },
@@ -366,9 +366,6 @@ router.get("/api/customers/counts", async (req, res) => {
 });
  
 
-
-
-
 router.get('/api/customers/export-csv', async (req, res) => {
   try {
     const { filters = '{}', status = '', tags = '[]' } = req.query;
@@ -407,6 +404,7 @@ router.get('/api/customers/export-csv', async (req, res) => {
       { label: 'Created At', value: 'createdAt' },
       { label: 'Date and Time', value: 'dateAndTime' },
       { label: 'Presales Lead Status', value: 'presalesLeadStatus' },
+      { label: 'Assigned Expert', value: 'assignedExpertName' },
     ];
 
     const customers = await Customer.aggregate([
@@ -434,6 +432,16 @@ router.get('/api/customers/export-csv', async (req, res) => {
           dateAndTime: 1,
           presalesLeadStatus: {
             $ifNull: [{ $arrayElemAt: ['$consultationDetails.presales.leadStatus', 0] }, '']
+          },
+          assignedExpertName: {
+            $ifNull: [
+              {
+                $arrayElemAt: [
+                  '$assignedExperts.fullName', 0
+                ]
+              },
+              ''
+            ]
           }
         }
       }
@@ -452,6 +460,7 @@ router.get('/api/customers/export-csv', async (req, res) => {
       createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '',
       dateAndTime: c.dateAndTime ? new Date(c.dateAndTime).toLocaleString() : '',
       presalesLeadStatus: c.presalesLeadStatus || '',
+      assignedExpertName: c.assignedExpertName || '',
     }));
 
     const parser = new Parser({ fields });
