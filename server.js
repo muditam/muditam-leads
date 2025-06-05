@@ -340,6 +340,25 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
   return totalFetched;
 };
 
+// POST /api/leads/by-phones
+app.post('/api/leads/by-phones', async (req, res) => {
+  const { phoneNumbers } = req.body;
+  if (!Array.isArray(phoneNumbers)) {
+    return res.status(400).json({ message: 'phoneNumbers should be an array' });
+  }
+
+  const cleanedPhones = phoneNumbers.map((phone) => phone.replace(/[^\d]/g, ""));
+  try {
+    const leads = await Lead.find({
+      contactNumber: { $in: cleanedPhones },
+    });
+
+    res.json(leads);
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
 
 app.post('/api/shipway/fetch-orders', async (req, res) => {
   try {
