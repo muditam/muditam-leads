@@ -411,10 +411,36 @@ router.get('/api/customers/export-csv', async (req, res) => {
       { $match: matchQuery },
       {
         $lookup: {
-          from: 'consultationdetails', // this should match the actual collection name in MongoDB
+          from: 'consultationdetails',
           localField: '_id',
           foreignField: 'customerId',
           as: 'consultationDetails'
+        }
+      },
+      {
+        $addFields: {
+          consultationDetail: { $arrayElemAt: ['$consultationDetails', 0] }
+        }
+      },
+      {
+        $lookup: {
+          from: 'employees',
+          localField: 'consultationDetail.presales.assignExpert',
+          foreignField: '_id',
+          as: 'assignedExpertDetails'
+        }
+      },
+      {
+        $addFields: {
+          assignedExpertName: {
+            $ifNull: [
+              { $arrayElemAt: ['$assignedExpertDetails.fullName', 0] },
+              { $arrayElemAt: ['$assignedExpertDetails.agentName', 0] }
+            ]
+          },
+          presalesLeadStatus: {
+            $ifNull: ['$consultationDetail.presales.leadStatus', '']
+          }
         }
       },
       {
@@ -430,19 +456,8 @@ router.get('/api/customers/export-csv', async (req, res) => {
           leadDate: 1,
           createdAt: 1,
           dateAndTime: 1,
-          presalesLeadStatus: {
-            $ifNull: [{ $arrayElemAt: ['$consultationDetails.presales.leadStatus', 0] }, '']
-          },
-          assignedExpertName: {
-            $ifNull: [
-              {
-                $arrayElemAt: [
-                  '$assignedExperts.fullName', 0
-                ]
-              },
-              ''
-            ]
-          }
+          presalesLeadStatus: 1,
+          assignedExpertName: 1,
         }
       }
     ]);
@@ -475,8 +490,6 @@ router.get('/api/customers/export-csv', async (req, res) => {
   }
 });
   
-
-
 
 
 // Fetch a single customer by ID
