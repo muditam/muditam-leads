@@ -455,15 +455,12 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
 });
 
 
-
-
-
 // Cron job to update shipment status every hour
 cron.schedule('0 8 * * *', async () => { 
   try {
     const orders = await Order.find({});
     for (const order of orders) {
-      try { 
+      try {  
         if (!order.order_date) continue;
 
         // Skip update if status is final

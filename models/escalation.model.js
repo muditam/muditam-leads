@@ -9,7 +9,7 @@ const EscalationSchema = new mongoose.Schema({
   query: String,
   attachedFileUrls: [String],  
   status: { type: String, default: 'Open' },
-  assignedTo: String,
+  assignedTo: String, 
   remark: String,
   resolvedDate: String,
 }, { timestamps: true });
