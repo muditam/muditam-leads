@@ -350,7 +350,7 @@ app.post('/api/leads/by-phones', async (req, res) => {
   const cleanedPhones = phoneNumbers.map((phone) => phone.replace(/[^\d]/g, ""));
   try {
     const leads = await Lead.find({
-      contactNumber: { $in: cleanedPhones },
+      contactNumber: { $in: cleanedPhones }, 
     });
 
     res.json(leads);

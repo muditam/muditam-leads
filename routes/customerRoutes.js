@@ -131,6 +131,9 @@ router.get("/api/customers", async (req, res) => {
     if (tags.includes("New Lead")) {
       orClauses.push({ "presales.leadStatus": "New Lead" });
     }
+    if (tags.includes("Call Back Later")) {
+      orClauses.push({ "presales.leadStatus": "Call Back Later" });
+    }
     if (tags.includes("No RT Agents")) {
       orClauses.push({
         $or: [
