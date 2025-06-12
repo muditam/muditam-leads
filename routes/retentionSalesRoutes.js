@@ -915,52 +915,93 @@ router.get("/api/shipment-summary", async (req, res) => {
     const retentionQuery = { orderCreatedBy: agentName };
     if (startDate || endDate) {
       retentionQuery.date = {};
-      if (startDate) {
-        retentionQuery.date.$gte = startDate;
-      }
-      if (endDate) {
-        retentionQuery.date.$lte = endDate;
-      }
+      if (startDate) retentionQuery.date.$gte = startDate;
+      if (endDate) retentionQuery.date.$lte = endDate;
     }
-    const retentionSales = await RetentionSales.find(retentionQuery).lean();
 
-    // ----------------------------
-    // 2. Fetch MyOrders Data
-    // ----------------------------
-    const myOrderQuery = { agentName };
-    if (startDate || endDate) {
-      myOrderQuery.orderDate = {};
-      if (startDate) {
-        myOrderQuery.orderDate.$gte = new Date(startDate);
-      }
-      if (endDate) {
-        const endDateObj = new Date(endDate);
-        endDateObj.setHours(23, 59, 59, 999);
-        myOrderQuery.orderDate.$lte = endDateObj;
-      }
-    }
-    const myOrders = await MyOrder.find(myOrderQuery).lean();
-
-    // Transform MyOrder documents into the same shape
-    const transformedMyOrders = myOrders.map((order) => {
-      const upsellAmount = Number(order.upsellAmount) || 0;
-      const totalPrice = Number(order.totalPrice) || 0;
-      const amountPaid = upsellAmount > 0 ? upsellAmount : totalPrice;
+    const retentionSalesRaw = await RetentionSales.find(retentionQuery).lean();
+    const retentionSales = retentionSalesRaw.map((sale) => {
+      const status = sale.shipway_status || sale.shipment_status || "";
+      const normalizedStatus = status.trim() || "Unknown";
       return {
-        date: order.orderDate
-          ? new Date(order.orderDate).toISOString().split("T")[0]
-          : "",
-        shipway_status: order.shipway_status?.trim() || "Unknown",
-        amountPaid,
+        date: sale.date,
+        shipway_status: normalizedStatus,
+        amountPaid: Number(sale.amountPaid) || 0,
       };
     });
+
+    // ----------------------------
+    // 2. Fetch MyOrders with $lookup from Order collection
+    // ----------------------------
+    const matchStage = { agentName };
+    if (startDate || endDate) {
+      matchStage.orderDate = {};
+      if (startDate) matchStage.orderDate.$gte = new Date(startDate);
+      if (endDate) {
+        const endObj = new Date(endDate);
+        endObj.setHours(23, 59, 59, 999);
+        matchStage.orderDate.$lte = endObj;
+      }
+    }
+
+    const myOrders = await MyOrder.aggregate([
+      { $match: matchStage },
+      {
+        $addFields: {
+          normalizedOrderId: {
+            $cond: [
+              { $eq: [{ $substrCP: ["$orderId", 0, 1] }, "#"] },
+              { $substrCP: ["$orderId", 1, { $subtract: [{ $strLenCP: "$orderId" }, 1] }] },
+              "$orderId"
+            ]
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: "orders",
+          localField: "normalizedOrderId",
+          foreignField: "order_id",
+          as: "orderDoc"
+        }
+      },
+      {
+        $unwind: {
+          path: "$orderDoc",
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $project: {
+          orderDate: 1,
+          amountPaid: {
+            $cond: [
+              { $gt: ["$upsellAmount", 0] },
+              { $toDouble: "$upsellAmount" },
+              { $toDouble: "$totalPrice" }
+            ]
+          },
+          shipway_status: {
+            $ifNull: ["$orderDoc.shipment_status", "Unknown"]
+          }
+        }
+      }
+    ]);
+
+    const transformedMyOrders = myOrders.map((order) => ({
+      date: order.orderDate
+        ? new Date(order.orderDate).toISOString().split("T")[0]
+        : "",
+      shipway_status: order.shipway_status?.trim() || "Unknown",
+      amountPaid: order.amountPaid || 0,
+    }));
 
     // ----------------------------
     // 3. Combine & Aggregate Data
     // ----------------------------
     const combinedSales = [...retentionSales, ...transformedMyOrders];
-
     const statusMap = {};
+
     combinedSales.forEach((sale) => {
       const status = sale.shipway_status?.trim() || "Unknown";
       if (!statusMap[status]) {
@@ -976,7 +1017,9 @@ router.get("/api/shipment-summary", async (req, res) => {
       0
     );
 
-    // Build the summary array
+    // ----------------------------
+    // 4. Build Final Summary
+    // ----------------------------
     const summary = [
       {
         label: "Total Orders",

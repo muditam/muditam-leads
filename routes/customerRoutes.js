@@ -1,7 +1,7 @@
 const express = require("express");
 const mongoose = require('mongoose');
 const Customer = require("../models/Customer");
-const Employee = require("../models/Employee");  // Used for "Assigned To" dropdown if needed
+const Employee = require("../models/Employee");   
 const ConsultationDetails = require("../models/ConsultationDetails");
 const router = express.Router();
 const { Parser } = require("json2csv");
@@ -12,7 +12,7 @@ const { Transform } = require('json2csv');
 router.post("/api/customers", async (req, res) => {
   const { name, phone, age, location, lookingFor, assignedTo, followUpDate, leadSource, leadDate } = req.body;
   
-  if (!name || !phone || !age || !location || !lookingFor || !assignedTo || !followUpDate || !leadSource || !leadDate ) {
+  if (!name || !phone || !age || !lookingFor || !assignedTo || !followUpDate || !leadSource || !leadDate ) {
     return res.status(400).json({ message: "All fields are required." });
   }
 
@@ -30,7 +30,7 @@ router.post("/api/customers", async (req, res) => {
       location,
       lookingFor,
       assignedTo,
-      followUpDate,
+      followUpDate, 
       leadSource,
       leadDate,
     });

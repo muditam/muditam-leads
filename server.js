@@ -307,7 +307,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
         };
 
         if (contactNumber) {
-          updateFields.contact_number = contactNumber;
+          updateFields.contact_number = contactNumber; 
           console.log(`Updating order ${normalizedOrderId} with contact number: ${contactNumber}`);
         } else {
           console.log(`Order ${normalizedOrderId} has NO contact number. Skipping contact update.`);
@@ -383,7 +383,7 @@ app.get('/api/shipway/orders', async (req, res) => {
     let filter = {};
     if (startDate || endDate) {
       filter.order_date = {};
-      if (startDate) {
+      if (startDate) { 
         filter.order_date.$gte = new Date(startDate);
       }
       if (endDate) {
