@@ -9,7 +9,7 @@ router.post("/", async (req, res) => {
       phone,
       shippingAddress,
       paymentStatus,
-      productOrdered,
+      productOrdered, 
       orderDate,
       orderId,
       totalPrice,

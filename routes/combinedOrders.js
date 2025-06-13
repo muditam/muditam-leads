@@ -4,6 +4,7 @@ const router = express.Router();
 const Lead = require("../models/Lead");
 const MyOrder = require("../models/MyOrder");
 const Employee = require("../models/Employee");
+const Order = require("../models/Order");
 
 
 // =====================
@@ -69,20 +70,12 @@ router.get("/", async (req, res) => {
     const limitNumber = parseInt(limit, 10) || 30;
     const skip = (pageNumber - 1) * limitNumber;
 
-
-    // -------------------------------
-    // Build filters for Lead collection
-    // -------------------------------
-    const leadMatch = {  
+    const leadMatch = {
       salesStatus: "Sales Done",
-      agentAssigned: { $nin: ['Admin', 'Online Order'] }
+      agentAssigned: { $nin: ["Admin", "Online Order"] },
     };
-    if (filters.name) {
-      leadMatch.name = { $regex: filters.name, $options: "i" };
-    }
-    if (filters.contactNumber) {
-      leadMatch.contactNumber = { $regex: filters.contactNumber, $options: "i" };
-    }
+    if (filters.name) leadMatch.name = { $regex: filters.name, $options: "i" };
+    if (filters.contactNumber) leadMatch.contactNumber = { $regex: filters.contactNumber, $options: "i" };
     if (filters.agentName) {
       const arr = Array.isArray(filters.agentName) ? filters.agentName : [filters.agentName];
       leadMatch.agentAssigned = { $in: arr };
@@ -92,7 +85,7 @@ router.get("/", async (req, res) => {
         leadMatch.$or = [
           { healthExpertAssigned: { $exists: false } },
           { healthExpertAssigned: "" },
-          { healthExpertAssigned: { $regex: /^\s*$/ } }
+          { healthExpertAssigned: { $regex: /^\s*$/ } },
         ];
       } else {
         leadMatch.healthExpertAssigned = { $regex: filters.healthExpertAssigned, $options: "i" };
@@ -121,17 +114,9 @@ router.get("/", async (req, res) => {
       leadMatch.lastOrderDate = { $gte: start, $lt: end };
     }
 
-
-    // -------------------------------
-    // Build filters for MyOrder collection
-    // -------------------------------
     const myOrderMatch = {};
-    if (filters.name) {
-      myOrderMatch.customerName = { $regex: filters.name, $options: "i" };
-    }
-    if (filters.contactNumber) {
-      myOrderMatch.phone = { $regex: filters.contactNumber, $options: "i" };
-    }
+    if (filters.name) myOrderMatch.customerName = { $regex: filters.name, $options: "i" };
+    if (filters.contactNumber) myOrderMatch.phone = { $regex: filters.contactNumber, $options: "i" };
     if (filters.agentName) {
       const arr = Array.isArray(filters.agentName) ? filters.agentName : [filters.agentName];
       myOrderMatch.agentName = { $in: arr };
@@ -159,14 +144,11 @@ router.get("/", async (req, res) => {
       myOrderMatch.orderDate = { $gte: start, $lt: end };
     }
 
-
-    // -------------------------------
-    // Aggregation pipeline for Lead collection
-    // -------------------------------
     const leadPipeline = [
       { $match: leadMatch },
       { $addFields: { isLead: 1 } },
-      { $project: {
+      {
+        $project: {
           orderDate: "$lastOrderDate",
           name: "$name",
           contactNumber: "$contactNumber",
@@ -177,96 +159,138 @@ router.get("/", async (req, res) => {
           remarkForHE: "$agentsRemarks",
           amountPaid: "$amountPaid",
           modeOfPayment: "$modeOfPayment",
-          isLead: 1
-      } }
+          isLead: 1,
+          shipment_status: "N/A"
+        },
+      },
     ];
 
-
-    // -------------------------------
-    // Aggregation pipeline for MyOrder collection with lookup to Lead collection
-    // -------------------------------
-    // Aggregation pipeline for MyOrder collection with lookup to Lead collection
-const myOrderPipeline = [
-  { $match: myOrderMatch },
-  {
-    $lookup: {
-      from: "employees",
-      localField: "agentName",
-      foreignField: "fullName",
-      as: "employeeData"
-    }
-  },
-  {
-    $match: {
-      employeeData: { $elemMatch: { role: "Sales Agent" } }
-    }
-  },
-  // Lookup from Lead collection based on matching "phone" (from MyOrder) to "contactNumber" (in Lead)
-  {
-    $lookup: {
-      from: "leads",
-      localField: "phone",
-      foreignField: "contactNumber",
-      as: "leadData"
-    }
-  },
-  // Extract the healthExpertAssigned field from the first matching lead document, if any
-  {
-    $addFields: {
-      healthExpertAssigned: {
-        $ifNull: [
-          {
-            $arrayElemAt: [
+    const myOrderPipeline = [
+      { $match: myOrderMatch },
+      {
+        $lookup: {
+          from: "employees",
+          localField: "agentName",
+          foreignField: "fullName",
+          as: "employeeData",
+        },
+      },
+      {
+        $match: {
+          employeeData: { $elemMatch: { role: "Sales Agent" } },
+        },
+      },
+      {
+        $lookup: {
+          from: "leads",
+          localField: "phone",
+          foreignField: "contactNumber",
+          as: "leadData",
+        },
+      },
+      {
+        $addFields: {
+          healthExpertAssigned: {
+            $ifNull: [
               {
-                $map: {
-                  input: "$leadData",
-                  as: "ld",
-                  in: "$$ld.healthExpertAssigned"
-                }
+                $arrayElemAt: [
+                  {
+                    $map: {
+                      input: "$leadData",
+                      as: "ld",
+                      in: "$$ld.healthExpertAssigned",
+                    },
+                  },
+                  0,
+                ],
               },
-              0
-            ]
+              "$healthExpertAssigned",
+            ],
           },
-          "$healthExpertAssigned"
-        ]
-      }
-    }
-  },
-  { $addFields: { isLead: 0 } },
-  {
-    $project: {
-      orderDate: "$orderDate",
-      name: "$customerName",
-      contactNumber: "$phone",
-      agentName: "$agentName",
-      productsOrdered: "$productOrdered",
-      dosageOrdered: "$dosageOrdered",
-      healthExpertAssigned: 1,
-      remarkForHE: "$selfRemark",
-      amountPaid: "$totalPrice",
-      modeOfPayment: "$paymentMethod",
-      isLead: "$isLead"
-    }
-  }
-];
+        },
+      },
+      {
+        $addFields: {
+          cleanedOrderId: { $trim: { input: { $substrCP: ["$orderId", 1, { $strLenCP: "$orderId" }] } } }
+        }
+      },
+      {
+        $lookup: {
+          from: "orders",
+          let: { cleanId: "$cleanedOrderId" },
+          pipeline: [
+            {
+              $addFields: {
+                order_id_cleaned: { $trim: { input: "$order_id" } }
+              }
+            },
+            {
+              $match: {
+                $expr: {
+                  $eq: [
+                    { $toLower: "$order_id_cleaned" },
+                    { $toLower: "$$cleanId" }
+                  ]
+                }
+              }
+            }
+          ],
+          as: "shipmentData"
+        }
+      },
+      {
+        $addFields: {
+          shipment_status: {
+            $ifNull: [
+              {
+                $arrayElemAt: [
+                  {
+                    $map: {
+                      input: "$shipmentData",
+                      as: "sd",
+                      in: "$$sd.shipment_status"
+                    }
+                  },
+                  0
+                ]
+              },
+              "Not Available",
+            ],
+          },
+        },
+      },
+      { $addFields: { isLead: 0 } },
+      {
+        $project: {
+          orderDate: "$orderDate",
+          name: "$customerName",
+          contactNumber: "$phone",
+          agentName: "$agentName",
+          productsOrdered: "$productOrdered",
+          dosageOrdered: "$dosageOrdered",
+          healthExpertAssigned: 1,
+          remarkForHE: "$selfRemark",
+          amountPaid: "$totalPrice",
+          modeOfPayment: "$paymentMethod",
+          isLead: "$isLead",
+          shipment_status: 1,
+        },
+      },
+    ];
 
-
-
-
-    // -------------------------------
-    // Combine both pipelines using $unionWith
-    // -------------------------------
     const unionPipeline = [
       ...leadPipeline,
-      { $unionWith: { coll: "myorders", pipeline: myOrderPipeline } }
+      { $unionWith: { coll: "myorders", pipeline: myOrderPipeline } },
     ];
 
-
-    // Sorting, grouping, and pagination
     const sortStage = { $sort: { isLead: -1, orderDate: -1 } };
     const groupStage = {
       $group: {
-        _id: { contactNumber: "$contactNumber", orderDate: "$orderDate", name: "$name" },
+        _id: {
+          contactNumber: "$contactNumber",
+          orderDate: "$orderDate",
+          name: "$name",
+        },
         orderDate: { $first: "$orderDate" },
         name: { $first: "$name" },
         contactNumber: { $first: "$contactNumber" },
@@ -277,39 +301,38 @@ const myOrderPipeline = [
         remarkForHE: { $first: "$remarkForHE" },
         amountPaid: { $first: "$amountPaid" },
         modeOfPayment: { $first: "$modeOfPayment" },
-        isLead: { $first: "$isLead" }
-      }
+        isLead: { $first: "$isLead" },
+        shipment_status: { $first: "$shipment_status" },
+      },
     };
+
     const finalSort = { $sort: { orderDate: -1 } };
     const facetStage = {
       $facet: {
         data: [{ $skip: skip }, { $limit: limitNumber }],
-        totalCount: [{ $count: "total" }]
-      }
+        totalCount: [{ $count: "total" }],
+      },
     };
-
 
     const aggregationPipeline = [
       ...unionPipeline,
       sortStage,
       groupStage,
       finalSort,
-      facetStage
+      facetStage,
     ];
-
 
     const results = await Lead.aggregate(aggregationPipeline);
     const combinedData = results[0].data;
     const totalCount = results[0].totalCount[0] ? results[0].totalCount[0].total : 0;
     const totalPages = Math.ceil(totalCount / limitNumber);
 
-
     res.status(200).json({
       orders: combinedData,
       total: totalCount,
       page: pageNumber,
       limit: limitNumber,
-      totalPages
+      totalPages,
     });
   } catch (error) {
     console.error("Error fetching combined orders:", error);
@@ -335,13 +358,13 @@ router.put("/update-by-contact", async (req, res) => {
     // Update all MyOrder documents matching the phone number
     const orderResult = await MyOrder.updateMany(
       { phone: contactNumber },
-  { $set: { healthExpertAssigned } },
-  { strict: false }
+      { $set: { healthExpertAssigned } },
+      { strict: false }
     );
     // Optionally, fetch updated records to return
     const updatedLeads = await Lead.find({ contactNumber });
     const updatedOrders = await MyOrder.find({ phone: contactNumber });
-    console.log("updated orders",updatedOrders)
+    console.log("updated orders", updatedOrders)
     if (updatedLeads.length === 0 && updatedOrders.length === 0) {
       return res.status(404).json({ message: "No record found with the provided contact number." });
     }
