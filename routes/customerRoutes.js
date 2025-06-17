@@ -88,18 +88,18 @@ router.get("/api/customers", async (req, res) => {
       postMatch["presales.leadStatus"] = "Sales Done";
     } else if (status === "Lost") {
       postMatch["presales.leadStatus"] = {
-        $in: ["General Query", "Fake Lead", "Invalid Number", "Not Interested", "Ordered from Other Sources", "Budget issue"],
+        $in: ["General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost", "Ordered from Other Sources", "Budget issue"],
       };
     }
 
     const orClauses = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
+    const tomorrow = new Date(today); 
     tomorrow.setDate(tomorrow.getDate() + 1);
     const afterTomorrow = new Date(tomorrow);
     afterTomorrow.setDate(afterTomorrow.getDate() + 1);
-    const deadStatuses = ["Switch Off", "General Query", "Fake Lead", "Invalid Number", "Not Interested"];
+    const deadStatuses = ["Switch Off", "General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost"];
 
     if (tags.includes("Missed")) {
       orClauses.push({ $and: [{ followUpDate: { $lt: today } }, { "presales.leadStatus": { $nin: deadStatuses } }] });
@@ -261,7 +261,7 @@ router.get("/api/customers/counts", async (req, res) => {
       "CONS Scheduled",
       "CONS Done",
       "Call Back Later",
-      "On Follow Up",
+      "On Follow Up", 
       "CNP",
       "Switch Off",
     ];
@@ -272,7 +272,7 @@ router.get("/api/customers/counts", async (req, res) => {
       "General Query",
       "Fake Lead",
       "Invalid Number",
-      "Not Interested",
+      "Not Interested-Lost",
       "Ordered from Other Sources",
       "Budget issue",
     ];
