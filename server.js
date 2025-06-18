@@ -38,6 +38,7 @@ const ordersDatesRoute = require("./routes/orders-dates");
 const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
+const orderRoutes = require("./routes/orderRoutes");
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -122,6 +123,8 @@ app.use(uploadToWasabi);
 app.use("/api/details", detailsRoutes);
 
 app.use('/api/escalations', escalationRoutes);
+
+app.use("/api/orders", orderRoutes);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -137,7 +140,7 @@ const httpsAgent = new https.Agent({
 
 async function fetchAllOrders(url, accessToken, allOrders = []) {
   try {
-    const response = await axios.get(url, {
+    const response = await axios.get(url, { 
       headers: {
         'X-Shopify-Access-Token': accessToken,
         'Content-Type': 'application/json'
@@ -1510,7 +1513,7 @@ app.post('/api/leads/transfer-reject', async (req, res) => {
   }
   try {
     const transferRequest = await TransferRequest.findById(requestId);
-    if (!transferRequest) {
+    if (!transferRequest) { 
       return res.status(404).json({ message: "Transfer request not found" });
     }
     if (transferRequest.status !== 'pending') {
@@ -1727,8 +1730,6 @@ app.get('/api/reachout-logs/disposition-count', async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-
 
  
 // Start Server

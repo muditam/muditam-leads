@@ -76,7 +76,7 @@ router.get("/api/customers", async (req, res) => {
       const dateEnd = new Date(createdAt);
       dateEnd.setHours(23, 59, 59, 999);
       rootMatch.createdAt = { $gte: dateStart, $lte: dateEnd };
-    }
+    } 
 
     const postMatch = {};
 
