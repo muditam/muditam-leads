@@ -6,6 +6,8 @@ const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
+const Customer = require('./models/Customer');
+const ConsultationDetails = require('./models/ConsultationDetails');
 const XLSX = require("xlsx");   
 const axios = require('axios');
 const https = require('https'); 
@@ -114,7 +116,7 @@ app.use("/api/consultation-followup", consultationFollowupRoute);
 
 // Mount the duplicate numbers router on /api/leads
 app.use("/api/leads", duplicateNumbersRoutes);
-app.use("/api/duplicate-leads", duplicateNumbersRoutes);
+app.use("/api/duplicate-leads", duplicateNumbersRoutes); 
 
 app.use(ordersDatesRoute);
 
@@ -1354,7 +1356,7 @@ app.get('/api/search', async (req, res) => {
   const { query } = req.query;
 
   if (!query) {
-    return res.status(400).json({ message: "Query is required" });
+    return res.status(400).json({ message: "Query is required" }); 
   }
 
   try {
@@ -1366,9 +1368,9 @@ app.get('/api/search', async (req, res) => {
     }).limit(10);  
 
     res.status(200).json(results);
-  } catch (error) {
+  } catch (error) { 
     console.error("Error during search:", error);
-    res.status(500).json({ message: "Error during search", error });
+    res.status(500).json({ message: "Error during search", error }); 
   }
 });
 
@@ -1731,6 +1733,23 @@ app.get('/api/reachout-logs/disposition-count', async (req, res) => {
   }
 });
 
+app.get('/api/consultation-history', async (req, res) => {
+  try {
+    const { contactNumber } = req.query;
+    if (!contactNumber) return res.status(400).json({ error: "Missing contactNumber" });
+
+    // 1. Find customer by phone 
+    const customer = await Customer.findOne({ phone: contactNumber });
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    // 2. Find consultation details by customerId
+    const consultations = await ConsultationDetails.find({ customerId: customer._id }).sort({ createdAt: -1 });
+
+    res.json({ consultations });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
  
 // Start Server
 app.listen(PORT, () => {

@@ -18,7 +18,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       dietType: { type: String },
       weight: { type: Number },
       sittingTime: { type: String },
-      exerciseRoutine: { type: String }, 
+      exerciseRoutine: { type: String },
       outsideMeals: { type: String },
       timeOfSleep: { type: String },
       notes: { type: String },
@@ -55,7 +55,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       gutIssues: { type: String },
       energyLevels: { type: String },
       sleepQuality: { type: String },
-      sugarCravings: { type: String }, 
+      sugarCravings: { type: String },
       notesCons:     { type: String },
       // Call checklist from Consultation.js
       checklist: {

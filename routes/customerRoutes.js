@@ -552,5 +552,4 @@ router.delete("/api/customers/:id", async (req, res) => {
   }
 });
 
-
 module.exports = router;

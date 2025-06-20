@@ -5,7 +5,7 @@ const router = express.Router();
 
 /**
  * GET /api/consultation-followup?customerId=...
- * Returns the followups array from ConsultationDetails.
+ * Returns the followups array from ConsultationDetails. 
  */
 router.get("/", async (req, res) => {
   try {
