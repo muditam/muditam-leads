@@ -19,9 +19,9 @@ function formatDayMonthYear(dateObj) {
 
 const priceMap = {
   "Karela Jamun Fizz": {
-    "1 month": 1350,
-    "2 months": 2650,
-    "3 months": 3800,
+    "1 month": 990,
+    "2 months": 1960,
+    "3 months": 2910,
     "4 months": 4500,
   },
   "Sugar Defend Pro": {
@@ -37,9 +37,9 @@ const priceMap = {
     "4 months": 5800,
   },
   "Liver Fix": {
-    "1 month": 1550,
-    "2 months": 2900,
-    "3 months": 3600,
+    "1 month": 995,
+    "2 months": 1970,
+    "3 months": 2925,
     "4 months": 6400,
   },
   "Stress & Sleep": {
@@ -67,9 +67,9 @@ const priceMap = {
     "4 months": 5400,
   },
   "Performance Forever": {
-    "1 month": 999,
-    "2 months": 1799,
-    "3 months": 2499,
+    "1 month": 249,
+    "2 months": 479,
+    "3 months": 729,
     "4 months": 3199,
   },
   "Shilajit with Gold": {
