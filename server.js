@@ -11,9 +11,9 @@ const ConsultationDetails = require('./models/ConsultationDetails');
 const XLSX = require("xlsx");   
 const axios = require('axios');
 const https = require('https'); 
-const cron = require('node-cron'); 
+const cron = require('node-cron');  
 const TransferRequest = require('./models/TransferRequests');
-const shopifyProductsRoute = require("./services/shopifyProducts");
+const shopifyProductsRoute = require("./services/shopifyProducts");        
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
 const razorpayRoutes = require("./services/razorpay"); 
@@ -21,12 +21,12 @@ const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
-const activeCountsRoute = require("./routes/activeCountsRoute");
+const activeCountsRoute = require("./routes/activeCountsRoute"); 
 const summaryRoutes = require('./routes/summaryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const myOrdersRoutes = require("./routes/myOrders");
 const Order = require('./models/Order');
-const MyOrder = require('./models/MyOrder');
+const MyOrder = require('./models/MyOrder'); 
 const Employee = require('./models/Employee');
 const orderByIdRoutes = require("./routes/orderById"); 
 const combinedOrdersRoute = require("./routes/combinedOrders"); 
@@ -41,6 +41,7 @@ const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
 const orderRoutes = require("./routes/orderRoutes");
+const phonepeRoutes = require("./routes/phonepe");
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -49,7 +50,7 @@ const PORT = process.env.PORT || 5000;
 // List of allowed origins
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
 
-// CORS middleware using the cors package
+// CORS middleware using the cors package 
 app.use(cors({
   origin: function(origin, callback) { 
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -127,6 +128,8 @@ app.use("/api/details", detailsRoutes);
 app.use('/api/escalations', escalationRoutes);
 
 app.use("/api/orders", orderRoutes);
+
+app.use("/api/phonepe", phonepeRoutes);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

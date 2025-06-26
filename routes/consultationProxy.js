@@ -43,8 +43,8 @@ const priceMap = {
     "4 months": 6400,
   },
   "Stress & Sleep": {
-    "1 month": 799,
-    "2 months": 1395,
+    "1 month": 799,  
+    "2 months": 1395, 
     "3 months": 2200,
     "4 months": 2750,
   },
