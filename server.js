@@ -41,7 +41,7 @@ const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
 const orderRoutes = require("./routes/orderRoutes");
-const phonepeRoutes = require("./routes/phonepe");
+// const phonepeRoutes = require("./routes/phonepe");
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -129,7 +129,7 @@ app.use('/api/escalations', escalationRoutes);
 
 app.use("/api/orders", orderRoutes);
 
-app.use("/api/phonepe", phonepeRoutes);
+// app.use("/api/phonepe", phonepeRoutes);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
