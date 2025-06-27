@@ -1,90 +1,197 @@
-const crypto = require("crypto");
 const express = require("express");
-const axios = require("axios");
+const Razorpay = require("razorpay");
 const router = express.Router();
+ 
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
 
-const MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
-const CLIENT_SECRET = process.env.PHONEPE_CLIENT_SECRET;
-
-const BASE_URL = "https://api.phonepe.com/apis/pg"; // change to production later
-const PAYLINK_ENDPOINT = "/paylinks/v1/pay";
-
+/**
+ * POST /create-payment-link
+ * Expects JSON body with:
+ * {
+ *   amount: <number>,         
+ *   currency: "INR",
+ *   customer: {
+ *     name: <string>,
+ *     email: <string>,
+ *     contact: <string>
+ *   }
+ * }
+ *
+ * This endpoint creates a payment link for the provided amount.
+ * Note: Razorpay expects the amount in the smallest currency unit (paise),
+ * so we multiply the rupees amount by 100.
+ * By omitting the callback_url, the user will not be redirected after payment.
+ */
 router.post("/create-payment-link", async (req, res) => {
+  const { amount, currency, customer } = req.body;
   try {
-    const { amount, customer } = req.body;
-
-    const paiseAmount = Math.round(Number(amount) * 100);
-    const merchantOrderId = `order_${Date.now()}`;
-    const expireAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days from now
-
-    const payload = {
-      merchantId: MERCHANT_ID,
-      merchantOrderId, 
-      amount: paiseAmount,
-      metaInfo: {
-        udf1: "Order via 60brands",
-        udf2: customer.name || "", 
-        udf3: customer.email || "",
-        udf4: customer.contact || ""
+    const options = {
+      amount: amount * 100, // converting rupees to paise
+      currency: currency,
+      accept_partial: false,
+      description: "Payment for order",
+      customer: {
+        name: customer.name,
+        email: customer.email,
+        contact: customer.contact,
       },
-      paymentFlow: {
-        type: "PAYLINK",
-        customerDetails: {
-          name: customer.name || "Customer",
-          phoneNumber: customer.contact.startsWith("+91")
-            ? customer.contact
-            : "+91" + customer.contact.replace(/[^0-9]/g, ""),
-          email: customer.email || "",
-          notificationChannels: {
-            SMS: false,
-            EMAIL: false
-          }
-        },
-        expireAt
-      }
+      notify: {
+        sms: true,
+        email: true,
+      },
+      // Do not include callback_url or callback_method
     };
 
-    const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
-
-    // Signature: SHA256(base64Payload + API_PATH + clientSecret)
-    const stringToSign = base64Payload + PAYLINK_ENDPOINT + CLIENT_SECRET;
-    const signature = crypto.createHash("sha256").update(stringToSign).digest("hex");
-
-    const response = await axios.post(
-      `${BASE_URL}${PAYLINK_ENDPOINT}`,
-      { request: base64Payload },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "X-VERIFY": signature + "###" + 1,
-          "X-MERCHANT-ID": MERCHANT_ID
-        },
-      }
-    );
-
-    const data = response.data;
-    const paylinkUrl = data.data?.paylinkUrl;
-
-    if (response.status === 200 && paylinkUrl) {
-      return res.json({
-        paymentLink: paylinkUrl,
-        orderId: data.data.orderId,
-        expireAt: data.data.expireAt,
-      });
-    } else {
-      return res.status(400).json({
-        message: "Failed to create PhonePe paylink",
-        details: data,
-      });
-    }
-
+    const paymentLink = await razorpay.paymentLink.create(options);
+    res.json({ paymentLink: paymentLink.short_url });
   } catch (error) {
-    console.error("[PhonePe Error]", error.response?.data || error.message);
-    return res.status(500).json({
-      message: "PhonePe API Error",
-      error: error.response?.data || error.message,
-    });
+    console.error("Error generating payment link:", error);
+    res.status(500).json({ message: "Error generating payment link", error: error.message });
   }
 });
 
 module.exports = router;
+
+
+
+
+// const express = require("express");
+// const axios = require("axios");
+// const crypto = require("crypto");
+// const router = express.Router();
+
+// // PhonePe credentials (use your real values here)
+// const MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
+// const SALT_KEY = process.env.PHONEPE_SALT_KEY;
+// const SALT_INDEX = process.env.PHONEPE_SALT_INDEX;
+// const BASE_URL = "https://api.phonepe.com/apis/hermes"; // production URL; for sandbox use sandbox endpoint
+
+// router.post("/create-payment-link", async (req, res) => {
+//   const { amount, currency, customer } = req.body;
+
+//   try {
+//     const payRequest = {
+//       merchantId: MERCHANT_ID,
+//       merchantTransactionId: `txn_${Date.now()}`,
+//       merchantUserId: `user_${Date.now()}`,
+//       amount: Math.round(amount * 100), // converting rupees to paise
+//       redirectUrl: "https://your-success-page.com",
+//       redirectMode: "REDIRECT",
+//       callbackUrl: "https://your-callback-url.com",
+//       mobileNumber: customer.contact,
+//       paymentInstrument: {
+//         type: "PAY_PAGE"
+//       }
+//     };
+
+//     const payloadBase64 = Buffer.from(JSON.stringify(payRequest)).toString("base64");
+//     const stringToSign = `${payloadBase64}/pg/v1/pay${SALT_KEY}`;
+//     const checksum = crypto.createHash("sha256").update(stringToSign).digest("hex") + `###${SALT_INDEX}`;
+
+//     const headers = {
+//       "Content-Type": "application/json",
+//       "X-VERIFY": checksum
+//     };
+
+//     const response = await axios.post(`${BASE_URL}/pg/v1/pay`, {
+//       request: payloadBase64
+//     }, { headers });
+
+//     if (response.data.success) {
+//       const paymentUrl = response.data.data.instrumentResponse.redirectInfo.url;
+//       res.json({ paymentLink: paymentUrl });
+//     } else {
+//       res.status(400).json({ message: "Failed to generate PhonePe payment link", error: response.data });
+//     }
+
+//   } catch (error) {
+//     console.error("Error generating PhonePe payment link:", error.response?.data || error.message);
+//     res.status(500).json({
+//       message: "Error generating PhonePe payment link",
+//       error: error.response?.data || error.message
+//     });
+//   }
+// });
+
+// module.exports = router;
+
+// const express = require("express");
+// const axios = require("axios");
+// const crypto = require("crypto");
+// const router = express.Router();
+
+// const MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
+// const CLIENT_ID = process.env.PHONEPE_CLIENT_ID;
+// const CLIENT_SECRET = process.env.PHONEPE_CLIENT_SECRET;
+// const BASE_URL = process.env.PHONEPE_BASE_URL || "https://api-preprod.phonepe.com/apis/pg-sandbox";
+
+// router.post("/create-payment-link", async (req, res) => {
+//   try {
+//     const { amount, currency, customer } = req.body;
+
+//     const paiseAmount = Math.round(Number(amount) * 100);
+
+//     const merchantTransactionId = `txn_${Date.now()}`;
+//     const payload = {
+//       merchantId: MERCHANT_ID,
+//       merchantTransactionId,
+//       amount: paiseAmount,
+//       instrumentType: "PAY_PAGE",
+//       redirectUrl: "https://www.60brands.com/order-success",
+//       redirectMode: "POST",
+//       callbackUrl: "https://www.60brands.com/order-callback",
+//       mobileNumber: customer.contact,
+//       merchantUserId: merchantTransactionId,
+//       message: "Payment for order",
+//       email: customer.email,
+//       // expiry, name, etc. optional
+//     };
+
+//     const payloadString = JSON.stringify(payload);
+//     const base64Payload = Buffer.from(payloadString).toString("base64");
+
+//     // Hash for /v3/payment/create
+//     const dataToSign = base64Payload + "/v3/payment/create" + CLIENT_SECRET;
+//     const xVerify = crypto.createHash("sha256").update(dataToSign).digest("hex") + "###1";
+
+//     const url = `${BASE_URL}/v3/payment/create`;
+
+//     const response = await axios.post(
+//       url,
+//       { request: base64Payload },
+//       {
+//         headers: {
+//           "Content-Type": "application/json",
+//           "X-VERIFY": xVerify,
+//           "X-CLIENT-ID": CLIENT_ID,
+//           "Accept": "application/json",
+//         },
+//       }
+//     );
+
+//     const respData = response.data;
+
+//     if (respData.success && respData.code === "PAYMENT_LINK_CREATED") {
+//       const payLink = respData.data.instrumentResponse.redirectInfo.url;
+//       res.json({ paymentLink: payLink });
+//     } else {
+//       res.status(400).json({
+//         message: "Failed to create PhonePe payment link",
+//         details: respData,
+//       });
+//     }
+//   } catch (error) {
+//     console.error("Error generating PhonePe payment link:", error?.response?.data || error.message);
+//     res.status(500).json({
+//       message: "Error generating PhonePe payment link",
+//       error: error?.response?.data || error.message,
+//     });
+//   }
+// });
+
+// module.exports = router;
+
+
