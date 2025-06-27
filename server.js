@@ -40,8 +40,7 @@ const ordersDatesRoute = require("./routes/orders-dates");
 const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
-const orderRoutes = require("./routes/orderRoutes");
-// const phonepeRoutes = require("./routes/phonepe");
+const orderRoutes = require("./routes/orderRoutes"); 
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -83,7 +82,7 @@ app.use("/api/razorpay", razorpayRoutes);
 app.use("/api/shopify", shopifyRoutes);
 app.use("/api/my-orders", myOrdersRoutes);
 
-app.use(retentionSalesRoutes);
+app.use(retentionSalesRoutes); 
 
 app.use('/', exportLeadsRouter);
 
@@ -128,8 +127,7 @@ app.use("/api/details", detailsRoutes);
 app.use('/api/escalations', escalationRoutes);
 
 app.use("/api/orders", orderRoutes);
-
-// app.use("/api/phonepe", phonepeRoutes);
+  
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
