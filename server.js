@@ -41,7 +41,6 @@ const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
 const orderRoutes = require("./routes/orderRoutes"); 
-const phonepeRoutes = require('./routes/phonepe');
 const getActiveProductsRoute = require("./routes/getActiveProducts");
 
 const app = express(); 
@@ -128,9 +127,7 @@ app.use("/api/details", detailsRoutes);
 
 app.use('/api/escalations', escalationRoutes);
 
-app.use("/api/orders", orderRoutes);
-  
-app.use('/api/phonepe', phonepeRoutes);   
+app.use("/api/orders", orderRoutes);   
 
 app.use(getActiveProductsRoute);
  
