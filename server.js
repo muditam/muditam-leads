@@ -41,6 +41,8 @@ const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
 const orderRoutes = require("./routes/orderRoutes"); 
+const phonepeRoutes = require('./routes/phonepe');
+const getActiveProductsRoute = require("./routes/getActiveProducts");
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -128,12 +130,15 @@ app.use('/api/escalations', escalationRoutes);
 
 app.use("/api/orders", orderRoutes);
   
+app.use('/api/phonepe', phonepeRoutes);   
+
+app.use(getActiveProductsRoute);
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err)); 
+  .catch((err) => console.error('MongoDB connection error:', err));   
   
 
 const httpsAgent = new https.Agent({
@@ -242,7 +247,7 @@ app.get('/api/orders', async (req, res) => {
 });
 
 
-const statusMapping = {
+const statusMapping = { 
   "DEL": "Delivered",
   "INT": "In Transit", 
   "UND": "Undelivered",
@@ -253,7 +258,7 @@ const statusMapping = {
   "ONH": "On Hold",
   "OOD": "Out For Delivery",
   "NFI": "Status Pending",
-  "NFIDS": "NFID",
+  "NFIDS": "NFID", 
   "RSCH": "Pickup Scheduled",
   "ROOP": "Out for Pickup",
   "RPKP": "Shipment Picked Up",

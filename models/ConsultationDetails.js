@@ -24,8 +24,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       notes: { type: String },
       assignExpert: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" },  
       doctorCons:   { type: String },
-      file: { type: String }, // Stores file path or URL
-      // Call checklist from Presales.js
+      file: { type: String }, // Stores file path or URL 
       checklist: {
         confirmedCustomerIdentity: { type: Boolean, default: false },
         confirmedLeadInquiry: { type: Boolean, default: false },
@@ -41,7 +40,6 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       },
     },
 
-    // Data coming from Consultation.js
     consultation: {
       currentMedications: [{ type: String }],
       sideEffects: { type: String },
