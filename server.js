@@ -41,7 +41,7 @@ const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
 const orderRoutes = require("./routes/orderRoutes"); 
-const getActiveProductsRoute = require("./routes/getActiveProducts");
+const getActiveProductsRoute = require("./routes/getActiveProducts"); 
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -129,7 +129,7 @@ app.use('/api/escalations', escalationRoutes);
 
 app.use("/api/orders", orderRoutes);   
 
-app.use(getActiveProductsRoute);
+app.use(getActiveProductsRoute); 
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -700,24 +700,24 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
 });
 
 
+// hasTeam: { type: Boolean, default: false }
+
 app.get("/api/employees", async (req, res) => {
   const { role, fullName, email } = req.query;
-
   try {
-    if (fullName && email) { 
+    if (fullName && email) {
       const employee = await Employee.findOne({ fullName, email });
-
       if (!employee) {
         return res.status(404).json({ message: "Employee not found" });
       }
-
-      const { async, agentNumber, callerId } = employee;
-      return res.status(200).json([{ async, agentNumber, callerId }]);  
+      const { async, agentNumber, callerId, target, hasTeam } = employee;
+      return res.status(200).json([{ async, agentNumber, callerId, target, hasTeam }]);
     }
- 
     const query = role ? { role } : {};
-    const employees = await Employee.find(query, "fullName email callerId agentNumber async role status");
-
+    const employees = await Employee.find(
+      query,
+      "fullName email callerId agentNumber async role status target hasTeam teamMembers"
+    );
     res.status(200).json(employees);
   } catch (error) {
     console.error("Error fetching employees:", error);
@@ -734,67 +734,101 @@ app.delete('/api/employees/:id', async (req, res) => {
     if (!employee) {
       return res.status(404).json({ message: 'Employee not found' });
     }
-    const employees = await Employee.find({}, '-password');  
+    const employees = await Employee.find({}, '-password');
     res.status(200).json({ message: 'Employee deleted successfully', employees });
   } catch (error) {
     res.status(500).json({ message: 'Error deleting employee', error });
   }
 });
 
+app.get("/api/employees/:id", async (req, res) => {
+  try {
+    const emp = await Employee.findById(req.params.id)
+      .populate("teamMembers", "fullName email role status target");
+    if (!emp) return res.status(404).json({ message: "Not found" });
+    res.json(emp);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching employee", error: err });
+  }
+});
+
+
+
 app.put('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
-  const { callerId, agentNumber, password, ...updateData } = req.body;  
+  const { callerId, agentNumber, password, target, hasTeam, ...updateData } = req.body;
 
-  try { 
-    if (password) {
-      updateData.password = password;
-    }
- 
+  try {
+    if (password) updateData.password = password;
+    if (target !== undefined) updateData.target = target;
+    if (typeof hasTeam !== "undefined") updateData.hasTeam = hasTeam;
+
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
-      { callerId, agentNumber, async: 1, ...updateData }, 
-      {
-        new: true, 
-        runValidators: true, 
-      }
+      { callerId, agentNumber, async: 1, ...updateData },
+      { new: true, runValidators: true }
     );
 
     if (!updatedEmployee) {
       return res.status(404).json({ message: 'Employee not found' });
     }
- 
+
     res.status(200).json({
       message: 'Employee updated successfully',
       employee: updatedEmployee,
-    }); 
+    });
   } catch (error) {
     console.error('Error updating employee:', error);
     res.status(500).json({ message: 'Error updating employee', error });
   }
 });
 
+app.put("/api/employees/:id/team", async (req, res) => {
+  const { id } = req.params; // manager's _id
+  const { teamMembers } = req.body; // array of employee _ids
+
+  if (!Array.isArray(teamMembers)) {
+    return res.status(400).json({ message: "teamMembers must be an array of employee IDs" });
+  }
+  try {
+    const updatedManager = await Employee.findByIdAndUpdate(
+      id,
+      { teamMembers, hasTeam: teamMembers.length > 0 },
+      { new: true }
+    ).populate("teamMembers", "fullName email role status target");
+    if (!updatedManager) return res.status(404).json({ message: "Manager not found" });
+    res.status(200).json({ message: "Team updated", manager: updatedManager });
+  } catch (error) {
+    res.status(500).json({ message: "Error updating team", error });
+  }
+});
+
+
 
 app.post('/api/employees', async (req, res) => {
-  const { fullName, email, callerId, agentNumber, role, password } = req.body;
- 
+  const { fullName, email, callerId, agentNumber, role, password, target, hasTeam } = req.body;
+
   if (!fullName || !email || !callerId || !agentNumber || !role || !password) {
     return res.status(400).json({ message: 'All fields are required.' });
   }
 
-  try { 
+  try {
     const existingEmployee = await Employee.findOne({ email });
     if (existingEmployee) {
       return res.status(400).json({ message: 'Email already exists.' });
     }
- 
+
     const newEmployee = new Employee({
       fullName,
       email,
-      callerId, 
+      callerId,
       agentNumber,
       role,
       password,
       async: 1,
+      status: 'active',
+      target: target !== undefined ? target : 0,
+      hasTeam: typeof hasTeam !== "undefined" ? hasTeam : false,
     });
 
     await newEmployee.save();
@@ -804,6 +838,8 @@ app.post('/api/employees', async (req, res) => {
     res.status(500).json({ message: 'Error adding employee', error });
   }
 });
+
+
 
 app.get('/api/leads/check-duplicate', async (req, res) => {
   const { contactNumber } = req.query;
@@ -1304,7 +1340,7 @@ app.get('/api/leads/new-orders', async (req, res) => {
 });
  
 
-// Login Route
+// Login Route 
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -1330,13 +1366,15 @@ app.post("/api/login", async (req, res) => {
         id: user._id,
         fullName: user.fullName,
         email: user.email,
-        role: user.role,  
+        role: user.role,
+        hasTeam: user.hasTeam, // <-- ADD THIS LINE!
       },
     });
   } catch (error) {
     res.status(500).json({ message: "Server error. Please try again later." });
   }
 });
+
 
 
 app.get('/api/leads/assigned', async (req, res) => {
@@ -1753,7 +1791,7 @@ app.get('/api/consultation-history', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
- 
+  
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

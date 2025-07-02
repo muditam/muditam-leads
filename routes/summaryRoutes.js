@@ -39,149 +39,171 @@ router.get('/sales-order-ids', async (req, res) => {
 });
 
 
-router.get('/sales-summary', async (req, res) => {
+router.get("/sales-summary", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    // Use provided dates or default to today's date (format: YYYY-MM-DD)
+
+
     const sDate = startDate || new Date().toISOString().split("T")[0];
     const eDate = endDate || new Date().toISOString().split("T")[0];
 
 
-    // For the Lead collection, assume the "date" field stores the lead's added date as a string "YYYY-MM-DD"
     const leadStartDate = sDate;
     const leadEndDate = eDate;
 
 
-    // For MyOrder, convert the dates into Date objects.
     const orderStartDate = new Date(sDate);
     const orderEndDate = new Date(eDate);
     orderEndDate.setHours(23, 59, 59, 999);
 
 
-    // Fetch the list of Sales Agents
-    const salesAgents = await Employee.find({ role: "Sales Agent" }, "fullName email");
-    const salesAgentNames = salesAgents.map(agent => agent.fullName);
+    // 1. Fetch sales agents
+    const salesAgents = await Employee.find(
+      { role: "Sales Agent" },
+      "fullName email"
+    );
+    const salesAgentNames = salesAgents.map((agent) => agent.fullName);
 
 
-    // ----- Overall Metrics -----
-    const leadsAssignedCount = await Lead.countDocuments({
+    // 2. Fetch all leads within date range
+    const allLeads = await Lead.find({
       date: { $gte: leadStartDate, $lte: leadEndDate },
-      agentAssigned: { $in: salesAgentNames }
-    });
-
-
-    const openLeadsCount = await Lead.countDocuments({
       agentAssigned: { $in: salesAgentNames },
-      $or: [
-        // Use $toLower to make comparison case-insensitive.
-        { $expr: { $eq: [ { $toLower: "$salesStatus" }, "on followup" ] } },
-        { $expr: { $in: [ { $toLower: "$salesStatus" }, [ "", null ] ] } }
-      ]
-    });
-    // ----------------------------
+    }).lean();
 
 
-    // Lead pipeline: compute per-agent leadsAssigned and openLeads.
-    const leadPipeline = [
-      {
-        $match: {
-          date: { $gte: leadStartDate, $lte: leadEndDate },
-          agentAssigned: { $in: salesAgentNames }
-        }
-      },
-      {
-        $group: {
-          _id: "$agentAssigned",
-          leadsAssigned: { $sum: 1 },
-          openLeads: {
-            $sum: {
-              $cond: [
-                {
-                  $or: [
-                    { $eq: [ { $toLower: "$salesStatus" }, "on followup" ] },
-                    { $in: [ { $toLower: "$salesStatus" }, [ "", null ] ] }
-                  ]
-                },
-                1,
-                0
-              ]
-            }
-          }
-        }
+    // 3. Count open leads for all agents
+    const allOpenLeads = await Lead.find({
+      agentAssigned: { $in: salesAgentNames },
+    }).lean();
+
+
+    const openLeadsCount = allOpenLeads.reduce((count, lead) => {
+      const status = (lead.salesStatus || "").toLowerCase();
+      if (status === "on followup" || status === "" || status === null) {
+        count += 1;
       }
-    ];
-    const leadData = await Lead.aggregate(leadPipeline);
+      return count;
+    }, 0);
 
 
-    // Order pipeline: deduplicate orders per agent by grouping on agentName and orderId.
-    const orderPipeline = [
-      {
-        $match: {
-          orderDate: { $gte: orderStartDate, $lte: orderEndDate },
-          agentName: { $in: salesAgentNames }
-        }
-      },
-      {
-        $project: {
-          agentName: 1,
-          orderId: 1,
-          orderPrice: { $ifNull: ["$totalPrice", { $ifNull: ["$amountPaid", 0] }] }
-        }
-      },
-      {
-        $group: {
-          _id: { agentName: "$agentName", orderId: "$orderId" },
-          orderPrice: { $first: "$orderPrice" }
-        }
-      },
-      {
-        $group: {
-          _id: "$_id.agentName",
-          orderCount: { $sum: 1 },
-          orderSalesAmount: { $sum: "$orderPrice" }
-        }
+    const leadsAssignedCount = allLeads.length;
+
+
+    // 4. Compute per-agent leadsAssigned and openLeads manually
+    const perAgentLeads = {};
+
+
+    for (const lead of allLeads) {
+      const agent = lead.agentAssigned;
+      if (!perAgentLeads[agent]) {
+        perAgentLeads[agent] = {
+          leadsAssigned: 0,
+          openLeads: 0,
+        };
       }
-    ];
-    const orderData = await MyOrder.aggregate(orderPipeline);
+      perAgentLeads[agent].leadsAssigned += 1;
 
 
-    // Merge per-agent data:
+      const status = (lead.salesStatus || "").toLowerCase();
+      if (status === "on followup" || status === "" || status === null) {
+        perAgentLeads[agent].openLeads += 1;
+      }
+    }
+
+
+    // 5. Fetch orders and process manually
+    const allOrders = await MyOrder.find({
+      orderDate: { $gte: orderStartDate, $lte: orderEndDate },
+      agentName: { $in: salesAgentNames },
+    }).lean();
+
+
     const orderMap = {};
-    orderData.forEach(item => {
-      orderMap[item._id] = item;
-    });
-    const perAgent = leadData.map(item => {
-      const agent = item._id;
-      const orderInfo = orderMap[agent] || { orderCount: 0, orderSalesAmount: 0 };
-      const leadsAssigned = item.leadsAssigned;
-      const openLeads = item.openLeads;
-      // Use only MyOrder data for sales done and total sales.
-      const salesDone = orderInfo.orderCount;
-      const totalSales = orderInfo.orderSalesAmount;
-      const conversionRate = leadsAssigned > 0 ? (salesDone / leadsAssigned) * 100 : 0;
-      const avgOrderValue = salesDone > 0 ? (totalSales / salesDone) : 0;
-      return {
+    const agentOrderStats = {};
+
+
+    for (const order of allOrders) {
+      const agent = order.agentName;
+      const orderKey = `${agent}-${order.orderId}`;
+      if (!orderMap[orderKey]) {
+        const price = order.totalPrice || order.amountPaid || 0;
+        orderMap[orderKey] = true;
+
+
+        if (!agentOrderStats[agent]) {
+          agentOrderStats[agent] = {
+            orderCount: 0,
+            orderSalesAmount: 0,
+          };
+        }
+        agentOrderStats[agent].orderCount += 1;
+        agentOrderStats[agent].orderSalesAmount += price;
+      }
+    }
+
+
+    // 6. Merge per-agent stats
+    const perAgent = [];
+
+
+    for (const agent of salesAgentNames) {
+      const leadStats = perAgentLeads[agent] || {
+        leadsAssigned: 0,
+        openLeads: 0,
+      };
+      const orderStats = agentOrderStats[agent] || {
+        orderCount: 0,
+        orderSalesAmount: 0,
+      };
+
+
+      const salesDone = orderStats.orderCount;
+      const totalSales = orderStats.orderSalesAmount;
+      const conversionRate =
+        leadStats.leadsAssigned > 0
+          ? (salesDone / leadStats.leadsAssigned) * 100
+          : 0;
+      const avgOrderValue = salesDone > 0 ? totalSales / salesDone : 0;
+
+
+      const agentSummary = {
         agentName: agent,
-        leadsAssigned,
-        openLeads,
+        leadsAssigned: leadStats.leadsAssigned,
+        openLeads: leadStats.openLeads,
         salesDone,
         totalSales: Number(totalSales.toFixed(2)),
         conversionRate: Number(conversionRate.toFixed(2)),
-        avgOrderValue: Number(avgOrderValue.toFixed(2))
+        avgOrderValue: Number(avgOrderValue.toFixed(2)),
       };
-    });
 
 
-    // Overall summary:
-    const overallOrder = orderData.reduce((acc, item) => {
-      acc.orderCount += item.orderCount;
-      acc.orderSalesAmount += item.orderSalesAmount;
-      return acc;
-    }, { orderCount: 0, orderSalesAmount: 0 });
-    const overallSalesDone = overallOrder.orderCount;
-    const overallTotalSales = overallOrder.orderSalesAmount;
-    const overallConversionRate = leadsAssignedCount > 0 ? (overallSalesDone / leadsAssignedCount) * 100 : 0;
-    const overallAvgOrderValue = overallSalesDone > 0 ? (overallTotalSales / overallSalesDone) : 0;
+      if (
+        agentSummary.leadsAssigned > 0 ||
+        agentSummary.openLeads > 0 ||
+        agentSummary.salesDone > 0 ||
+        agentSummary.totalSales > 0
+      ) {
+        perAgent.push(agentSummary);
+      }
+    }
+
+
+    // 7. Overall Summary
+    const overallSalesDone = Object.values(agentOrderStats).reduce(
+      (sum, a) => sum + a.orderCount,
+      0
+    );
+    const overallTotalSales = Object.values(agentOrderStats).reduce(
+      (sum, a) => sum + a.orderSalesAmount,
+      0
+    );
+    const overallConversionRate =
+      leadsAssignedCount > 0
+        ? (overallSalesDone / leadsAssignedCount) * 100
+        : 0;
+    const overallAvgOrderValue =
+      overallSalesDone > 0 ? overallTotalSales / overallSalesDone : 0;
 
 
     const overall = {
@@ -191,20 +213,18 @@ router.get('/sales-summary', async (req, res) => {
       conversionRate: Number(overallConversionRate.toFixed(2)),
       avgOrderValue: Number(overallAvgOrderValue.toFixed(2)),
       overallLeadsAssigned: leadsAssignedCount,
-      openLeads: openLeadsCount
+      openLeads: openLeadsCount,
     };
 
 
     res.json({ perAgent, overall });
   } catch (error) {
     console.error("Error fetching sales summary:", error);
-    res.status(500).json({ message: "Error fetching sales summary", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching sales summary", error: error.message });
   }
 });
-
-
-
-
 
 
 // GET /api/followup-summary

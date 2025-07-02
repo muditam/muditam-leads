@@ -1143,9 +1143,72 @@ router.put('/api/retention-sales/all/:id', async (req, res) => {
   }
 });
 
-// Assuming you have express and Lead model imported
+router.get('/api/retention-sales/progress', async (req, res) => {
+  const { name } = req.query;
+  if (!name) return res.status(400).json({ message: "Name is required" });
 
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const firstDay = `${yyyy}-${mm}-01`;
+  const lastDayNum = new Date(yyyy, now.getMonth() + 1, 0).getDate();
+  const lastDay = `${yyyy}-${mm}-${String(lastDayNum).padStart(2, '0')}`;
 
+  try {
+    // 1. RetentionSales sum
+    const rsData = await RetentionSales.aggregate([
+      { 
+        $match: {
+          orderCreatedBy: name,
+          date: { $gte: firstDay, $lte: lastDay }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
+        }
+      }
+    ]);
+    const retentionTotal = rsData.length ? rsData[0].total : 0;
+
+    // 2. MyOrder sum
+    const startDateObj = new Date(firstDay + "T00:00:00");
+    const endDateObj = new Date(lastDay + "T23:59:59.999");
+    const moData = await MyOrder.aggregate([
+      {
+        $match: {
+          agentName: name,
+          orderDate: { $gte: startDateObj, $lte: endDateObj }
+        }
+      },
+      {
+        $project: {
+          amountPaid: {
+            $add: [
+              { $toDouble: { $ifNull: ["$totalPrice", 0] } },
+              { $toDouble: { $ifNull: ["$partialPayment", 0] } },
+              { $toDouble: { $ifNull: ["$upsellAmount", 0] } }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amountPaid" }
+        }
+      }
+    ]);
+    const myOrderTotal = moData.length ? moData[0].total : 0;
+
+    // 3. Return combined total
+    res.json({ total: retentionTotal + myOrderTotal });
+  } catch (err) {
+    console.error("Error in retention-sales/progress:", err);
+    res.status(500).json({ message: "Error calculating progress" });
+  }
+});
 
 module.exports = router;
  

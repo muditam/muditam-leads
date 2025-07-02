@@ -50,12 +50,13 @@ router.get("/api/shopify/active-products", async (req, res) => {
   }
 });
 
+
+// 🔹 Get Shopify Customer by Phone and all address fields
 router.get("/api/shopify/customers", async (req, res) => {
   let phone = req.query.phone;
   if (!phone) {
     return res.status(400).json({ error: "Phone number is required" });
   }
-  // Remove all non-digits
   const digits = phone.replace(/\D/g, "");
   const normalizedOptions = [
     `+91${digits}`,
@@ -66,12 +67,11 @@ router.get("/api/shopify/customers", async (req, res) => {
   let foundCustomer = null;
   let candidates = [];
   let searchQueries = [
-    normalizedOptions[0], // "+91XXXXXXXXXX"
-    normalizedOptions[1], // "91XXXXXXXXXX"
-    normalizedOptions[2], // "XXXXXXXXXX"
+    normalizedOptions[0],
+    normalizedOptions[1],
+    normalizedOptions[2],
   ];
 
-  // Try each query, break when found
   for (const query of searchQueries) {
     try {
       const url = `https://${SHOPIFY_STORE}/admin/api/2023-10/customers/search.json?query=${encodeURIComponent(query)}`;
@@ -82,13 +82,9 @@ router.get("/api/shopify/customers", async (req, res) => {
         },
       });
       candidates = response.data.customers;
-      // Log all for debugging
-      console.log("DEBUG candidates", candidates.map(c => ({ id: c.id, phone: c.phone })));
       foundCustomer = candidates.find(c => {
-        // Check customer root phone
         const cDigits = (c.phone || "").replace(/\D/g, "");
         if (cDigits.slice(-10) === digits.slice(-10)) return true;
-        // ALSO check all address phones!
         if (c.addresses && c.addresses.length > 0) {
           return c.addresses.some(addr => {
             const aDigits = (addr.phone || "").replace(/\D/g, "");
@@ -97,19 +93,25 @@ router.get("/api/shopify/customers", async (req, res) => {
         }
         return false;
       });
-      if (foundCustomer) break; 
-    } catch (err) {
-      // just continue
-    }
+      if (foundCustomer) break;
+    } catch (err) {}
   }
 
   if (!foundCustomer) {
     return res.json({ addresses: [] });
   }
 
-  // Format all addresses
+  // Send full address fields for each address
   const addresses = (foundCustomer.addresses || []).map(addr => ({
     id: addr.id,
+    address1: addr.address1 || "",
+    address2: addr.address2 || "",
+    city: addr.city || "",
+    province: addr.province || "",
+    zip: addr.zip || "",
+    country: addr.country || "",
+    phone: addr.phone || "",
+    name: addr.name || "",
     formatted: [
       addr.address1,
       addr.address2,
@@ -120,10 +122,11 @@ router.get("/api/shopify/customers", async (req, res) => {
     ].filter(Boolean).join(", "),
   }));
 
-  res.json({ addresses });
+  res.json({ id: foundCustomer.id, addresses })
 });
 
 
+// 🔹 Razorpay Payment Link
 router.post("/api/razorpay/generate-link", async (req, res) => {
   try {
     const { customerName, customerPhone, customerAddress, amount } = req.body;
@@ -131,7 +134,7 @@ router.post("/api/razorpay/generate-link", async (req, res) => {
       return res.status(400).json({ error: "Missing fields" });
     }
     const response = await razorpay.paymentLink.create({
-      amount: Math.round(Number(amount) * 100), // in paise
+      amount: Math.round(Number(amount) * 100),
       currency: "INR",
       accept_partial: false,
       description: `Payment link for ${customerName}`,
@@ -143,9 +146,11 @@ router.post("/api/razorpay/generate-link", async (req, res) => {
       notify: { sms: true, email: false },
       reminder_enable: true,
       notes: {
-        address: customerAddress || "",
+        address: (typeof customerAddress === 'object' && customerAddress.formatted)
+          ? customerAddress.formatted
+          : (customerAddress || ""),
       },
-      callback_url: "", // optional: you can add your post-payment webhook/callback
+      callback_url: "",
       callback_method: "get",
     });
     res.json({ paymentLink: response.short_url });
@@ -155,7 +160,8 @@ router.post("/api/razorpay/generate-link", async (req, res) => {
   }
 });
 
-// --- Shopify Place Order ---
+
+// 🔹 Shopify Place Order
 router.post("/api/shopify/place-order", async (req, res) => {
   try {
     const {
@@ -165,7 +171,7 @@ router.post("/api/shopify/place-order", async (req, res) => {
       transactionId,
       shippingCharge,
       discount,
-      notes,
+      discountType,
     } = req.body;
 
     if (!customer || !cartItems || cartItems.length === 0 || !customer.address) {
@@ -176,24 +182,55 @@ router.post("/api/shopify/place-order", async (req, res) => {
     const line_items = cartItems.map((item) => ({
       variant_id: item.id,
       quantity: item.quantity,
-      price: item.price, // Shopify may ignore price for existing variants, but it's OK to send.
+      price: item.price,
       title: item.productTitle,
     }));
 
-    // Build order payload
+    // Use existing customer ID if present
+    let shopifyCustomer;
+    if (customer.customerId) {
+      shopifyCustomer = { id: customer.customerId };
+    } else {
+      shopifyCustomer = {
+        first_name: customer.name || "",
+        phone: customer.phone || "",
+        email: customer.email || "dummy@email.com",
+      };
+    }
+
+    // Use the full address object if available, else parse string
+    let shipping_address = (typeof customer.address === 'object' && customer.address.address1)
+      ? customer.address
+      : parseAddressString(customer.address);
+    let billing_address = shipping_address;
+
+    // Build note_attributes for transactionId if prepaid
+    const note_attributes = [];
+    if (paymentMethod === "Prepaid" && transactionId) {
+      note_attributes.push({
+        name: "Transaction ID",
+        value: transactionId
+      });
+    }
+
     const orderData = {
       order: {
         line_items,
-        customer: {
-          first_name: customer.name || "",
-          phone: customer.phone || "",
-        },
-        shipping_address: parseAddressString(customer.address),
-        billing_address: parseAddressString(customer.address),
+        customer: shopifyCustomer,
+        shipping_address,
+        billing_address,
         financial_status: paymentMethod === "Prepaid" ? "paid" : "pending",
-        note: notes || "",
-        tags: paymentMethod,
-        discount_codes: discount ? [{ code: "ManualDiscount", amount: String(discount), type: "fixed_amount" }] : [],
+        note: "", // Blank, can be set after order placement
+        note_attributes,
+        discount_codes: discount
+          ? [
+              {
+                code: "ManualDiscount",
+                amount: String(discount),
+                type: discountType === "percentage" ? "percentage" : "fixed_amount",
+              },
+            ]
+          : [],
         shipping_lines: shippingCharge
           ? [
               {
@@ -240,11 +277,12 @@ router.post("/api/shopify/place-order", async (req, res) => {
   }
 });
 
+
+// Address parsing fallback
 function parseAddressString(formatted) {
   if (!formatted) return { address1: "No Address Provided", country: "India" };
   const parts = formatted.split(",").map((s) => s.trim()).filter(Boolean);
 
-  // Make sure at least address1 and country are filled
   return {
     address1: parts[0] || formatted,
     address2: parts[1] || "",
@@ -255,5 +293,25 @@ function parseAddressString(formatted) {
   };
 }
 
+
+// 🔹 Add Note to Shopify Order
+router.post("/api/shopify/add-note", async (req, res) => {
+  const { orderId, note } = req.body;
+  if (!orderId || !note) return res.status(400).json({ error: "Missing fields" });
+  try {
+    const url = `https://${SHOPIFY_STORE}/admin/api/2023-10/orders/${orderId}.json`; 
+    await axios.put(
+      url,
+      { order: { id: orderId, note } },
+      { headers: {
+        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+        "Content-Type": "application/json",
+      } }
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to update note" });
+  }
+});
 
 module.exports = router;
