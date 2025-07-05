@@ -10,6 +10,7 @@ const Lead = require('../models/Lead');
 // Import the Order model (Shipway data)
 const Order = require('../models/Order');
 const MyOrder = require("../models/MyOrder");
+const Employee = require("../models/Employee");
 
 const RetentionSalesSchema = new mongoose.Schema({
   date: String,
@@ -300,14 +301,9 @@ router.post('/api/retention-sales/update-matching', async (req, res) => {
 router.get('/api/retention-sales/aggregated', async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
-    // For RetentionSales the "date" field is stored as a string.
-    // We assume that buildDateMatch returns an object like:
-    // { date: { $gte: "YYYY-MM-DD", $lte: "YYYY-MM-DD" } }
-    const retentionMatch = buildDateMatch(startDate, endDate);
+    
+    const retentionMatch = buildDateMatch(startDate, endDate); 
 
-    // Build a filter for MyOrder based on the orderDate field.
-    // MyOrder.orderDate is stored as a Date so we must convert the string(s)
-    // to Date objects and include the entire day for the end date.
     let myOrderMatch = {};
     if (startDate || endDate) {
       myOrderMatch.orderDate = {};
@@ -320,13 +316,7 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
         myOrderMatch.orderDate.$lte = endDateObj;
       }
     }
-
-    // Aggregate from RetentionSales collection.
-    // We assume that each retention sales record has:
-    // - "orderCreatedBy": the agent name,
-    // - "amountPaid": the sales amount (as a string or number).
-    // We output a standardized structure with:
-    //   salesDone: 1 per record, totalSales: amountPaid converted to number.
+ 
     const aggregatedData = await RetentionSales.aggregate([
       { $match: retentionMatch },
       {
@@ -349,8 +339,7 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
           salesDone: "$retentionSalesDone",
           totalSales: "$retentionTotalSales"
         }
-      },
-      // Use $unionWith to add MyOrder data into the pipeline.
+      }, 
       { 
         $unionWith: {
           coll: "myorders", // The collection name for MyOrder documents (Mongoose pluralizes it)
@@ -417,6 +406,97 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
     res.status(500).json({ message: "Error aggregating sales", error: error.message });
   }
 });
+
+router.get("/api/retention-sales/aggregated-followup", async (req, res) => {
+  try {
+    // 1. Get all active retention agents
+    const activeAgents = await Employee.find(
+      { role: "Retention Agent", status: "active" },
+      { fullName: 1 }
+    ).lean();
+    const agentNames = activeAgents.map((agent) => agent.fullName);
+
+    function toISODate(d) {
+      const istOffset = 5.5 * 60 * 60 * 1000; // IST offset in ms
+      const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+      const istTime = new Date(utc + istOffset);
+      return istTime.toISOString().split("T")[0];
+    }
+
+    const todayDate = new Date();
+    const tomorrowDate = new Date();
+    tomorrowDate.setDate(todayDate.getDate() + 1);
+
+
+    const today = toISODate(todayDate);
+    const tomorrow = toISODate(tomorrowDate);
+
+
+    // 2. For each agent, get the counts in parallel
+    const summary = await Promise.all(
+      agentNames.map(async (agentName) => {
+        const [
+          noFollowupSet,
+          followupMissed,
+          followupToday,
+          followupTomorrow,
+          followupLater,
+          lostCustomers,
+        ] = await Promise.all([
+          Lead.countDocuments({
+            healthExpertAssigned: agentName,
+            $or: [
+              { rtNextFollowupDate: { $exists: false } },
+              { rtNextFollowupDate: null },
+              { rtNextFollowupDate: "" },
+            ],
+          }),
+          Lead.countDocuments({
+            healthExpertAssigned: agentName,
+            rtNextFollowupDate: { $ne: null, $lt: today },
+          }),
+          Lead.countDocuments({
+            healthExpertAssigned: agentName,
+            rtNextFollowupDate: today,
+          }),
+          Lead.countDocuments({
+            healthExpertAssigned: agentName,
+            rtNextFollowupDate: tomorrow,
+          }),
+          Lead.countDocuments({
+            healthExpertAssigned: agentName,
+            rtNextFollowupDate: { $gt: tomorrow },
+          }),
+          Lead.countDocuments({
+            healthExpertAssigned: agentName,
+            retentionStatus: { $eq: "Lost" },
+          }),
+        ]);
+
+
+        return {
+          agentName,
+          noFollowupSet,
+          followupMissed,
+          followupToday,
+          followupTomorrow,
+          followupLater,
+          lostCustomers,
+        };
+      })
+    );
+
+
+    res.json({ summary });
+  } catch (error) {
+    console.error("Error fetching all followup summary:", error);
+    res.status(500).json({
+      message: "Error fetching all followup summary",
+      error: error.message,
+    });
+  }
+});
+
 
 
 /**

@@ -13,13 +13,13 @@ const axios = require('axios');
 const https = require('https'); 
 const cron = require('node-cron');  
 const TransferRequest = require('./models/TransferRequests');
-const shopifyProductsRoute = require("./services/shopifyProducts");        
+const shopifyProductsRoute = require("./services/shopifyProducts");         
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
 const razorpayRoutes = require("./services/razorpay"); 
 const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
-const exportLeadsRouter = require('./routes/exportLeads');
+const exportLeadsRouter = require('./routes/exportLeads'); 
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
 const activeCountsRoute = require("./routes/activeCountsRoute"); 
 const summaryRoutes = require('./routes/summaryRoutes');
@@ -42,6 +42,7 @@ const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
 const orderRoutes = require("./routes/orderRoutes"); 
 const getActiveProductsRoute = require("./routes/getActiveProducts"); 
+const phonepeRoutes = require('./routes/phonepePaymentLink');
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -51,7 +52,7 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
 
 // CORS middleware using the cors package 
-app.use(cors({
+app.use(cors({  
   origin: function(origin, callback) { 
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
@@ -130,6 +131,9 @@ app.use('/api/escalations', escalationRoutes);
 app.use("/api/orders", orderRoutes);   
 
 app.use(getActiveProductsRoute); 
+
+app.use('/api/phonepe', phonepeRoutes);
+
  
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -701,9 +705,8 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
 
 
 // hasTeam: { type: Boolean, default: false }
-
 app.get("/api/employees", async (req, res) => {
-  const { role, fullName, email } = req.query;
+  const { role, fullName, email } = req.query; 
   try {
     if (fullName && email) {
       const employee = await Employee.findOne({ fullName, email });
@@ -1010,135 +1013,372 @@ app.delete('/api/leads/:id', async (req, res) => {
 });
 
  
-app.get('/api/leads/retention', async (req, res) => {
-  const { page, limit, all, ...filterParams } = req.query;
-  let query = { salesStatus: "Sales Done" };
+// app.get('/api/leads/retention', async (req, res) => {
+//   const { page, limit, all, ...filterParams } = req.query;
+//   let query = { salesStatus: "Sales Done" };
 
 
-  const calculateReminder = (nextFollowupDate) => {
-    const today = new Date();
-    const followupDate = new Date(nextFollowupDate);
-    if (!nextFollowupDate) return null;
-    const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
-    if (diffInDays < 0) return "Follow-up Missed";
-    if (diffInDays === 0) return "Today";
-    if (diffInDays === 1) return "Tomorrow";
-    return "Later";
-  };
+//   const calculateReminder = (nextFollowupDate) => {
+//     const today = new Date();
+//     const followupDate = new Date(nextFollowupDate); 
+//     if (!nextFollowupDate) return null;
+//     const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
+//     if (diffInDays < 0) return "Follow-up Missed";
+//     if (diffInDays === 0) return "Today";
+//     if (diffInDays === 1) return "Tomorrow";
+//     return "Later";
+//   };
 
 
-  // Remove the condition for `rtFollowupReminder`
-  for (const key in filterParams) {
-    if (filterParams[key] && filterParams[key] !== "") {
-      if (key === "lastOrderDateFrom" || key === "lastOrderDateTo") {
-        if (filterParams.lastOrderDateFrom || filterParams.lastOrderDateTo) {
-          query.lastOrderDate = {};
-          if (filterParams.lastOrderDateFrom) {
-            query.lastOrderDate.$gte = filterParams.lastOrderDateFrom;
-          }
-          if (filterParams.lastOrderDateTo) {
-            query.lastOrderDate.$lte = filterParams.lastOrderDateTo;
-          }
-        }
-      } else if (key !== "rtFollowupReminder") {
-        if (Array.isArray(filterParams[key])) {
-          query[key] = { $in: filterParams[key] };
-        } else {
-          if (["productPitched", "productsOrdered"].includes(key)) {
-            const arr = filterParams[key].split(",").map(item => item.trim());
-            query[key] = { $in: arr };
-          } else {
-            query[key] = { $regex: filterParams[key], $options: "i" };
+//   // Remove the condition for `rtFollowupReminder`
+//   for (const key in filterParams) {
+//     if (filterParams[key] && filterParams[key] !== "") {
+//       if (key === "lastOrderDateFrom" || key === "lastOrderDateTo") {
+//         if (filterParams.lastOrderDateFrom || filterParams.lastOrderDateTo) {
+//           query.lastOrderDate = {};
+//           if (filterParams.lastOrderDateFrom) {
+//             query.lastOrderDate.$gte = filterParams.lastOrderDateFrom;
+//           }
+//           if (filterParams.lastOrderDateTo) {
+//             query.lastOrderDate.$lte = filterParams.lastOrderDateTo;
+//           }
+//         }
+//       } else if (key !== "rtFollowupReminder") {
+//         if (Array.isArray(filterParams[key])) {
+//           query[key] = { $in: filterParams[key] };
+//         } else {
+//           if (["productPitched", "productsOrdered"].includes(key)) {
+//             const arr = filterParams[key].split(",").map(item => item.trim());
+//             query[key] = { $in: arr };
+//           } else {
+//             query[key] = { $regex: filterParams[key], $options: "i" };
+//           }
+//         }
+//       }
+//     }
+//   }
+
+
+//   try {
+//     if (all === "true") {
+//       const leads = await Lead.find(query, {
+//         name: 1,
+//         contactNumber: 1,
+//         agentAssigned: 1,
+//         productPitched: 1,
+//         agentsRemarks: 1,
+//         productsOrdered: 1,
+//         dosageOrdered: 1,
+//         modeOfPayment: 1,
+//         deliveryStatus: 1,
+//         healthExpertAssigned: 1,
+//         dosageExpiring: 1,
+//         rtNextFollowupDate: 1,
+//         rtFollowupReminder: 1,
+//         rtFollowupStatus: 1,
+//         lastOrderDate: 1,
+//         repeatDosageOrdered: 1,
+//         retentionStatus: 1,
+//         rtRemark: 1,
+//       }).sort({ lastOrderDate: -1 });
+     
+//       const leadsWithReminder = leads.map((lead) => ({
+//         ...lead._doc,
+//         rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
+//       }));
+
+
+//       return res.status(200).json({
+//         leads: leadsWithReminder,
+//         totalLeads: leadsWithReminder.length,
+//         totalPages: 1,
+//         currentPage: 1,
+//       });
+//     } else {
+//       const pageNumber = parseInt(page) || 1;
+//       const limitNumber = parseInt(limit) || 50;
+//       const skip = (pageNumber - 1) * limitNumber;
+//       const totalLeads = await Lead.countDocuments(query);
+//       const leads = await Lead.find(query, {
+//         name: 1,
+//         contactNumber: 1,
+//         agentAssigned: 1,
+//         productPitched: 1,
+//         agentsRemarks: 1,
+//         productsOrdered: 1,
+//         dosageOrdered: 1,
+//         modeOfPayment: 1,
+//         deliveryStatus: 1,
+//         healthExpertAssigned: 1,
+//         dosageExpiring: 1,
+//         rtNextFollowupDate: 1,
+//         rtFollowupReminder: 1,
+//         rtFollowupStatus: 1,
+//         lastOrderDate: 1,
+//         repeatDosageOrdered: 1,
+//         retentionStatus: 1,
+//         rtRemark: 1,
+//       })
+//         .sort({ lastOrderDate: -1 })
+//         .skip(skip)
+//         .limit(limitNumber);
+
+
+//       const leadsWithReminder = leads.map((lead) => ({
+//         ...lead._doc,
+//         rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
+//       }));
+
+
+//       return res.status(200).json({
+//         leads: leadsWithReminder,
+//         totalLeads,
+//         totalPages: Math.ceil(totalLeads / limitNumber),
+//         currentPage: pageNumber,
+//       });
+//     }
+//   } catch (error) {
+//     console.error("Error in retention endpoint:", error.message);
+//     res.status(500).json({ message: "Internal Server Error", error: error.message });
+//   }
+// });
+
+function getReminderType(nextFollowupDate) {
+  if (!nextFollowupDate) return "NotSet";
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const followupDate = new Date(nextFollowupDate);
+  followupDate.setHours(0,0,0,0);
+  const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
+  if (isNaN(diffInDays)) return "NotSet";
+  if (diffInDays < 0) return "Missed";
+  if (diffInDays === 0) return "Today";
+  if (diffInDays === 1) return "Tomorrow";
+  return "Later";
+}
+
+app.get("/api/leads/retention", async (req, res) => { 
+  try {
+    let {
+      page = 1,
+      limit = 20,
+      search = "",
+      retentionStatus = "All",
+      followup,
+      agentAssigned,
+      healthExpertAssigned,
+    } = req.query;
+
+    page = parseInt(page);
+    limit = parseInt(limit);
+
+    // Build MongoDB match object
+    let match = { salesStatus: "Sales Done" };
+
+    // Top filter: Active/Lost
+    if (retentionStatus && retentionStatus !== "All") {
+      match.retentionStatus = retentionStatus;
+    }
+
+    // Search filter: Name, Contact, Order ID (case-insensitive)
+    if (search && search.trim() !== "") {
+      const s = search.trim();
+      match.$or = [
+        { name: { $regex: s, $options: "i" } },
+        { contactNumber: { $regex: s, $options: "i" } },
+        { orderId: { $regex: s, $options: "i" } },
+      ];
+    }
+
+    // Filter by agentAssigned (multi)
+    if (agentAssigned) {
+      let arr = Array.isArray(agentAssigned)
+        ? agentAssigned
+        : agentAssigned.split(",");
+      match.agentAssigned = { $in: arr };
+    }
+
+    // Filter by healthExpertAssigned (multi)
+    if (healthExpertAssigned) {
+      let arr = Array.isArray(healthExpertAssigned)
+        ? healthExpertAssigned
+        : healthExpertAssigned.split(",");
+      match.healthExpertAssigned = { $in: arr };
+    }
+
+    // Add calculated reminder with MongoDB $addFields
+    const addFieldsStage = {
+      $addFields: {
+        calculatedReminder: {
+          $switch: {
+            branches: [
+              {
+                case: {
+                  $or: [
+                    { $eq: ["$rtNextFollowupDate", null] },
+                    { $eq: ["$rtNextFollowupDate", ""] },
+                    { $eq: ["$rtNextFollowupDate", undefined] },
+                  ]
+                },
+                then: "NotSet"
+              },
+            ],
+            default: {
+              $let: {
+                vars: {
+                  followup: {
+                    $dateFromString: {
+                      dateString: "$rtNextFollowupDate",
+                    }
+                  },
+                  today: {
+                    $dateFromParts: {
+                      year: { $year: { $toDate: "$$NOW" } },
+                      month: { $month: { $toDate: "$$NOW" } },
+                      day: { $dayOfMonth: { $toDate: "$$NOW" } }
+                    }
+                  }
+                },
+                in: {
+                  $switch: {
+                    branches: [
+                      // Missed: Date is before today
+                      {
+                        case: { $lt: [
+                          { $subtract: [ "$$followup", "$$today" ] }, 0
+                        ] },
+                        then: "Missed"
+                      },
+                      // Today: Date is today
+                      {
+                        case: {
+                          $eq: [
+                            { $trunc: { $divide: [ { $subtract: [ "$$followup", "$$today" ] }, 1000 * 60 * 60 * 24 ] } }, 0
+                          ]
+                        },
+                        then: "Today"
+                      },
+                      // Tomorrow: Date is tomorrow
+                      {
+                        case: {
+                          $eq: [
+                            { $trunc: { $divide: [ { $subtract: [ "$$followup", "$$today" ] }, 1000 * 60 * 60 * 24 ] } }, 1
+                          ]
+                        },
+                        then: "Tomorrow"
+                      },
+                    ],
+                    // Later: Any other future date
+                    default: "Later"
+                  }
+                }
+              }
+            }
           }
         }
       }
+    };
+
+    // 1. For pill counts (all, not just current page)
+    const countPipeline = [
+      { $match: match },
+      addFieldsStage,
+      {
+        $group: {
+          _id: "$calculatedReminder",
+          count: { $sum: 1 }
+        }
+      }
+    ];
+
+    // 2. For top filter counts (All/Active/Lost)
+    const statusCountsPromise = Lead.aggregate([
+      { $match: { salesStatus: "Sales Done" } },
+      {
+        $group: {
+          _id: { $ifNull: ["$retentionStatus", "Active"] },
+          count: { $sum: 1 },
+        }
+      }
+    ]);
+
+    // 3. Main data query
+    let mainPipeline = [
+      { $match: match },
+      addFieldsStage
+    ];
+
+    // Filter on selected followup (if set)
+    if (followup) {
+      mainPipeline.push({ $match: { calculatedReminder: followup } });
     }
-  }
 
+    mainPipeline.push(
+      { $sort: { lastOrderDate: -1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit }
+    );
 
-  try {
-    if (all === "true") {
-      const leads = await Lead.find(query, {
-        name: 1,
-        contactNumber: 1,
-        agentAssigned: 1,
-        productPitched: 1,
-        agentsRemarks: 1,
-        productsOrdered: 1,
-        dosageOrdered: 1,
-        modeOfPayment: 1,
-        deliveryStatus: 1,
-        healthExpertAssigned: 1,
-        dosageExpiring: 1,
-        rtNextFollowupDate: 1,
-        rtFollowupReminder: 1,
-        rtFollowupStatus: 1,
-        lastOrderDate: 1,
-        repeatDosageOrdered: 1,
-        retentionStatus: 1,
-        rtRemark: 1,
-      }).sort({ lastOrderDate: -1 });
-     
-      const leadsWithReminder = leads.map((lead) => ({
-        ...lead._doc,
-        rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
-      }));
+    // Run all queries in parallel
+    let [leads, followupCountsArr, statusCountsArr] = await Promise.all([
+      Lead.aggregate(mainPipeline),
+      Lead.aggregate(countPipeline),
+      statusCountsPromise,
+    ]);
 
+    // Calculate profile completion % for each lead
+    const profileFields = [
+      "name", "contactNumber", "agentAssigned", "leadSource", "enquiryFor",
+      "orderId", "productsOrdered", "amountPaid", "modeOfPayment", "deliveryStatus",
+      "dosageOrdered", "rtNextFollowupDate", "customerType", "retentionStatus",
+      "healthExpertAssigned", "agentsRemarks", "dosageExpiring", "repeatDosageOrdered", "rtRemark"
+    ];
 
-      return res.status(200).json({
-        leads: leadsWithReminder,
-        totalLeads: leadsWithReminder.length,
-        totalPages: 1,
-        currentPage: 1,
-      });
-    } else {
-      const pageNumber = parseInt(page) || 1;
-      const limitNumber = parseInt(limit) || 50;
-      const skip = (pageNumber - 1) * limitNumber;
-      const totalLeads = await Lead.countDocuments(query);
-      const leads = await Lead.find(query, {
-        name: 1,
-        contactNumber: 1,
-        agentAssigned: 1,
-        productPitched: 1,
-        agentsRemarks: 1,
-        productsOrdered: 1,
-        dosageOrdered: 1,
-        modeOfPayment: 1,
-        deliveryStatus: 1,
-        healthExpertAssigned: 1,
-        dosageExpiring: 1,
-        rtNextFollowupDate: 1,
-        rtFollowupReminder: 1,
-        rtFollowupStatus: 1,
-        lastOrderDate: 1,
-        repeatDosageOrdered: 1,
-        retentionStatus: 1,
-        rtRemark: 1,
-      })
-        .sort({ lastOrderDate: -1 })
-        .skip(skip)
-        .limit(limitNumber);
-
-
-      const leadsWithReminder = leads.map((lead) => ({
-        ...lead._doc,
-        rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
-      }));
-
-
-      return res.status(200).json({
-        leads: leadsWithReminder,
-        totalLeads,
-        totalPages: Math.ceil(totalLeads / limitNumber),
-        currentPage: pageNumber,
-      });
+    for (let lead of leads) {
+      let filled = 0;
+      for (let field of profileFields) {
+        let value = lead[field];
+        if (Array.isArray(value)) {
+          if (value.length > 0) filled++;
+        } else if (value !== null && value !== undefined && value !== "") {
+          filled++;
+        }
+      }
+      lead.profilePercent = Math.round((filled / profileFields.length) * 100);
     }
-  } catch (error) {
-    console.error("Error in retention endpoint:", error.message);
-    res.status(500).json({ message: "Internal Server Error", error: error.message });
+
+    // Format pill counts
+    const counts = { Today: 0, Tomorrow: 0, Missed: 0, Later: 0, NotSet: 0 };
+    for (const f of followupCountsArr) {
+      counts[f._id] = f.count;
+    }
+
+    // Format top status counts
+    let topCounts = { All: 0, Active: 0, Lost: 0 };
+    let total = 0;
+    for (const s of statusCountsArr) {
+      let key = s._id === "Lost" ? "Lost" : "Active";
+      if (s._id === "Lost") topCounts.Lost = s.count;
+      else topCounts.Active += s.count;
+      total += s.count;
+    }
+    topCounts.All = total;
+
+    // Response
+    res.json({
+      leads,
+      counts,
+      topCounts,
+      page,
+      limit,
+    });
+
+  } catch (err) {
+    console.error("Retention API error:", err);
+    res.status(500).json({ error: "Internal Server Error" });  
   }
-});
+}); 
+
 
 
 app.get('/api/leads/retentions', async (req, res) => {

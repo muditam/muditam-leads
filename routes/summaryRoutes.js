@@ -48,105 +48,120 @@ router.get("/sales-summary", async (req, res) => {
     const eDate = endDate || new Date().toISOString().split("T")[0];
 
 
-    const leadStartDate = sDate;
-    const leadEndDate = eDate;
-
-
     const orderStartDate = new Date(sDate);
     const orderEndDate = new Date(eDate);
     orderEndDate.setHours(23, 59, 59, 999);
 
 
-    // 1. Fetch sales agents
+    // Step 1: Fetch Sales Agents
     const salesAgents = await Employee.find(
       { role: "Sales Agent" },
-      "fullName email"
+      "fullName"
     );
-    const salesAgentNames = salesAgents.map((agent) => agent.fullName);
+    const salesAgentNames = salesAgents.map((a) => a.fullName);
 
 
-    // 2. Fetch all leads within date range
-    const allLeads = await Lead.find({
-      date: { $gte: leadStartDate, $lte: leadEndDate },
-      agentAssigned: { $in: salesAgentNames },
-    }).lean();
+    // Step 2: Aggregation to get leadsAssigned and openLeads
+    const leadsAgg = await Lead.aggregate([
+      {
+        $match: {
+          date: { $gte: sDate, $lte: eDate },
+          agentAssigned: { $in: salesAgentNames },
+        },
+      },
+      {
+        $group: {
+          _id: "$agentAssigned",
+          leadsAssigned: { $sum: 1 },
+          openLeads: {
+            $sum: {
+              $cond: [
+                {
+                  $or: [
+                    { $eq: [{ $toLower: "$salesStatus" }, "on followup"] },
+                    { $eq: ["$salesStatus", null] },
+                    { $eq: ["$salesStatus", ""] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
 
 
-    // 3. Count open leads for all agents
-    const allOpenLeads = await Lead.find({
-      agentAssigned: { $in: salesAgentNames },
-    }).lean();
-
-
-    const openLeadsCount = allOpenLeads.reduce((count, lead) => {
-      const status = (lead.salesStatus || "").toLowerCase();
-      if (status === "on followup" || status === "" || status === null) {
-        count += 1;
-      }
-      return count;
-    }, 0);
-
-
-    const leadsAssignedCount = allLeads.length;
-
-
-    // 4. Compute per-agent leadsAssigned and openLeads manually
+    const leadsAssignedCount = leadsAgg.reduce(
+      (sum, a) => sum + a.leadsAssigned,
+      0
+    );
     const perAgentLeads = {};
+    leadsAgg.forEach((agent) => {
+      perAgentLeads[agent._id] = {
+        leadsAssigned: agent.leadsAssigned,
+        openLeads: agent.openLeads,
+      };
+    });
 
 
-    for (const lead of allLeads) {
-      const agent = lead.agentAssigned;
-      if (!perAgentLeads[agent]) {
-        perAgentLeads[agent] = {
-          leadsAssigned: 0,
-          openLeads: 0,
-        };
-      }
-      perAgentLeads[agent].leadsAssigned += 1;
+    // Step 3: Get open leads count for all sales agents
+    const openLeadsAllAgg = await Lead.aggregate([
+      {
+        $match: {
+          agentAssigned: { $in: salesAgentNames },
+          $or: [
+            { salesStatus: null },
+            { salesStatus: "" },
+            { salesStatus: { $regex: /^on followup$/i } },
+          ],
+        },
+      },
+      { $count: "openLeads" },
+    ]);
+    const openLeadsCount = openLeadsAllAgg[0]?.openLeads || 0;
 
 
-      const status = (lead.salesStatus || "").toLowerCase();
-      if (status === "on followup" || status === "" || status === null) {
-        perAgentLeads[agent].openLeads += 1;
-      }
-    }
+    // Step 4: Aggregation for order data per agent
+    const ordersAgg = await MyOrder.aggregate([
+      {
+        $match: {
+          orderDate: { $gte: orderStartDate, $lte: orderEndDate },
+          agentName: { $in: salesAgentNames },
+        },
+      },
+      {
+        $group: {
+          _id: { agentName: "$agentName", orderId: "$orderId" },
+          totalPrice: {
+            $first: {
+              $ifNull: ["$totalPrice", "$amountPaid"],
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$_id.agentName",
+          orderCount: { $sum: 1 },
+          orderSalesAmount: { $sum: "$totalPrice" },
+        },
+      },
+    ]);
 
 
-    // 5. Fetch orders and process manually
-    const allOrders = await MyOrder.find({
-      orderDate: { $gte: orderStartDate, $lte: orderEndDate },
-      agentName: { $in: salesAgentNames },
-    }).lean();
-
-
-    const orderMap = {};
     const agentOrderStats = {};
+    ordersAgg.forEach((agent) => {
+      agentOrderStats[agent._id] = {
+        orderCount: agent.orderCount,
+        orderSalesAmount: agent.orderSalesAmount,
+      };
+    });
 
 
-    for (const order of allOrders) {
-      const agent = order.agentName;
-      const orderKey = `${agent}-${order.orderId}`;
-      if (!orderMap[orderKey]) {
-        const price = order.totalPrice || order.amountPaid || 0;
-        orderMap[orderKey] = true;
-
-
-        if (!agentOrderStats[agent]) {
-          agentOrderStats[agent] = {
-            orderCount: 0,
-            orderSalesAmount: 0,
-          };
-        }
-        agentOrderStats[agent].orderCount += 1;
-        agentOrderStats[agent].orderSalesAmount += price;
-      }
-    }
-
-
-    // 6. Merge per-agent stats
+    // Step 5: Merge stats
     const perAgent = [];
-
-
     for (const agent of salesAgentNames) {
       const leadStats = perAgentLeads[agent] || {
         leadsAssigned: 0,
@@ -189,12 +204,12 @@ router.get("/sales-summary", async (req, res) => {
     }
 
 
-    // 7. Overall Summary
-    const overallSalesDone = Object.values(agentOrderStats).reduce(
+    // Step 6: Overall stats
+    const overallSalesDone = ordersAgg.reduce(
       (sum, a) => sum + a.orderCount,
       0
     );
-    const overallTotalSales = Object.values(agentOrderStats).reduce(
+    const overallTotalSales = ordersAgg.reduce(
       (sum, a) => sum + a.orderSalesAmount,
       0
     );
@@ -220,86 +235,95 @@ router.get("/sales-summary", async (req, res) => {
     res.json({ perAgent, overall });
   } catch (error) {
     console.error("Error fetching sales summary:", error);
-    res
-      .status(500)
-      .json({ message: "Error fetching sales summary", error: error.message });
+    res.status(500).json({
+      message: "Error fetching sales summary",
+      error: error.message,
+    });
   }
 });
 
 
 // GET /api/followup-summary
-router.get('/followup-summarys', async (req, res) => {
+router.get("/followup-summarys", async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
-    const sDate = startDate || new Date().toISOString().split("T")[0];
-    const eDate = endDate || new Date().toISOString().split("T")[0];
+    // 1. Get all sales agents (always included in response)
+    const salesAgents = await Employee.find(
+      { role: "Sales Agent", status: "active" },
+      "fullName"
+    );
+    const salesAgentNames = salesAgents.map((a) => a.fullName);
+    const refDate =
+      req.query.referenceDate || new Date().toISOString().split("T")[0];
+    const today = refDate;
 
 
-    const pipeline = [
+    // 3. Reference points for nextFollowup logic
+    function addDays(dateStr, days) {
+      const d = new Date(dateStr);
+      d.setDate(d.getDate() + days);
+      return d.toISOString().split("T")[0];
+    }
+    const tomorrow = addDays(today, 1);
+    const yesterday = addDays(today, -1);
+    const dayAfterTomorrow = addDays(today, 2);
+
+
+    // 4. Find all leads assigned to any sales agent (NO DATE FILTER!)
+    const leads = await Lead.find(
       {
-        $match: {
-          date: { $gte: sDate, $lte: eDate },
-        },
+        agentAssigned: { $in: salesAgentNames },
+        nextFollowup: { $exists: true },
       },
       {
-        $group: {
-          _id: "$agentAssigned",
-          noFollowupSet: {
-            $sum: {
-              $cond: [
-                {
-                  $or: [
-                    { $eq: ["$nextFollowup", null] },
-                    { $eq: ["$nextFollowup", ""] },
-                  ],
-                },
-                1,
-                0,
-              ],
-            },
-          },
-          followupMissed: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $ne: ["$nextFollowup", null] },
-                    { $ne: ["$nextFollowup", ""] },
-                    { $lt: ["$nextFollowup", sDate] },
-                  ],
-                },
-                1,
-                0,
-              ],
-            },
-          },
-          followupToday: {
-            $sum: { $cond: [{ $eq: ["$nextFollowup", sDate] }, 1, 0] },
-          },
-          followupTomorrow: {
-            $sum: { $cond: [{ $eq: ["$nextFollowup", eDate] }, 1, 0] },
-          },
-          followupLater: {
-            $sum: { $cond: [{ $gt: ["$nextFollowup", eDate] }, 1, 0] },
-          },
-        },
-      },
-      {
-        $project: {
-          agentName: "$_id",
-          _id: 0,
-          noFollowupSet: 1,
-          followupMissed: 1,
-          followupToday: 1,
-          followupTomorrow: 1,
-          followupLater: 1,
-        },
-      },
-    ];
+        agentAssigned: 1,
+        nextFollowup: 1,
+      }
+    ).lean();
 
 
-    const results = await Lead.aggregate(pipeline);
-    res.json({ followup: results });
+    // 5. Build empty stats for every agent
+    const agentStats = {};
+    salesAgentNames.forEach((name) => {
+      agentStats[name] = {
+        agentName: name,
+        noFollowupSet: 0,
+        followupMissed: 0,
+        followupToday: 0,
+        followupTomorrow: 0,
+        followupYesterday: 0,
+        followupLater: 0,
+      };
+    });
+
+
+    // 6. Fill stats by bucketing each lead according to nextFollowup rules
+    leads.forEach((lead) => {
+      const stat = agentStats[lead.agentAssigned];
+      if (!stat) return;
+      const nf = lead.nextFollowup || "";
+
+
+      if (nf === "") {
+        stat.noFollowupSet += 1;
+      } else if (nf < today) {
+        stat.followupMissed += 1;
+      } else if (nf === today) {
+        stat.followupToday += 1;
+      } else if (nf === tomorrow) {
+        stat.followupTomorrow += 1;
+      } else if (nf === yesterday) {
+        stat.followupYesterday += 1;
+      } else if (nf >= dayAfterTomorrow) {
+        stat.followupLater += 1;
+      }
+    });
+
+
+    // 7. Build final response: one entry per sales agent, always included (even if zero)
+    const final = salesAgentNames.map((name) => agentStats[name]);
+
+
+    res.json({ followup: final });
   } catch (error) {
     console.error("Error fetching followup summary:", error);
     res.status(500).json({ message: "Error fetching followup summary" });
