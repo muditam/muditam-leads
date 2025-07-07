@@ -2007,12 +2007,12 @@ app.get('/api/reachout-logs/disposition-count', async (req, res) => {
       return acc;
     }, {});
 
-    res.json(formattedResult);
+    res.json(formattedResult); 
   } catch (err) {
     console.error("Error fetching disposition counts:", err);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+}); 
 
 app.get('/api/consultation-history', async (req, res) => {
   try {
