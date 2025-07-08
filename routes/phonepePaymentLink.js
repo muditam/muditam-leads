@@ -9,7 +9,7 @@ const PHONEPE_CLIENT_VERSION = process.env.PHONEPE_CLIENT_VERSION;
 const OAUTH_URL = 'https://api.phonepe.com/apis/identity-manager/v1/oauth/token'; 
 const PAYLINK_URL = 'https://api.phonepe.com/apis/pg/paylinks/v1/pay';
 
-// Token memory cache
+// Token memory cache 
 let cachedToken = null;
 let cachedExpiry = null;  
 
@@ -17,7 +17,7 @@ let cachedExpiry = null;
 async function getPhonePeToken() {
   const now = Math.floor(Date.now() / 1000);
   if (cachedToken && cachedExpiry && now < cachedExpiry - 60) { 
-    return cachedToken;
+    return cachedToken; 
   }
 
   // Prepare payload for PhonePe OAuth
@@ -37,8 +37,7 @@ async function getPhonePeToken() {
     throw new Error('Failed to get PhonePe access token');
   }
   cachedToken = resp.data.access_token;
-  cachedExpiry = resp.data.expires_at;
-  console.log('Fetched new PhonePe token, expires at', cachedExpiry);
+  cachedExpiry = resp.data.expires_at; 
   return cachedToken;
 }
 
@@ -56,14 +55,12 @@ router.post('/create-payment-link', async (req, res) => {
       expireAt
     } = req.body;
 
-    if (!amount || !customer.phoneNumber) {
-      console.log("Missing required parameters: amount or customer.phoneNumber");
+    if (!amount || !customer.phoneNumber) { 
       return res.status(400).json({ error: "Missing amount or customer phone number" });
     }
 
     // Validate phone number format
-    if (!/^\+91\d{10}$/.test(customer.phoneNumber)) {
-      console.log("Invalid phone number format: ", customer.phoneNumber);
+    if (!/^\+91\d{10}$/.test(customer.phoneNumber)) { 
       return res.status(400).json({ error: "Invalid phone number format. It should be +91XXXXXXXXXX" });
     }
 
@@ -84,7 +81,7 @@ router.post('/create-payment-link', async (req, res) => {
           email: customer.email || "customer@example.com"
         },
         notificationChannels: {
-          SMS: false,
+          SMS: true,
           EMAIL: false
         }
       }
@@ -101,14 +98,10 @@ router.post('/create-payment-link', async (req, res) => {
       "Content-Type": "application/json",
       "Authorization": `O-Bearer ${token}`
     };
-
-    // Logging outgoing request for debugging
-    console.log("Sending request to PhonePe Paylink:", JSON.stringify(payload, null, 2));
+ 
 
     const response = await axios.post(PAYLINK_URL, payload, { headers });
-
-    // Logging the response from PhonePe
-    console.log("Received response from PhonePe:", response.status, response.data);
+ 
 
     if (response.status === 200 && response.data.paylinkUrl) {
       return res.json({
@@ -117,18 +110,15 @@ router.post('/create-payment-link', async (req, res) => {
         expireAt: response.data.expireAt,
         state: response.data.state
       });
-    } else {
-      console.log("Failed to create paylink:", response.data);
+    } else { 
       return res.status(400).json({
         error: response.data.message || "Failed to create paylink"
       });
     }
   } catch (err) {
-    if (err.response && err.response.data) {
-      console.log("PhonePe API error response:", err.response.status, err.response.data);
+    if (err.response && err.response.data) { 
       return res.status(err.response.status).json(err.response.data);
-    }
-    console.log("Unhandled server error:", err);
+    } 
     return res.status(500).json({ error: "Internal server error" });
   }
 });

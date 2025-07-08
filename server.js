@@ -1473,22 +1473,20 @@ app.get('/api/leads/new-orders', async (req, res) => {
       salesStatus: "Sales Done",
       agentAssigned: { $nin: ['Admin', 'Online Order'] }
     };
-
-    // Apply additional filters if provided
+ 
     if (filters.name) {
       query.name = { $regex: filters.name, $options: "i" };
     }
     if (filters.contactNumber) {
       query.contactNumber = { $regex: filters.contactNumber };
-    }
+    } 
     if (filters.agentName) {
       let agentArr = filters.agentName;
       if (!Array.isArray(agentArr)) {
         agentArr = [agentArr];
-      }
-      // This will override our $nin if provided, so merge carefully if needed
+      } 
       query.agentAssigned = { $in: agentArr };
-    }
+    } 
     if (filters.healthExpertAssigned) {
       if (filters.healthExpertAssigned === "blank") {
         query.$or = [
