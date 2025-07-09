@@ -105,7 +105,7 @@ const LeadSchema = new mongoose.Schema({
           "Switch Off",
           "Drop On Intro",
         ],
-      },
+      }, 
     },
   ],  
 });
