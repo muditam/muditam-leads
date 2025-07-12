@@ -33,7 +33,7 @@ const combinedOrdersRoute = require("./routes/combinedOrders");
 const customerRoutes = require("./routes/customerRoutes"); 
 const consultationDetailsRoutes = require("./routes/consultationDetailsRoutes"); 
 const consultationProxyRoutes = require("./routes/consultationProxy");
-const consultationFullHistoryRoute = require("./routes/consultationFullHistory");
+const consultationFullHistoryRoute = require("./routes/consultationFullHistory");  
 const consultationFollowupRoute = require("./routes/consultationFollowup");
 const duplicateNumbersRoutes = require("./routes/duplicateNumbersRoutes");
 const ordersDatesRoute = require("./routes/orders-dates");
@@ -43,6 +43,7 @@ const escalationRoutes = require('./routes/escalation.routes');
 const orderRoutes = require("./routes/orderRoutes"); 
 const getActiveProductsRoute = require("./routes/getActiveProducts"); 
 const phonepeRoutes = require('./routes/phonepePaymentLink');
+const downloadRoute = require('./routes/download');
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -134,7 +135,8 @@ app.use(getActiveProductsRoute);
 
 app.use('/api/phonepe', phonepeRoutes);
 
- 
+app.use('/api/myorders/download', downloadRoute);
+
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -1011,137 +1013,6 @@ app.delete('/api/leads/:id', async (req, res) => {
     res.status(500).json({ message: 'Error deleting lead', error });
   }
 });
-
- 
-// app.get('/api/leads/retention', async (req, res) => {
-//   const { page, limit, all, ...filterParams } = req.query;
-//   let query = { salesStatus: "Sales Done" };
-
-
-//   const calculateReminder = (nextFollowupDate) => {
-//     const today = new Date();
-//     const followupDate = new Date(nextFollowupDate); 
-//     if (!nextFollowupDate) return null;
-//     const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
-//     if (diffInDays < 0) return "Follow-up Missed";
-//     if (diffInDays === 0) return "Today";
-//     if (diffInDays === 1) return "Tomorrow";
-//     return "Later";
-//   };
-
-
-//   // Remove the condition for `rtFollowupReminder`
-//   for (const key in filterParams) {
-//     if (filterParams[key] && filterParams[key] !== "") {
-//       if (key === "lastOrderDateFrom" || key === "lastOrderDateTo") {
-//         if (filterParams.lastOrderDateFrom || filterParams.lastOrderDateTo) {
-//           query.lastOrderDate = {};
-//           if (filterParams.lastOrderDateFrom) {
-//             query.lastOrderDate.$gte = filterParams.lastOrderDateFrom;
-//           }
-//           if (filterParams.lastOrderDateTo) {
-//             query.lastOrderDate.$lte = filterParams.lastOrderDateTo;
-//           }
-//         }
-//       } else if (key !== "rtFollowupReminder") {
-//         if (Array.isArray(filterParams[key])) {
-//           query[key] = { $in: filterParams[key] };
-//         } else {
-//           if (["productPitched", "productsOrdered"].includes(key)) {
-//             const arr = filterParams[key].split(",").map(item => item.trim());
-//             query[key] = { $in: arr };
-//           } else {
-//             query[key] = { $regex: filterParams[key], $options: "i" };
-//           }
-//         }
-//       }
-//     }
-//   }
-
-
-//   try {
-//     if (all === "true") {
-//       const leads = await Lead.find(query, {
-//         name: 1,
-//         contactNumber: 1,
-//         agentAssigned: 1,
-//         productPitched: 1,
-//         agentsRemarks: 1,
-//         productsOrdered: 1,
-//         dosageOrdered: 1,
-//         modeOfPayment: 1,
-//         deliveryStatus: 1,
-//         healthExpertAssigned: 1,
-//         dosageExpiring: 1,
-//         rtNextFollowupDate: 1,
-//         rtFollowupReminder: 1,
-//         rtFollowupStatus: 1,
-//         lastOrderDate: 1,
-//         repeatDosageOrdered: 1,
-//         retentionStatus: 1,
-//         rtRemark: 1,
-//       }).sort({ lastOrderDate: -1 });
-     
-//       const leadsWithReminder = leads.map((lead) => ({
-//         ...lead._doc,
-//         rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
-//       }));
-
-
-//       return res.status(200).json({
-//         leads: leadsWithReminder,
-//         totalLeads: leadsWithReminder.length,
-//         totalPages: 1,
-//         currentPage: 1,
-//       });
-//     } else {
-//       const pageNumber = parseInt(page) || 1;
-//       const limitNumber = parseInt(limit) || 50;
-//       const skip = (pageNumber - 1) * limitNumber;
-//       const totalLeads = await Lead.countDocuments(query);
-//       const leads = await Lead.find(query, {
-//         name: 1,
-//         contactNumber: 1,
-//         agentAssigned: 1,
-//         productPitched: 1,
-//         agentsRemarks: 1,
-//         productsOrdered: 1,
-//         dosageOrdered: 1,
-//         modeOfPayment: 1,
-//         deliveryStatus: 1,
-//         healthExpertAssigned: 1,
-//         dosageExpiring: 1,
-//         rtNextFollowupDate: 1,
-//         rtFollowupReminder: 1,
-//         rtFollowupStatus: 1,
-//         lastOrderDate: 1,
-//         repeatDosageOrdered: 1,
-//         retentionStatus: 1,
-//         rtRemark: 1,
-//       })
-//         .sort({ lastOrderDate: -1 })
-//         .skip(skip)
-//         .limit(limitNumber);
-
-
-//       const leadsWithReminder = leads.map((lead) => ({
-//         ...lead._doc,
-//         rtFollowupReminder: calculateReminder(lead.rtNextFollowupDate),
-//       }));
-
-
-//       return res.status(200).json({
-//         leads: leadsWithReminder,
-//         totalLeads,
-//         totalPages: Math.ceil(totalLeads / limitNumber),
-//         currentPage: pageNumber,
-//       });
-//     }
-//   } catch (error) {
-//     console.error("Error in retention endpoint:", error.message);
-//     res.status(500).json({ message: "Internal Server Error", error: error.message });
-//   }
-// });
 
 function getReminderType(nextFollowupDate) {
   if (!nextFollowupDate) return "NotSet";
@@ -2030,6 +1901,7 @@ app.get('/api/consultation-history', async (req, res) => {
   }
 });
   
+
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

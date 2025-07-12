@@ -1237,7 +1237,7 @@ router.get('/api/retention-sales/progress', async (req, res) => {
   try {
     // 1. RetentionSales sum
     const rsData = await RetentionSales.aggregate([
-      { 
+      {
         $match: {
           orderCreatedBy: name,
           date: { $gte: firstDay, $lte: lastDay }
@@ -1282,8 +1282,31 @@ router.get('/api/retention-sales/progress', async (req, res) => {
     ]);
     const myOrderTotal = moData.length ? moData[0].total : 0;
 
-    // 3. Return combined total
-    res.json({ total: retentionTotal + myOrderTotal });
+    // 3. Lead schema sales sum
+    const leadsData = await Lead.aggregate([
+      {
+        $match: {
+          agentAssigned: name,
+          salesStatus: "Sales Done",
+          date: { $gte: firstDay, $lte: lastDay }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
+        }
+      }
+    ]);
+    const leadsTotal = leadsData.length ? leadsData[0].total : 0;
+
+    // 4. Return combined total 
+    res.json({
+      total: retentionTotal + myOrderTotal + leadsTotal,
+      retentionSales: retentionTotal,
+      myOrderSales: myOrderTotal,
+      leadSales: leadsTotal
+    });
   } catch (err) {
     console.error("Error in retention-sales/progress:", err);
     res.status(500).json({ message: "Error calculating progress" });
