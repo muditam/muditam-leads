@@ -44,6 +44,7 @@ const orderRoutes = require("./routes/orderRoutes");
 const getActiveProductsRoute = require("./routes/getActiveProducts"); 
 const phonepeRoutes = require('./routes/phonepePaymentLink');
 const downloadRoute = require('./routes/download');
+const deliveryStatusRoutes = require("./routes/deliverystatuschecker");
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -136,6 +137,8 @@ app.use(getActiveProductsRoute);
 app.use('/api/phonepe', phonepeRoutes);
 
 app.use('/api/myorders/download', downloadRoute);
+
+app.use("/api/delivery", deliveryStatusRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -311,13 +314,15 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
         const normalizedOrderId = order.order_id.replace(/^#/, '');
         const shipmentStatus = statusMapping[order.shipment_status] || order.shipment_status;
         const orderDate = order.order_date ? new Date(order.order_date) : null;
- 
+
         const contactNumber = order.phone || order.s_phone || "";
+        const trackingNumber = order.tracking_number || ""; // Get tracking number from Shipway API response
 
         const updateFields = {
           order_id: normalizedOrderId,
           shipment_status: shipmentStatus,
           order_date: orderDate,
+          tracking_number: trackingNumber // Add tracking number
         };
 
         if (contactNumber) {
@@ -325,6 +330,12 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
           console.log(`Updating order ${normalizedOrderId} with contact number: ${contactNumber}`);
         } else {
           console.log(`Order ${normalizedOrderId} has NO contact number. Skipping contact update.`);
+        }
+
+        if (trackingNumber) {
+          console.log(`Updating order ${normalizedOrderId} with tracking number: ${trackingNumber}`);
+        } else {
+          console.log(`Order ${normalizedOrderId} has NO tracking number.`);
         }
 
         const updateResult = await Order.updateOne(
@@ -353,6 +364,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
   console.log(`Completed syncOrdersForDateRange. Total orders fetched and updated: ${totalFetched}`);
   return totalFetched;
 };
+
 
 // POST /api/leads/by-phones
 app.post('/api/leads/by-phones', async (req, res) => {
@@ -706,9 +718,8 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
 });
 
 
-// hasTeam: { type: Boolean, default: false }
 app.get("/api/employees", async (req, res) => {
-  const { role, fullName, email } = req.query; 
+  const { role, fullName, email } = req.query;
   try {
     if (fullName && email) {
       const employee = await Employee.findOne({ fullName, email });
@@ -718,100 +729,75 @@ app.get("/api/employees", async (req, res) => {
       const { async, agentNumber, callerId, target, hasTeam } = employee;
       return res.status(200).json([{ async, agentNumber, callerId, target, hasTeam }]);
     }
+
     const query = role ? { role } : {};
-    const employees = await Employee.find(
-      query,
-      "fullName email callerId agentNumber async role status target hasTeam teamMembers"
-    );
-    res.status(200).json(employees);
+    const employees = await Employee.find(query)
+      .select("fullName email callerId agentNumber async role status target hasTeam teamMembers teamLeader")
+      .populate("teamLeader", "fullName");
+
+    // Format with teamLeader name
+    const formatted = employees.map(emp => ({
+      ...emp.toObject(),
+      teamLeader: emp.teamLeader ? {
+        _id: emp.teamLeader._id,
+        fullName: emp.teamLeader.fullName
+      } : null,
+    }));
+
+    res.status(200).json(formatted);
   } catch (error) {
     console.error("Error fetching employees:", error);
     res.status(500).json({ message: "Error fetching employees", error });
-  }
+  }  
 });
 
-
-
-app.delete('/api/employees/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const employee = await Employee.findByIdAndDelete(id);
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
-    const employees = await Employee.find({}, '-password');
-    res.status(200).json({ message: 'Employee deleted successfully', employees });
-  } catch (error) {
-    res.status(500).json({ message: 'Error deleting employee', error });
-  }
-});
-
+// GET single employee (with team members populated and their teamLeaders)
 app.get("/api/employees/:id", async (req, res) => {
   try {
     const emp = await Employee.findById(req.params.id)
-      .populate("teamMembers", "fullName email role status target");
+      .populate({
+        path: "teamMembers",
+        select: "fullName email role status target teamLeader", // ✅ must include teamLeader
+        populate: {
+          path: "teamLeader",
+          select: "fullName", // ✅ nested populate
+        },
+      })
+      .populate("teamLeader", "fullName email role status"); // for manager’s own leader
+
     if (!emp) return res.status(404).json({ message: "Not found" });
-    res.json(emp);
+
+    const data = emp.toObject();
+
+    // Clean formatting for frontend
+    data.teamMembers = data.teamMembers.map(tm => ({
+      ...tm,
+      teamLeader: tm.teamLeader?.fullName || "--", // ✅ this will now be a string
+    }));
+
+    res.json(data);
   } catch (err) {
+    console.error("Error fetching employee:", err);
     res.status(500).json({ message: "Error fetching employee", error: err });
   }
 });
 
 
 
-app.put('/api/employees/:id', async (req, res) => {
-  const { id } = req.params;
-  const { callerId, agentNumber, password, target, hasTeam, ...updateData } = req.body;
 
-  try {
-    if (password) updateData.password = password;
-    if (target !== undefined) updateData.target = target;
-    if (typeof hasTeam !== "undefined") updateData.hasTeam = hasTeam;
-
-    const updatedEmployee = await Employee.findByIdAndUpdate(
-      id,
-      { callerId, agentNumber, async: 1, ...updateData },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedEmployee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
-
-    res.status(200).json({
-      message: 'Employee updated successfully',
-      employee: updatedEmployee,
-    });
-  } catch (error) {
-    console.error('Error updating employee:', error);
-    res.status(500).json({ message: 'Error updating employee', error });
-  }
-});
-
-app.put("/api/employees/:id/team", async (req, res) => {
-  const { id } = req.params; // manager's _id
-  const { teamMembers } = req.body; // array of employee _ids
-
-  if (!Array.isArray(teamMembers)) {
-    return res.status(400).json({ message: "teamMembers must be an array of employee IDs" });
-  }
-  try {
-    const updatedManager = await Employee.findByIdAndUpdate(
-      id,
-      { teamMembers, hasTeam: teamMembers.length > 0 },
-      { new: true }
-    ).populate("teamMembers", "fullName email role status target");
-    if (!updatedManager) return res.status(404).json({ message: "Manager not found" });
-    res.status(200).json({ message: "Team updated", manager: updatedManager });
-  } catch (error) {
-    res.status(500).json({ message: "Error updating team", error });
-  }
-});
-
-
-
+// CREATE new employee
 app.post('/api/employees', async (req, res) => {
-  const { fullName, email, callerId, agentNumber, role, password, target, hasTeam } = req.body;
+  const {
+    fullName,
+    email,
+    callerId,
+    agentNumber,
+    role,
+    password,
+    target,
+    hasTeam,
+    teamLeader
+  } = req.body;
 
   if (!fullName || !email || !callerId || !agentNumber || !role || !password) {
     return res.status(400).json({ message: 'All fields are required.' });
@@ -833,7 +819,8 @@ app.post('/api/employees', async (req, res) => {
       async: 1,
       status: 'active',
       target: target !== undefined ? target : 0,
-      hasTeam: typeof hasTeam !== "undefined" ? hasTeam : false,
+      hasTeam: !!hasTeam,
+      teamLeader: teamLeader || null
     });
 
     await newEmployee.save();
@@ -844,7 +831,75 @@ app.post('/api/employees', async (req, res) => {
   }
 });
 
+// UPDATE employee
+app.put('/api/employees/:id', async (req, res) => {
+  const { id } = req.params;
+  const { callerId, agentNumber, password, target, hasTeam, teamLeader, ...updateData } = req.body;
 
+  try {
+    if (password) updateData.password = password;
+    if (target !== undefined) updateData.target = target;
+    if (typeof hasTeam !== "undefined") updateData.hasTeam = hasTeam;
+    if (teamLeader !== undefined) updateData.teamLeader = teamLeader;
+
+    const updatedEmployee = await Employee.findByIdAndUpdate(
+      id,
+      { callerId, agentNumber, async: 1, ...updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedEmployee) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+
+    res.status(200).json({
+      message: 'Employee updated successfully',
+      employee: updatedEmployee,
+    });
+  } catch (error) {
+    console.error('Error updating employee:', error);
+    res.status(500).json({ message: 'Error updating employee', error });
+  }
+});
+
+// DELETE employee
+app.delete('/api/employees/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const employee = await Employee.findByIdAndDelete(id);
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+    const employees = await Employee.find({}, '-password');
+    res.status(200).json({ message: 'Employee deleted successfully', employees });
+  } catch (error) {
+    res.status(500).json({ message: 'Error deleting employee', error });
+  }
+});
+
+// UPDATE teamMembers of a manager
+app.put("/api/employees/:id/team", async (req, res) => {
+  const { id } = req.params;
+  const { teamMembers } = req.body;
+
+  if (!Array.isArray(teamMembers)) {
+    return res.status(400).json({ message: "teamMembers must be an array of employee IDs" });
+  }
+
+  try {
+    const updatedManager = await Employee.findByIdAndUpdate(
+      id,
+      { teamMembers, hasTeam: teamMembers.length > 0 },
+      { new: true }
+    ).populate("teamMembers", "fullName email role status target");
+
+    if (!updatedManager) return res.status(404).json({ message: "Manager not found" });
+
+    res.status(200).json({ message: "Team updated", manager: updatedManager });
+  } catch (error) {
+    res.status(500).json({ message: "Error updating team", error });
+  }
+});
 
 app.get('/api/leads/check-duplicate', async (req, res) => {
   const { contactNumber } = req.query;
@@ -1500,27 +1555,74 @@ app.get('/api/leads/assigned', async (req, res) => {
     res.status(500).json({ message: 'Error fetching assigned leads', error });
   }
 });
- 
-// Search endpoint
+
 app.get('/api/search', async (req, res) => {
   const { query } = req.query;
 
   if (!query) {
-    return res.status(400).json({ message: "Query is required" }); 
+    return res.status(400).json({ message: "Query is required" });
   }
 
   try {
-    const results = await Lead.find({
+    // Search in Lead model
+    const leadResults = await Lead.find({
       $or: [
         { name: { $regex: query, $options: "i" } },
         { contactNumber: { $regex: query } }
       ],
-    }).limit(10);  
+    })
+      .limit(10)
+      .lean();
 
-    res.status(200).json(results);
-  } catch (error) { 
+    const formattedLeads = leadResults.map(item => ({
+      _id: item._id,
+      name: item.name,
+      contactNumber: item.contactNumber,
+      agentAssigned: item.agentAssigned || "",
+      healthExpertAssigned: item.healthExpertAssigned || "",
+      source: "lead"
+    }));
+
+    // Search in Customer model
+    const customerResults = await Customer.find({
+      $or: [
+        { name: { $regex: query, $options: "i" } },
+        { phone: { $regex: query } }
+      ],
+    })
+      .limit(10)
+      .lean();
+
+    // Get ConsultationDetails to fetch assignExpert name
+    const customerIds = customerResults.map(c => c._id);
+    const consultationMap = {};
+
+    const consultations = await ConsultationDetails.find({
+      customerId: { $in: customerIds }
+    })
+      .populate("presales.assignExpert", "fullName")
+      .lean();
+
+    consultations.forEach(c => {
+      consultationMap[c.customerId.toString()] = c.presales.assignExpert?.fullName || "";
+    });
+
+    const formattedCustomers = customerResults.map(item => ({
+      _id: item._id,
+      name: item.name,
+      contactNumber: item.phone,
+      agentAssigned: item.assignedTo || "",
+      healthExpertAssigned: consultationMap[item._id.toString()] || "",
+      source: "customer"
+    }));
+
+    // Combine and limit total to 10 (optional)
+    const combined = [...formattedLeads, ...formattedCustomers].slice(0, 10);
+
+    res.status(200).json(combined);
+  } catch (error) {
     console.error("Error during search:", error);
-    res.status(500).json({ message: "Error during search", error }); 
+    res.status(500).json({ message: "Error during search", error });
   }
 });
 
@@ -1794,9 +1896,9 @@ app.get('/api/reachout-logs/disposition-summary', async (req, res) => {
 
   try {
     const dispositionCounts = await Lead.aggregate([
-      { $match: { healthExpertAssigned } },  // Only match agent at lead level
-      { $unwind: "$reachoutLogs" },          // Break apart logs
-      {                                      // Now filter logs inside the date window
+      { $match: { healthExpertAssigned } },  
+      { $unwind: "$reachoutLogs" },        
+      {                                   
         $match: {
           "reachoutLogs.timestamp": {
             $gte: new Date(startDate),

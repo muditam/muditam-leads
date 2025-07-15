@@ -25,7 +25,7 @@ router.post("/api/customers", async (req, res) => {
 
     const newCustomer = new Customer({
       name,  
-      phone,
+      phone, 
       age,
       location,
       lookingFor,
@@ -532,7 +532,7 @@ router.put("/api/customers/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating customer:", error);
-    res.status(500).json({ message: "Error updating customer", error });
+    res.status(500).json({ message: "Error updating customer", error }); 
   }
 }); 
 

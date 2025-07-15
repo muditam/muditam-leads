@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const ConsultationDetailsSchema = new mongoose.Schema(
   {
     // Reference to the Customer document (assumed unique per customer)
-    customerId: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true },
+    customerId: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true }, 
 
     // Data coming from Presales.js
     presales: {
@@ -19,7 +19,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       weight: { type: Number },
       sittingTime: { type: String },
       exerciseRoutine: { type: String },
-      outsideMeals: { type: String },
+      outsideMeals: { type: String }, 
       timeOfSleep: { type: String },
       notes: { type: String },
       assignExpert: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" },  

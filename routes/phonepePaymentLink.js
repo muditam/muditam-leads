@@ -6,7 +6,7 @@ require('dotenv').config();
 const PHONEPE_CLIENT_ID = process.env.PHONEPE_CLIENT_ID;
 const PHONEPE_CLIENT_SECRET = process.env.PHONEPE_CLIENT_SECRET;
 const PHONEPE_CLIENT_VERSION = process.env.PHONEPE_CLIENT_VERSION;
-const OAUTH_URL = 'https://api.phonepe.com/apis/identity-manager/v1/oauth/token'; 
+const OAUTH_URL = 'https://api.phonepe.com/apis/identity-manager/v1/oauth/token';
 const PAYLINK_URL = 'https://api.phonepe.com/apis/pg/paylinks/v1/pay';
 
 // Token memory cache 
@@ -22,7 +22,7 @@ async function getPhonePeToken() {
 
   const params = new URLSearchParams();
   params.append('client_id', PHONEPE_CLIENT_ID);
-  params.append('client_version', PHONEPE_CLIENT_VERSION); 
+  params.append('client_version', PHONEPE_CLIENT_VERSION);
   params.append('client_secret', PHONEPE_CLIENT_SECRET);
   params.append('grant_type', 'client_credentials');
 
@@ -91,9 +91,9 @@ router.post('/create-payment-link', async (req, res) => {
     const merchantOrderId = generateMerchantOrderId();
 
     const phone10 = standardizedPhone.slice(3).replace(/\D/g, '');
-if (phone10.length !== 10) {
-  return res.status(400).json({ error: "Invalid phone number after processing." });
-}
+    if (phone10.length !== 10) {
+      return res.status(400).json({ error: "Invalid phone number after processing." });
+    }
 
     const payload = {
       merchantOrderId,
@@ -136,7 +136,7 @@ if (phone10.length !== 10) {
       return res.status(400).json({
         error: response.data.message || "Failed to create paylink"
       });
-    } 
+    }
   } catch (err) {
     if (err.response && err.response.data) {
       return res.status(err.response.status).json(err.response.data);

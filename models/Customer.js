@@ -11,7 +11,7 @@ const CustomerSchema = new mongoose.Schema({
   leadSource: { type: String, required: true },
   leadDate:     { type: Date, required: true },
   createdAt: { type: Date, default: Date.now },
-  dateAndTime: { type: Date, default: () => new Date() },
+  dateAndTime: { type: Date, default: () => new Date() }, 
 }); 
 
 module.exports = mongoose.model("Customer", CustomerSchema);

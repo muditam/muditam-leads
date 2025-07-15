@@ -20,7 +20,7 @@ const LeadSchema = new mongoose.Schema({
   amountPaid: Number,
   modeOfPayment: String, 
   deliveryStatus: String,
-  healthExpertAssigned: String,
+  healthExpertAssigned: String, 
   orderId: String, 
   dosageExpiring: String,
   rtNextFollowupDate: String,

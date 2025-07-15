@@ -3,9 +3,9 @@
 const mongoose = require('mongoose');
 
 const MyOrderSchema = new mongoose.Schema({
-  customerName: { type: String, required: true },
+  customerName: { type: String, required: true }, 
   phone: { type: String, required: true },
-  shippingAddress: { type: String, required: true },
+  shippingAddress: { type: String, required: true },       
   paymentStatus: { type: String, required: true },
   productOrdered: { type: String, required: true }, 
   orderDate: { type: Date, required: true },

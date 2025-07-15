@@ -5,7 +5,7 @@ const OrderSchema = new mongoose.Schema({
   shipment_status: { type: String, required: true },
   order_date: { type: Date },  
   contact_number: { type: String }, 
+  tracking_number: { type: String },
 }, { timestamps: true }); 
 
 module.exports = mongoose.model('Order', OrderSchema); 
- 

@@ -242,8 +242,6 @@ router.get("/sales-summary", async (req, res) => {
   }
 });
 
-
-// GET /api/followup-summary
 router.get("/followup-summarys", async (req, res) => {
   try {
     // 1. Get all sales agents (always included in response)

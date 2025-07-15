@@ -403,36 +403,36 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
     res.status(200).json(aggregatedData);
   } catch (error) {
     console.error("Error aggregating sales:", error);
-    res.status(500).json({ message: "Error aggregating sales", error: error.message });
+    res.status(500).json({ message: "Error aggregating sales", error: error.message }); 
   }
 });
 
-router.get("/api/retention-sales/aggregated-followup", async (req, res) => {
+function toISODate(d) {
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const ist = new Date(utc + istOffsetMs);
+  return ist.toISOString().split("T")[0];
+}
+
+router.get("/api/retention-sales/aggregated-followup", async (req, res) => { 
   try {
-    // 1. Get all active retention agents
+    // 1. Fetch all active Retention Agents
     const activeAgents = await Employee.find(
       { role: "Retention Agent", status: "active" },
       { fullName: 1 }
     ).lean();
-    const agentNames = activeAgents.map((agent) => agent.fullName);
+    const agentNames = activeAgents.map(({ fullName }) => fullName);
 
-    function toISODate(d) {
-      const istOffset = 5.5 * 60 * 60 * 1000; // IST offset in ms
-      const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-      const istTime = new Date(utc + istOffset);
-      return istTime.toISOString().split("T")[0];
-    }
+    // 2. Compute "today" and "tomorrow" in IST
+    const today = toISODate(new Date());
+    const tomorrow = toISODate(new Date(Date.now() + 24 * 60 * 60 * 1000));
 
-    const todayDate = new Date();
-    const tomorrowDate = new Date();
-    tomorrowDate.setDate(todayDate.getDate() + 1);
+    // 3. Only include leads with retentionStatus null or "Active"
+    const retentionFilter = {
+      $or: [{ retentionStatus: null }, { retentionStatus: "Active" }],
+    };
 
-
-    const today = toISODate(todayDate);
-    const tomorrow = toISODate(tomorrowDate);
-
-
-    // 2. For each agent, get the counts in parallel
+    // 4. For each agent, run all counts in parallel
     const summary = await Promise.all(
       agentNames.map(async (agentName) => {
         const [
@@ -443,36 +443,51 @@ router.get("/api/retention-sales/aggregated-followup", async (req, res) => {
           followupLater,
           lostCustomers,
         ] = await Promise.all([
+          // No followup set
           Lead.countDocuments({
             healthExpertAssigned: agentName,
+            ...retentionFilter,
             $or: [
               { rtNextFollowupDate: { $exists: false } },
               { rtNextFollowupDate: null },
               { rtNextFollowupDate: "" },
             ],
           }),
+
+          // Missed: date < today
           Lead.countDocuments({
             healthExpertAssigned: agentName,
-            rtNextFollowupDate: { $ne: null, $lt: today },
+            ...retentionFilter,
+            rtNextFollowupDate: { $lt: today },
           }),
+
+          // Today: date === today
           Lead.countDocuments({
             healthExpertAssigned: agentName,
+            ...retentionFilter,
             rtNextFollowupDate: today,
           }),
+
+          // Tomorrow: date === tomorrow
           Lead.countDocuments({
             healthExpertAssigned: agentName,
+            ...retentionFilter,
             rtNextFollowupDate: tomorrow,
           }),
+
+          // Later: date > tomorrow
           Lead.countDocuments({
             healthExpertAssigned: agentName,
+            ...retentionFilter,
             rtNextFollowupDate: { $gt: tomorrow },
           }),
+
+          // Lost customers
           Lead.countDocuments({
             healthExpertAssigned: agentName,
-            retentionStatus: { $eq: "Lost" },
+            retentionStatus: "Lost",
           }),
         ]);
-
 
         return {
           agentName,
@@ -486,12 +501,11 @@ router.get("/api/retention-sales/aggregated-followup", async (req, res) => {
       })
     );
 
-
     res.json({ summary });
   } catch (error) {
-    console.error("Error fetching all followup summary:", error);
+    console.error("Error fetching aggregated followup summary:", error);
     res.status(500).json({
-      message: "Error fetching all followup summary",
+      message: "Error fetching aggregated followup summary",
       error: error.message,
     });
   }
@@ -902,9 +916,7 @@ router.get('/api/today-summary', async (req, res) => {
 });
 
 function parseDateOrToday(dateStr) {
-  // If dateStr is provided and has the correct length (e.g., "YYYY-MM-DD"), return it.
-  // Otherwise, return today's date in "YYYY-MM-DD" format.
-  if (dateStr && dateStr.length === 10) {
+  if (typeof dateStr === "string" && dateStr.length === 10) {
     return dateStr;
   }
   return new Date().toISOString().split("T")[0];
@@ -921,12 +933,22 @@ router.get("/api/followup-summary", async (req, res) => {
     if (!agentName) {
       return res.status(400).json({ message: "agentName is required." });
     }
-    const sDate = parseDateOrToday(req.query.startDate);
-    const eDate = parseDateOrToday(req.query.endDate);
 
-    // Count leads with no followup set
+    // 1) Determine today and tomorrow as YYYY-MM-DD strings
+    const todayStr = parseDateOrToday(req.query.startDate);
+    const tomorrowDate = new Date(todayStr);
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrowStr = tomorrowDate.toISOString().split("T")[0];
+
+    // 2) Only include active (or untagged) retentionStatus
+    const retentionFilter = {
+      $or: [{ retentionStatus: null }, { retentionStatus: "Active" }],
+    };
+
+    // 3) Count each bucket
     const noFollowupSet = await Lead.countDocuments({
       healthExpertAssigned: agentName,
+      ...retentionFilter,
       $or: [
         { rtNextFollowupDate: { $exists: false } },
         { rtNextFollowupDate: null },
@@ -934,49 +956,48 @@ router.get("/api/followup-summary", async (req, res) => {
       ],
     });
 
-    // Count leads where followup has been missed (rtNextFollowupDate < sDate)
     const followupMissed = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      rtNextFollowupDate: { $lt: sDate }
+      ...retentionFilter,
+      rtNextFollowupDate: { $lt: todayStr },
     });
 
-    // Count leads scheduled for followup today (rtNextFollowupDate === sDate)
     const followupToday = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      rtNextFollowupDate: sDate
+      ...retentionFilter,
+      rtNextFollowupDate: todayStr,
     });
 
-    // Count leads scheduled for followup tomorrow (rtNextFollowupDate === eDate)
     const followupTomorrow = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      rtNextFollowupDate: eDate
+      ...retentionFilter,
+      rtNextFollowupDate: tomorrowStr,
     });
 
-    // Count leads scheduled for followup later (rtNextFollowupDate > eDate)
     const followupLater = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      rtNextFollowupDate: { $gt: eDate }
+      ...retentionFilter,
+      rtNextFollowupDate: { $gt: tomorrowStr },
     });
 
-    // Count lost customers (retentionStatus equals "Lost")
     const lostCustomers = await Lead.countDocuments({
       healthExpertAssigned: agentName,
-      retentionStatus: "Lost"
+      retentionStatus: "Lost",
     });
 
-    res.json({
+    return res.json({
       noFollowupSet,
       followupMissed,
       followupToday,
       followupTomorrow,
       followupLater,
-      lostCustomers
+      lostCustomers,
     });
   } catch (error) {
     console.error("Error fetching followup summary:", error);
-    res.status(500).json({
+    return res.status(500).json({
       message: "Error fetching followup summary",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -1312,6 +1333,105 @@ router.get('/api/retention-sales/progress', async (req, res) => {
     res.status(500).json({ message: "Error calculating progress" });
   }
 });
+
+router.post('/api/retention-sales/progress-multiple', async (req, res) => {
+  const { names } = req.body;
+  if (!Array.isArray(names) || names.length === 0) {
+    return res.status(400).json({ message: "names must be a non-empty array" });
+  }
+
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const firstDay = `${yyyy}-${mm}-01`;
+  const lastDayNum = new Date(yyyy, now.getMonth() + 1, 0).getDate();
+  const lastDay = `${yyyy}-${mm}-${String(lastDayNum).padStart(2, '0')}`;
+
+  const startDateObj = new Date(firstDay + "T00:00:00");
+  const endDateObj = new Date(lastDay + "T23:59:59.999");
+
+  try {
+    // Retention Sales
+    const retentionData = await RetentionSales.aggregate([
+      {
+        $match: {
+          orderCreatedBy: { $in: names },
+          date: { $gte: firstDay, $lte: lastDay }
+        }
+      },
+      {
+        $group: {
+          _id: "$orderCreatedBy",
+          total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
+        }
+      }
+    ]);
+
+    // My Orders
+    const myOrderData = await MyOrder.aggregate([
+      {
+        $match: {
+          agentName: { $in: names },
+          orderDate: { $gte: startDateObj, $lte: endDateObj }
+        }
+      },
+      {
+        $project: {
+          agentName: 1,
+          amountPaid: {
+            $add: [
+              { $toDouble: { $ifNull: ["$totalPrice", 0] } },
+              { $toDouble: { $ifNull: ["$partialPayment", 0] } },
+              { $toDouble: { $ifNull: ["$upsellAmount", 0] } }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$agentName",
+          total: { $sum: "$amountPaid" }
+        }
+      }
+    ]);
+
+    // Lead Sales
+    const leadData = await Lead.aggregate([
+      {
+        $match: {
+          agentAssigned: { $in: names },
+          salesStatus: "Sales Done",
+          date: { $gte: firstDay, $lte: lastDay }
+        }
+      },
+      {
+        $group: {
+          _id: "$agentAssigned",
+          total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
+        }
+      }
+    ]);
+
+    // Combine by name
+    const totals = {};
+    for (const name of names) totals[name] = 0;
+
+    for (const { _id, total } of retentionData) totals[_id] += total;
+    for (const { _id, total } of myOrderData) totals[_id] += total;
+    for (const { _id, total } of leadData) totals[_id] += total;
+
+    const result = names.map((name) => ({
+      name,
+      total: Math.round(totals[name] || 0),
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error("Error in progress-multiple:", err);
+    res.status(500).json({ message: "Failed to fetch totals" });
+  }
+});
+
 
 module.exports = router;
  

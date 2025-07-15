@@ -11,7 +11,8 @@ const EmployeeSchema = new mongoose.Schema({
   status: { type: String, default: "active" },
   target: { type: Number, default: 0 },
   hasTeam: { type: Boolean, default: false },
-  teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: [] }]
+  teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: [] }],
+  teamLeader: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null } 
 });
 
 module.exports = mongoose.model("Employee", EmployeeSchema);
