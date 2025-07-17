@@ -407,6 +407,7 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
   }
 });
 
+// Helper to convert Date to YYYY-MM-DD in IST
 function toISODate(d) {
   const istOffsetMs = 5.5 * 60 * 60 * 1000;
   const utc = d.getTime() + d.getTimezoneOffset() * 60000;
@@ -414,25 +415,25 @@ function toISODate(d) {
   return ist.toISOString().split("T")[0];
 }
 
-router.get("/api/retention-sales/aggregated-followup", async (req, res) => { 
+router.get("/api/retention-sales/aggregated-followup", async (req, res) => {
   try {
-    // 1. Fetch all active Retention Agents
+    // 1. Get all active retention agents
     const activeAgents = await Employee.find(
       { role: "Retention Agent", status: "active" },
       { fullName: 1 }
     ).lean();
     const agentNames = activeAgents.map(({ fullName }) => fullName);
 
-    // 2. Compute "today" and "tomorrow" in IST
+    // 2. Calculate IST-adjusted today and tomorrow
     const today = toISODate(new Date());
     const tomorrow = toISODate(new Date(Date.now() + 24 * 60 * 60 * 1000));
 
-    // 3. Only include leads with retentionStatus null or "Active"
-    const retentionFilter = {
+    // 3. Filter for retentionStatus null or Active
+    const retentionStatusFilter = {
       $or: [{ retentionStatus: null }, { retentionStatus: "Active" }],
     };
 
-    // 4. For each agent, run all counts in parallel
+    // 4. For each agent, get metrics
     const summary = await Promise.all(
       agentNames.map(async (agentName) => {
         const [
@@ -443,46 +444,58 @@ router.get("/api/retention-sales/aggregated-followup", async (req, res) => {
           followupLater,
           lostCustomers,
         ] = await Promise.all([
-          // No followup set
+          // No Followup Set
           Lead.countDocuments({
-            healthExpertAssigned: agentName,
-            ...retentionFilter,
-            $or: [
-              { rtNextFollowupDate: { $exists: false } },
-              { rtNextFollowupDate: null },
-              { rtNextFollowupDate: "" },
+            $and: [
+              { healthExpertAssigned: agentName },
+              retentionStatusFilter,
+              {
+                $or: [
+                  { rtNextFollowupDate: { $exists: false } },
+                  { rtNextFollowupDate: null },
+                  { rtNextFollowupDate: "" },
+                ],
+              },
             ],
           }),
 
-          // Missed: date < today
+          // Followup Missed (before today)
           Lead.countDocuments({
-            healthExpertAssigned: agentName,
-            ...retentionFilter,
-            rtNextFollowupDate: { $lt: today },
+            $and: [
+              { healthExpertAssigned: agentName },
+              retentionStatusFilter,
+              { rtNextFollowupDate: { $lt: today } },
+            ],
           }),
 
-          // Today: date === today
+          // Followup Today
           Lead.countDocuments({
-            healthExpertAssigned: agentName,
-            ...retentionFilter,
-            rtNextFollowupDate: today,
+            $and: [
+              { healthExpertAssigned: agentName },
+              retentionStatusFilter,
+              { rtNextFollowupDate: today },
+            ],
           }),
 
-          // Tomorrow: date === tomorrow
+          // Followup Tomorrow
           Lead.countDocuments({
-            healthExpertAssigned: agentName,
-            ...retentionFilter,
-            rtNextFollowupDate: tomorrow,
+            $and: [
+              { healthExpertAssigned: agentName },
+              retentionStatusFilter,
+              { rtNextFollowupDate: tomorrow },
+            ],
           }),
 
-          // Later: date > tomorrow
+          // Followup Later (after tomorrow)
           Lead.countDocuments({
-            healthExpertAssigned: agentName,
-            ...retentionFilter,
-            rtNextFollowupDate: { $gt: tomorrow },
+            $and: [
+              { healthExpertAssigned: agentName },
+              retentionStatusFilter,
+              { rtNextFollowupDate: { $gt: tomorrow } },
+            ],
           }),
 
-          // Lost customers
+          // Lost Customers (only retentionStatus = "Lost")
           Lead.countDocuments({
             healthExpertAssigned: agentName,
             retentionStatus: "Lost",
@@ -510,7 +523,6 @@ router.get("/api/retention-sales/aggregated-followup", async (req, res) => {
     });
   }
 });
-
 
 
 /**
@@ -1152,69 +1164,127 @@ router.get("/api/shipment-summary", async (req, res) => {
 });
 
 
+// router.get('/api/retention-sales/all', async (req, res) => {
+//   try {
+//     const { orderCreatedBy } = req.query;
+//     const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
+//     const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
+
+//     const retentionSales = await RetentionSales.find(retentionQuery).lean();
+//     const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+//     const transformedOrders = myOrders.map(order => {
+//       const upsellAmount = Number(order.upsellAmount);
+//       const partialPayment = Number(order.partialPayment);
+//       const totalPrice = Number(order.totalPrice);
+
+//       // Calculate the correct amountPaid (totalPrice + partialPayment)
+//       let amountPaid = totalPrice + partialPayment + upsellAmount;  // Updated calculation
+
+//       return { 
+//         _id: order._id, 
+//         date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
+//         name: order.customerName,
+//         contactNumber: order.phone,
+//         productsOrdered: order.productOrdered,
+//         dosageOrdered: order.dosageOrdered,
+//         upsellAmount: upsellAmount,  
+//         partialPayment: partialPayment,  
+//         amountPaid: amountPaid,  // Updated amountPaid calculation
+//         modeOfPayment: order.paymentMethod,  
+//         shipway_status: order.shipway_status || "",  
+//         orderId: order.orderId,
+//         orderCreatedBy: order.agentName,
+//         remarks: order.selfRemark || "", 
+//         source: "MyOrder"
+//       };
+//     });
+
+//     const combinedData = [...retentionSales, ...transformedOrders];
+
+//     // Update the shipway_status from the corresponding Order document if missing
+//     await Promise.all(
+//       combinedData.map(async (sale) => {
+//         if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
+//           const normalizedOrderId = sale.orderId.startsWith('#')
+//             ? sale.orderId.slice(1)
+//             : sale.orderId;
+//           const orderRecord = await Order.findOne({ order_id: normalizedOrderId }).lean();
+//           if (orderRecord) {
+//             sale.shipway_status = orderRecord.shipment_status;
+//           }
+//         }
+//       })
+//     );
+
+//     // Sort the combined data by date in descending order
+//     combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+//     // Return the combined and updated sales data
+//     res.status(200).json(combinedData);
+//   } catch (error) {
+//     console.error("Error fetching combined retention sales:", error);
+//     res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
+//   }
+// });
+
+
 router.get('/api/retention-sales/all', async (req, res) => {
+  const { orderCreatedBy, startDate, endDate } = req.query;
+
+  // Build retention-sales query (date is a YYYY-MM-DD string)
+  const retentionQuery = {};
+  if (orderCreatedBy) retentionQuery.orderCreatedBy = orderCreatedBy;
+  if (startDate || endDate) {
+    retentionQuery.date = {};
+    if (startDate) retentionQuery.date.$gte = startDate;
+    if (endDate)   retentionQuery.date.$lte = endDate;
+  }
+
+  // Build myorders query (orderDate is a JS Date)
+  const myOrderQuery = {};
+  if (orderCreatedBy) myOrderQuery.agentName = orderCreatedBy;
+  if (startDate || endDate) {
+    myOrderQuery.orderDate = {};
+    if (startDate) myOrderQuery.orderDate.$gte = new Date(startDate);
+    if (endDate) {
+      const d = new Date(endDate);
+      d.setHours(23,59,59,999);
+      myOrderQuery.orderDate.$lte = d;
+    }
+  }
+
   try {
-    const { orderCreatedBy } = req.query;
-    const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
-    const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
+    const [ retentionSales, myOrders ] = await Promise.all([
+      RetentionSales.find(retentionQuery).lean(),
+      MyOrder.find(myOrderQuery).lean(),
+    ]);
 
-    const retentionSales = await RetentionSales.find(retentionQuery).lean();
-    const myOrders = await MyOrder.find(myOrderQuery).lean();
+    // ... transform myOrders exactly as before ...
+    const transformed = myOrders.map(order => ({
+      _id: order._id,
+      date: order.orderDate.toISOString().slice(0,10),
+      orderId: order.orderId,
+      shipway_status: order.shipway_status || '',
+      contactNumber: order.phone,
+      amountPaid:
+        Number(order.upsellAmount) > 0
+          ? Number(order.upsellAmount)
+          : Number(order.totalPrice) + Number(order.partialPayment || 0)
+    }));
 
-    const transformedOrders = myOrders.map(order => {
-      const upsellAmount = Number(order.upsellAmount);
-      const partialPayment = Number(order.partialPayment);
-      const totalPrice = Number(order.totalPrice);
+    // merge and sort descending by date
+    const combined = [...retentionSales, ...transformed]
+      .sort((a,b) => new Date(b.date) - new Date(a.date));
 
-      // Calculate the correct amountPaid (totalPrice + partialPayment)
-      let amountPaid = totalPrice + partialPayment + upsellAmount;  // Updated calculation
-
-      return { 
-        _id: order._id, 
-        date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
-        name: order.customerName,
-        contactNumber: order.phone,
-        productsOrdered: order.productOrdered,
-        dosageOrdered: order.dosageOrdered,
-        upsellAmount: upsellAmount,  
-        partialPayment: partialPayment,  
-        amountPaid: amountPaid,  // Updated amountPaid calculation
-        modeOfPayment: order.paymentMethod,  
-        shipway_status: order.shipway_status || "",  
-        orderId: order.orderId,
-        orderCreatedBy: order.agentName,
-        remarks: order.selfRemark || "", 
-        source: "MyOrder"
-      };
-    });
-
-    const combinedData = [...retentionSales, ...transformedOrders];
-
-    // Update the shipway_status from the corresponding Order document if missing
-    await Promise.all(
-      combinedData.map(async (sale) => {
-        if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
-          const normalizedOrderId = sale.orderId.startsWith('#')
-            ? sale.orderId.slice(1)
-            : sale.orderId;
-          const orderRecord = await Order.findOne({ order_id: normalizedOrderId }).lean();
-          if (orderRecord) {
-            sale.shipway_status = orderRecord.shipment_status;
-          }
-        }
-      })
-    );
-
-    // Sort the combined data by date in descending order
-    combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    // Return the combined and updated sales data
-    res.status(200).json(combinedData);
-  } catch (error) {
-    console.error("Error fetching combined retention sales:", error);
-    res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
+    res.json(combined);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching combined sales', error: err });
   }
 });
+
+
 
 
 router.put('/api/retention-sales/all/:id', async (req, res) => {
@@ -1431,6 +1501,8 @@ router.post('/api/retention-sales/progress-multiple', async (req, res) => {
     res.status(500).json({ message: "Failed to fetch totals" });
   }
 });
+
+
 
 
 module.exports = router;

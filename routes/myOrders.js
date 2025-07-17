@@ -7,17 +7,17 @@ router.post("/", async (req, res) => {
     const {
       customerName,
       phone,
-      shippingAddress,
+      shippingAddress, 
       paymentStatus,
       productOrdered, 
       orderDate,
       orderId,
       totalPrice,
       agentName,
-      partialPayment,
+      partialPayment, 
       dosageOrdered,
-      selfRemark,
-      paymentMethod,
+      selfRemark, 
+      paymentMethod, 
       upsellAmount,
     } = req.body;
 
@@ -41,10 +41,10 @@ router.post("/", async (req, res) => {
 
     // Convert values to the appropriate types
     const newOrder = new MyOrder({
-      customerName,
-      phone,
+      customerName, 
+      phone, 
       shippingAddress,
-      paymentStatus,
+      paymentStatus, 
       productOrdered,
       orderDate: new Date(orderDate),
       orderId,

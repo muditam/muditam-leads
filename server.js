@@ -44,7 +44,9 @@ const orderRoutes = require("./routes/orderRoutes");
 const getActiveProductsRoute = require("./routes/getActiveProducts"); 
 const phonepeRoutes = require('./routes/phonepePaymentLink');
 const downloadRoute = require('./routes/download');
-const deliveryStatusRoutes = require("./routes/deliverystatuschecker");
+const deliveryStatusRoutes = require("./routes/deliverystatuschecker");  
+const mergedSalesRoutes = require("./routes/mergedSales");
+const employeeRoutes = require("./routes/employees");
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -138,7 +140,11 @@ app.use('/api/phonepe', phonepeRoutes);
 
 app.use('/api/myorders/download', downloadRoute);
 
-app.use("/api/delivery", deliveryStatusRoutes);
+app.use("/api/delivery", deliveryStatusRoutes); 
+
+app.use("/api/merged-sales", mergedSalesRoutes);
+
+app.use("/api/deliver-history", employeeRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -732,10 +738,9 @@ app.get("/api/employees", async (req, res) => {
 
     const query = role ? { role } : {};
     const employees = await Employee.find(query)
-      .select("fullName email callerId agentNumber async role status target hasTeam teamMembers teamLeader")
+      .select("fullName email callerId agentNumber async role status target hasTeam teamMembers teamLeader joiningDate")
       .populate("teamLeader", "fullName");
 
-    // Format with teamLeader name
     const formatted = employees.map(emp => ({
       ...emp.toObject(),
       teamLeader: emp.teamLeader ? {
@@ -748,31 +753,29 @@ app.get("/api/employees", async (req, res) => {
   } catch (error) {
     console.error("Error fetching employees:", error);
     res.status(500).json({ message: "Error fetching employees", error });
-  }  
+  }
 });
 
-// GET single employee (with team members populated and their teamLeaders)
 app.get("/api/employees/:id", async (req, res) => {
   try {
     const emp = await Employee.findById(req.params.id)
       .populate({
         path: "teamMembers",
-        select: "fullName email role status target teamLeader", // ✅ must include teamLeader
+        select: "fullName email role status target teamLeader joiningDate",
         populate: {
           path: "teamLeader",
-          select: "fullName", // ✅ nested populate
+          select: "fullName",
         },
       })
-      .populate("teamLeader", "fullName email role status"); // for manager’s own leader
+      .populate("teamLeader", "fullName email role status");
 
     if (!emp) return res.status(404).json({ message: "Not found" });
 
     const data = emp.toObject();
 
-    // Clean formatting for frontend
     data.teamMembers = data.teamMembers.map(tm => ({
       ...tm,
-      teamLeader: tm.teamLeader?.fullName || "--", // ✅ this will now be a string
+      teamLeader: tm.teamLeader?.fullName || "--",
     }));
 
     res.json(data);
@@ -781,9 +784,6 @@ app.get("/api/employees/:id", async (req, res) => {
     res.status(500).json({ message: "Error fetching employee", error: err });
   }
 });
-
-
-
 
 // CREATE new employee
 app.post('/api/employees', async (req, res) => {
@@ -796,7 +796,8 @@ app.post('/api/employees', async (req, res) => {
     password,
     target,
     hasTeam,
-    teamLeader
+    teamLeader,
+    joiningDate
   } = req.body;
 
   if (!fullName || !email || !callerId || !agentNumber || !role || !password) {
@@ -820,7 +821,8 @@ app.post('/api/employees', async (req, res) => {
       status: 'active',
       target: target !== undefined ? target : 0,
       hasTeam: !!hasTeam,
-      teamLeader: teamLeader || null
+      teamLeader: teamLeader || null,
+      joiningDate: joiningDate || null,  
     });
 
     await newEmployee.save();
@@ -831,16 +833,16 @@ app.post('/api/employees', async (req, res) => {
   }
 });
 
-// UPDATE employee
 app.put('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
-  const { callerId, agentNumber, password, target, hasTeam, teamLeader, ...updateData } = req.body;
+  const { callerId, agentNumber, password, target, hasTeam, teamLeader, joiningDate, ...updateData } = req.body;
 
   try {
     if (password) updateData.password = password;
     if (target !== undefined) updateData.target = target;
     if (typeof hasTeam !== "undefined") updateData.hasTeam = hasTeam;
     if (teamLeader !== undefined) updateData.teamLeader = teamLeader;
+    if (joiningDate) updateData.joiningDate = joiningDate;
 
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
@@ -918,7 +920,7 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
 
  
 app.get('/api/leads', async (req, res) => {
-  const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus } = req.query;
+  const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus, sortBy = '_id', sortOrder = 'desc' } = req.query;
   const filterCriteria = JSON.parse(filters);
 
   const parseDate = (dateString) => {
