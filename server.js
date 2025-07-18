@@ -46,7 +46,7 @@ const phonepeRoutes = require('./routes/phonepePaymentLink');
 const downloadRoute = require('./routes/download');
 const deliveryStatusRoutes = require("./routes/deliverystatuschecker");  
 const mergedSalesRoutes = require("./routes/mergedSales");
-const employeeRoutes = require("./routes/employees");
+const employeeRoutes = require("./routes/employees"); 
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -144,7 +144,7 @@ app.use("/api/delivery", deliveryStatusRoutes);
 
 app.use("/api/merged-sales", mergedSalesRoutes);
 
-app.use("/api/deliver-history", employeeRoutes); 
+app.use("/api/deliver-history", employeeRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

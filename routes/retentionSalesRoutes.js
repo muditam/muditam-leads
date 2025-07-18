@@ -1224,7 +1224,7 @@ router.get('/api/retention-sales/all', async (req, res) => {
     res.status(200).json(combinedData);
   } catch (error) {
     console.error("Error fetching combined retention sales:", error);
-    res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
+    res.status(500).json({ message: "Error fetching combined retention sales", error: error.message }); 
   }
 });
 

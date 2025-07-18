@@ -46,7 +46,7 @@ router.put("/update-duplicate-group", async (req, res) => {
       { contactNumber: oldContactNumber },
       { $set: updatedData }
     );
-    res.json({ message: "Duplicate group updated", updateResult });
+    res.json({ message: "Duplicate group updated", updateResult }); 
   } catch (err) {
     console.error("Error updating duplicate group:", err);
     res.status(500).json({ error: "Server error" });

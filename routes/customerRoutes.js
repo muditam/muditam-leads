@@ -47,6 +47,8 @@ router.get("/api/customers", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
+    const skip = req.query.skip !== undefined ? parseInt(req.query.skip, 10) : null; 
+
     const filters = JSON.parse(req.query.filters || "{}");
     const status = req.query.status || "";
     const tags = JSON.parse(req.query.tags || "[]");
@@ -67,7 +69,7 @@ router.get("/api/customers", async (req, res) => {
     if (filters.phone) rootMatch.phone = filters.phone;
     if (filters.location) rootMatch.location = { $regex: filters.location, $options: "i" };
     if (assignedTo) {
-      const assignedArray = assignedTo.split(",").map(a => a.trim());
+      const assignedArray = assignedTo.split(",").map((a) => a.trim());
       rootMatch.assignedTo = assignedArray.length === 1 ? assignedArray[0] : { $in: assignedArray };
     }
     if (createdAt) {
@@ -76,33 +78,52 @@ router.get("/api/customers", async (req, res) => {
       const dateEnd = new Date(createdAt);
       dateEnd.setHours(23, 59, 59, 999);
       rootMatch.createdAt = { $gte: dateStart, $lte: dateEnd };
-    } 
+    }
 
     const postMatch = {};
-
     if (status === "Open") {
       postMatch["presales.leadStatus"] = {
-        $in: ["New Lead", "CONS Scheduled", "CONS Done", "Call Back Later", "On Follow Up", "CNP", "Switch Off"],
+        $in: [
+          "New Lead",
+          "CONS Scheduled",
+          "CONS Done",
+          "Call Back Later",
+          "On Follow Up",
+          "CNP",
+          "Switch Off",
+        ],
       };
     } else if (status === "Won") {
       postMatch["presales.leadStatus"] = "Sales Done";
     } else if (status === "Lost") {
       postMatch["presales.leadStatus"] = {
-        $in: ["General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost", "Ordered from Other Sources", "Budget issue"],
+        $in: [
+          "General Query",
+          "Fake Lead",
+          "Invalid Number",
+          "Not Interested-Lost",
+          "Ordered from Other Sources",
+          "Budget issue",
+        ],
       };
     }
 
     const orClauses = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today); 
+    const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const afterTomorrow = new Date(tomorrow);
     afterTomorrow.setDate(afterTomorrow.getDate() + 1);
     const deadStatuses = ["Switch Off", "General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost"];
 
     if (tags.includes("Missed")) {
-      orClauses.push({ $and: [{ followUpDate: { $lt: today } }, { "presales.leadStatus": { $nin: deadStatuses } }] });
+      orClauses.push({
+        $and: [
+          { followUpDate: { $lt: today } },
+          { "presales.leadStatus": { $nin: deadStatuses } },
+        ],
+      });
     }
     if (tags.includes("Today")) {
       orClauses.push({ followUpDate: { $gte: today, $lt: tomorrow } });
@@ -138,10 +159,11 @@ router.get("/api/customers", async (req, res) => {
       orClauses.push({
         $or: [
           { "presales.assignExpert": { $exists: false } },
-          { "presales.assignExpert": null }
-        ]
+          { "presales.assignExpert": null },
+        ],
       });
     }
+
     if (orClauses.length) {
       postMatch.$or = orClauses;
     }
@@ -151,6 +173,7 @@ router.get("/api/customers", async (req, res) => {
     if (sortBy === "desc") sortStage = { name: -1 };
     if (sortBy === "oldest") sortStage = { createdAt: 1 };
 
+    // Main aggregation pipeline
     const pipeline = [
       { $match: rootMatch },
       {
@@ -186,10 +209,11 @@ router.get("/api/customers", async (req, res) => {
     pipeline.push(
       { $match: postMatch },
       { $sort: sortStage },
-      { $skip: (page - 1) * limit },
+      { $skip: skip !== null && !isNaN(skip) ? skip : (page - 1) * limit },
       { $limit: limit }
     );
 
+    // Count aggregation
     const countPipeline = [
       { $match: rootMatch },
       {
@@ -243,7 +267,7 @@ router.get("/api/customers", async (req, res) => {
   }
 });
 
- 
+
 
 router.get("/api/customers/counts", async (req, res) => {
   try {
