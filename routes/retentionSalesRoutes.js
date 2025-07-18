@@ -1164,72 +1164,72 @@ router.get("/api/shipment-summary", async (req, res) => {
 });
 
 
-// router.get('/api/retention-sales/all', async (req, res) => {
-//   try {
-//     const { orderCreatedBy } = req.query;
-//     const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
-//     const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
-
-//     const retentionSales = await RetentionSales.find(retentionQuery).lean();
-//     const myOrders = await MyOrder.find(myOrderQuery).lean();
-
-//     const transformedOrders = myOrders.map(order => {
-//       const upsellAmount = Number(order.upsellAmount);
-//       const partialPayment = Number(order.partialPayment);
-//       const totalPrice = Number(order.totalPrice);
-
-//       // Calculate the correct amountPaid (totalPrice + partialPayment)
-//       let amountPaid = totalPrice + partialPayment + upsellAmount;  // Updated calculation
-
-//       return { 
-//         _id: order._id, 
-//         date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
-//         name: order.customerName,
-//         contactNumber: order.phone,
-//         productsOrdered: order.productOrdered,
-//         dosageOrdered: order.dosageOrdered,
-//         upsellAmount: upsellAmount,  
-//         partialPayment: partialPayment,  
-//         amountPaid: amountPaid,  // Updated amountPaid calculation
-//         modeOfPayment: order.paymentMethod,  
-//         shipway_status: order.shipway_status || "",  
-//         orderId: order.orderId,
-//         orderCreatedBy: order.agentName,
-//         remarks: order.selfRemark || "", 
-//         source: "MyOrder"
-//       };
-//     });
-
-//     const combinedData = [...retentionSales, ...transformedOrders];
-
-//     // Update the shipway_status from the corresponding Order document if missing
-//     await Promise.all(
-//       combinedData.map(async (sale) => {
-//         if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
-//           const normalizedOrderId = sale.orderId.startsWith('#')
-//             ? sale.orderId.slice(1)
-//             : sale.orderId;
-//           const orderRecord = await Order.findOne({ order_id: normalizedOrderId }).lean();
-//           if (orderRecord) {
-//             sale.shipway_status = orderRecord.shipment_status;
-//           }
-//         }
-//       })
-//     );
-
-//     // Sort the combined data by date in descending order
-//     combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-//     // Return the combined and updated sales data
-//     res.status(200).json(combinedData);
-//   } catch (error) {
-//     console.error("Error fetching combined retention sales:", error);
-//     res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
-//   }
-// });
-
-
 router.get('/api/retention-sales/all', async (req, res) => {
+  try {
+    const { orderCreatedBy } = req.query;
+    const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
+    const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
+
+    const retentionSales = await RetentionSales.find(retentionQuery).lean();
+    const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+    const transformedOrders = myOrders.map(order => {
+      const upsellAmount = Number(order.upsellAmount);
+      const partialPayment = Number(order.partialPayment);
+      const totalPrice = Number(order.totalPrice);
+
+      // Calculate the correct amountPaid (totalPrice + partialPayment)
+      let amountPaid = totalPrice + partialPayment + upsellAmount;  // Updated calculation
+
+      return { 
+        _id: order._id, 
+        date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
+        name: order.customerName,
+        contactNumber: order.phone,
+        productsOrdered: order.productOrdered,
+        dosageOrdered: order.dosageOrdered,
+        upsellAmount: upsellAmount,  
+        partialPayment: partialPayment,  
+        amountPaid: amountPaid,  // Updated amountPaid calculation
+        modeOfPayment: order.paymentMethod,  
+        shipway_status: order.shipway_status || "",  
+        orderId: order.orderId,
+        orderCreatedBy: order.agentName,
+        remarks: order.selfRemark || "", 
+        source: "MyOrder"
+      };
+    });
+
+    const combinedData = [...retentionSales, ...transformedOrders];
+
+    // Update the shipway_status from the corresponding Order document if missing
+    await Promise.all(
+      combinedData.map(async (sale) => {
+        if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
+          const normalizedOrderId = sale.orderId.startsWith('#')
+            ? sale.orderId.slice(1)
+            : sale.orderId;
+          const orderRecord = await Order.findOne({ order_id: normalizedOrderId }).lean();
+          if (orderRecord) {
+            sale.shipway_status = orderRecord.shipment_status;
+          }
+        }
+      })
+    );
+
+    // Sort the combined data by date in descending order
+    combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Return the combined and updated sales data
+    res.status(200).json(combinedData);
+  } catch (error) {
+    console.error("Error fetching combined retention sales:", error);
+    res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
+  }
+});
+
+
+router.get('/api/retention-sales/allnew', async (req, res) => {
   const { orderCreatedBy, startDate, endDate } = req.query;
 
   // Build retention-sales query (date is a YYYY-MM-DD string)

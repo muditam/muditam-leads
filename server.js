@@ -144,7 +144,7 @@ app.use("/api/delivery", deliveryStatusRoutes);
 
 app.use("/api/merged-sales", mergedSalesRoutes);
 
-app.use("/api/deliver-history", employeeRoutes);
+app.use("/api/deliver-history", employeeRoutes); 
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
