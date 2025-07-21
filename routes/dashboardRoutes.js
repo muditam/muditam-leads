@@ -39,12 +39,13 @@ router.get('/today-summary-agent', async (req, res) => {
             }
           },
           salesDone: { $sum: { $cond: [{ $eq: ["$salesStatus", "Sales Done"] }, 1, 0] } },
-          totalSales: { $sum: { $ifNull: ["$amountPaid", 0] } }
+          totalSales: { $sum: { $ifNull: ["$amountPaid", 0] } },
+          totalPartialPayment: { $sum: { $ifNull: ["$partialPayment", 0] } }, // <-- added
         }
       }
     ];
     const leadResult = await Lead.aggregate(leadPipeline);
-    const leadData = leadResult[0] || { leadsAssignedToday: 0, openLeads: 0, salesDone: 0, totalSales: 0 };
+    const leadData = leadResult[0] || { leadsAssignedToday: 0, openLeads: 0, salesDone: 0, totalSales: 0, totalPartialPayment: 0 };
 
     // ------------------------------
     // 2) Aggregate data from MyOrder collection
@@ -53,13 +54,11 @@ router.get('/today-summary-agent', async (req, res) => {
     if (agentName) {
       myOrderMatch.agentName = agentName;
     }
-    // IMPORTANT: Use sDate for start and eDate for end boundaries
+    // Use sDate for start and eDate for end boundaries
     const startDateObj = new Date(sDate + "T00:00:00+05:30");
     const endDateObj = new Date(eDate + "T23:59:59.999+05:30");
     myOrderMatch.orderDate = { $gte: startDateObj, $lte: endDateObj };
 
-    // For MyOrder, count each order as one sale and compute totalSales as:
-    // if upsellAmount > 0 then upsellAmount, else totalPrice.
     const orderPipeline = [
       { $match: myOrderMatch },
       {
@@ -75,24 +74,40 @@ router.get('/today-summary-agent', async (req, res) => {
                 { $toDouble: "$totalPrice" }
               ]
             }
+          },
+          totalPartialPayment: {
+            $sum: {
+              $cond: [
+                { $ifNull: ["$partialPayment", false] },
+                { $toDouble: "$partialPayment" },
+                0
+              ]
+            }
           }
         }
       }
     ];
     const orderResult = await MyOrder.aggregate(orderPipeline);
-    const orderData = orderResult[0] || { leadsAssignedToday: 0, salesDone: 0, totalSales: 0 };
+    const orderData = orderResult[0] || { leadsAssignedToday: 0, salesDone: 0, totalSales: 0, totalPartialPayment: 0 };
 
     // ------------------------------
     // 3) Combine the results
     // ------------------------------
-    const combinedLeadsAssigned = leadData.leadsAssignedToday + orderData.leadsAssignedToday;
-    const combinedSalesDone = leadData.salesDone + orderData.salesDone;
-    const combinedTotalSales = leadData.totalSales + orderData.totalSales;
+    const combinedLeadsAssigned = (leadData.leadsAssignedToday || 0) + (orderData.leadsAssignedToday || 0);
+    const combinedSalesDone = (leadData.salesDone || 0) + (orderData.salesDone || 0);
+
+    // Add total partial payments to total sales for combined sales
+    const totalPartialPayment = (leadData.totalPartialPayment || 0) + (orderData.totalPartialPayment || 0);
+    const combinedTotalSales =
+      (leadData.totalSales || 0) +
+      (orderData.totalSales || 0) +
+      totalPartialPayment;
+
     // Open leads come only from Lead collection.
-    const openLeads = leadData.openLeads;
+    const openLeads = leadData.openLeads || 0;
 
     const conversionRate =
-      combinedLeadsAssigned > 0 ? (combinedSalesDone / combinedLeadsAssigned) * 100 : 0;
+      combinedLeadsAssigned > 0 ? (combinedSalesDone / combinedLeadsAssigned) * 100 : 0; 
     const avgOrderValue =
       combinedSalesDone > 0 ? combinedTotalSales / combinedSalesDone : 0;
 
@@ -101,14 +116,16 @@ router.get('/today-summary-agent', async (req, res) => {
       leadsAssignedToday: combinedLeadsAssigned,
       salesDone: combinedSalesDone,
       conversionRate: Number(conversionRate.toFixed(2)),
-      totalSales: Number(combinedTotalSales.toFixed(2)),
-      avgOrderValue: Number(avgOrderValue.toFixed(2))
+      totalSales: Number(combinedTotalSales.toFixed(2)), // includes partial payments
+      avgOrderValue: Number(avgOrderValue.toFixed(2)),
+      totalPartialPayment: Number(totalPartialPayment.toFixed(2)), // exposed separately as well
     });
   } catch (error) {
     console.error("Error in today-summary-agent:", error);
     res.status(500).json({ message: "Error in today-summary-agent" });
   }
 });
+
 
 
 /* -------------------------

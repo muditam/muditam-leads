@@ -14,7 +14,7 @@ router.get("/", async (req, res) => {
     res.status(200).json(consultations);
   } catch (error) {
     console.error("Error fetching consultation details:", error);
-    res.status(500).json({ message: "Error fetching consultation details", error: error.message }); 
+    res.status(500).json({ message: "Error fetching consultation details", error: error.message });
   }
 });
 
@@ -36,16 +36,17 @@ router.post("/", async (req, res) => {
   try {
     const { customerId, presales, consultation, closing } = req.body;
     if (!customerId) {
-      return res.status(400).json({ message: "customerId is required" }); 
+      return res.status(400).json({ message: "customerId is required" });
     }
 
     // Build an update object using dot notation for the presales subdocument.
     const updateData = {};
 
     if (presales) {
-      // Iterate over each key in the presales object, e.g., leadStatus, hba1c, etc.
       Object.keys(presales).forEach((key) => {
-        updateData[`presales.${key}`] = presales[key];
+        if (key !== "leadStatus" && key !== "subLeadStatus") {
+          updateData[`presales.${key}`] = presales[key];
+        }
       });
     }
     if (consultation) {

@@ -6,14 +6,12 @@ const ConsultationDetailsSchema = new mongoose.Schema(
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true }, 
 
     // Data coming from Presales.js
-    presales: {
-      leadStatus: { type: String, default: "New Lead" }, 
-      subLeadStatus: { type: String },
+    presales: { 
       hba1c: { type: String },
-      lastTestDone: { type: String },
+      lastTestDone: { type: String }, 
       fastingSugar: { type: String },
       ppSugar: { type: String }, 
-      durationOfDiabetes: { type: String },
+      durationOfDiabetes: { type: String }, 
       gender: { type: String },
       dietType: { type: String },
       weight: { type: Number },
@@ -22,7 +20,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
       outsideMeals: { type: String }, 
       timeOfSleep: { type: String },
       notes: { type: String },
-      assignExpert: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" },  
+      assignExpert: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" }, 
       doctorCons:   { type: String },
       file: { type: String }, // Stores file path or URL 
       checklist: {

@@ -45,7 +45,7 @@ router.get("/", async (req, res) => {
 
     // Leads with MyOrders
     leads.forEach((lead) => {
-      const phone = normalizePhone(lead.contactNumber);
+      const phone = normalizePhone(lead.contactNumber); 
       seenPhones.add(phone);
       const order = myOrdersMap[phone];
 
@@ -79,6 +79,7 @@ router.get("/", async (req, res) => {
           productsOrdered: [order.productOrdered],
           dosageOrdered: order.dosageOrdered,
           amountPaid: order.totalPrice,
+          partialPayment: order.partialPayment || 0,  
           modeOfPayment: order.paymentMethod,
           lastOrderDate: order.orderDate,
           salesStatus: "Sales Done",
@@ -90,7 +91,7 @@ router.get("/", async (req, res) => {
             dosageOrdered: order.dosageOrdered,
             totalPrice: order.totalPrice,
             paymentMethod: order.paymentMethod,
-            partialPayment: order.partialPayment,
+            partialPayment: order.partialPayment || 0,
             selfRemark: order.selfRemark,
             orderId: order.orderId || "",
             shipmentStatus: "",

@@ -8,6 +8,7 @@ const { Parser } = require("json2csv");
 const { Readable } = require('stream');
 const { Transform } = require('json2csv');   
 
+
 // Create a new customer with duplicate phone check
 router.post("/api/customers", async (req, res) => {
   const { name, phone, age, location, lookingFor, assignedTo, followUpDate, leadSource, leadDate } = req.body;
@@ -47,7 +48,7 @@ router.get("/api/customers", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
-    const skip = req.query.skip !== undefined ? parseInt(req.query.skip, 10) : null; 
+    const skip = req.query.skip !== undefined ? parseInt(req.query.skip, 10) : null;
 
     const filters = JSON.parse(req.query.filters || "{}");
     const status = req.query.status || "";
@@ -56,22 +57,38 @@ router.get("/api/customers", async (req, res) => {
     const assignedTo = req.query.assignedTo;
     const createdAt = req.query.createdAt;
     const userRole = req.query.userRole;
-    const userId = req.query.userId;
     const userName = req.query.userName;
 
     const rootMatch = {};
 
+    // Search & Filter conditions
     if (filters.search) {
       const regex = new RegExp(filters.search, "i");
-      rootMatch.$or = [{ name: { $regex: regex } }, { phone: { $regex: regex } }];
+      rootMatch.$or = [
+        { name: { $regex: regex } },
+        { phone: { $regex: regex } },
+        { location: { $regex: regex } },
+      ];
     }
     if (filters.name) rootMatch.name = { $regex: filters.name, $options: "i" };
     if (filters.phone) rootMatch.phone = filters.phone;
     if (filters.location) rootMatch.location = { $regex: filters.location, $options: "i" };
+
+    // Assigned To filter (from dropdown or role)
     if (assignedTo) {
       const assignedArray = assignedTo.split(",").map((a) => a.trim());
       rootMatch.assignedTo = assignedArray.length === 1 ? assignedArray[0] : { $in: assignedArray };
     }
+
+    // Role-based filtering
+    if (userRole === "Sales Agent" && userName) {
+      rootMatch.assignedTo = userName;
+    }
+    if (userRole === "Retention Agent" && userName) {
+      rootMatch.assignedTo = userName;
+    }
+
+    // Created At filter
     if (createdAt) {
       const dateStart = new Date(createdAt);
       dateStart.setHours(0, 0, 0, 0);
@@ -80,34 +97,26 @@ router.get("/api/customers", async (req, res) => {
       rootMatch.createdAt = { $gte: dateStart, $lte: dateEnd };
     }
 
-    const postMatch = {};
+    // Open / Won / Lost status filter
+    const openStatuses = [
+      "New Lead", "CONS Scheduled", "CONS Done", "Call Back Later",
+      "On Follow Up", "CNP", "Switch Off"
+    ];
+    const lostStatuses = [
+      "General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost",
+      "Ordered from Other Sources", "Budget issue"
+    ];
+    const wonStatuses = ["Sales Done"];
+
     if (status === "Open") {
-      postMatch["presales.leadStatus"] = {
-        $in: [
-          "New Lead",
-          "CONS Scheduled",
-          "CONS Done",
-          "Call Back Later",
-          "On Follow Up",
-          "CNP",
-          "Switch Off",
-        ],
-      };
+      rootMatch.leadStatus = { $in: openStatuses };
     } else if (status === "Won") {
-      postMatch["presales.leadStatus"] = "Sales Done";
+      rootMatch.leadStatus = { $in: wonStatuses };
     } else if (status === "Lost") {
-      postMatch["presales.leadStatus"] = {
-        $in: [
-          "General Query",
-          "Fake Lead",
-          "Invalid Number",
-          "Not Interested-Lost",
-          "Ordered from Other Sources",
-          "Budget issue",
-        ],
-      };
+      rootMatch.leadStatus = { $in: lostStatuses };
     }
 
+    // Tag-based filters
     const orClauses = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -115,13 +124,13 @@ router.get("/api/customers", async (req, res) => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const afterTomorrow = new Date(tomorrow);
     afterTomorrow.setDate(afterTomorrow.getDate() + 1);
-    const deadStatuses = ["Switch Off", "General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost"];
+    const deadStatuses = [...lostStatuses, "Switch Off"];
 
     if (tags.includes("Missed")) {
       orClauses.push({
         $and: [
           { followUpDate: { $lt: today } },
-          { "presales.leadStatus": { $nin: deadStatuses } },
+          { leadStatus: { $nin: deadStatuses } },
         ],
       });
     }
@@ -131,129 +140,45 @@ router.get("/api/customers", async (req, res) => {
     if (tags.includes("Tomorrow")) {
       orClauses.push({ followUpDate: { $gte: tomorrow, $lt: afterTomorrow } });
     }
-    if (tags.includes("Later")) {
-      orClauses.push({ followUpDate: { $gt: afterTomorrow } });
-    }
     if (tags.includes("CONS Scheduled")) {
-      orClauses.push({ "presales.leadStatus": "CONS Scheduled" });
+      orClauses.push({ leadStatus: "CONS Scheduled" });
     }
     if (tags.includes("CONS Done")) {
-      orClauses.push({ "presales.leadStatus": "CONS Done" });
+      orClauses.push({ leadStatus: "CONS Done" });
     }
     if (tags.includes("Sales Done")) {
-      orClauses.push({ "presales.leadStatus": "Sales Done" });
+      orClauses.push({ leadStatus: "Sales Done" });
     }
     if (tags.includes("CNP")) {
-      orClauses.push({ "presales.leadStatus": "CNP" });
+      orClauses.push({ leadStatus: "CNP" });
     }
     if (tags.includes("On Follow Up")) {
-      orClauses.push({ "presales.leadStatus": "On Follow Up" });
+      orClauses.push({ leadStatus: "On Follow Up" });
     }
     if (tags.includes("New Lead")) {
-      orClauses.push({ "presales.leadStatus": "New Lead" });
+      orClauses.push({ leadStatus: "New Lead" });
     }
     if (tags.includes("Call Back Later")) {
-      orClauses.push({ "presales.leadStatus": "Call Back Later" });
-    }
-    if (tags.includes("No RT Agents")) {
-      orClauses.push({
-        $or: [
-          { "presales.assignExpert": { $exists: false } },
-          { "presales.assignExpert": null },
-        ],
-      });
+      orClauses.push({ leadStatus: "Call Back Later" });
     }
 
     if (orClauses.length) {
-      postMatch.$or = orClauses;
+      rootMatch.$or = orClauses;
     }
 
+    // Sorting
     let sortStage = { createdAt: -1 };
     if (sortBy === "asc") sortStage = { name: 1 };
     if (sortBy === "desc") sortStage = { name: -1 };
     if (sortBy === "oldest") sortStage = { createdAt: 1 };
 
-    // Main aggregation pipeline
-    const pipeline = [
-      { $match: rootMatch },
-      {
-        $lookup: {
-          from: "consultationdetails",
-          localField: "_id",
-          foreignField: "customerId",
-          as: "consultation",
-        },
-      },
-      {
-        $addFields: {
-          presales: { $arrayElemAt: ["$consultation.presales", 0] },
-        },
-      },
-    ];
-
-    if (userRole === "Sales Agent" && userName) {
-      pipeline.push({ $match: { assignedTo: userName } });
-    }
-
-    if (userRole === "Retention Agent" && userId) {
-      pipeline.push({
-        $match: {
-          $or: [
-            { assignedTo: userName },
-            { "presales.assignExpert": new mongoose.Types.ObjectId(userId) },
-          ],
-        },
-      });
-    }
-
-    pipeline.push(
-      { $match: postMatch },
-      { $sort: sortStage },
-      { $skip: skip !== null && !isNaN(skip) ? skip : (page - 1) * limit },
-      { $limit: limit }
-    );
-
-    // Count aggregation
-    const countPipeline = [
-      { $match: rootMatch },
-      {
-        $lookup: {
-          from: "consultationdetails",
-          localField: "_id",
-          foreignField: "customerId",
-          as: "consultation",
-        },
-      },
-      {
-        $addFields: {
-          presales: { $arrayElemAt: ["$consultation.presales", 0] },
-        },
-      },
-    ];
-
-    if (userRole === "Sales Agent" && userName) {
-      countPipeline.push({ $match: { assignedTo: userName } });
-    }
-
-    if (userRole === "Retention Agent" && userId) {
-      countPipeline.push({
-        $match: {
-          $or: [
-            { assignedTo: userName },
-            { "presales.assignExpert": new mongoose.Types.ObjectId(userId) },
-          ],
-        },
-      });
-    }
-
-    countPipeline.push({ $match: postMatch }, { $count: "total" });
-
-    const [customers, countResult] = await Promise.all([
-      Customer.aggregate(pipeline),
-      Customer.aggregate(countPipeline),
+    const [customers, total] = await Promise.all([
+      Customer.find(rootMatch)
+        .sort(sortStage)
+        .skip(skip !== null && !isNaN(skip) ? skip : (page - 1) * limit)
+        .limit(limit),
+      Customer.countDocuments(rootMatch),
     ]);
-
-    const total = (countResult[0] && countResult[0].total) || 0;
 
     res.json({
       customers,
@@ -268,128 +193,32 @@ router.get("/api/customers", async (req, res) => {
 });
 
 
-
 router.get("/api/customers/counts", async (req, res) => {
   try {
-    const { role, userId, userName } = req.query;
+    const { role, userName } = req.query;
 
-    // Validate userId if present
-    let objectUserId = null;
-    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-      objectUserId = new mongoose.Types.ObjectId(userId);
-    } 
-
-    // Define your statuses here:
-    const openStatuses = [
-      "New Lead",
-      "CONS Scheduled",
-      "CONS Done",
-      "Call Back Later",
-      "On Follow Up", 
-      "CNP",
-      "Switch Off",
-    ];
-    const wonStatuses = [
-      "Sales Done",
-    ];
-    const lostStatuses = [
-      "General Query",
-      "Fake Lead",
-      "Invalid Number",
-      "Not Interested-Lost",
-      "Ordered from Other Sources",
-      "Budget issue",
-    ];
-
-    const rootMatch = {};
-
-    if (role === "Sales Agent" && userName) {
-      rootMatch.assignedTo = userName;
+    const matchStage = {};
+    if ((role === "Sales Agent" || role === "Retention Agent") && userName) {
+      matchStage.assignedTo = userName;
     }
 
-    const pipeline = [
-      { $match: rootMatch },
-      {
-        $lookup: {
-          from: "consultationdetails",
-          localField: "_id",
-          foreignField: "customerId",
-          as: "consultation",
-        },
-      },
-      {
-        $addFields: {
-          leadStatus: {
-            $cond: [
-              { $gt: [{ $size: "$consultation" }, 0] },
-              { $ifNull: [{ $arrayElemAt: ["$consultation.presales.leadStatus", 0] }, null] },
-              null,
-            ],
-          },
-          assignExpert: {
-            $cond: [
-              { $gt: [{ $size: "$consultation" }, 0] },
-              { $ifNull: [{ $arrayElemAt: ["$consultation.presales.assignExpert", 0] }, null] },
-              null,
-            ],
-          },
-          assignedToField: "$assignedTo",
-        },
-      },
-      ...(role === "Retention Agent"
-        ? [
-            {
-              $match: {
-                $or: [
-                  ...(userName ? [{ assignedToField: userName }] : []),
-                  ...(objectUserId ? [{ assignExpert: objectUserId }] : []),
-                ],
-              },
-            },
-          ]
-        : []),
-      {
-        $match: {
-          leadStatus: { $ne: null },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          openCount: {
-            $sum: {
-              $cond: [{ $in: ["$leadStatus", openStatuses] }, 1, 0],
-            },
-          },
-          wonCount: {
-            $sum: {
-              $cond: [{ $in: ["$leadStatus", wonStatuses] }, 1, 0],
-            },
-          },
-          lostCount: {
-            $sum: {
-              $cond: [{ $in: ["$leadStatus", lostStatuses] }, 1, 0],
-            },
-          },
-        },
-      },
-    ];
+    const [openCount, wonCount, lostCount] = await Promise.all([
+      Customer.countDocuments({ ...matchStage, leadStatus: {
+        $in: [
+          "New Lead", "CONS Scheduled", "CONS Done", "Call Back Later", "On Follow Up", "CNP", "Switch Off",
+        ] } }),
+      Customer.countDocuments({ ...matchStage, leadStatus: "Sales Done" }),
+      Customer.countDocuments({ ...matchStage, leadStatus: {
+        $in: [
+          "General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost", "Ordered from Other Sources", "Budget issue",
+        ] } }),
+    ]);
 
-    const result = await Customer.aggregate(pipeline);
-
-    if (result.length === 0) {
-      return res.json({ openCount: 0, wonCount: 0, lostCount: 0 });
-    }
-
-    res.json({
-      openCount: result[0].openCount,
-      wonCount: result[0].wonCount,
-      lostCount: result[0].lostCount,
-    });
+    res.json({ openCount, wonCount, lostCount });
   } catch (err) {
     console.error("Error fetching counts:", err);
     res.status(500).json({ message: "Server error", error: err.message });
-  } 
+  }
 });
  
 
@@ -411,7 +240,7 @@ router.get('/api/customers/export-csv', async (req, res) => {
     }
 
     if (status) {
-      matchQuery['presales.leadStatus'] = status;
+      matchQuery.leadStatus = status;
     }
 
     if (tagsArray.length > 0) {
@@ -430,64 +259,11 @@ router.get('/api/customers/export-csv', async (req, res) => {
       { label: 'Lead Date', value: 'leadDate' },
       { label: 'Created At', value: 'createdAt' },
       { label: 'Date and Time', value: 'dateAndTime' },
-      { label: 'Presales Lead Status', value: 'presalesLeadStatus' },
-      { label: 'Assigned Expert', value: 'assignedExpertName' },
+      { label: 'Lead Status', value: 'leadStatus' },
+      { label: 'Sub Lead Status', value: 'subLeadStatus' },
     ];
 
-    const customers = await Customer.aggregate([
-      { $match: matchQuery },
-      {
-        $lookup: {
-          from: 'consultationdetails',
-          localField: '_id',
-          foreignField: 'customerId',
-          as: 'consultationDetails'
-        }
-      },
-      {
-        $addFields: {
-          consultationDetail: { $arrayElemAt: ['$consultationDetails', 0] }
-        }
-      },
-      {
-        $lookup: {
-          from: 'employees',
-          localField: 'consultationDetail.presales.assignExpert',
-          foreignField: '_id',
-          as: 'assignedExpertDetails'
-        }
-      },
-      {
-        $addFields: {
-          assignedExpertName: {
-            $ifNull: [
-              { $arrayElemAt: ['$assignedExpertDetails.fullName', 0] },
-              { $arrayElemAt: ['$assignedExpertDetails.agentName', 0] }
-            ]
-          },
-          presalesLeadStatus: {
-            $ifNull: ['$consultationDetail.presales.leadStatus', '']
-          }
-        }
-      },
-      {
-        $project: {
-          name: 1,
-          phone: 1,
-          age: 1,
-          location: 1,
-          lookingFor: 1,
-          assignedTo: 1,
-          followUpDate: 1,
-          leadSource: 1,
-          leadDate: 1,
-          createdAt: 1,
-          dateAndTime: 1,
-          presalesLeadStatus: 1,
-          assignedExpertName: 1,
-        }
-      }
-    ]);
+    const customers = await Customer.find(matchQuery).lean();
 
     const formattedData = customers.map(c => ({
       name: c.name,
@@ -501,8 +277,8 @@ router.get('/api/customers/export-csv', async (req, res) => {
       leadDate: c.leadDate ? new Date(c.leadDate).toLocaleDateString() : '',
       createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '',
       dateAndTime: c.dateAndTime ? new Date(c.dateAndTime).toLocaleString() : '',
-      presalesLeadStatus: c.presalesLeadStatus || '',
-      assignedExpertName: c.assignedExpertName || '',
+      leadStatus: c.leadStatus || '',
+      subLeadStatus: c.subLeadStatus || '',
     }));
 
     const parser = new Parser({ fields });
@@ -518,8 +294,6 @@ router.get('/api/customers/export-csv', async (req, res) => {
 });
   
 
-
-// Fetch a single customer by ID
 router.get("/api/customers/:id", async (req, res) => {
   const { id } = req.params;
   try {
@@ -534,15 +308,29 @@ router.get("/api/customers/:id", async (req, res) => {
   }
 });
 
-// Update customer details
 router.put("/api/customers/:id", async (req, res) => {
   const { id } = req.params;
-  const { name, phone, age, location, lookingFor, assignedTo, followUpDate, leadSource } = req.body;
+  const {
+    name, phone, age, location,
+    lookingFor, assignedTo, followUpDate,
+    leadSource, leadStatus, subLeadStatus,
+  } = req.body;
 
   try {
     const updatedCustomer = await Customer.findByIdAndUpdate(
       id,
-      { name, phone, age, location, lookingFor, assignedTo, followUpDate, leadSource },
+      {
+        name,
+        phone,
+        age,
+        location,
+        lookingFor,
+        assignedTo,
+        followUpDate,
+        leadSource,
+        leadStatus,
+        subLeadStatus,
+      },
       { new: true }
     );
 
@@ -556,9 +344,9 @@ router.put("/api/customers/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating customer:", error);
-    res.status(500).json({ message: "Error updating customer", error }); 
+    res.status(500).json({ message: "Error updating customer", error });
   }
-}); 
+});
 
 // Delete a customer
 router.delete("/api/customers/:id", async (req, res) => {

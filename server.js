@@ -7,7 +7,7 @@ const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
 const Customer = require('./models/Customer');
-const ConsultationDetails = require('./models/ConsultationDetails');
+const ConsultationDetails = require('./models/ConsultationDetails'); 
 const XLSX = require("xlsx");   
 const axios = require('axios');
 const https = require('https'); 
@@ -46,7 +46,7 @@ const phonepeRoutes = require('./routes/phonepePaymentLink');
 const downloadRoute = require('./routes/download');
 const deliveryStatusRoutes = require("./routes/deliverystatuschecker");  
 const mergedSalesRoutes = require("./routes/mergedSales");
-const employeeRoutes = require("./routes/employees"); 
+const employeeRoutes = require("./routes/employees");  
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 

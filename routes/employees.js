@@ -14,7 +14,7 @@ const Employee = require("../models/Employee");
 
 router.get("/", async (req, res) => {
   try {
-    const { role, fullName } = req.query;
+    const { role, fullName } = req.query; 
 
     // Always get active Sales and Retention agents
     const all = await Employee.find({
