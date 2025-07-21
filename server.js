@@ -67,7 +67,7 @@ app.use(cors({
   }
 }));
 
-// Additional middleware to always set CORS headers on every response
+// Additional middleware to always set CORS headers on every response 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -1303,7 +1303,7 @@ app.get("/api/leads/retention", async (req, res) => {
 
   } catch (err) {
     console.error("Retention API error:", err);
-    res.status(500).json({ error: "Internal Server Error" });  
+    res.status(500).json({ error: "Internal Server Error" });   
   }
 }); 
 
@@ -1336,7 +1336,7 @@ app.patch('/api/leads/:id/images', async (req, res) => {
 
   try {
     const lead = await Lead.findById(leadId);
-    if (!lead) return res.status(404).json({ message: 'Lead not found' });
+    if (!lead) return res.status(404).json({ message: 'Lead not found' }); 
 
     lead.images = images; // replace images array
     await lead.save();

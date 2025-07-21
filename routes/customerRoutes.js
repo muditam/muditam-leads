@@ -202,24 +202,91 @@ router.get("/api/customers/counts", async (req, res) => {
       matchStage.assignedTo = userName;
     }
 
-    const [openCount, wonCount, lostCount] = await Promise.all([
-      Customer.countDocuments({ ...matchStage, leadStatus: {
-        $in: [
-          "New Lead", "CONS Scheduled", "CONS Done", "Call Back Later", "On Follow Up", "CNP", "Switch Off",
-        ] } }),
-      Customer.countDocuments({ ...matchStage, leadStatus: "Sales Done" }),
-      Customer.countDocuments({ ...matchStage, leadStatus: {
-        $in: [
-          "General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost", "Ordered from Other Sources", "Budget issue",
-        ] } }),
-    ]);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    res.json({ openCount, wonCount, lostCount });
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const afterTomorrow = new Date(tomorrow);
+    afterTomorrow.setDate(afterTomorrow.getDate() + 1);
+
+    const deadStatuses = [
+      "General Query",
+      "Fake Lead",
+      "Invalid Number",
+      "Not Interested-Lost",
+      "Ordered from Other Sources",
+      "Budget issue",
+      "Switch Off",
+    ];
+
+    const [openCount, wonCount, lostCount, todayCount, missedCount, tomorrowCount, newLeadCount] =
+      await Promise.all([
+        Customer.countDocuments({
+          ...matchStage,
+          leadStatus: {
+            $in: [
+              "New Lead",
+              "CONS Scheduled",
+              "CONS Done",
+              "Call Back Later",
+              "On Follow Up",
+              "CNP",
+              "Switch Off",
+            ],
+          },
+        }),
+        Customer.countDocuments({ ...matchStage, leadStatus: "Sales Done" }),
+        Customer.countDocuments({
+          ...matchStage,
+          leadStatus: {
+            $in: [
+              "General Query",
+              "Fake Lead",
+              "Invalid Number",
+              "Not Interested-Lost",
+              "Ordered from Other Sources",
+              "Budget issue",
+            ],
+          },
+        }),
+        // Today
+        Customer.countDocuments({
+          ...matchStage,
+          followUpDate: { $gte: today, $lt: tomorrow },
+        }),
+        // Missed
+        Customer.countDocuments({
+          ...matchStage,
+          followUpDate: { $lt: today },
+          leadStatus: { $nin: deadStatuses },
+        }),
+        // Tomorrow
+        Customer.countDocuments({
+          ...matchStage,
+          followUpDate: { $gte: tomorrow, $lt: afterTomorrow },
+        }),
+        // New Lead
+        Customer.countDocuments({ ...matchStage, leadStatus: "New Lead" }),
+      ]);
+
+    res.json({
+      openCount,
+      wonCount,
+      lostCount,
+      todayCount,
+      missedCount,
+      tomorrowCount,
+      newLeadCount,
+    });
   } catch (err) {
     console.error("Error fetching counts:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+
+
  
 
 router.get('/api/customers/export-csv', async (req, res) => {

@@ -959,14 +959,23 @@ router.get("/api/followup-summary", async (req, res) => {
 
     // 3) Count each bucket
     const noFollowupSet = await Lead.countDocuments({
-      healthExpertAssigned: agentName,
-      ...retentionFilter,
+  healthExpertAssigned: agentName,
+  $and: [
+    {
+      $or: [
+        { retentionStatus: null },
+        { retentionStatus: "Active" }
+      ],
+    },
+    {
       $or: [
         { rtNextFollowupDate: { $exists: false } },
         { rtNextFollowupDate: null },
-        { rtNextFollowupDate: "" },
-      ],
-    });
+        { rtNextFollowupDate: "" }
+      ]
+    }
+  ]
+});
 
     const followupMissed = await Lead.countDocuments({
       healthExpertAssigned: agentName,
