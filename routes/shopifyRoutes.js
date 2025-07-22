@@ -63,7 +63,7 @@ router.get('/customerDetails', async (req, res) => {
     return res.json({
       customer: {
         id: customer.id,
-        name: `${customer.first_name || ""} ${customer.last_name || ""}`.trim(),
+        name: `${customer.first_name || ""} ${customer.last_name || ""}`.trim(), 
         totalOrders,
         totalSpent,
         lastOrderDate,

@@ -47,6 +47,7 @@ const downloadRoute = require('./routes/download');
 const deliveryStatusRoutes = require("./routes/deliverystatuschecker");  
 const mergedSalesRoutes = require("./routes/mergedSales");
 const employeeRoutes = require("./routes/employees");  
+const shipwayRoutes = require('./routes/shipwayRoutes');
 
 const app = express(); 
 const PORT = process.env.PORT || 5000; 
@@ -145,6 +146,8 @@ app.use("/api/delivery", deliveryStatusRoutes);
 app.use("/api/merged-sales", mergedSalesRoutes);
 
 app.use("/api/deliver-history", employeeRoutes);
+
+app.use('/api/shipway', shipwayRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -322,26 +325,35 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
         const orderDate = order.order_date ? new Date(order.order_date) : null;
 
         const contactNumber = order.phone || order.s_phone || "";
-        const trackingNumber = order.tracking_number || ""; // Get tracking number from Shipway API response
+        const trackingNumber = order.tracking_number || "";  
+        const carrierTitle = order.carrier_title || "";
 
         const updateFields = {
           order_id: normalizedOrderId,
           shipment_status: shipmentStatus,
           order_date: orderDate,
-          tracking_number: trackingNumber // Add tracking number
+          tracking_number: trackingNumber, 
+          carrier_title: carrierTitle,
+          last_updated_at: new Date()
         };
 
         if (contactNumber) {
-          updateFields.contact_number = contactNumber; 
-          console.log(`Updating order ${normalizedOrderId} with contact number: ${contactNumber}`);
-        } else {
-          console.log(`Order ${normalizedOrderId} has NO contact number. Skipping contact update.`);
+          updateFields.contact_number = contactNumber;
+          console.log(`Updating ${normalizedOrderId} with contact number: ${contactNumber}`);
         }
 
         if (trackingNumber) {
-          console.log(`Updating order ${normalizedOrderId} with tracking number: ${trackingNumber}`);
-        } else {
-          console.log(`Order ${normalizedOrderId} has NO tracking number.`);
+          console.log(`Updating ${normalizedOrderId} with tracking number: ${trackingNumber}`);
+        }
+
+        if (carrierTitle) {
+          console.log(`Updating ${normalizedOrderId} with carrier: ${carrierTitle}`);
+        }
+
+        const existing = await Order.findOne({ order_id: normalizedOrderId });
+        if (existing && existing.selfUpdated) {
+          console.log(`Skipping ${normalizedOrderId} — marked as selfUpdated`);
+          continue;
         }
 
         const updateResult = await Order.updateOne(
@@ -1313,7 +1325,7 @@ app.get('/api/leads/retentions', async (req, res) => {
   const { fullName, email } = req.query;  
 
   if (!fullName || !email) {
-    return res.status(400).json({ message: 'Full name and email are required' });
+    return res.status(400).json({ message: 'Full name and email are required' }); 
   }
 
   try {
@@ -1331,12 +1343,12 @@ app.get('/api/leads/retentions', async (req, res) => {
 
 // Express route to update images of a lead by lead id
 app.patch('/api/leads/:id/images', async (req, res) => {
-  const leadId = req.params.id;
+  const leadId = req.params.id; 
   const { images } = req.body; // array of { url, date, tag } objects
 
   try {
     const lead = await Lead.findById(leadId);
-    if (!lead) return res.status(404).json({ message: 'Lead not found' }); 
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });  
 
     lead.images = images; // replace images array
     await lead.save();

@@ -6,6 +6,9 @@ const OrderSchema = new mongoose.Schema({
   order_date: { type: Date },  
   contact_number: { type: String }, 
   tracking_number: { type: String },
+  carrier_title: { type: String },  
+  selfUpdated: { type: Boolean, default: false },
+  last_updated_at: { type: Date, default: Date.now }
 }, { timestamps: true }); 
 
 module.exports = mongoose.model('Order', OrderSchema); 
