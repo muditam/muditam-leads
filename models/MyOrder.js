@@ -12,7 +12,7 @@ const MyOrderSchema = new mongoose.Schema({
   orderId: { type: String, required: true },
   totalPrice: { type: Number, required: true }, 
   agentName: { type: String, required: true }, 
-  partialPayment: { type: Number, required: true }, 
+  partialPayment: { type: Number, required: true },  
   dosageOrdered: { type: String, required: true },   
   selfRemark: { type: String },                      
   paymentMethod: { type: String, required: true },   
