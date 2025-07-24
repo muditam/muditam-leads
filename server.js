@@ -2009,7 +2009,7 @@ app.get('/api/consultation-history', async (req, res) => {
     if (!customer) return res.status(404).json({ error: "Customer not found" });
 
     // 2. Find consultation details by customerId
-    const consultations = await ConsultationDetails.find({ customerId: customer._id }).sort({ createdAt: -1 }); 
+    const consultations = await ConsultationDetails.find({ customerId: customer._id }).sort({ createdAt: -1 });  
 
     res.json({ consultations });
   } catch (err) {

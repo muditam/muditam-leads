@@ -1634,7 +1634,7 @@ router.put('/api/retention-sales/all/:id', async (req, res) => {
 
 router.get('/api/retention-sales/progress', async (req, res) => {
   const { name, from, to } = req.query;
-  if (!name) return res.status(400).json({ message: "Name is required" });
+  if (!name) return res.status(400).json({ message: "Name is required" }); 
 
   // Use custom from-to if available, otherwise default to current month
   let firstDay, lastDay;
