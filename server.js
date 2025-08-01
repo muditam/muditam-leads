@@ -7,31 +7,31 @@ const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
 const Customer = require('./models/Customer');
-const ConsultationDetails = require('./models/ConsultationDetails'); 
-const XLSX = require("xlsx");   
+const ConsultationDetails = require('./models/ConsultationDetails');
+const XLSX = require("xlsx");
 const axios = require('axios');
-const https = require('https'); 
-const cron = require('node-cron');  
+const https = require('https');
+const cron = require('node-cron');
 const TransferRequest = require('./models/TransferRequests');
-const shopifyProductsRoute = require("./services/shopifyProducts");         
+const shopifyProductsRoute = require("./services/shopifyProducts"); 
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
-const razorpayRoutes = require("./services/razorpay"); 
-const shopifyRoutes = require("./routes/shopifyRoutes");
+const razorpayRoutes = require("./services/razorpay");
+const shopifyRoutes = require("./routes/shopifyRoutes"); 
 const templateRoutes = require("./routes/templates");
-const exportLeadsRouter = require('./routes/exportLeads'); 
+const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
-const activeCountsRoute = require("./routes/activeCountsRoute"); 
+const activeCountsRoute = require("./routes/activeCountsRoute");
 const summaryRoutes = require('./routes/summaryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const myOrdersRoutes = require("./routes/myOrders");
 const Order = require('./models/Order');
-const MyOrder = require('./models/MyOrder'); 
+const MyOrder = require('./models/MyOrder');
 const Employee = require('./models/Employee');
-const orderByIdRoutes = require("./routes/orderById"); 
-const combinedOrdersRoute = require("./routes/combinedOrders"); 
-const customerRoutes = require("./routes/customerRoutes"); 
-const consultationDetailsRoutes = require("./routes/consultationDetailsRoutes"); 
+const orderByIdRoutes = require("./routes/orderById");
+const combinedOrdersRoute = require("./routes/combinedOrders");
+const customerRoutes = require("./routes/customerRoutes");
+const consultationDetailsRoutes = require("./routes/consultationDetailsRoutes");
 const consultationProxyRoutes = require("./routes/consultationProxy");
 const consultationFullHistoryRoute = require("./routes/consultationFullHistory");  
 const consultationFollowupRoute = require("./routes/consultationFollowup");
@@ -40,26 +40,28 @@ const ordersDatesRoute = require("./routes/orders-dates");
 const uploadToWasabi = require("./routes/uploadToWasabi");
 const detailsRoutes = require("./routes/details");
 const escalationRoutes = require('./routes/escalation.routes');
-const orderRoutes = require("./routes/orderRoutes"); 
-const getActiveProductsRoute = require("./routes/getActiveProducts"); 
+const orderRoutes = require("./routes/orderRoutes");
+const getActiveProductsRoute = require("./routes/getActiveProducts");
 const phonepeRoutes = require('./routes/phonepePaymentLink');
 const downloadRoute = require('./routes/download');
-const deliveryStatusRoutes = require("./routes/deliverystatuschecker");  
+const deliveryStatusRoutes = require("./routes/deliverystatuschecker");
 const mergedSalesRoutes = require("./routes/mergedSales");
-const employeeRoutes = require("./routes/employees");  
+const employeeRoutes = require("./routes/employees");
 const shipwayRoutes = require('./routes/shipwayRoutes');
+const reachoutRoutes = require('./routes/reachoutLogs');
+const leadTransfer = require('./routes/leadTransferRoutes');
+const searchRoutes = require('./routes/searchRoutes');
+const Addemployee = require('./routes/Addemployee');
+const authRoutes = require('./routes/loginRoutes');
+const clickToCallRoutes = require('./routes/clickToCallRoutes');
 
-const app = express(); 
-const PORT = process.env.PORT || 5000; 
+const app = express();
+const PORT = process.env.PORT || 5001;
 
-
-// List of allowed origins
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
 
-// CORS middleware using the cors package 
-app.use(cors({  
-  origin: function(origin, callback) { 
-    // Allow requests with no origin (like mobile apps or curl requests)
+app.use(cors({
+  origin: function (origin, callback) { 
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
       return callback(new Error('Not allowed by CORS'));
@@ -67,8 +69,7 @@ app.use(cors({
     return callback(null, true);
   }
 }));
-
-// Additional middleware to always set CORS headers on every response 
+ 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -79,51 +80,42 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());  
+app.use(express.json());
 
 app.use("/api/templates", templateRoutes);
 app.use("/api/shopify", shopifyProductsRoute);
 app.use("/api/shopify", shopifyOrdersRoute);
 app.use("/api/shopify", ShopifyPush);
-app.use("/api/razorpay", razorpayRoutes); 
+app.use("/api/razorpay", razorpayRoutes);
 app.use("/api/shopify", shopifyRoutes);
-app.use("/api/my-orders", myOrdersRoutes);
+app.use("/api/my-orders", myOrdersRoutes); 
 
-app.use(retentionSalesRoutes); 
+app.use(retentionSalesRoutes);
 
 app.use('/', exportLeadsRouter);
-
-//MasterRetentiondashboard
+ 
 app.use("/api/leads/retention", activeCountsRoute);
-
-//MasterSalesdashboard
-app.use('/api', summaryRoutes); 
-
-//Sales Agent
+ 
+app.use('/api', summaryRoutes);
+ 
 app.use('/api/dashboard', dashboardRoutes);
 
 app.use("/api/order-by-id", orderByIdRoutes);
- 
+
 app.use("/api/orders/combined", combinedOrdersRoute);
-
-// Use customer routes
+ 
 app.use(customerRoutes);
-
-// Use the consultation details routes for all endpoints starting with /api/consultation-details
+ 
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
 app.use("/", consultationProxyRoutes);
-
-
-//consultation history
+ 
 app.use("/api/consultation-full-history", consultationFullHistoryRoute);
-
-//consultation FollowUp
+ 
 app.use("/api/consultation-followup", consultationFollowupRoute);
-
-// Mount the duplicate numbers router on /api/leads
+ 
 app.use("/api/leads", duplicateNumbersRoutes);
-app.use("/api/duplicate-leads", duplicateNumbersRoutes); 
+app.use("/api/duplicate-leads", duplicateNumbersRoutes);
 
 app.use(ordersDatesRoute);
 
@@ -133,15 +125,15 @@ app.use("/api/details", detailsRoutes);
 
 app.use('/api/escalations', escalationRoutes);
 
-app.use("/api/orders", orderRoutes);   
+app.use("/api/orders", orderRoutes);
 
-app.use(getActiveProductsRoute); 
+app.use(getActiveProductsRoute);
 
 app.use('/api/phonepe', phonepeRoutes);
 
 app.use('/api/myorders/download', downloadRoute);
 
-app.use("/api/delivery", deliveryStatusRoutes); 
+app.use("/api/delivery", deliveryStatusRoutes);
 
 app.use("/api/merged-sales", mergedSalesRoutes);
 
@@ -149,12 +141,24 @@ app.use("/api/deliver-history", employeeRoutes);
 
 app.use('/api/shipway', shipwayRoutes);
 
+app.use('/api/reachout-logs', reachoutRoutes);
+
+app.use('/api/leads', leadTransfer);
+
+app.use('/api/search', searchRoutes); 
+
+app.use(Addemployee);
+
+app.use('/api', authRoutes);
+
+app.use('/api', clickToCallRoutes);
+
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err));   
-  
+  .catch((err) => console.error('MongoDB connection error:', err));
+
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
@@ -163,7 +167,7 @@ const httpsAgent = new https.Agent({
 
 async function fetchAllOrders(url, accessToken, allOrders = []) {
   try {
-    const response = await axios.get(url, { 
+    const response = await axios.get(url, {
       headers: {
         'X-Shopify-Access-Token': accessToken,
         'Content-Type': 'application/json'
@@ -262,9 +266,9 @@ app.get('/api/orders', async (req, res) => {
 });
 
 
-const statusMapping = { 
+const statusMapping = {
   "DEL": "Delivered",
-  "INT": "In Transit", 
+  "INT": "In Transit",
   "UND": "Undelivered",
   "RTO": "RTO",
   "RTD": "RTO Delivered",
@@ -273,7 +277,7 @@ const statusMapping = {
   "ONH": "On Hold",
   "OOD": "Out For Delivery",
   "NFI": "Status Pending",
-  "NFIDS": "NFID", 
+  "NFIDS": "NFID",
   "RSCH": "Pickup Scheduled",
   "ROOP": "Out for Pickup",
   "RPKP": "Shipment Picked Up",
@@ -287,7 +291,7 @@ const statusMapping = {
   "ROTH": "Others",
   "RPF": "Pickup Failed"
 };
- 
+
 const fetchOrdersFromShipway = async (page, startDate, endDate) => {
   const username = process.env.SHIPWAY_USERNAME;
   const licenseKey = process.env.SHIPWAY_LICENSE_KEY;
@@ -300,7 +304,7 @@ const fetchOrdersFromShipway = async (page, startDate, endDate) => {
     params
   });
 
-  return response.data.message;  
+  return response.data.message;
 };
 
 const syncOrdersForDateRange = async (startDate, endDate) => {
@@ -325,14 +329,14 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
         const orderDate = order.order_date ? new Date(order.order_date) : null;
 
         const contactNumber = order.phone || order.s_phone || "";
-        const trackingNumber = order.tracking_number || "";  
+        const trackingNumber = order.tracking_number || "";
         const carrierTitle = order.carrier_title || "";
 
         const updateFields = {
           order_id: normalizedOrderId,
           shipment_status: shipmentStatus,
           order_date: orderDate,
-          tracking_number: trackingNumber, 
+          tracking_number: trackingNumber,
           carrier_title: carrierTitle,
           last_updated_at: new Date()
         };
@@ -394,7 +398,7 @@ app.post('/api/leads/by-phones', async (req, res) => {
   const cleanedPhones = phoneNumbers.map((phone) => phone.replace(/[^\d]/g, ""));
   try {
     const leads = await Lead.find({
-      contactNumber: { $in: cleanedPhones }, 
+      contactNumber: { $in: cleanedPhones },
     });
 
     res.json(leads);
@@ -412,7 +416,7 @@ app.post('/api/shipway/fetch-orders', async (req, res) => {
     }
     const totalFetched = await syncOrdersForDateRange(startDate, endDate);
     res.json({ message: `Fetched and stored ${totalFetched} orders for date range ${startDate} to ${endDate}` });
-  } catch (error) { 
+  } catch (error) {
     res.status(500).json({ message: "Error fetching orders", error: error.message });
   }
 });
@@ -422,12 +426,12 @@ app.get('/api/shipway/orders', async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const rowsPerPage = 100;
     const skip = (page - 1) * rowsPerPage;
- 
+
     const { startDate, endDate } = req.query;
     let filter = {};
     if (startDate || endDate) {
       filter.order_date = {};
-      if (startDate) { 
+      if (startDate) {
         filter.order_date.$gte = new Date(startDate);
       }
       if (endDate) {
@@ -442,7 +446,7 @@ app.get('/api/shipway/orders', async (req, res) => {
 
     const totalOrders = await Order.countDocuments(filter);
     res.json({ message: orders, totalOrders });
-  } catch (error) { 
+  } catch (error) {
     res.status(500).json({ message: "Error fetching orders", error: error.message });
   }
 });
@@ -463,7 +467,7 @@ app.post('/api/shipway/neworder', async (req, res) => {
       { upsert: true }
     );
     res.json({ message: "Order saved/updated" });
-  } catch (error) { 
+  } catch (error) {
     res.status(500).json({ message: "Error saving new order", error: error.message });
   }
 });
@@ -500,11 +504,11 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
 
 
 // Cron job to update shipment status every hour
-cron.schedule('0 8 * * *', async () => { 
+cron.schedule('0 8 * * *', async () => {
   try {
     const orders = await Order.find({});
     for (const order of orders) {
-      try {  
+      try {
         if (!order.order_date) continue;
 
         // Skip update if status is final
@@ -521,11 +525,11 @@ cron.schedule('0 8 * * *', async () => {
           const shipmentStatus = statusMapping[updatedOrder.shipment_status] || updatedOrder.shipment_status;
           await Order.updateOne({ order_id: order.order_id }, { shipment_status: shipmentStatus });
         }
-      } catch (err) {  
+      } catch (err) {
         console.error(`Error updating order ${order.order_id}:`, err);
       }
     }
-  } catch (error) {  
+  } catch (error) {
     console.error("Cron job error:", error);
   }
 });
@@ -662,8 +666,8 @@ app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
     console.error("Error updating lastOrderDate from Shopify:", error);
     res.status(500).json({ message: "Internal server error", error: error.message });
   }
-}); 
- 
+});
+
 const upload = multer({
   dest: "uploads/",
   fileFilter: (req, file, cb) => {
@@ -677,14 +681,14 @@ const upload = multer({
 app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
   const filePath = req.file.path;
 
-  try { 
+  try {
     const workbook = XLSX.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet);
 
     const requiredFields = ["Date", "Name", "Contact No"];
     const errors = [];
- 
+
     const leads = rows.map((row, index) => {
       const missingFields = requiredFields.filter((field) => !row[field]);
       if (missingFields.length > 0) {
@@ -692,7 +696,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
         return null;
       }
       return {
-        date: new Date().toISOString().split("T")[0],   
+        date: new Date().toISOString().split("T")[0],
         time: row.Time || "",
         name: row.Name,
         contactNumber: row["Contact No"],
@@ -726,7 +730,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
     if (errors.length > 0) {
       return res.status(400).json({ success: false, error: errors.join(". ") });
     }
- 
+
     await Lead.insertMany(leads.filter(Boolean));
     res.json({ success: true });
   } catch (err) {
@@ -735,185 +739,6 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-
-app.get("/api/employees", async (req, res) => {
-  const { role, fullName, email } = req.query;
-  try {
-    if (fullName && email) {
-      const employee = await Employee.findOne({ fullName, email });
-      if (!employee) {
-        return res.status(404).json({ message: "Employee not found" });
-      }
-      const { async, agentNumber, callerId, target, hasTeam } = employee;
-      return res.status(200).json([{ async, agentNumber, callerId, target, hasTeam }]);
-    }
-
-    const query = role ? { role } : {};
-    const employees = await Employee.find(query)
-      .select("fullName email callerId agentNumber async role status target hasTeam teamMembers teamLeader joiningDate")
-      .populate("teamLeader", "fullName");
-
-    const formatted = employees.map(emp => ({
-      ...emp.toObject(),
-      teamLeader: emp.teamLeader ? {
-        _id: emp.teamLeader._id,
-        fullName: emp.teamLeader.fullName
-      } : null,
-    }));
-
-    res.status(200).json(formatted);
-  } catch (error) {
-    console.error("Error fetching employees:", error);
-    res.status(500).json({ message: "Error fetching employees", error });
-  }
-});
-
-app.get("/api/employees/:id", async (req, res) => {
-  try {
-    const emp = await Employee.findById(req.params.id)
-      .populate({
-        path: "teamMembers",
-        select: "fullName email role status target teamLeader joiningDate",
-        populate: {
-          path: "teamLeader",
-          select: "fullName",
-        },
-      })
-      .populate("teamLeader", "fullName email role status");
-
-    if (!emp) return res.status(404).json({ message: "Not found" });
-
-    const data = emp.toObject();
-
-    data.teamMembers = data.teamMembers.map(tm => ({
-      ...tm,
-      teamLeader: tm.teamLeader?.fullName || "--",
-    }));
-
-    res.json(data);
-  } catch (err) {
-    console.error("Error fetching employee:", err);
-    res.status(500).json({ message: "Error fetching employee", error: err });
-  }
-});
-
-// CREATE new employee
-app.post('/api/employees', async (req, res) => {
-  const {
-    fullName,
-    email,
-    callerId,
-    agentNumber,
-    role,
-    password,
-    target,
-    hasTeam,
-    teamLeader,
-    joiningDate
-  } = req.body;
-
-  if (!fullName || !email || !callerId || !agentNumber || !role || !password) {
-    return res.status(400).json({ message: 'All fields are required.' });
-  }
-
-  try {
-    const existingEmployee = await Employee.findOne({ email });
-    if (existingEmployee) {
-      return res.status(400).json({ message: 'Email already exists.' });
-    }
-
-    const newEmployee = new Employee({
-      fullName,
-      email,
-      callerId,
-      agentNumber,
-      role,
-      password,
-      async: 1,
-      status: 'active',
-      target: target !== undefined ? target : 0,
-      hasTeam: !!hasTeam,
-      teamLeader: teamLeader || null,
-      joiningDate: joiningDate || null,  
-    });
-
-    await newEmployee.save();
-    res.status(201).json({ message: 'Employee added successfully', employee: newEmployee });
-  } catch (error) {
-    console.error('Error adding employee:', error);
-    res.status(500).json({ message: 'Error adding employee', error });
-  }
-});
-
-app.put('/api/employees/:id', async (req, res) => {
-  const { id } = req.params;
-  const { callerId, agentNumber, password, target, hasTeam, teamLeader, joiningDate, ...updateData } = req.body;
-
-  try {
-    if (password) updateData.password = password;
-    if (target !== undefined) updateData.target = target;
-    if (typeof hasTeam !== "undefined") updateData.hasTeam = hasTeam;
-    if (teamLeader !== undefined) updateData.teamLeader = teamLeader;
-    if (joiningDate) updateData.joiningDate = joiningDate;
-
-    const updatedEmployee = await Employee.findByIdAndUpdate(
-      id,
-      { callerId, agentNumber, async: 1, ...updateData },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedEmployee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
-
-    res.status(200).json({
-      message: 'Employee updated successfully',
-      employee: updatedEmployee,
-    });
-  } catch (error) {
-    console.error('Error updating employee:', error);
-    res.status(500).json({ message: 'Error updating employee', error });
-  }
-});
-
-// DELETE employee
-app.delete('/api/employees/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const employee = await Employee.findByIdAndDelete(id);
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
-    const employees = await Employee.find({}, '-password');
-    res.status(200).json({ message: 'Employee deleted successfully', employees });
-  } catch (error) {
-    res.status(500).json({ message: 'Error deleting employee', error });
-  }
-});
-
-// UPDATE teamMembers of a manager
-app.put("/api/employees/:id/team", async (req, res) => {
-  const { id } = req.params;
-  const { teamMembers } = req.body;
-
-  if (!Array.isArray(teamMembers)) {
-    return res.status(400).json({ message: "teamMembers must be an array of employee IDs" });
-  }
-
-  try {
-    const updatedManager = await Employee.findByIdAndUpdate(
-      id,
-      { teamMembers, hasTeam: teamMembers.length > 0 },
-      { new: true }
-    ).populate("teamMembers", "fullName email role status target");
-
-    if (!updatedManager) return res.status(404).json({ message: "Manager not found" });
-
-    res.status(200).json({ message: "Team updated", manager: updatedManager });
-  } catch (error) {
-    res.status(500).json({ message: "Error updating team", error });
-  }
-});
 
 app.get('/api/leads/check-duplicate', async (req, res) => {
   const { contactNumber } = req.query;
@@ -926,11 +751,11 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
     return res.status(200).json({ exists: false });
   } catch (error) {
     console.error("Error checking duplicate:", error);
-    res.status(500).json({ message: "Internal server error" }); 
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
- 
+
 app.get('/api/leads', async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus, sortBy = '_id', sortOrder = 'desc' } = req.query;
   const filterCriteria = JSON.parse(filters);
@@ -938,39 +763,36 @@ app.get('/api/leads', async (req, res) => {
   const parseDate = (dateString) => {
     if (!dateString) return null;
     const parsedDate = new Date(dateString);
-    return isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString().split("T")[0];  
-};
-
+    return isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString().split("T")[0];
+  };
 
   try {
     const query = {};
- 
+
     if (filterCriteria.name) query.name = { $regex: filterCriteria.name, $options: 'i' };
     if (filterCriteria.contactNumber) query.contactNumber = filterCriteria.contactNumber;
-    if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
+    if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource }; 
 
     if (filterCriteria.startDate || filterCriteria.endDate) {
       query.date = {};
       if (filterCriteria.startDate) {
-          const parsedStartDate = parseDate(filterCriteria.startDate);
-          if (parsedStartDate) query.date.$gte = parsedStartDate;
+        const parsedStartDate = parseDate(filterCriteria.startDate);
+        if (parsedStartDate) query.date.$gte = parsedStartDate;
       }
       if (filterCriteria.endDate) {
-          const parsedEndDate = parseDate(filterCriteria.endDate);
-          if (parsedEndDate) query.date.$lte = parsedEndDate;
+        const parsedEndDate = parseDate(filterCriteria.endDate);
+        if (parsedEndDate) query.date.$lte = parsedEndDate;
       }
-      if (Object.keys(query.date).length === 0) delete query.date;  
-  }
-  
-
-    // Order Date
+      if (Object.keys(query.date).length === 0) delete query.date;
+    }
+ 
     if (filterCriteria.lastOrderDate) {
       const parsedlastOrderDate = parseDate(filterCriteria.lastOrderDate);
       if (parsedlastOrderDate) {
-          query.lastOrderDate = parsedlastOrderDate;
+        query.lastOrderDate = parsedlastOrderDate;
       }
-  }
-  
+    }
+
     if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
     if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
     if (filterCriteria.salesStatus?.length) query.salesStatus = { $in: filterCriteria.salesStatus };
@@ -984,36 +806,36 @@ app.get('/api/leads', async (req, res) => {
     if (filterCriteria.reminder) {
       const today = new Date();
       if (filterCriteria.reminder === "Today") {
-          query.nextFollowup = { $eq: today.toISOString().split("T")[0] };
+        query.nextFollowup = { $eq: today.toISOString().split("T")[0] };
       } else if (filterCriteria.reminder === "Tomorrow") {
-          const tomorrow = new Date(today);
-          tomorrow.setDate(today.getDate() + 1);
-          query.nextFollowup = { $eq: tomorrow.toISOString().split("T")[0] };
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+        query.nextFollowup = { $eq: tomorrow.toISOString().split("T")[0] };
       } else if (filterCriteria.reminder === "Follow-up Missed") {
-          query.nextFollowup = { $lt: today.toISOString().split("T")[0] };
+        query.nextFollowup = { $lt: today.toISOString().split("T")[0] };
       } else if (filterCriteria.reminder === "Later") {
-          query.nextFollowup = { $gt: today.toISOString().split("T")[0] }; 
+        query.nextFollowup = { $gt: today.toISOString().split("T")[0] };
       }
-  }
-  
-  if (filterCriteria.rtFollowupReminder) {
+    }
+
+    if (filterCriteria.rtFollowupReminder) {
       const today = new Date();
       if (filterCriteria.rtFollowupReminder === "Today") {
-          query.rtNextFollowupDate = { $eq: today.toISOString().split("T")[0] };
+        query.rtNextFollowupDate = { $eq: today.toISOString().split("T")[0] };
       } else if (filterCriteria.rtFollowupReminder === "Tomorrow") {
-          const tomorrow = new Date(today);
-          tomorrow.setDate(today.getDate() + 1);
-          query.rtNextFollowupDate = { $eq: tomorrow.toISOString().split("T")[0] };
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+        query.rtNextFollowupDate = { $eq: tomorrow.toISOString().split("T")[0] };
       } else if (filterCriteria.rtFollowupReminder === "Follow-up Missed") {
-          query.rtNextFollowupDate = { $lt: today.toISOString().split("T")[0] };
+        query.rtNextFollowupDate = { $lt: today.toISOString().split("T")[0] };
       } else if (filterCriteria.rtFollowupReminder === "Later") {
-          query.rtNextFollowupDate = { $gt: today.toISOString().split("T")[0] };
+        query.rtNextFollowupDate = { $gt: today.toISOString().split("T")[0] };
       }
-  }
-   
+    }
+
     if (agentAssignedName) query.agentAssigned = agentAssignedName;
     if (salesStatus) query.salesStatus = salesStatus;
- 
+
     const totalLeads = await Lead.countDocuments(query);
     const leads = await Lead.find(query)
       .sort({ _id: -1 })
@@ -1043,7 +865,7 @@ app.post('/api/leads', async (req, res) => {
     res.status(500).json({ message: 'Error adding lead', error });
   }
 });
-  
+
 
 app.put('/api/leads/:id', async (req, res) => {
   const { id } = req.params;
@@ -1086,10 +908,10 @@ app.delete('/api/leads/:id', async (req, res) => {
 function getReminderType(nextFollowupDate) {
   if (!nextFollowupDate) return "NotSet";
   const today = new Date();
-  today.setHours(0,0,0,0);
+  today.setHours(0, 0, 0, 0);
   const followupDate = new Date(nextFollowupDate);
-  followupDate.setHours(0,0,0,0);
-  const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
+  followupDate.setHours(0, 0, 0, 0);
+  const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24)); 
   if (isNaN(diffInDays)) return "NotSet";
   if (diffInDays < 0) return "Missed";
   if (diffInDays === 0) return "Today";
@@ -1097,7 +919,7 @@ function getReminderType(nextFollowupDate) {
   return "Later";
 }
 
-app.get("/api/leads/retention", async (req, res) => { 
+app.get("/api/leads/retention", async (req, res) => {
   try {
     let {
       page = 1,
@@ -1184,16 +1006,18 @@ app.get("/api/leads/retention", async (req, res) => {
                     branches: [
                       // Missed: Date is before today
                       {
-                        case: { $lt: [
-                          { $subtract: [ "$$followup", "$$today" ] }, 0
-                        ] },
+                        case: {
+                          $lt: [
+                            { $subtract: ["$$followup", "$$today"] }, 0
+                          ]
+                        },
                         then: "Missed"
                       },
                       // Today: Date is today
                       {
                         case: {
                           $eq: [
-                            { $trunc: { $divide: [ { $subtract: [ "$$followup", "$$today" ] }, 1000 * 60 * 60 * 24 ] } }, 0
+                            { $trunc: { $divide: [{ $subtract: ["$$followup", "$$today"] }, 1000 * 60 * 60 * 24] } }, 0
                           ]
                         },
                         then: "Today"
@@ -1202,7 +1026,7 @@ app.get("/api/leads/retention", async (req, res) => {
                       {
                         case: {
                           $eq: [
-                            { $trunc: { $divide: [ { $subtract: [ "$$followup", "$$today" ] }, 1000 * 60 * 60 * 24 ] } }, 1
+                            { $trunc: { $divide: [{ $subtract: ["$$followup", "$$today"] }, 1000 * 60 * 60 * 24] } }, 1
                           ]
                         },
                         then: "Tomorrow"
@@ -1315,21 +1139,20 @@ app.get("/api/leads/retention", async (req, res) => {
 
   } catch (err) {
     console.error("Retention API error:", err);
-    res.status(500).json({ error: "Internal Server Error" });   
+    res.status(500).json({ error: "Internal Server Error" });
   }
-}); 
+});
 
 
 
 app.get('/api/leads/retentions', async (req, res) => {
-  const { fullName, email } = req.query;  
+  const { fullName, email } = req.query;
 
   if (!fullName || !email) {
-    return res.status(400).json({ message: 'Full name and email are required' }); 
+    return res.status(400).json({ message: 'Full name and email are required' });
   }
 
-  try {
-    // Match either the exact fullName or the combined format
+  try { 
     const leads = await Lead.find({
       healthExpertAssigned: { $in: [fullName, `${fullName} (${email})`] },
       salesStatus: "Sales Done",
@@ -1343,12 +1166,12 @@ app.get('/api/leads/retentions', async (req, res) => {
 
 // Express route to update images of a lead by lead id
 app.patch('/api/leads/:id/images', async (req, res) => {
-  const leadId = req.params.id; 
+  const leadId = req.params.id;
   const { images } = req.body; // array of { url, date, tag } objects
 
   try {
     const lead = await Lead.findById(leadId);
-    if (!lead) return res.status(404).json({ message: 'Lead not found' });  
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
     lead.images = images; // replace images array
     await lead.save();
@@ -1390,7 +1213,6 @@ app.post('/api/leads/:id/reachout-log', async (req, res) => {
   }
 });
 
-
 app.get("/api/leads/:id/reachout-logs", async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id, "reachoutLogs");
@@ -1402,31 +1224,29 @@ app.get("/api/leads/:id/reachout-logs", async (req, res) => {
   }
 });
 
-
 app.get('/api/leads/new-orders', async (req, res) => {
   try {
     // Extract page, limit, and other filter parameters from query
     const { page = 1, limit = 30, ...filters } = req.query;
-    
-    // Build the query with default filter and exclusion for Admin/Online Order
-    const query = { 
+  
+    const query = {
       salesStatus: "Sales Done",
       agentAssigned: { $nin: ['Admin', 'Online Order'] }
     };
- 
+
     if (filters.name) {
       query.name = { $regex: filters.name, $options: "i" };
     }
     if (filters.contactNumber) {
       query.contactNumber = { $regex: filters.contactNumber };
-    } 
+    }
     if (filters.agentName) {
       let agentArr = filters.agentName;
       if (!Array.isArray(agentArr)) {
         agentArr = [agentArr];
-      } 
+      }
       query.agentAssigned = { $in: agentArr };
-    } 
+    }
     if (filters.healthExpertAssigned) {
       if (filters.healthExpertAssigned === "blank") {
         query.$or = [
@@ -1469,7 +1289,7 @@ app.get('/api/leads/new-orders', async (req, res) => {
       query.lastOrderDate = query.lastOrderDate || {};
       query.lastOrderDate.$lte = new Date(filters.endDate);
     }
-    if (filters.orderDate) { 
+    if (filters.orderDate) {
       const orderDateStart = new Date(filters.orderDate);
       const orderDateEnd = new Date(filters.orderDate);
       orderDateEnd.setDate(orderDateEnd.getDate() + 1);
@@ -1516,44 +1336,6 @@ app.get('/api/leads/new-orders', async (req, res) => {
     });
   }
 });
- 
-
-// Login Route 
-app.post("/api/login", async (req, res) => {
-  const { email, password } = req.body;
-
-  try {
-    // Find user by email
-    const user = await Employee.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: "Invalid email or password." });
-    }
- 
-    if (user.password !== password) {
-      return res.status(400).json({ message: "Invalid email or password." });
-    }
-
-    // Prevent login if employee is inactive
-    if (user.status !== "active") {
-      return res.status(403).json({ message: "Inactive employees are not allowed to login." });
-    }
- 
-    res.status(200).json({
-      message: "Login successful",
-      user: {
-        id: user._id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role,
-        hasTeam: user.hasTeam, // <-- ADD THIS LINE!
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Server error. Please try again later." });
-  }
-});
-
-
 
 app.get('/api/leads/assigned', async (req, res) => {
   const { agentAssigned } = req.query;
@@ -1570,434 +1352,16 @@ app.get('/api/leads/assigned', async (req, res) => {
   }
 });
 
-app.get('/api/search', async (req, res) => {
-  const { query } = req.query;
-
-  if (!query) {
-    return res.status(400).json({ message: "Query is required" });
-  }
-
-  try {
-    // Search in Lead model
-    const leadResults = await Lead.find({
-      $or: [
-        { name: { $regex: query, $options: "i" } },
-        { contactNumber: { $regex: query } }
-      ],
-    })
-      .limit(10)
-      .lean();
-
-    const formattedLeads = leadResults.map(item => ({
-      _id: item._id,
-      name: item.name,
-      contactNumber: item.contactNumber,
-      agentAssigned: item.agentAssigned || "",
-      healthExpertAssigned: item.healthExpertAssigned || "",
-      source: "lead"
-    }));
-
-    // Search in Customer model
-    const customerResults = await Customer.find({
-      $or: [
-        { name: { $regex: query, $options: "i" } },
-        { phone: { $regex: query } }
-      ],
-    })
-      .limit(10)
-      .lean();
-
-    // Get ConsultationDetails to fetch assignExpert name
-    const customerIds = customerResults.map(c => c._id);
-    const consultationMap = {};
-
-    const consultations = await ConsultationDetails.find({
-      customerId: { $in: customerIds }
-    })
-      .populate("presales.assignExpert", "fullName")
-      .lean();
-
-    consultations.forEach(c => {
-      consultationMap[c.customerId.toString()] = c.presales.assignExpert?.fullName || "";
-    });
-
-    const formattedCustomers = customerResults.map(item => ({
-      _id: item._id,
-      name: item.name,
-      contactNumber: item.phone,
-      agentAssigned: item.assignedTo || "",
-      healthExpertAssigned: consultationMap[item._id.toString()] || "",
-      source: "customer"
-    }));
-
-    // Combine and limit total to 10 (optional)
-    const combined = [...formattedLeads, ...formattedCustomers].slice(0, 10);
-
-    res.status(200).json(combined);
-  } catch (error) {
-    console.error("Error during search:", error);
-    res.status(500).json({ message: "Error during search", error });
-  }
-});
-
 app.get('/api/retention-orders', async (req, res) => {
   try {
-      const orders = await RetentionSales.find({});  
-      res.json(orders); 
+    const orders = await RetentionSales.find({});
+    res.json(orders);
   } catch (error) {
-      console.error('Error fetching retention orders:', error);
-      res.status(500).json({ message: 'Failed to fetch retention orders', error: error });
-  }
-});
- 
-
-app.post("/api/click_to_call", async (req, res) => {
-  const { destination_number, async, agent_number, caller_id } = req.body;
-
-  console.log("Received API Request:", req.body);
-
-  if (!destination_number || !agent_number || !caller_id) {
-    return res.status(400).json({ status: "error", message: "Missing required parameters" });
-  }
-
-  try {
-    const response = await axios.post(
-      "https://api-smartflo.tatateleservices.com/v1/click_to_call",
-      { destination_number, async, agent_number, caller_id },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.SMARTFLO_TOKEN}`,   
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    console.log("Smartflo API Response:", response.data);
-
-    if (response.data.status === "success") {
-      res.status(200).json({ status: "success", message: "Call initiated successfully" });
-    } else {
-      res.status(500).json({ status: "error", message: "Failed to initiate the call" });
-    }
-  } catch (error) {
-    console.error("Error during Smartflo API call:", error.response?.data || error);
-    res.status(500).json({ status: "error", message: "Error initiating the call" });
+    console.error('Error fetching retention orders:', error);
+    res.status(500).json({ message: 'Failed to fetch retention orders', error: error });
   }
 });
 
-app.get('/api/leads/transfer-requests', async (req, res) => {
-  try {
-    const requests = await TransferRequest.find({ status: 'pending' }).populate("leadId");
-    res.status(200).json(requests);
-  } catch (error) {
-    console.error("Error fetching transfer requests:", error);
-    res.status(500).json({ message: "Error fetching transfer requests", error: error.message });
-  }
-});
- 
-app.post('/api/leads/transfer-request', async (req, res) => {
-  const { leadId, requestedBy, role } = req.body;
-  if (!leadId || !requestedBy || !role) {
-    return res.status(400).json({ message: "Missing required parameters" });
-  }
-  try {
-    const lead = await Lead.findById(leadId);
-    if (!lead) {
-      return res.status(404).json({ message: "Lead not found" });
-    } 
-
-    if (role === "Sales Agent") {
-      if (lead.agentAssigned === requestedBy) {
-        return res.status(400).json({ message: "You are already assigned to this lead" });
-      }
-    } else if (role === "Retention Agent") {
-      if (lead.healthExpertAssigned === requestedBy) {
-        return res.status(400).json({ message: "You are already assigned to this lead" });
-      }
-    } else {
-      return res.status(400).json({ message: "Invalid role for transfer" });
-    } 
-
-    const newRequest = new TransferRequest({ leadId, requestedBy, role });
-    await newRequest.save();
-    return res.status(200).json({ message: "Transfer request sent successfully", request: newRequest });
-  } catch (error) {
-    console.error("Error in transfer request:", error);
-    return res.status(500).json({ message: "Internal server error", error: error.message });
-  }
-}); 
-
-app.post('/api/leads/transfer-approve', async (req, res) => {
-  const { requestId } = req.body;
-  if (!requestId) {
-    return res.status(400).json({ message: "Request ID is required" });
-  }
-  try {
-    const transferRequest = await TransferRequest.findById(requestId);
-    if (!transferRequest) {
-      return res.status(404).json({ message: "Transfer request not found" });
-    }
-    if (transferRequest.status !== 'pending') {
-      return res.status(400).json({ message: "Transfer request already processed" });
-    }
-    const lead = await Lead.findById(transferRequest.leadId);
-    if (!lead) {
-      return res.status(404).json({ message: "Lead not found" });
-    } 
-    if (transferRequest.role === "Sales Agent") {
-      lead.agentAssigned = transferRequest.requestedBy;
-    } else if (transferRequest.role === "Retention Agent") {
-      lead.healthExpertAssigned = transferRequest.requestedBy;
-    }
-    await lead.save();
-    transferRequest.status = "approved";
-    await transferRequest.save();
-    return res.status(200).json({ message: "Transfer request approved and lead updated", lead });
-  } catch (error) {
-    console.error("Error approving transfer request:", error);
-    return res.status(500).json({ message: "Internal server error", error: error.message });
-  }
-});
-
-
-  
-app.get('/api/leads/:id', async (req, res) => {
-  try {
-    const lead = await Lead.findById(req.params.id);
-    if (!lead) {
-      return res.status(404).json({ message: 'Lead not found' });
-    }
-    res.status(200).json(lead);
-  } catch (error) {
-    console.error("Error fetching lead:", error);
-    res.status(500).json({ message: "Error fetching lead", error: error.message });
-  }
-});
-
-app.post('/api/leads/transfer-reject', async (req, res) => {
-  const { requestId } = req.body;
-  if (!requestId) {
-    return res.status(400).json({ message: "Request ID is required" });
-  }
-  try {
-    const transferRequest = await TransferRequest.findById(requestId);
-    if (!transferRequest) { 
-      return res.status(404).json({ message: "Transfer request not found" });
-    }
-    if (transferRequest.status !== 'pending') {
-      return res.status(400).json({ message: "Transfer request already processed" });
-    }
-    transferRequest.status = "rejected";
-    await transferRequest.save();
-    return res.status(200).json({ message: "Transfer request rejected", transferRequest });
-  } catch (error) {
-    console.error("Error rejecting transfer request:", error);
-    return res.status(500).json({ message: "Internal server error", error: error.message });
-  }
-});
-
-app.get('/api/leads/transfer-requests/all', async (req, res) => {
-  try {
-    const requests = await TransferRequest.find().populate("leadId");
-    res.status(200).json(requests);
-  } catch (error) {
-    console.error("Error fetching transfer requests:", error);
-    res.status(500).json({ message: "Error fetching transfer requests", error: error.message });
-  }
-});
- 
-
-app.get('/api/reachout-logs/count', async (req, res) => {
-  try {
-    const { startDate, endDate, healthExpertAssigned } = req.query;
-
-    let start = startDate ? new Date(startDate) : new Date(0);
-    let end = endDate ? new Date(endDate) : new Date();
-    end.setHours(23, 59, 59, 999);
-
-    const matchStage = healthExpertAssigned ? { healthExpertAssigned } : {};
-
-    // Aggregate unique leads count per method
-    const result = await Lead.aggregate([
-      { $match: matchStage },
-      {
-        $project: {
-          contactNumber: 1,
-          reachoutLogs: {
-            $filter: {
-              input: { $ifNull: ["$reachoutLogs", []] },
-              as: "log",
-              cond: {
-                $and: [
-                  { $gte: ["$$log.timestamp", start] },
-                  { $lte: ["$$log.timestamp", end] }
-                ]
-              }
-            }
-          }
-        }
-      },
-      { $unwind: "$reachoutLogs" },
-      {
-        $group: {
-          _id: {
-            contactNumber: "$contactNumber",
-            method: "$reachoutLogs.method",
-          }
-        }
-      },
-      {
-        $group: {
-          _id: "$_id.method",
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-
-    // Aggregate total unique leads contacted by any method
-    const uniqueLeadsResult = await Lead.aggregate([
-      { $match: matchStage },
-      {
-        $project: {
-          contactNumber: 1,
-          reachoutLogs: {
-            $filter: {
-              input: { $ifNull: ["$reachoutLogs", []] },
-              as: "log",
-              cond: {
-                $and: [
-                  { $gte: ["$$log.timestamp", start] },
-                  { $lte: ["$$log.timestamp", end] }
-                ]
-              }
-            }
-          }
-        }
-      },
-      { $unwind: "$reachoutLogs" },
-      {
-        $group: {
-          _id: "$contactNumber"
-        }
-      },
-      {
-        $count: "totalUniqueLeads"
-      }
-    ]);
-    const totalCount = uniqueLeadsResult.length > 0 ? uniqueLeadsResult[0].totalUniqueLeads : 0;
-
-    // Format counts by method, default to 0 if missing
-    const counts = { WhatsApp: 0, Call: 0, Both: 0 };
-    result.forEach((item) => {
-      if (item._id) counts[item._id] = item.count;
-    });
-
-    res.json({ totalCount, ...counts });
-  } catch (err) {
-    console.error("Error fetching reachout logs count:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-});
-
-
-// Assuming you have Express app and Lead model
-app.get('/api/reachout-logs/disposition-summary', async (req, res) => {
-  const { startDate, endDate, healthExpertAssigned } = req.query;
-
-  if (!healthExpertAssigned) {
-    return res.status(400).json({ error: "healthExpertAssigned is required" });
-  }
-
-  try {
-    const dispositionCounts = await Lead.aggregate([
-      { $match: { healthExpertAssigned } },  
-      { $unwind: "$reachoutLogs" },        
-      {                                   
-        $match: {
-          "reachoutLogs.timestamp": {
-            $gte: new Date(startDate),
-            $lte: new Date(endDate),
-          },
-        },
-      },
-      {
-        $group: {
-          _id: "$reachoutLogs.status",
-          count: { $sum: 1 },
-        },
-      },
-    ]);
-
-    const countsObject = dispositionCounts.reduce((acc, curr) => {
-      acc[curr._id] = curr.count;
-      return acc;
-    }, {});
-
-    res.json(countsObject);
-  } catch (error) {
-    console.error("Error fetching disposition summary:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.get('/api/reachout-logs/disposition-count', async (req, res) => {
-  try {
-    const { startDate: startDateRaw, endDate: endDateRaw, healthExpertAssigned } = req.query;
-
-    const matchRoot = {};
-    if (healthExpertAssigned) {
-      matchRoot.healthExpertAssigned = healthExpertAssigned;
-    }
-
-    let startDate, endDate;
-    if (startDateRaw && endDateRaw) {
-      startDate = new Date(startDateRaw);
-      startDate.setHours(0, 0, 0, 0); // start of day
-
-      endDate = new Date(endDateRaw);
-      endDate.setHours(23, 59, 59, 999); // end of day
-    }
-
-    // Pipeline steps:
-    const pipeline = [
-      { $match: matchRoot },        // Match root documents first
-      { $unwind: "$reachoutLogs" }, // Unwind array
-    ];
-
-    // If date filters are provided, apply match on unwinded subfield:
-    if (startDate && endDate) {
-      pipeline.push({
-        $match: {
-          "reachoutLogs.timestamp": {
-            $gte: startDate,
-            $lte: endDate,
-          },
-        },
-      });
-    }
-
-    // Then group by disposition status
-    pipeline.push({
-      $group: {
-        _id: "$reachoutLogs.status",
-        count: { $sum: 1 },
-      },
-    });
-
-    const result = await Lead.aggregate(pipeline);
-
-    // Format result to key: count map
-    const formattedResult = result.reduce((acc, item) => {
-      acc[item._id] = item.count;
-      return acc;
-    }, {});
-
-    res.json(formattedResult); 
-  } catch (err) {
-    console.error("Error fetching disposition counts:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-}); 
 
 app.get('/api/consultation-history', async (req, res) => {
   try {
@@ -2009,14 +1373,13 @@ app.get('/api/consultation-history', async (req, res) => {
     if (!customer) return res.status(404).json({ error: "Customer not found" });
 
     // 2. Find consultation details by customerId
-    const consultations = await ConsultationDetails.find({ customerId: customer._id }).sort({ createdAt: -1 });  
+    const consultations = await ConsultationDetails.find({ customerId: customer._id }).sort({ createdAt: -1 });
 
     res.json({ consultations });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-  
 
 // Start Server
 app.listen(PORT, () => {

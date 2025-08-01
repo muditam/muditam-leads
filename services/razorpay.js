@@ -17,7 +17,7 @@ router.post("/create-payment-link", async (req, res) => {
       description: "Payment for order",
       customer: {
         name: customer.name,
-        email: customer.email,
+        email: customer.email, 
         contact: customer.contact,
       },
       notify: {

@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const EmployeeSchema = new mongoose.Schema({
   fullName: { type: String, required: true }, 
-  email: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true }, 
   callerId: { type: String, required: true },
   role: { type: String, required: true },
   password: { type: String, required: true },
@@ -15,7 +15,7 @@ const EmployeeSchema = new mongoose.Schema({
   monthlyDeliveredSales: { type: mongoose.Schema.Types.Mixed, default: {} },
   totalDeliveredSales: { type: Number, default: 0 },
   teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: [] }], 
-  teamLeader: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null } 
+  teamLeader: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null }  
 });
 
 module.exports = mongoose.model("Employee", EmployeeSchema);
