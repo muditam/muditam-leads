@@ -111,18 +111,4 @@ router.post('/transfer-reject', async (req, res) => {
   }
 });
 
-// GET: Single lead details
-router.get('/:id', async (req, res) => {
-  try {
-    const lead = await Lead.findById(req.params.id);
-    if (!lead) {
-      return res.status(404).json({ message: 'Lead not found' });
-    }
-    res.status(200).json(lead);
-  } catch (error) {
-    console.error("Error fetching lead:", error);
-    res.status(500).json({ message: "Error fetching lead", error: error.message });
-  }
-});
-
 module.exports = router;
