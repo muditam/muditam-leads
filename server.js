@@ -1,13 +1,13 @@
 require('dotenv').config();
 
 const express = require('express');
-const mongoose = require('mongoose');
+const mongoose = require('mongoose'); 
 const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
 const Customer = require('./models/Customer');
-const ConsultationDetails = require('./models/ConsultationDetails');
+const ConsultationDetails = require('./models/ConsultationDetails');  
 const XLSX = require("xlsx");
 const axios = require('axios');
 const https = require('https');
@@ -21,7 +21,7 @@ const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
-const activeCountsRoute = require("./routes/activeCountsRoute");
+const activeCountsRoute = require("./routes/activeCountsRoute"); 
 const summaryRoutes = require('./routes/summaryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const myOrdersRoutes = require("./routes/myOrders");
@@ -64,9 +64,9 @@ app.use(cors({
   origin: function (origin, callback) { 
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(new Error('Not allowed by CORS'));
+      return callback(new Error('Not allowed by CORS')); 
     }
-    return callback(null, true);
+    return callback(null, true); 
   }
 }));
  
@@ -76,7 +76,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization"); 
   next();
 });
 
@@ -1143,12 +1143,11 @@ app.get("/api/leads/retention", async (req, res) => {
   }
 });
 
-
 app.get('/api/leads/retentions', async (req, res) => {
   const { fullName, email } = req.query;
 
   if (!fullName || !email) {
-    return res.status(400).json({ message: 'Full name and email are required' });
+    return res.status(400).json({ message: 'Full name and email are required' }); 
   }
 
   try { 
@@ -1159,18 +1158,18 @@ app.get('/api/leads/retentions', async (req, res) => {
     res.status(200).json(leads);
   } catch (error) {
     console.error('Error fetching retention leads:', error);
-    res.status(500).json({ message: 'Error fetching retention leads', error });
+    res.status(500).json({ message: 'Error fetching retention leads', error }); 
   }
 });
+  
 
-// Express route to update images of a lead by lead id
 app.patch('/api/leads/:id/images', async (req, res) => {
   const leadId = req.params.id;
-  const { images } = req.body; // array of { url, date, tag } objects
+  const { images } = req.body;  
 
   try {
     const lead = await Lead.findById(leadId);
-    if (!lead) return res.status(404).json({ message: 'Lead not found' });
+    if (!lead) return res.status(404).json({ message: 'Lead not found' }); 
 
     lead.images = images; // replace images array
     await lead.save();
@@ -1181,8 +1180,7 @@ app.patch('/api/leads/:id/images', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-// Example in Express (Node.js)
+ 
 app.post('/api/leads/:id/reachout-log', async (req, res) => {
   try {
     const { id } = req.params;

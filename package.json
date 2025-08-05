@@ -20,6 +20,7 @@
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
     "discord-webhook-node": "^1.1.8",
+    "dns": "^0.2.2",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
