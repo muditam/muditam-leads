@@ -148,6 +148,8 @@ router.put("/update-duplicate-group", async (req, res) => {
 });
 
 // DELETE duplicate group: Deletes all leads with the normalized contact number
+
+// DELETE group: Deletes all leads and customers with the normalized contact number
 router.delete("/duplicate-number", async (req, res) => {
   try {
     const { contactNumber } = req.body;
@@ -155,7 +157,9 @@ router.delete("/duplicate-number", async (req, res) => {
       return res.status(400).json({ error: "Missing contact number" });
     }
     const normalized = normalizeNumber(contactNumber);
-    const deleteResult = await Lead.deleteMany({
+
+    // Delete from Lead
+    const leadDeleteResult = await Lead.deleteMany({
       $expr: {
         $eq: [
           { $substr: [{ $replaceAll: { input: "$contactNumber", find: /\D/g, replacement: "" } }, -10, 10] },
@@ -163,11 +167,46 @@ router.delete("/duplicate-number", async (req, res) => {
         ]
       }
     });
-    res.json({ message: "Leads with duplicate group deleted", deleteResult });
+
+    // Delete from Customer
+    const customerDeleteResult = await Customer.deleteMany({
+      $expr: {
+        $eq: [
+          { $substr: [{ $replaceAll: { input: "$phone", find: /\D/g, replacement: "" } }, -10, 10] },
+          normalized
+        ]
+      }
+    });
+
+    res.json({ 
+      message: "Leads and Customers with duplicate group deleted",
+      leadDeleteResult,
+      customerDeleteResult
+    });
   } catch (err) {
     console.error("Error deleting duplicate group:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
+
+// DELETE row-wise: Delete a single record by its type and _id
+router.delete("/:type/:id", async (req, res) => {
+  const { type, id } = req.params;
+  try {
+    if (type === "lead") {
+      await Lead.findByIdAndDelete(id); 
+      return res.json({ message: "Lead deleted" });
+    } else if (type === "customer") {
+      await Customer.findByIdAndDelete(id);
+      return res.json({ message: "Customer deleted" });
+    } else {
+      return res.status(400).json({ error: "Invalid type" });
+    }
+  } catch (err) {
+    console.error("Error deleting:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 
 module.exports = router;
