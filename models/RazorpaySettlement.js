@@ -1,0 +1,36 @@
+const mongoose = require("mongoose");
+
+const RazorpaySettlementSchema = new mongoose.Schema({
+  uploadDate: { type: Date, default: Date.now },
+  transaction_entity: String,
+  entity_id: String,
+  amount: Number,
+  currency: String,
+  fee: Number,
+  tax: Number,
+  debit: Number,
+  credit: Number,
+  payment_method: String,
+  upi_flow: String,
+  card_type: String,
+  issuer_name: String,
+  entity_created_at: String,
+  payment_captured_at: String,
+  payment_notes: String,
+  refund_notes: String,
+  arn: String,
+  entity_description: String,
+  order_id: String,
+  order_receipt: String,
+  order_notes: String,
+  dispute_id: String,
+  dispute_created_at: String,
+  dispute_reason: String,
+  settlement_id: String,
+  settled_at: String,
+  settlement_utr: String,
+  settled_by: String,
+  additional_utr: String,
+});
+
+module.exports = mongoose.model("RazorpaySettlement", RazorpaySettlementSchema);

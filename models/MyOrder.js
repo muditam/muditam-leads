@@ -16,8 +16,9 @@ const MyOrderSchema = new mongoose.Schema({
   dosageOrdered: { type: String, required: true },   
   selfRemark: { type: String },                      
   paymentMethod: { type: String, required: true },   
-  upsellAmount: { type: Number, default: 0 }          
-}); 
+  upsellAmount: { type: Number, default: 0 },
+  transactionId: { type: String },        
+});  
 
 module.exports = mongoose.model('MyOrder', MyOrderSchema);  
 

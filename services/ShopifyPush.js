@@ -21,7 +21,7 @@ router.post("/create-order", async (req, res) => {
     order: {
       line_items: cartItems.map(item => ({
         variant_id: item.variantId,
-        quantity: item.quantity,
+        quantity: item.quantity, 
       })),
       shipping_address: {
         first_name: shippingAddress.firstName,

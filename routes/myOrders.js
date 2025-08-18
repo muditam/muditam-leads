@@ -15,10 +15,11 @@ router.post("/", async (req, res) => {
       totalPrice,
       agentName,
       partialPayment, 
-      dosageOrdered,
+      dosageOrdered, 
       selfRemark, 
       paymentMethod, 
       upsellAmount,
+      transactionId,
     } = req.body;
 
     // Validate required fields
@@ -55,6 +56,7 @@ router.post("/", async (req, res) => {
       selfRemark,
       paymentMethod,
       upsellAmount: upsellAmount ? Number(upsellAmount) : 0,
+      transactionId: transactionId || "", 
     });
 
     await newOrder.save();

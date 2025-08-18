@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const mongoose = require('mongoose'); 
+const dns = require('dns');
 const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
@@ -54,11 +55,23 @@ const searchRoutes = require('./routes/searchRoutes');
 const Addemployee = require('./routes/Addemployee');
 const authRoutes = require('./routes/loginRoutes');
 const clickToCallRoutes = require('./routes/clickToCallRoutes');
+const financeRoutes = require("./routes/financeRoutes");
+const razorpaySettlementRoutes = require("./PaymentGateway/razorpaySettlements");
+const GokwikSettlementRoutes = require("./PaymentGateway/easebuzz");
+const phonepeFinance = require("./PaymentGateway/phonepeFinance");
+const Bluedart = require("./PaymentGateway/bluedart");
+const Delhivery = require("./PaymentGateway/delhivery");
+const DTDC = require("./PaymentGateway/DTDC");
+const OrderSummeryOperations = require('./operations/OrderSummeryOperations');
+
+const markRTORoute = require("./operations/markRTO"); 
 
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5001; 
 
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
+
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 app.use(cors({
   origin: function (origin, callback) { 
@@ -67,7 +80,7 @@ app.use(cors({
       return callback(new Error('Not allowed by CORS')); 
     }
     return callback(null, true); 
-  }
+  } 
 }));
  
 app.use((req, res, next) => {
@@ -153,11 +166,29 @@ app.use('/api', authRoutes);
 
 app.use('/api', clickToCallRoutes);
 
-mongoose.connect(process.env.MONGO_URI, {
+app.use("/api/finance", financeRoutes);
+
+app.use("/api/razorpay", razorpaySettlementRoutes);
+
+app.use("/api/easebuzz", GokwikSettlementRoutes);
+
+app.use("/api/phonepe", phonepeFinance);
+
+app.use("/api/bluedart", Bluedart);
+
+app.use("/api/delhivery", Delhivery);
+
+app.use("/api/dtdc", DTDC); 
+
+app.use('/api/operations', OrderSummeryOperations);
+
+app.use(markRTORoute);
+
+mongoose.connect(process.env.MONGO_URI, { 
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+  .catch((err) => console.error('MongoDB connection error:', err)); 
 
 
 const httpsAgent = new https.Agent({
@@ -331,6 +362,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
         const contactNumber = order.phone || order.s_phone || "";
         const trackingNumber = order.tracking_number || "";
         const carrierTitle = order.carrier_title || "";
+        const fullName = [order.s_firstname, order.s_lastname].filter(Boolean).join(" ").trim();
 
         const updateFields = {
           order_id: normalizedOrderId,
@@ -338,6 +370,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
           order_date: orderDate,
           tracking_number: trackingNumber,
           carrier_title: carrierTitle,
+          full_name: fullName,
           last_updated_at: new Date()
         };
 
@@ -352,6 +385,10 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
 
         if (carrierTitle) {
           console.log(`Updating ${normalizedOrderId} with carrier: ${carrierTitle}`);
+        }
+
+        if (fullName) {
+          console.log(`Updating ${normalizedOrderId} with full name: ${fullName}`);
         }
 
         const existing = await Order.findOne({ order_id: normalizedOrderId });
@@ -1387,6 +1424,62 @@ app.get('/api/consultation-history', async (req, res) => {
     res.json({ consultations });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } 
+});
+
+app.post("/api/webhook", async (req, res) => {
+  try {
+    // 1) Verify (optional now, recommended later – see section 4)
+    const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET; // set this when GoKwik shares it
+    const signatureHeader = req.get("X-GK-Signature"); // header name TBD by GoKwik; confirm with POC
+
+    if (sharedSecret && signatureHeader) {
+      const digest = crypto
+        .createHmac("sha256", sharedSecret)
+        .update(req.body) // raw buffer
+        .digest("hex");
+      const safe = signatureHeader.replace(/^sha256=/, "") === digest;
+      if (!safe) {
+        console.warn("⚠️ Invalid signature");
+        return res.status(401).send("Invalid signature");
+      }
+    }
+
+    // 2) Parse JSON safely after verification
+    let event = {};
+    try {
+      event = JSON.parse(req.body.toString("utf8"));
+    } catch (e) {
+      console.error("JSON parse error", e);
+      return res.status(400).send("Bad JSON");
+    }
+
+    // 3) Idempotency (avoid duplicates if GoKwik retries)
+    const eventId = event.id || event.event_id || event.checkout_id; // adapt once you see payload
+    // TODO: check your DB/cache if this eventId was already processed
+
+    // 4) Only handle abandoned checkout events
+    const type = event.type || event.event || event.topic; // adjust after sample payloads
+    if (String(type).toLowerCase().includes("abandoned")) {
+      // Extract what you need — customer, cart, items, amounts, timestamps
+      // Save to DB / enqueue for WhatsApp/SMS/email flows
+      console.log("🛒 Abandoned checkout:", {
+        eventId,
+        type,
+        email: event?.customer?.email,
+        phone: event?.customer?.phone,
+        total: event?.cart?.total || event?.amount,
+        items: event?.cart?.items?.length,
+      });
+    } else {
+      console.log("Received non-abandoned event:", type);
+    }
+
+    // 5) Acknowledge quickly
+    return res.status(200).send("ok");
+  } catch (err) {
+    console.error("Webhook error:", err);
+    return res.status(500).send("server error");
   }
 });
 

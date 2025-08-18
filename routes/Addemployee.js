@@ -1,5 +1,5 @@
 const express = require('express');
-const router = express.Router();
+const router = express.Router(); 
 const Employee = require('../models/Employee');
 
 router.get("/api/employees", async (req, res) => {
@@ -10,7 +10,7 @@ router.get("/api/employees", async (req, res) => {
       if (!employee) {
         return res.status(404).json({ message: "Employee not found" });
       }
-      const { async, agentNumber, callerId, target, hasTeam } = employee;
+      const { async, agentNumber, callerId, target, hasTeam } = employee; 
       return res.status(200).json([{ async, agentNumber, callerId, target, hasTeam }]);
     }
 

@@ -188,14 +188,15 @@ router.delete("/duplicate-number", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
+ 
 // DELETE row-wise: Delete a single record by its type and _id
 router.delete("/:type/:id", async (req, res) => {
   const { type, id } = req.params;
   try {
     if (type === "lead") {
       await Lead.findByIdAndDelete(id); 
-      return res.json({ message: "Lead deleted" });
+      return res.json({ message: "Lead deleted" }); 
+      
     } else if (type === "customer") {
       await Customer.findByIdAndDelete(id);
       return res.json({ message: "Customer deleted" });
