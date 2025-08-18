@@ -66,7 +66,9 @@ const Delhivery = require("./PaymentGateway/delhivery");
 const DTDC = require("./PaymentGateway/DTDC");
 const OrderSummeryOperations = require('./operations/OrderSummeryOperations');
 
-const markRTORoute = require("./operations/markRTO"); 
+const markRTORoute = require("./operations/markRTO");
+const AbandonedCheckout = require('./models/AbandonedCheckout');
+const abandonedRouter = require('./routes/abandoned'); 
 
 const app = express();
 const PORT = process.env.PORT || 5001; 
@@ -188,6 +190,8 @@ app.use('/api/operations', OrderSummeryOperations);
 
 app.use(markRTORoute);
 
+app.use("/api/abandoned", abandonedRouter);
+
 mongoose.connect(process.env.MONGO_URI, { 
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -203,86 +207,109 @@ const httpsAgent = new https.Agent({
 
 app.post(
   "/api/webhook",
-  // These middlewares select themselves based on Content-Type:
   bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
   bodyParser.urlencoded({ verify: rawSaver, extended: false, limit: "2mb", type: ["application/x-www-form-urlencoded"] }),
   bodyParser.text({ verify: rawSaver, type: ["text/plain"], limit: "2mb" }),
   async (req, res) => {
     try {
-      // ——— 1) Inspect what actually came in ———
       const ctype = (req.headers["content-type"] || "").split(";")[0];
       const raw = req.rawBody || Buffer.from("");
-      
-      // ——— 2) OPTIONAL: Verify HMAC if/when GoKwik gives you a secret ———
-      const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET; // set later
-      const sig = req.get("X-GK-Signature"); // header name may differ
+
+      // (Optional) HMAC verification when enabled
+      const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET; 
+      const sig = req.get("X-GK-Signature"); // confirm exact header with GoKwik
       if (sharedSecret && sig) {
-        const digest = crypto.createHmac("sha256", sharedSecret).update(raw).digest("hex");
+        const digest = require("crypto").createHmac("sha256", sharedSecret).update(raw).digest("hex");
         const ok = sig.replace(/^sha256=/, "") === digest;
         if (!ok) return res.status(401).send("Invalid signature");
       }
 
-      // ——— 3) Normalize body into an object called `event` ———
+      // Normalize body into `event`
       let event;
-
       if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
-        // bodyParser.json already parsed:
         event = req.body;
       } else if (ctype === "application/x-www-form-urlencoded") {
-        // Could be key/value OR nested JSON under `payload`
-        // Example forms:
-        //   payload={...json...}
-        //   event_type=abandoned_checkout&email=...
-        const params = req.body; // already parsed into an object
+        const params = req.body;
         if (typeof params.payload === "string") {
-          try {
-            event = JSON.parse(params.payload);
-          } catch {
-            // Not JSON? Fall back to the whole params object
-            event = params;
-          }
+          try { event = JSON.parse(params.payload); } catch { event = params; }
         } else {
           event = params;
         }
       } else if (ctype === "text/plain") {
-        // Try to parse as JSON, else keep as string
         const str = typeof req.body === "string" ? req.body : raw.toString("utf8");
         try { event = JSON.parse(str); } catch { event = { text: str }; }
       } else {
-        // Unknown/empty content-type: last attempt as JSON
         try { event = JSON.parse(raw.toString("utf8")); }
         catch {
-          // Final fallback: log and return 400 so you can see headers/body
           console.error("Unsupported Content-Type or non-JSON body:", {
             contentType: ctype,
-            // Log only a preview to avoid leaking PII
             bodyPreview: raw.toString("utf8").slice(0, 500),
           });
           return res.status(400).send("Unsupported body format");
         }
       }
 
-      // ——— 4) Basic shape handling ———
       const type = (event.type || event.event || event.topic || event.event_type || "").toLowerCase();
       const eventId = event.id || event.event_id || event.checkout_id || event.order_id;
 
-      // Example extraction (customize after you see a real payload)
-      const customer = event.customer || event.user || {};
-      const cart = event.cart || event.items || event.line_items || [];
+      const customer = event.customer || event.user || event.billing_address || {};
+      const itemsArray =
+        Array.isArray(event.line_items || event.items)
+          ? (event.line_items || event.items)
+          : (event.cart && Array.isArray(event.cart.items) ? event.cart.items : []);
+
+      const normalized = {
+        eventId,
+        checkoutId: event.checkout_id || event.cart_id || event.checkoutId,
+        orderId: event.order_id || event.orderId,
+        type: type || "abandoned_checkout",
+        customer: {
+          name: customer.name || [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || event.name,
+          email: customer.email || event.email,
+          phone: customer.phone || customer.mobile || event.phone,
+        },
+        items: itemsArray.map((it) => ({
+          sku: it.sku || it.variant_sku || it.id,
+          title: it.title || it.name,
+          quantity: it.quantity || it.qty || 1,
+          price: it.price || it.line_price || it.unit_price,
+        })),
+        itemCount: itemsArray.length,
+        currency: event.currency || (event.cart && event.cart.currency) || "INR",
+        total:
+          typeof event.amount === "number"
+            ? event.amount
+            : (event.cart && event.cart.total) || event.total,
+        eventAt: event.created_at
+          ? new Date(event.created_at)
+          : event.timestamp
+          ? new Date(event.timestamp)
+          : new Date(),
+        receivedAt: new Date(),
+        raw: event,
+      };
 
       console.log("✅ Webhook received:", {
         contentType: ctype,
-        eventId,
-        type,
-        customerEmail: customer.email,
-        customerPhone: customer.phone || customer.mobile,
-        itemCount: Array.isArray(cart) ? cart.length : cart?.items?.length,
+        eventId: normalized.eventId,
+        type: normalized.type,
+        customerEmail: normalized.customer.email,
+        customerPhone: normalized.customer.phone,
+        itemCount: normalized.itemCount,
+        total: normalized.total,
       });
 
-      // Only process abandoned events
-      if (type.includes("abandoned")) {
-        // TODO: idempotency check with eventId in DB/Redis
-        // TODO: save event into DB + trigger WhatsApp/SMS/email flow
+      // Persist only if it's an abandoned event
+      if (String(normalized.type).includes("abandoned")) {
+        const query = normalized.eventId
+          ? { eventId: normalized.eventId }
+          : { checkoutId: normalized.checkoutId, eventAt: { $gte: new Date(new Date(normalized.eventAt).setSeconds(0, 0)) } };
+
+        await AbandonedCheckout.findOneAndUpdate(
+          query,
+          { $setOnInsert: normalized },
+          { upsert: true, new: true }
+        );
       }
 
       return res.status(200).send("ok");
