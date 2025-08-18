@@ -13,6 +13,8 @@ const XLSX = require("xlsx");
 const axios = require('axios');
 const https = require('https');
 const cron = require('node-cron');
+const bodyParser = require('body-parser');
+const crypto = require('crypto');
 const TransferRequest = require('./models/TransferRequests');
 const shopifyProductsRoute = require("./services/shopifyProducts"); 
 const shopifyOrdersRoute = require("./services/shopifyOrders");
@@ -72,6 +74,8 @@ const PORT = process.env.PORT || 5001;
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
 
 dns.setServers(['8.8.8.8', '1.1.1.1']);
+
+const rawSaver = (req, res, buf) => { req.rawBody = buf; };
 
 app.use(cors({
   origin: function (origin, callback) { 
@@ -195,6 +199,99 @@ const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
   secureProtocol: 'TLSv1_2_method'
 });
+
+
+app.post(
+  "/api/webhook",
+  // These middlewares select themselves based on Content-Type:
+  bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
+  bodyParser.urlencoded({ verify: rawSaver, extended: false, limit: "2mb", type: ["application/x-www-form-urlencoded"] }),
+  bodyParser.text({ verify: rawSaver, type: ["text/plain"], limit: "2mb" }),
+  async (req, res) => {
+    try {
+      // ——— 1) Inspect what actually came in ———
+      const ctype = (req.headers["content-type"] || "").split(";")[0];
+      const raw = req.rawBody || Buffer.from("");
+      
+      // ——— 2) OPTIONAL: Verify HMAC if/when GoKwik gives you a secret ———
+      const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET; // set later
+      const sig = req.get("X-GK-Signature"); // header name may differ
+      if (sharedSecret && sig) {
+        const digest = crypto.createHmac("sha256", sharedSecret).update(raw).digest("hex");
+        const ok = sig.replace(/^sha256=/, "") === digest;
+        if (!ok) return res.status(401).send("Invalid signature");
+      }
+
+      // ——— 3) Normalize body into an object called `event` ———
+      let event;
+
+      if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
+        // bodyParser.json already parsed:
+        event = req.body;
+      } else if (ctype === "application/x-www-form-urlencoded") {
+        // Could be key/value OR nested JSON under `payload`
+        // Example forms:
+        //   payload={...json...}
+        //   event_type=abandoned_checkout&email=...
+        const params = req.body; // already parsed into an object
+        if (typeof params.payload === "string") {
+          try {
+            event = JSON.parse(params.payload);
+          } catch {
+            // Not JSON? Fall back to the whole params object
+            event = params;
+          }
+        } else {
+          event = params;
+        }
+      } else if (ctype === "text/plain") {
+        // Try to parse as JSON, else keep as string
+        const str = typeof req.body === "string" ? req.body : raw.toString("utf8");
+        try { event = JSON.parse(str); } catch { event = { text: str }; }
+      } else {
+        // Unknown/empty content-type: last attempt as JSON
+        try { event = JSON.parse(raw.toString("utf8")); }
+        catch {
+          // Final fallback: log and return 400 so you can see headers/body
+          console.error("Unsupported Content-Type or non-JSON body:", {
+            contentType: ctype,
+            // Log only a preview to avoid leaking PII
+            bodyPreview: raw.toString("utf8").slice(0, 500),
+          });
+          return res.status(400).send("Unsupported body format");
+        }
+      }
+
+      // ——— 4) Basic shape handling ———
+      const type = (event.type || event.event || event.topic || event.event_type || "").toLowerCase();
+      const eventId = event.id || event.event_id || event.checkout_id || event.order_id;
+
+      // Example extraction (customize after you see a real payload)
+      const customer = event.customer || event.user || {};
+      const cart = event.cart || event.items || event.line_items || [];
+
+      console.log("✅ Webhook received:", {
+        contentType: ctype,
+        eventId,
+        type,
+        customerEmail: customer.email,
+        customerPhone: customer.phone || customer.mobile,
+        itemCount: Array.isArray(cart) ? cart.length : cart?.items?.length,
+      });
+
+      // Only process abandoned events
+      if (type.includes("abandoned")) {
+        // TODO: idempotency check with eventId in DB/Redis
+        // TODO: save event into DB + trigger WhatsApp/SMS/email flow
+      }
+
+      return res.status(200).send("ok");
+    } catch (err) {
+      console.error("Webhook error:", err);
+      return res.status(500).send("server error");
+    }
+  }
+);
 
 async function fetchAllOrders(url, accessToken, allOrders = []) {
   try {
@@ -1425,62 +1522,6 @@ app.get('/api/consultation-history', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   } 
-});
-
-app.post("/api/webhook", async (req, res) => {
-  try {
-    // 1) Verify (optional now, recommended later – see section 4)
-    const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET; // set this when GoKwik shares it
-    const signatureHeader = req.get("X-GK-Signature"); // header name TBD by GoKwik; confirm with POC
-
-    if (sharedSecret && signatureHeader) {
-      const digest = crypto
-        .createHmac("sha256", sharedSecret)
-        .update(req.body) // raw buffer
-        .digest("hex");
-      const safe = signatureHeader.replace(/^sha256=/, "") === digest;
-      if (!safe) {
-        console.warn("⚠️ Invalid signature");
-        return res.status(401).send("Invalid signature");
-      }
-    }
-
-    // 2) Parse JSON safely after verification
-    let event = {};
-    try {
-      event = JSON.parse(req.body.toString("utf8"));
-    } catch (e) {
-      console.error("JSON parse error", e);
-      return res.status(400).send("Bad JSON");
-    }
-
-    // 3) Idempotency (avoid duplicates if GoKwik retries)
-    const eventId = event.id || event.event_id || event.checkout_id; // adapt once you see payload
-    // TODO: check your DB/cache if this eventId was already processed
-
-    // 4) Only handle abandoned checkout events
-    const type = event.type || event.event || event.topic; // adjust after sample payloads
-    if (String(type).toLowerCase().includes("abandoned")) {
-      // Extract what you need — customer, cart, items, amounts, timestamps
-      // Save to DB / enqueue for WhatsApp/SMS/email flows
-      console.log("🛒 Abandoned checkout:", {
-        eventId,
-        type,
-        email: event?.customer?.email,
-        phone: event?.customer?.phone,
-        total: event?.cart?.total || event?.amount,
-        items: event?.cart?.items?.length,
-      });
-    } else {
-      console.log("Received non-abandoned event:", type);
-    }
-
-    // 5) Acknowledge quickly
-    return res.status(200).send("ok");
-  } catch (err) {
-    console.error("Webhook error:", err);
-    return res.status(500).send("server error");
-  }
 });
 
 // Start Server
