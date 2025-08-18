@@ -8,7 +8,6 @@ const router = express.Router();
 router.get("/", async (req, res) => {
   try {
     const { query = "", start = "", end = "", page = 1, limit = 50 } = req.query;
-
     const q = {};
 
     if (query) {
@@ -21,7 +20,8 @@ router.get("/", async (req, res) => {
         { checkoutId: rx },
         { orderId: rx },
         { type: rx },
-        { "items.title": rx },
+        { "items.title": rx },       // allow product name search
+        { "items.variantTitle": rx } // allow variant search
       ];
     }
 
@@ -54,7 +54,7 @@ router.post("/:id/notify", async (req, res) => {
     const doc = await AbandonedCheckout.findById(id);
     if (!doc) return res.status(404).json({ error: "not_found" });
 
-    // TODO: call WhatsApp/SMS/Email service here
+    // TODO: integrate WhatsApp/SMS/Email
     await AbandonedCheckout.findByIdAndUpdate(id, {
       $set: { notified: true, notifiedAt: new Date(), notifyChannel: "manual" },
     });

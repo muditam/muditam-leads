@@ -205,6 +205,50 @@ const httpsAgent = new https.Agent({
 });
 
 
+function toNumberLoose(v) {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "number" && !Number.isNaN(v)) return v;
+  if (typeof v === "string") {
+    const cleaned = v.replace(/[^\d.\-]/g, ""); // remove ₹, commas, spaces
+    if (!cleaned) return undefined;
+    const n = Number(cleaned);
+    return Number.isNaN(n) ? undefined : n;
+  }
+  if (typeof v === "object") {
+    // common shapes: { amount: "1299.00" }, { value: 1299 }, { price: "₹1,299" }
+    return toNumberLoose(v.amount ?? v.value ?? v.price ?? v.total ?? v.gross ?? v.net);
+  }
+  return undefined;
+}
+
+function pickFirst(...vals) {
+  for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
+  return undefined;
+}
+
+function looksAbandoned({ headers, event, root, typeText }) {
+  const h = (k) => headers[k] || headers[k?.toLowerCase()] || headers[k?.toUpperCase()];
+  const ceType = h("ce-type");
+  const fields = [
+    event?.type, event?.event, event?.topic, event?.event_type,
+    event?.name, event?.eventName, event?.event_name,
+    root?.event, root?.event_type, root?.event_name, root?.name,
+    ceType, typeText
+  ]
+  .filter(Boolean)
+  .map(String)
+  .join(" ")
+  .toLowerCase();
+
+  return (
+    /abandon/.test(fields) ||               // any "abandon" substring
+    root?.status === "abandoned" ||
+    root?.checkout_status === "abandoned" ||
+    root?.cart_status === "abandoned" ||
+    (root?.reason && /abandon/.test(String(root.reason).toLowerCase()))
+  );
+}
+
 app.post(
   "/api/webhook",
   bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
@@ -215,7 +259,7 @@ app.post(
       const ctype = (req.headers["content-type"] || "").split(";")[0];
       const raw = req.rawBody || Buffer.from("");
 
-      // ---- Optional HMAC verification ----
+      // Optional HMAC
       const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET;
       const sig = req.get("X-GK-Signature") || req.get("x-gk-signature");
       if (sharedSecret && sig) {
@@ -224,7 +268,7 @@ app.post(
         if (!ok) return res.status(401).send("Invalid signature");
       }
 
-      // ---- Parse body into `event` ----
+      // Parse body
       let event;
       if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
         event = req.body;
@@ -232,132 +276,105 @@ app.post(
         const params = req.body;
         if (typeof params.payload === "string") {
           try { event = JSON.parse(params.payload); } catch { event = params; }
-        } else {
-          event = params;
-        }
+        } else event = params;
       } else if (ctype === "text/plain") {
         const str = typeof req.body === "string" ? req.body : raw.toString("utf8");
         try { event = JSON.parse(str); } catch { event = { text: str }; }
       } else {
         try { event = JSON.parse(raw.toString("utf8")); }
         catch {
-          console.error("Unsupported Content-Type or non-JSON body:", {
-            contentType: ctype,
-            bodyPreview: raw.toString("utf8").slice(0, 500),
-          });
+          console.error("Unsupported Content-Type or non-JSON body:", { contentType: ctype, bodyPreview: raw.toString("utf8").slice(0, 500) });
           return res.status(400).send("Unsupported body format");
         }
       }
 
-      // Some providers wrap actual data under .data or .payload
+      // Unwrap common containers
       const root = event?.data || event?.payload || event;
 
-      // CloudEvents fallbacks for ID/type/time
-      const ceType = req.get("ce-type") || req.get("Ce-Type");
-      const ceId = req.get("ce-id") || req.get("Ce-Id");
-      const ceTime = req.get("ce-time") || req.get("Ce-Time");
+      // Identify type text for logging/detection
+      const typeText = [
+        event?.type, event?.event, event?.topic, event?.event_type,
+        root?.event, root?.event_type, root?.event_name, root?.name
+      ].filter(Boolean).join("|");
 
-      const typeRaw =
-        (event.type || event.event || event.topic || event.event_type || ceType || "").toString().toLowerCase();
+      const abandoned = looksAbandoned({ headers: req.headers, event, root, typeText });
 
-      // broader detection of "abandoned" events
-      const maybeAbandoned =
-        /abandon/.test(typeRaw) ||
-        /abandon/.test(String(event.name || event.event_name || "")) ||
-        root?.status === "abandoned" ||
-        root?.abandoned === true;
-
-      // Build a robust eventId/checkoutId/orderId set
-      const eventId =
-        event.id || event.event_id || root?.event_id || root?.id || ceId || root?.checkout_id || root?.order_id;
-
-      const checkoutId = root?.checkout_id || root?.cart_id || root?.checkoutId || root?.checkout_token;
-      const orderId = root?.order_id || root?.orderId;
+      // IDs
+      const eventId   = pickFirst(event?.id, event?.event_id, root?.event_id, root?.id, root?.checkout_id, root?.order_id, req.get("ce-id"));
+      const checkoutId= pickFirst(root?.checkout_id, root?.checkoutId, root?.cart_id, root?.checkout_token);
+      const orderId   = pickFirst(root?.order_id, root?.orderId);
 
       // Customer
       const cust = root.customer || root.user || root.billing_address || root.contact || {};
       const customer = {
-        name:
-          cust.name ||
+        name: (cust.name ||
           [cust.first_name, cust.last_name].filter(Boolean).join(" ").trim() ||
-          root.name ||
-          "",
-        email: cust.email || root.email || "",
-        phone: cust.phone || cust.mobile || root.phone || "",
+          root.name || ""),
+        email: pickFirst(cust.email, root.email),
+        phone: pickFirst(cust.phone, cust.mobile, root.phone),
       };
 
-      // Items array from various shapes
+      // Try many item shapes
       const itemsSrc =
         (Array.isArray(root.line_items) && root.line_items) ||
         (Array.isArray(root.items) && root.items) ||
         (root.cart && Array.isArray(root.cart.items) && root.cart.items) ||
+        (Array.isArray(root.products) && root.products) ||
         (root.order && Array.isArray(root.order.line_items) && root.order.line_items) ||
         [];
 
-      const safeNum = (v) => (v === undefined || v === null || v === "" ? undefined : Number(v));
-
       const items = itemsSrc.map((it) => {
-        const qty = safeNum(it.quantity ?? it.qty ?? it.count) ?? 1;
+        const qty = pickFirst(it.quantity, it.qty, it.count, 1);
 
-        // best guess for unit & final line price across platforms
-        const unitPrice =
-          safeNum(it.final_price_per_unit) ??
-          safeNum(it.discounted_price_per_unit) ??
-          safeNum(it.unit_price) ??
-          safeNum(it.price) ??
-          safeNum(it.original_price) ??
-          0;
+        // Unit price candidates
+        const unitPrice = toNumberLoose(
+          pickFirst(
+            it.final_price_per_unit, it.discounted_price_per_unit,
+            it.unit_price, it.price, it.original_price,
+            it.amount_per_unit, it.base_price, it.net_price
+          )
+        ) ?? 0;
 
-        const providedLine =
-          safeNum(it.final_line_price) ??
-          safeNum(it.line_price_final) ??
-          safeNum(it.discounted_total_price) ??
-          safeNum(it.price_total) ??
-          safeNum(it.line_price) ??
-          safeNum(it.total);
-
-        const finalLinePrice = providedLine ?? unitPrice * qty;
+        // Final line price candidates
+        const finalLinePrice = toNumberLoose(
+          pickFirst(
+            it.final_line_price, it.line_price_final, it.discounted_total_price,
+            it.total, it.price_total, it.line_price, it.line_total
+          )
+        ) ?? (Number(qty || 1) * unitPrice);
 
         const variantTitle =
-          it.variant_title ||
-          it.variant ||
-          [it.option1, it.option2, it.option3].filter(Boolean).join(" / ") ||
-          "";
+          it.variant_title || it.variant ||
+          [it.option1, it.option2, it.option3].filter(Boolean).join(" / ") || "";
 
         return {
-          sku: it.sku || it.variant_sku || it.id || "",
+          sku: it.sku || it.variant_sku || it.id || it.variantId || "",
           title: it.title || it.name || it.product_name || "",
           variantTitle,
-          quantity: qty,
+          quantity: Number(qty || 1),
           unitPrice,
-          finalLinePrice,
+          finalLinePrice
         };
       });
 
-      // Currency + total (fallback to sum of line totals if missing)
-      const currency = root.currency || root.cart?.currency || root.currency_code || "INR";
+      const currency = pickFirst(root.currency, root.cart?.currency, root.currency_code, "INR");
 
-      const totalProvided =
-        safeNum(root.total) ??
-        safeNum(root.total_price) ??
-        safeNum(root.amount) ??
-        safeNum(root.grand_total) ??
-        safeNum(event.amount);
+      // Total: prefer explicit, else sum of lines
+      const total =
+        toNumberLoose(pickFirst(root.total, root.total_price, root.amount, root.grand_total, event.amount)) ??
+        items.reduce((s, it) => s + (it.finalLinePrice || 0), 0);
 
-      const total = totalProvided ?? items.reduce((s, it) => s + (it.finalLinePrice || 0), 0);
-
-      // Event time
       const eventAt =
         (root.created_at && new Date(root.created_at)) ||
         (event.timestamp && new Date(event.timestamp)) ||
-        (ceTime && new Date(ceTime)) ||
+        (req.get("ce-time") && new Date(req.get("ce-time"))) ||
         new Date();
 
       const normalized = {
         eventId,
         checkoutId,
         orderId,
-        type: typeRaw || "abandoned_checkout",
+        type: (typeText || "abandoned_checkout").toLowerCase(),
         customer,
         items,
         itemCount: items.length,
@@ -368,23 +385,25 @@ app.post(
         raw: event,
       };
 
-      console.log("✅ Webhook received:", {
+      console.log("✅ Webhook:", {
         eventId: normalized.eventId,
         type: normalized.type,
-        itemCount: normalized.itemCount,
+        abandonedDetected: abandoned,
+        items: normalized.itemCount,
         total: normalized.total,
-        customerEmail: normalized.customer.email,
-        customerPhone: normalized.customer.phone,
+        phone: normalized.customer.phone,
       });
 
-      // Persist if abandoned or looks like it
-      if (maybeAbandoned) {
-        const query = normalized.eventId
-          ? { eventId: normalized.eventId }
-          : (normalized.checkoutId
-              ? { checkoutId: normalized.checkoutId, eventAt: { $gte: new Date(normalized.eventAt.getTime() - 5 * 60 * 1000) } } // 5-min window
-              : { type: normalized.type, "customer.phone": normalized.customer.phone, eventAt: { $gte: new Date(normalized.eventAt.getTime() - 5 * 60 * 1000) } }
-            );
+      // Save only if abandoned (robust) OR if you want to store all "cart/checkout" events set env GOKWIK_STORE_ALL=1
+      if (abandoned || process.env.GOKWIK_STORE_ALL === "1") {
+        const fiveMinBefore = new Date(normalized.eventAt.getTime() - 5 * 60 * 1000);
+
+        const query =
+          normalized.eventId
+            ? { eventId: normalized.eventId }
+            : (normalized.checkoutId
+                ? { checkoutId: normalized.checkoutId, eventAt: { $gte: fiveMinBefore } }
+                : { "customer.phone": normalized.customer.phone, eventAt: { $gte: fiveMinBefore } });
 
         await AbandonedCheckout.findOneAndUpdate(
           query,
