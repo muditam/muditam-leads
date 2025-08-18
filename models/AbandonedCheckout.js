@@ -4,9 +4,11 @@ const mongoose = require("mongoose");
 const ItemSchema = new mongoose.Schema(
   {
     sku: String,
-    title: String,
+    title: String,          // product title/name
+    variantTitle: String,   // e.g., "Large / Red"
     quantity: Number,
-    price: Number, // minor units if available
+    unitPrice: Number,      // per-unit (minor units if provider uses paise/cents)
+    finalLinePrice: Number, // total for the line after discounts (prefer provider's field; else qty*unitPrice)
   },
   { _id: false }
 );
@@ -30,20 +32,21 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
     itemCount: Number,
 
     currency: { type: String, default: "INR" },
-    total: Number, // store in paise if integer minor units; else raw number
+    total: Number, // store in minor units if that’s how provider sends
 
-    eventAt: { type: Date, default: Date.now }, // when it happened (provider time)
-    receivedAt: { type: Date, default: Date.now }, // when we received
+    eventAt: { type: Date, default: Date.now },
+    receivedAt: { type: Date, default: Date.now },
 
-    // Notification state
     notified: { type: Boolean, default: false },
     notifiedAt: Date,
-    notifyChannel: String, // "whatsapp" | "sms" | "email" | "manual"
+    notifyChannel: String,
 
-    // Keep the raw for auditing / schema evolution
     raw: mongoose.Schema.Types.Mixed,
   },
   { timestamps: true }
 );
+
+// Helpful for range queries
+AbandonedCheckoutSchema.index({ eventAt: -1, _id: -1 });
 
 module.exports = mongoose.model("AbandonedCheckout", AbandonedCheckoutSchema);

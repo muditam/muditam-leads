@@ -20,6 +20,8 @@ router.get("/", async (req, res) => {
         { eventId: rx },
         { checkoutId: rx },
         { orderId: rx },
+        { type: rx },
+        { "items.title": rx },
       ];
     }
 
@@ -52,8 +54,7 @@ router.post("/:id/notify", async (req, res) => {
     const doc = await AbandonedCheckout.findById(id);
     if (!doc) return res.status(404).json({ error: "not_found" });
 
-    // TODO: invoke your WhatsApp/SMS/Email service here
-
+    // TODO: call WhatsApp/SMS/Email service here
     await AbandonedCheckout.findByIdAndUpdate(id, {
       $set: { notified: true, notifiedAt: new Date(), notifyChannel: "manual" },
     });

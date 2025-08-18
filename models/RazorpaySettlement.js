@@ -28,7 +28,7 @@ const RazorpaySettlementSchema = new mongoose.Schema({
   dispute_reason: String,
   settlement_id: String,
   settled_at: String,
-  settlement_utr: String,
+  settlement_utr: String, 
   settled_by: String,
   additional_utr: String,
 });

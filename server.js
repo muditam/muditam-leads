@@ -215,16 +215,16 @@ app.post(
       const ctype = (req.headers["content-type"] || "").split(";")[0];
       const raw = req.rawBody || Buffer.from("");
 
-      // (Optional) HMAC verification when enabled
-      const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET; 
-      const sig = req.get("X-GK-Signature"); // confirm exact header with GoKwik
+      // ---- Optional HMAC verification ----
+      const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET;
+      const sig = req.get("X-GK-Signature") || req.get("x-gk-signature");
       if (sharedSecret && sig) {
         const digest = require("crypto").createHmac("sha256", sharedSecret).update(raw).digest("hex");
         const ok = sig.replace(/^sha256=/, "") === digest;
         if (!ok) return res.status(401).send("Invalid signature");
       }
 
-      // Normalize body into `event`
+      // ---- Parse body into `event` ----
       let event;
       if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
         event = req.body;
@@ -249,61 +249,142 @@ app.post(
         }
       }
 
-      const type = (event.type || event.event || event.topic || event.event_type || "").toLowerCase();
-      const eventId = event.id || event.event_id || event.checkout_id || event.order_id;
+      // Some providers wrap actual data under .data or .payload
+      const root = event?.data || event?.payload || event;
 
-      const customer = event.customer || event.user || event.billing_address || {};
-      const itemsArray =
-        Array.isArray(event.line_items || event.items)
-          ? (event.line_items || event.items)
-          : (event.cart && Array.isArray(event.cart.items) ? event.cart.items : []);
+      // CloudEvents fallbacks for ID/type/time
+      const ceType = req.get("ce-type") || req.get("Ce-Type");
+      const ceId = req.get("ce-id") || req.get("Ce-Id");
+      const ceTime = req.get("ce-time") || req.get("Ce-Time");
+
+      const typeRaw =
+        (event.type || event.event || event.topic || event.event_type || ceType || "").toString().toLowerCase();
+
+      // broader detection of "abandoned" events
+      const maybeAbandoned =
+        /abandon/.test(typeRaw) ||
+        /abandon/.test(String(event.name || event.event_name || "")) ||
+        root?.status === "abandoned" ||
+        root?.abandoned === true;
+
+      // Build a robust eventId/checkoutId/orderId set
+      const eventId =
+        event.id || event.event_id || root?.event_id || root?.id || ceId || root?.checkout_id || root?.order_id;
+
+      const checkoutId = root?.checkout_id || root?.cart_id || root?.checkoutId || root?.checkout_token;
+      const orderId = root?.order_id || root?.orderId;
+
+      // Customer
+      const cust = root.customer || root.user || root.billing_address || root.contact || {};
+      const customer = {
+        name:
+          cust.name ||
+          [cust.first_name, cust.last_name].filter(Boolean).join(" ").trim() ||
+          root.name ||
+          "",
+        email: cust.email || root.email || "",
+        phone: cust.phone || cust.mobile || root.phone || "",
+      };
+
+      // Items array from various shapes
+      const itemsSrc =
+        (Array.isArray(root.line_items) && root.line_items) ||
+        (Array.isArray(root.items) && root.items) ||
+        (root.cart && Array.isArray(root.cart.items) && root.cart.items) ||
+        (root.order && Array.isArray(root.order.line_items) && root.order.line_items) ||
+        [];
+
+      const safeNum = (v) => (v === undefined || v === null || v === "" ? undefined : Number(v));
+
+      const items = itemsSrc.map((it) => {
+        const qty = safeNum(it.quantity ?? it.qty ?? it.count) ?? 1;
+
+        // best guess for unit & final line price across platforms
+        const unitPrice =
+          safeNum(it.final_price_per_unit) ??
+          safeNum(it.discounted_price_per_unit) ??
+          safeNum(it.unit_price) ??
+          safeNum(it.price) ??
+          safeNum(it.original_price) ??
+          0;
+
+        const providedLine =
+          safeNum(it.final_line_price) ??
+          safeNum(it.line_price_final) ??
+          safeNum(it.discounted_total_price) ??
+          safeNum(it.price_total) ??
+          safeNum(it.line_price) ??
+          safeNum(it.total);
+
+        const finalLinePrice = providedLine ?? unitPrice * qty;
+
+        const variantTitle =
+          it.variant_title ||
+          it.variant ||
+          [it.option1, it.option2, it.option3].filter(Boolean).join(" / ") ||
+          "";
+
+        return {
+          sku: it.sku || it.variant_sku || it.id || "",
+          title: it.title || it.name || it.product_name || "",
+          variantTitle,
+          quantity: qty,
+          unitPrice,
+          finalLinePrice,
+        };
+      });
+
+      // Currency + total (fallback to sum of line totals if missing)
+      const currency = root.currency || root.cart?.currency || root.currency_code || "INR";
+
+      const totalProvided =
+        safeNum(root.total) ??
+        safeNum(root.total_price) ??
+        safeNum(root.amount) ??
+        safeNum(root.grand_total) ??
+        safeNum(event.amount);
+
+      const total = totalProvided ?? items.reduce((s, it) => s + (it.finalLinePrice || 0), 0);
+
+      // Event time
+      const eventAt =
+        (root.created_at && new Date(root.created_at)) ||
+        (event.timestamp && new Date(event.timestamp)) ||
+        (ceTime && new Date(ceTime)) ||
+        new Date();
 
       const normalized = {
         eventId,
-        checkoutId: event.checkout_id || event.cart_id || event.checkoutId,
-        orderId: event.order_id || event.orderId,
-        type: type || "abandoned_checkout",
-        customer: {
-          name: customer.name || [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || event.name,
-          email: customer.email || event.email,
-          phone: customer.phone || customer.mobile || event.phone,
-        },
-        items: itemsArray.map((it) => ({
-          sku: it.sku || it.variant_sku || it.id,
-          title: it.title || it.name,
-          quantity: it.quantity || it.qty || 1,
-          price: it.price || it.line_price || it.unit_price,
-        })),
-        itemCount: itemsArray.length,
-        currency: event.currency || (event.cart && event.cart.currency) || "INR",
-        total:
-          typeof event.amount === "number"
-            ? event.amount
-            : (event.cart && event.cart.total) || event.total,
-        eventAt: event.created_at
-          ? new Date(event.created_at)
-          : event.timestamp
-          ? new Date(event.timestamp)
-          : new Date(),
+        checkoutId,
+        orderId,
+        type: typeRaw || "abandoned_checkout",
+        customer,
+        items,
+        itemCount: items.length,
+        currency,
+        total,
+        eventAt,
         receivedAt: new Date(),
         raw: event,
       };
 
       console.log("✅ Webhook received:", {
-        contentType: ctype,
         eventId: normalized.eventId,
         type: normalized.type,
-        customerEmail: normalized.customer.email,
-        customerPhone: normalized.customer.phone,
         itemCount: normalized.itemCount,
         total: normalized.total,
+        customerEmail: normalized.customer.email,
+        customerPhone: normalized.customer.phone,
       });
 
-      // Persist only if it's an abandoned event
-      if (String(normalized.type).includes("abandoned")) {
+      // Persist if abandoned or looks like it
+      if (maybeAbandoned) {
         const query = normalized.eventId
           ? { eventId: normalized.eventId }
-          : { checkoutId: normalized.checkoutId, eventAt: { $gte: new Date(new Date(normalized.eventAt).setSeconds(0, 0)) } };
+          : (normalized.checkoutId
+              ? { checkoutId: normalized.checkoutId, eventAt: { $gte: new Date(normalized.eventAt.getTime() - 5 * 60 * 1000) } } // 5-min window
+              : { type: normalized.type, "customer.phone": normalized.customer.phone, eventAt: { $gte: new Date(normalized.eventAt.getTime() - 5 * 60 * 1000) } }
+            );
 
         await AbandonedCheckout.findOneAndUpdate(
           query,
