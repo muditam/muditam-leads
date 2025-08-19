@@ -101,7 +101,6 @@ function mapShopifyToSnapshot(o) {
     totalPrice: parseFloat(o?.total_price || 0),
     lmsNote,
     shopifyId: o?.id,
-    // we do not persist archived/cancelled; we filter those at refresh stage
   };
 }
 
@@ -110,11 +109,11 @@ function normalizeOrderNameToId(orderName) {
   return (orderName || "").toString().replace(/^#/, "").trim();
 }
 
-// for robust matching against settlements where IDs may be saved as strings or numbers
+// Build robust match sets (raw "#1234", clean "1234", numeric 1234)
 function buildMatchSets(orderNames) {
-  const raw = new Set();       // e.g. "#1234"
-  const clean = new Set();     // e.g. "1234"
-  const numeric = new Set();   // e.g. 1234 (Number)
+  const raw = new Set();
+  const clean = new Set();
+  const numeric = new Set();
 
   for (const on of orderNames) {
     const rawKey = (on || "").toString().trim();
@@ -123,20 +122,12 @@ function buildMatchSets(orderNames) {
     if (rawKey) raw.add(rawKey);
     if (cleanKey) clean.add(cleanKey);
 
-    // if clean is an integer, add numeric form too
     const n = Number(cleanKey);
     if (!Number.isNaN(n) && Number.isFinite(n) && String(n) === cleanKey) {
-      numeric.add(n); // add number type to handle numeric-stored fields
+      numeric.add(n);
     }
   }
-
   return { raw: [...raw], clean: [...clean], numeric: [...numeric] };
-}
-
-function nonEmpty(val) {
-  if (val === null || val === undefined) return false;
-  if (typeof val === "string") return val.trim().length > 0;
-  return true;
 }
 
 /* -------------------- Routes -------------------- */
@@ -160,8 +151,8 @@ router.post("/refresh-shopify", async (req, res) => {
     // filter out voided / archived / cancelled
     const filtered = shopifyOrders.filter((o) => {
       const isVoided = (o?.financial_status || "").toLowerCase() === "voided";
-      const isArchived = !!o?.archived;            // boolean
-      const isCancelled = !!o?.cancelled_at;       // date string if cancelled
+      const isArchived = !!o?.archived;
+      const isCancelled = !!o?.cancelled_at;
       return !isVoided && !isArchived && !isCancelled;
     });
 
@@ -211,9 +202,10 @@ router.post("/refresh-shopify", async (req, res) => {
 /**
  * GET /api/finance/orders
  * Read from DB snapshot and enrich with:
- * - Courier Partner, Order Tracking ID from Order (by normalized order_id)
- * - Partial Payment from MyOrder (by both with-# and without-# and numeric)
- * - Settlement UTR from Easebuzz/Dtdc/Delhivery/Bluedart (robust match)
+ * - Courier Partner, Order Tracking ID, Delivered Date (last_updated_at) from Order
+ * - Partial Payment from MyOrder
+ * - Settlement UTR + Total Received from Easebuzz/DTDC/Delhivery/Bluedart (robust match)
+ * - Remaining = Total Received - Partial Payment
  *
  * Also excludes stale "voided" rows if any exist in DB from earlier runs.
  */
@@ -225,7 +217,6 @@ router.get("/orders", async (req, res) => {
 
     const { startDate, endDate } = req.query;
     const findQuery = {
-      // extra guard to exclude any old voided rows (if they exist)
       financialStatus: { $ne: "voided" },
     };
 
@@ -253,32 +244,30 @@ router.get("/orders", async (req, res) => {
 
     // --- Fetch related data in bulk ---
 
-    // 1) Order (tracking + courier) by clean order_id (string only; model stores string per your schema)
+    // 1) Order (tracking + courier + deliveredDate) by clean order_id (string)
     const ordersDocs = await Order.find({ order_id: { $in: cleanKeys } })
-      .select("order_id tracking_number carrier_title")
+      .select("order_id tracking_number carrier_title last_updated_at")
       .lean();
 
-    // 2) MyOrder (partialPayment) by both with-# and without-# (strings).
-    //    If some MyOrder.orderId are numbers, we still cover via a second query with numericKeys.
+    // 2) MyOrder (partialPayment) by raw/clean strings and (if any) numeric
     const myOrdersStrDocs = await MyOrder.find({ orderId: { $in: [...rawKeys, ...cleanKeys] } })
       .select("orderId partialPayment")
       .lean();
 
     let myOrdersNumDocs = [];
     if (numericKeys.length) {
-      // try to match numeric-stored orderId too
       myOrdersNumDocs = await MyOrder.find({ orderId: { $in: numericKeys } })
         .select("orderId partialPayment")
         .lean();
     }
 
-    // 3) Settlement UTRs (query with strings and numbers where applicable)
+    // 3) Settlement UTRs + Amounts
 
-    // Easebuzz: merchantOrderId may be "#1234", "1234" or numeric 1234
+    // Easebuzz: merchantOrderId can be "#1234", "1234", or 1234
     const easebuzzStrDocs = await EasebuzzTransaction.find({
       merchantOrderId: { $in: [...rawKeys, ...cleanKeys] },
     })
-      .select("merchantOrderId settlementUTR")
+      .select("merchantOrderId settlementUTR amount")
       .lean();
 
     let easebuzzNumDocs = [];
@@ -286,15 +275,15 @@ router.get("/orders", async (req, res) => {
       easebuzzNumDocs = await EasebuzzTransaction.find({
         merchantOrderId: { $in: numericKeys },
       })
-        .select("merchantOrderId settlementUTR")
+        .select("merchantOrderId settlementUTR amount")
         .lean();
     }
 
-    // DTDC: customerReferenceNumber === orderName
+    // DTDC: customerReferenceNumber
     const dtdcStrDocs = await DtdcSettlement.find({
       customerReferenceNumber: { $in: [...rawKeys, ...cleanKeys] },
     })
-      .select("customerReferenceNumber utrNumber")
+      .select("customerReferenceNumber utrNumber codAmount")
       .lean();
 
     let dtdcNumDocs = [];
@@ -302,15 +291,15 @@ router.get("/orders", async (req, res) => {
       dtdcNumDocs = await DtdcSettlement.find({
         customerReferenceNumber: { $in: numericKeys },
       })
-        .select("customerReferenceNumber utrNumber")
+        .select("customerReferenceNumber utrNumber codAmount")
         .lean();
     }
 
-    // Delhivery: orderId === orderName
+    // Delhivery: orderId
     const delhiveryStrDocs = await DelhiverySettlement.find({
       orderId: { $in: [...rawKeys, ...cleanKeys] },
     })
-      .select("orderId utrNo")
+      .select("orderId utrNo amount")
       .lean();
 
     let delhiveryNumDocs = [];
@@ -318,15 +307,15 @@ router.get("/orders", async (req, res) => {
       delhiveryNumDocs = await DelhiverySettlement.find({
         orderId: { $in: numericKeys },
       })
-        .select("orderId utrNo")
+        .select("orderId utrNo amount")
         .lean();
     }
 
-    // Bluedart: orderId === orderName
+    // Bluedart: orderId
     const bluedartStrDocs = await BluedartSettlement.find({
       orderId: { $in: [...rawKeys, ...cleanKeys] },
     })
-      .select("orderId utr")
+      .select("orderId utr customerPayAmt")
       .lean();
 
     let bluedartNumDocs = [];
@@ -334,41 +323,49 @@ router.get("/orders", async (req, res) => {
       bluedartNumDocs = await BluedartSettlement.find({
         orderId: { $in: numericKeys },
       })
-        .select("orderId utr")
+        .select("orderId utr customerPayAmt")
         .lean();
     }
 
     // --- Build maps for quick lookups ---
 
-    // Order map (by clean id, string)
+    // Order map (by clean id)
     const mapOrderByCleanId = new Map();
     for (const od of ordersDocs) {
       mapOrderByCleanId.set((od.order_id || "").toString(), od);
     }
 
-    // MyOrder map (index both with and without # to the same doc).
+    // MyOrder map (index raw/clean/numeric)
     const mapMyOrderByAnyId = new Map();
     const indexMyOrder = (mo) => {
       const raw = (mo.orderId ?? "").toString().trim();
       const clean = normalizeOrderNameToId(raw);
-      const numeric = Number.isFinite(Number(raw)) ? Number(raw) : null;
+      const num = Number.isFinite(Number(raw)) ? Number(raw) : null;
 
       if (raw) mapMyOrderByAnyId.set(raw, mo);
       if (clean) mapMyOrderByAnyId.set(clean, mo);
-      if (numeric !== null) mapMyOrderByAnyId.set(numeric, mo);
+      if (num !== null) mapMyOrderByAnyId.set(num, mo);
     };
     [...myOrdersStrDocs, ...myOrdersNumDocs].forEach(indexMyOrder);
 
-    // Settlement UTR map (store by all variants; priority Easebuzz > DTDC > Delhivery > Bluedart)
+    // Settlement UTR (priority) and Amount accumulation
     const mapUtrByKey = new Map();
+    const mapAmountByKey = new Map();
+
+    const addAmount = (key, amt) => {
+      if (key === undefined || key === null) return;
+      const n = Number(amt);
+      if (Number.isNaN(n)) return;
+      mapAmountByKey.set(key, (mapAmountByKey.get(key) || 0) + n);
+    };
 
     const setUtrPriority = (key, utr) => {
       const u = (utr || "").toString().trim();
-      if (!key || !u) return; // only set if non-empty
+      if (!key || !u) return;
       if (!mapUtrByKey.has(key)) mapUtrByKey.set(key, u);
     };
 
-    // Easebuzz (highest priority)
+    // Easebuzz (highest priority) — UTR + amount
     for (const ez of [...easebuzzStrDocs, ...easebuzzNumDocs]) {
       const kRaw = ez.merchantOrderId;
       const sRaw = (kRaw ?? "").toString().trim();
@@ -378,9 +375,13 @@ router.get("/orders", async (req, res) => {
       setUtrPriority(sRaw, ez.settlementUTR);
       setUtrPriority(sClean, ez.settlementUTR);
       if (sNum !== null) setUtrPriority(sNum, ez.settlementUTR);
+
+      addAmount(sRaw, ez.amount);
+      addAmount(sClean, ez.amount);
+      if (sNum !== null) addAmount(sNum, ez.amount);
     }
 
-    // DTDC
+    // DTDC — UTR + codAmount
     for (const d of [...dtdcStrDocs, ...dtdcNumDocs]) {
       const kRaw = d.customerReferenceNumber;
       const sRaw = (kRaw ?? "").toString().trim();
@@ -390,9 +391,13 @@ router.get("/orders", async (req, res) => {
       setUtrPriority(sRaw, d.utrNumber);
       setUtrPriority(sClean, d.utrNumber);
       if (sNum !== null) setUtrPriority(sNum, d.utrNumber);
+
+      addAmount(sRaw, d.codAmount);
+      addAmount(sClean, d.codAmount);
+      if (sNum !== null) addAmount(sNum, d.codAmount);
     }
 
-    // Delhivery
+    // Delhivery — UTR + amount
     for (const dl of [...delhiveryStrDocs, ...delhiveryNumDocs]) {
       const kRaw = dl.orderId;
       const sRaw = (kRaw ?? "").toString().trim();
@@ -402,9 +407,13 @@ router.get("/orders", async (req, res) => {
       setUtrPriority(sRaw, dl.utrNo);
       setUtrPriority(sClean, dl.utrNo);
       if (sNum !== null) setUtrPriority(sNum, dl.utrNo);
+
+      addAmount(sRaw, dl.amount);
+      addAmount(sClean, dl.amount);
+      if (sNum !== null) addAmount(sNum, dl.amount);
     }
 
-    // Bluedart
+    // Bluedart — UTR + customerPayAmt
     for (const bd of [...bluedartStrDocs, ...bluedartNumDocs]) {
       const kRaw = bd.orderId;
       const sRaw = (kRaw ?? "").toString().trim();
@@ -414,6 +423,10 @@ router.get("/orders", async (req, res) => {
       setUtrPriority(sRaw, bd.utr);
       setUtrPriority(sClean, bd.utr);
       if (sNum !== null) setUtrPriority(sNum, bd.utr);
+
+      addAmount(sRaw, bd.customerPayAmt);
+      addAmount(sClean, bd.customerPayAmt);
+      if (sNum !== null) addAmount(sNum, bd.customerPayAmt);
     }
 
     // --- Compose final rows ---
@@ -430,6 +443,10 @@ router.get("/orders", async (req, res) => {
 
       const trackingId = od?.tracking_number || "--";
       const courierPartner = od?.carrier_title || "--";
+
+      // Delivered Date from Order.last_updated_at
+      const deliveredDate = od?.last_updated_at || null;
+
       const partialPayment = typeof mo?.partialPayment === "number" ? mo.partialPayment : 0;
 
       // Settlement UTR (check raw, clean, numeric)
@@ -438,6 +455,15 @@ router.get("/orders", async (req, res) => {
         mapUtrByKey.get(cleanId) ??
         (numericId !== null ? mapUtrByKey.get(numericId) : undefined) ??
         "";
+
+      // Total Received = sum of Easebuzz.amount + DTDC.codAmount + Delhivery.amount + Bluedart.customerPayAmt
+      const totalReceived =
+        (mapAmountByKey.get(r.orderName) ?? 0) +
+        (mapAmountByKey.get(cleanId) ?? 0) +
+        (numericId !== null ? (mapAmountByKey.get(numericId) ?? 0) : 0);
+
+      // Remaining = Total Received - Partial Payment (per your instruction)
+      const remainingAmount = totalReceived - (partialPayment || 0);
 
       return {
         createdAt: r.createdAt,
@@ -456,10 +482,11 @@ router.get("/orders", async (req, res) => {
         partialPayment,
 
         // computed
-        deliveredDate: null, // (wire later)
-        totalReceived: 0,
-        remainingAmount: r.totalPrice - (partialPayment || 0),
- 
+        deliveredDate,
+        totalReceived,
+        remainingAmount,
+
+        // settlement & misc
         refund: "",
         settlementDate: "",
         remark: "",
