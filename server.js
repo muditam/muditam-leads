@@ -209,44 +209,27 @@ function toNumberLoose(v) {
   if (v === null || v === undefined) return undefined;
   if (typeof v === "number" && !Number.isNaN(v)) return v;
   if (typeof v === "string") {
-    const cleaned = v.replace(/[^\d.\-]/g, ""); // remove ₹, commas, spaces
+    const cleaned = v.replace(/[^\d.\-]/g, "");
     if (!cleaned) return undefined;
     const n = Number(cleaned);
     return Number.isNaN(n) ? undefined : n;
   }
   if (typeof v === "object") {
-    // common shapes: { amount: "1299.00" }, { value: 1299 }, { price: "₹1,299" }
     return toNumberLoose(v.amount ?? v.value ?? v.price ?? v.total ?? v.gross ?? v.net);
   }
   return undefined;
 }
 
+function majorStringToMinor(s) {
+  const n = toNumberLoose(s);
+  if (n === undefined) return undefined;
+  // round to paise
+  return Math.round(n * 100);
+}
+
 function pickFirst(...vals) {
   for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
   return undefined;
-}
-
-function looksAbandoned({ headers, event, root, typeText }) {
-  const h = (k) => headers[k] || headers[k?.toLowerCase()] || headers[k?.toUpperCase()];
-  const ceType = h("ce-type");
-  const fields = [
-    event?.type, event?.event, event?.topic, event?.event_type,
-    event?.name, event?.eventName, event?.event_name,
-    root?.event, root?.event_type, root?.event_name, root?.name,
-    ceType, typeText
-  ]
-  .filter(Boolean)
-  .map(String)
-  .join(" ")
-  .toLowerCase();
-
-  return (
-    /abandon/.test(fields) ||               // any "abandon" substring
-    root?.status === "abandoned" ||
-    root?.checkout_status === "abandoned" ||
-    root?.cart_status === "abandoned" ||
-    (root?.reason && /abandon/.test(String(root.reason).toLowerCase()))
-  );
 }
 
 app.post(
@@ -268,146 +251,141 @@ app.post(
         if (!ok) return res.status(401).send("Invalid signature");
       }
 
-      // Parse body
-      let event;
+      // Parse
+      let payload;
       if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
-        event = req.body;
+        payload = req.body;
       } else if (ctype === "application/x-www-form-urlencoded") {
         const params = req.body;
         if (typeof params.payload === "string") {
-          try { event = JSON.parse(params.payload); } catch { event = params; }
-        } else event = params;
+          try { payload = JSON.parse(params.payload); } catch { payload = params; }
+        } else payload = params;
       } else if (ctype === "text/plain") {
         const str = typeof req.body === "string" ? req.body : raw.toString("utf8");
-        try { event = JSON.parse(str); } catch { event = { text: str }; }
+        try { payload = JSON.parse(str); } catch { payload = { text: str }; }
       } else {
-        try { event = JSON.parse(raw.toString("utf8")); }
+        try { payload = JSON.parse(raw.toString("utf8")); }
         catch {
           console.error("Unsupported Content-Type or non-JSON body:", { contentType: ctype, bodyPreview: raw.toString("utf8").slice(0, 500) });
           return res.status(400).send("Unsupported body format");
         }
       }
 
-      // Unwrap common containers
-      const root = event?.data || event?.payload || event;
+      // GoKwik sends the abandoned cart body "flat" (no .data). Use it directly:
+      const root = payload?.data || payload?.payload || payload;
 
-      // Identify type text for logging/detection
-      const typeText = [
-        event?.type, event?.event, event?.topic, event?.event_type,
-        root?.event, root?.event_type, root?.event_name, root?.name
-      ].filter(Boolean).join("|");
+      // === Map identifiers & abandonment ===
+      const requestId = root.request_id || root.requestId;
+      const cId       = root.c_id || root.cId;
+      const token     = root.token;
 
-      const abandoned = looksAbandoned({ headers: req.headers, event, root, typeText });
+      const isAbandoned = !!(root.is_abandoned === true);
 
-      // IDs
-      const eventId   = pickFirst(event?.id, event?.event_id, root?.event_id, root?.id, root?.checkout_id, root?.order_id, req.get("ce-id"));
-      const checkoutId= pickFirst(root?.checkout_id, root?.checkoutId, root?.cart_id, root?.checkout_token);
-      const orderId   = pickFirst(root?.order_id, root?.orderId);
+      // Build strong idempotency key
+      const eventId =
+        requestId ||
+        cId ||
+        token ||
+        req.get("ce-id") ||
+        undefined;
 
       // Customer
-      const cust = root.customer || root.user || root.billing_address || root.contact || {};
+      const addr = root.address || {};
+      const cust = root.customer || {};
       const customer = {
-        name: (cust.name ||
-          [cust.first_name, cust.last_name].filter(Boolean).join(" ").trim() ||
-          root.name || ""),
-        email: pickFirst(cust.email, root.email),
-        phone: pickFirst(cust.phone, cust.mobile, root.phone),
+        name:  [addr.firstname || cust.firstname, addr.lastname || cust.lastname].filter(Boolean).join(" ").trim() || addr.name || "",
+        email: cust.email || addr.email || "",
+        phone: cust.phone || addr.phone || "",
       };
 
-      // Try many item shapes
-      const itemsSrc =
-        (Array.isArray(root.line_items) && root.line_items) ||
-        (Array.isArray(root.items) && root.items) ||
-        (root.cart && Array.isArray(root.cart.items) && root.cart.items) ||
-        (Array.isArray(root.products) && root.products) ||
-        (root.order && Array.isArray(root.order.line_items) && root.order.line_items) ||
-        [];
-
+      // Items (GoKwik sample uses minor units in item.price/final_line_price)
+      const itemsSrc = Array.isArray(root.items) ? root.items : [];
       const items = itemsSrc.map((it) => {
-        const qty = pickFirst(it.quantity, it.qty, it.count, 1);
+        const qty = Number(pickFirst(it.quantity, it.qty, 1)) || 1;
 
-        // Unit price candidates
-        const unitPrice = toNumberLoose(
-          pickFirst(
-            it.final_price_per_unit, it.discounted_price_per_unit,
-            it.unit_price, it.price, it.original_price,
-            it.amount_per_unit, it.base_price, it.net_price
-          )
-        ) ?? 0;
+        // Prefer provided minor-unit fields
+        const unitPriceMinor =
+          toNumberLoose(pickFirst(it.final_price_per_unit, it.discounted_price_per_unit, it.unit_price, it.price, it.original_price)) ?? 0;
 
-        // Final line price candidates
-        const finalLinePrice = toNumberLoose(
-          pickFirst(
-            it.final_line_price, it.line_price_final, it.discounted_total_price,
-            it.total, it.price_total, it.line_price, it.line_total
-          )
-        ) ?? (Number(qty || 1) * unitPrice);
+        const finalLineMinor =
+          toNumberLoose(pickFirst(it.final_line_price, it.line_price_final, it.discounted_total_price, it.total, it.price_total, it.line_price)) ??
+          unitPriceMinor * qty;
 
         const variantTitle =
           it.variant_title || it.variant ||
           [it.option1, it.option2, it.option3].filter(Boolean).join(" / ") || "";
 
         return {
-          sku: it.sku || it.variant_sku || it.id || it.variantId || "",
-          title: it.title || it.name || it.product_name || "",
+          sku: it.sku || it.variant_sku || String(it.variant_id || it.id || ""),
+          title: it.title || it.product_title || it.name || "",
           variantTitle,
-          quantity: Number(qty || 1),
-          unitPrice,
-          finalLinePrice
+          quantity: qty,
+          unitPrice: unitPriceMinor,
+          finalLinePrice: finalLineMinor,
         };
       });
 
-      const currency = pickFirst(root.currency, root.cart?.currency, root.currency_code, "INR");
+      // Currency + totals: sample has major strings at root, minor ints in items
+      const currency = root.currency || "INR";
 
-      // Total: prefer explicit, else sum of lines
-      const total =
-        toNumberLoose(pickFirst(root.total, root.total_price, root.amount, root.grand_total, event.amount)) ??
+      // Prefer explicit root total (major string), convert to minor; else sum items
+      const totalMinor =
+        majorStringToMinor(pickFirst(root.total_price, root.items_subtotal_price, root.original_total_price)) ??
         items.reduce((s, it) => s + (it.finalLinePrice || 0), 0);
 
-      const eventAt =
-        (root.created_at && new Date(root.created_at)) ||
-        (event.timestamp && new Date(event.timestamp)) ||
-        (req.get("ce-time") && new Date(req.get("ce-time"))) ||
-        new Date();
+      // Timestamps
+      const eventAt = root.created_at ? new Date(root.created_at) : new Date();
 
       const normalized = {
-        eventId,
-        checkoutId,
-        orderId,
-        type: (typeText || "abandoned_checkout").toLowerCase(),
+        requestId,
+        cId,
+        token,
+        eventId,                  // for idempotency
+        checkoutId: token,        // useful alias
+        orderId: undefined,
+        isAbandoned,
+        type: "abandoned_cart",
         customer,
         items,
         itemCount: items.length,
         currency,
-        total,
+        total: totalMinor,
+        abcUrl: root.abc_url || "",
         eventAt,
         receivedAt: new Date(),
-        raw: event,
+        raw: payload,
       };
 
-      console.log("✅ Webhook:", {
-        eventId: normalized.eventId,
-        type: normalized.type,
-        abandonedDetected: abandoned,
+      console.log("✅ GoKwik Abandoned Cart:", {
+        requestId: normalized.requestId,
+        token: normalized.token,
+        isAbandoned: normalized.isAbandoned,
         items: normalized.itemCount,
-        total: normalized.total,
+        totalMinor: normalized.total,
         phone: normalized.customer.phone,
       });
 
-      // Save only if abandoned (robust) OR if you want to store all "cart/checkout" events set env GOKWIK_STORE_ALL=1
-      if (abandoned || process.env.GOKWIK_STORE_ALL === "1") {
-        const fiveMinBefore = new Date(normalized.eventAt.getTime() - 5 * 60 * 1000);
-
-        const query =
-          normalized.eventId
-            ? { eventId: normalized.eventId }
-            : (normalized.checkoutId
-                ? { checkoutId: normalized.checkoutId, eventAt: { $gte: fiveMinBefore } }
-                : { "customer.phone": normalized.customer.phone, eventAt: { $gte: fiveMinBefore } });
+      // Save everything that is marked abandoned (this matches GoKwik dashboard semantics)
+      if (normalized.isAbandoned) {
+        const query = normalized.eventId
+          ? { eventId: normalized.eventId }
+          : (normalized.token ? { checkoutId: normalized.token } : { "customer.phone": normalized.customer.phone, eventAt: { $gte: new Date(eventAt.getTime() - 5 * 60 * 1000) } });
 
         await AbandonedCheckout.findOneAndUpdate(
           query,
-          { $setOnInsert: normalized },
+          {
+            $setOnInsert: normalized,
+            // If the same request_id arrives again with updated totals/items, keep latest important fields
+            $set: {
+              total: normalized.total,
+              items: normalized.items,
+              itemCount: normalized.itemCount,
+              customer: normalized.customer,
+              abcUrl: normalized.abcUrl,
+              currency: normalized.currency,
+              isAbandoned: normalized.isAbandoned,
+            },
+          },
           { upsert: true, new: true }
         );
       }
