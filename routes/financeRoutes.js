@@ -19,14 +19,12 @@ const SHOPIFY_STORE_NAME = process.env.SHOPIFY_STORE_NAME;
 /* -------------------- Helpers -------------------- */
 
 function monthRangeUTC({ year, month }) {
-  // month: 1-12
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)); // last day of month
+  const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
   return { start, end };
 }
 
 function shopifyOrdersBaseUrl({ start, end }) {
-  // include archived + cancelled fields so we can skip them
   let baseUrl =
     `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2023-07/orders.json` +
     `?status=any&limit=250` +
@@ -105,7 +103,6 @@ function mapShopifyToSnapshot(o) {
 }
 
 function normalizeOrderNameToId(orderName) {
-  // "#12345" -> "12345"; also trim spaces
   return (orderName || "").toString().replace(/^#/, "").trim();
 }
 
@@ -130,15 +127,60 @@ function buildMatchSets(orderNames) {
   return { raw: [...raw], clean: [...clean], numeric: [...numeric] };
 }
 
+/** Normalize Date -> "YYYY-MM-DD" */
+function toISODateString(d) {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Parse mixed settlement date formats to "YYYY-MM-DD" */
+function parseSettlementDateString(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  if (!str) return null;
+
+  // Native Date first
+  const d1 = new Date(str);
+  if (!isNaN(d1.getTime())) return toISODateString(d1);
+
+  // DD-MMM-YY
+  let m = str.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/);
+  if (m) {
+    const day = parseInt(m[1], 10);
+    const monStr = m[2].toLowerCase();
+    const yy = parseInt(m[3], 10);
+    const monMap = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+    const month = monMap[monStr];
+    if (month !== undefined) {
+      const year = 2000 + yy;
+      const date = new Date(Date.UTC(year, month, day));
+      return toISODateString(date);
+    }
+  }
+
+  // DD-MM-YYYY
+  m = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (m) {
+    const day = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10) - 1;
+    const year = parseInt(m[3], 10);
+    const date = new Date(Date.UTC(year, month, day));
+    return toISODateString(date);
+  }
+
+  const tryIso = new Date(str.replace(" ", "T"));
+  if (!isNaN(tryIso.getTime())) return toISODateString(tryIso);
+
+  return null;
+}
+
 /* -------------------- Routes -------------------- */
 
-/**
- * POST /api/finance/refresh-shopify
- * Pull July data (default July 2025) and upsert into ShopifyFinanceOrder
- * Optional query: ?year=2025&month=7
- *
- * Excludes: financial_status = "voided", archived = true, cancelled orders.
- */
 router.post("/refresh-shopify", async (req, res) => {
   try {
     const year = parseInt(req.query.year || "2025", 10);
@@ -148,7 +190,6 @@ router.post("/refresh-shopify", async (req, res) => {
 
     const shopifyOrders = await fetchShopifyOrdersMinimal(start, end);
 
-    // filter out voided / archived / cancelled
     const filtered = shopifyOrders.filter((o) => {
       const isVoided = (o?.financial_status || "").toLowerCase() === "voided";
       const isArchived = !!o?.archived;
@@ -199,16 +240,6 @@ router.post("/refresh-shopify", async (req, res) => {
   }
 });
 
-/**
- * GET /api/finance/orders
- * Read from DB snapshot and enrich with:
- * - Courier Partner, Order Tracking ID, Delivered Date (last_updated_at) from Order
- * - Partial Payment from MyOrder
- * - Settlement UTR + Total Received from Easebuzz/DTDC/Delhivery/Bluedart (robust match)
- * - Remaining = Total Received - Partial Payment
- *
- * Also excludes stale "voided" rows if any exist in DB from earlier runs.
- */
 router.get("/orders", async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
@@ -216,9 +247,7 @@ router.get("/orders", async (req, res) => {
     const skip = (page - 1) * limit;
 
     const { startDate, endDate } = req.query;
-    const findQuery = {
-      financialStatus: { $ne: "voided" },
-    };
+    const findQuery = { financialStatus: { $ne: "voided" } };
 
     if (startDate || endDate) {
       findQuery.createdAt = {};
@@ -242,18 +271,15 @@ router.get("/orders", async (req, res) => {
     const orderNames = baseRows.map((r) => r.orderName).filter(Boolean);
     const { raw: rawKeys, clean: cleanKeys, numeric: numericKeys } = buildMatchSets(orderNames);
 
-    // --- Fetch related data in bulk ---
-
-    // 1) Order (tracking + courier + deliveredDate) by clean order_id (string)
+    // 1) Order
     const ordersDocs = await Order.find({ order_id: { $in: cleanKeys } })
       .select("order_id tracking_number carrier_title last_updated_at")
       .lean();
 
-    // 2) MyOrder (partialPayment) by raw/clean strings and (if any) numeric
+    // 2) MyOrder
     const myOrdersStrDocs = await MyOrder.find({ orderId: { $in: [...rawKeys, ...cleanKeys] } })
       .select("orderId partialPayment")
       .lean();
-
     let myOrdersNumDocs = [];
     if (numericKeys.length) {
       myOrdersNumDocs = await MyOrder.find({ orderId: { $in: numericKeys } })
@@ -261,96 +287,82 @@ router.get("/orders", async (req, res) => {
         .lean();
     }
 
-    // 3) Settlement UTRs + Amounts
-
-    // Easebuzz: merchantOrderId can be "#1234", "1234", or 1234
+    // 3) Settlements
     const easebuzzStrDocs = await EasebuzzTransaction.find({
       merchantOrderId: { $in: [...rawKeys, ...cleanKeys] },
     })
-      .select("merchantOrderId settlementUTR amount")
+      .select("merchantOrderId settlementUTR amount settlementDate")
       .lean();
-
     let easebuzzNumDocs = [];
     if (numericKeys.length) {
       easebuzzNumDocs = await EasebuzzTransaction.find({
         merchantOrderId: { $in: numericKeys },
       })
-        .select("merchantOrderId settlementUTR amount")
+        .select("merchantOrderId settlementUTR amount settlementDate")
         .lean();
     }
 
-    // DTDC: customerReferenceNumber
     const dtdcStrDocs = await DtdcSettlement.find({
       customerReferenceNumber: { $in: [...rawKeys, ...cleanKeys] },
     })
-      .select("customerReferenceNumber utrNumber codAmount")
+      .select("customerReferenceNumber utrNumber codAmount remittanceDate")
       .lean();
-
     let dtdcNumDocs = [];
     if (numericKeys.length) {
       dtdcNumDocs = await DtdcSettlement.find({
-        customerReferenceNumber: { $in: numericKeys },
-      })
-        .select("customerReferenceNumber utrNumber codAmount")
+        customerReferenceNumber: { $in: numericKeys } })
+        .select("customerReferenceNumber utrNumber codAmount remittanceDate")
         .lean();
     }
 
-    // Delhivery: orderId
     const delhiveryStrDocs = await DelhiverySettlement.find({
       orderId: { $in: [...rawKeys, ...cleanKeys] },
     })
-      .select("orderId utrNo amount")
+      .select("orderId utrNo amount settledDate")
       .lean();
-
     let delhiveryNumDocs = [];
     if (numericKeys.length) {
       delhiveryNumDocs = await DelhiverySettlement.find({
         orderId: { $in: numericKeys },
       })
-        .select("orderId utrNo amount")
+        .select("orderId utrNo amount settledDate")
         .lean();
     }
 
-    // Bluedart: orderId
     const bluedartStrDocs = await BluedartSettlement.find({
       orderId: { $in: [...rawKeys, ...cleanKeys] },
     })
-      .select("orderId utr customerPayAmt")
+      .select("orderId utr customerPayAmt settledDate")
       .lean();
-
     let bluedartNumDocs = [];
     if (numericKeys.length) {
       bluedartNumDocs = await BluedartSettlement.find({
         orderId: { $in: numericKeys },
       })
-        .select("orderId utr customerPayAmt")
+        .select("orderId utr customerPayAmt settledDate")
         .lean();
     }
 
-    // --- Build maps for quick lookups ---
-
-    // Order map (by clean id)
+    // Maps
     const mapOrderByCleanId = new Map();
     for (const od of ordersDocs) {
       mapOrderByCleanId.set((od.order_id || "").toString(), od);
     }
 
-    // MyOrder map (index raw/clean/numeric)
     const mapMyOrderByAnyId = new Map();
     const indexMyOrder = (mo) => {
       const raw = (mo.orderId ?? "").toString().trim();
       const clean = normalizeOrderNameToId(raw);
       const num = Number.isFinite(Number(raw)) ? Number(raw) : null;
-
       if (raw) mapMyOrderByAnyId.set(raw, mo);
       if (clean) mapMyOrderByAnyId.set(clean, mo);
       if (num !== null) mapMyOrderByAnyId.set(num, mo);
     };
     [...myOrdersStrDocs, ...myOrdersNumDocs].forEach(indexMyOrder);
 
-    // Settlement UTR (priority) and Amount accumulation
     const mapUtrByKey = new Map();
     const mapAmountByKey = new Map();
+    const mapSettleDateByKey = new Map();
 
     const addAmount = (key, amt) => {
       if (key === undefined || key === null) return;
@@ -365,71 +377,83 @@ router.get("/orders", async (req, res) => {
       if (!mapUtrByKey.has(key)) mapUtrByKey.set(key, u);
     };
 
-    // Easebuzz (highest priority) — UTR + amount
+    const setDatePriority = (key, dateStr) => {
+      const iso = parseSettlementDateString(dateStr);
+      if (!key || !iso) return;
+      if (!mapSettleDateByKey.has(key)) mapSettleDateByKey.set(key, iso);
+    };
+
     for (const ez of [...easebuzzStrDocs, ...easebuzzNumDocs]) {
-      const kRaw = ez.merchantOrderId;
-      const sRaw = (kRaw ?? "").toString().trim();
-      const sClean = normalizeOrderNameToId(sRaw);
-      const sNum = Number.isFinite(Number(sRaw)) ? Number(sRaw) : null;
+      const raw = (ez.merchantOrderId ?? "").toString().trim();
+      const clean = normalizeOrderNameToId(raw);
+      const num = Number.isFinite(Number(raw)) ? Number(raw) : null;
 
-      setUtrPriority(sRaw, ez.settlementUTR);
-      setUtrPriority(sClean, ez.settlementUTR);
-      if (sNum !== null) setUtrPriority(sNum, ez.settlementUTR);
+      setUtrPriority(raw, ez.settlementUTR);
+      setUtrPriority(clean, ez.settlementUTR);
+      if (num !== null) setUtrPriority(num, ez.settlementUTR);
 
-      addAmount(sRaw, ez.amount);
-      addAmount(sClean, ez.amount);
-      if (sNum !== null) addAmount(sNum, ez.amount);
+      setDatePriority(raw, ez.settlementDate);
+      setDatePriority(clean, ez.settlementDate);
+      if (num !== null) setDatePriority(num, ez.settlementDate);
+
+      addAmount(raw, ez.amount);
+      addAmount(clean, ez.amount);
+      if (num !== null) addAmount(num, ez.amount);
     }
 
-    // DTDC — UTR + codAmount
     for (const d of [...dtdcStrDocs, ...dtdcNumDocs]) {
-      const kRaw = d.customerReferenceNumber;
-      const sRaw = (kRaw ?? "").toString().trim();
-      const sClean = normalizeOrderNameToId(sRaw);
-      const sNum = Number.isFinite(Number(sRaw)) ? Number(sRaw) : null;
+      const raw = (d.customerReferenceNumber ?? "").toString().trim();
+      const clean = normalizeOrderNameToId(raw);
+      const num = Number.isFinite(Number(raw)) ? Number(raw) : null;
 
-      setUtrPriority(sRaw, d.utrNumber);
-      setUtrPriority(sClean, d.utrNumber);
-      if (sNum !== null) setUtrPriority(sNum, d.utrNumber);
+      setUtrPriority(raw, d.utrNumber);
+      setUtrPriority(clean, d.utrNumber);
+      if (num !== null) setUtrPriority(num, d.utrNumber);
 
-      addAmount(sRaw, d.codAmount);
-      addAmount(sClean, d.codAmount);
-      if (sNum !== null) addAmount(sNum, d.codAmount);
+      setDatePriority(raw, d.remittanceDate);
+      setDatePriority(clean, d.remittanceDate);
+      if (num !== null) setDatePriority(num, d.remittanceDate);
+
+      addAmount(raw, d.codAmount);
+      addAmount(clean, d.codAmount);
+      if (num !== null) addAmount(num, d.codAmount);
     }
 
-    // Delhivery — UTR + amount
     for (const dl of [...delhiveryStrDocs, ...delhiveryNumDocs]) {
-      const kRaw = dl.orderId;
-      const sRaw = (kRaw ?? "").toString().trim();
-      const sClean = normalizeOrderNameToId(sRaw);
-      const sNum = Number.isFinite(Number(sRaw)) ? Number(sRaw) : null;
+      const raw = (dl.orderId ?? "").toString().trim();
+      const clean = normalizeOrderNameToId(raw);
+      const num = Number.isFinite(Number(raw)) ? Number(raw) : null;
 
-      setUtrPriority(sRaw, dl.utrNo);
-      setUtrPriority(sClean, dl.utrNo);
-      if (sNum !== null) setUtrPriority(sNum, dl.utrNo);
+      setUtrPriority(raw, dl.utrNo);
+      setUtrPriority(clean, dl.utrNo);
+      if (num !== null) setUtrPriority(num, dl.utrNo);
 
-      addAmount(sRaw, dl.amount);
-      addAmount(sClean, dl.amount);
-      if (sNum !== null) addAmount(sNum, dl.amount);
+      setDatePriority(raw, dl.settledDate);
+      setDatePriority(clean, dl.settledDate);
+      if (num !== null) setDatePriority(num, dl.settledDate);
+
+      addAmount(raw, dl.amount);
+      addAmount(clean, dl.amount);
+      if (num !== null) addAmount(num, dl.amount);
     }
 
-    // Bluedart — UTR + customerPayAmt
     for (const bd of [...bluedartStrDocs, ...bluedartNumDocs]) {
-      const kRaw = bd.orderId;
-      const sRaw = (kRaw ?? "").toString().trim();
-      const sClean = normalizeOrderNameToId(sRaw);
-      const sNum = Number.isFinite(Number(sRaw)) ? Number(sRaw) : null;
+      const raw = (bd.orderId ?? "").toString().trim();
+      const clean = normalizeOrderNameToId(raw);
+      const num = Number.isFinite(Number(raw)) ? Number(raw) : null;
 
-      setUtrPriority(sRaw, bd.utr);
-      setUtrPriority(sClean, bd.utr);
-      if (sNum !== null) setUtrPriority(sNum, bd.utr);
+      setUtrPriority(raw, bd.utr);
+      setUtrPriority(clean, bd.utr);
+      if (num !== null) setUtrPriority(num, bd.utr);
 
-      addAmount(sRaw, bd.customerPayAmt);
-      addAmount(sClean, bd.customerPayAmt);
-      if (sNum !== null) addAmount(sNum, bd.customerPayAmt);
+      setDatePriority(raw, bd.settledDate);
+      setDatePriority(clean, bd.settledDate);
+      if (num !== null) setDatePriority(num, bd.settledDate);
+
+      addAmount(raw, bd.customerPayAmt);
+      addAmount(clean, bd.customerPayAmt);
+      if (num !== null) addAmount(num, bd.customerPayAmt);
     }
-
-    // --- Compose final rows ---
 
     const rows = baseRows.map((r) => {
       const cleanId = normalizeOrderNameToId(r.orderName);
@@ -443,27 +467,32 @@ router.get("/orders", async (req, res) => {
 
       const trackingId = od?.tracking_number || "--";
       const courierPartner = od?.carrier_title || "--";
-
-      // Delivered Date from Order.last_updated_at
       const deliveredDate = od?.last_updated_at || null;
 
       const partialPayment = typeof mo?.partialPayment === "number" ? mo.partialPayment : 0;
 
-      // Settlement UTR (check raw, clean, numeric)
       const utr =
         mapUtrByKey.get(r.orderName) ??
         mapUtrByKey.get(cleanId) ??
         (numericId !== null ? mapUtrByKey.get(numericId) : undefined) ??
         "";
 
-      // Total Received = sum of Easebuzz.amount + DTDC.codAmount + Delhivery.amount + Bluedart.customerPayAmt
+      const settlementDate =
+        mapSettleDateByKey.get(r.orderName) ??
+        mapSettleDateByKey.get(cleanId) ??
+        (numericId !== null ? mapSettleDateByKey.get(numericId) : undefined) ??
+        "";
+
       const totalReceived =
         (mapAmountByKey.get(r.orderName) ?? 0) +
         (mapAmountByKey.get(cleanId) ?? 0) +
         (numericId !== null ? (mapAmountByKey.get(numericId) ?? 0) : 0);
 
-      // Remaining = Total Received - Partial Payment (per your instruction)
-      const remainingAmount = totalReceived - (partialPayment || 0);
+      // *** CHANGED LOGIC ***
+      // Remaining = max(0, Partial Payment - Total Received)
+      // If no partial payment, Remaining = 0
+      const remainingAmount =
+        partialPayment > 0 ? Math.max(0, partialPayment - totalReceived) : 0;
 
       return {
         createdAt: r.createdAt,
@@ -475,20 +504,17 @@ router.get("/orders", async (req, res) => {
         totalPrice: r.totalPrice,
         lmsNote: r.lmsNote,
 
-        // enriched
         trackingId,
         courierPartner,
         customOrderStatus: "open",
         partialPayment,
 
-        // computed
         deliveredDate,
         totalReceived,
         remainingAmount,
 
-        // settlement & misc
         refund: "",
-        settlementDate: "",
+        settlementDate, // "YYYY-MM-DD"
         remark: "",
         utr,
         orderStatus: "—",

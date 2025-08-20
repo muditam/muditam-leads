@@ -44,6 +44,154 @@ router.post("/api/customers", async (req, res) => {
   }
 });
 
+// router.get("/api/customers", async (req, res) => {
+//   try {
+//     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+//     const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
+//     const skip = req.query.skip !== undefined ? parseInt(req.query.skip, 10) : null;
+
+//     const filters = JSON.parse(req.query.filters || "{}");
+//     const status = req.query.status || "";
+//     const tags = JSON.parse(req.query.tags || "[]");
+//     const sortBy = req.query.sortBy || "";
+//     const assignedTo = req.query.assignedTo;
+//     const createdAt = req.query.createdAt;
+//     const userRole = req.query.userRole;
+//     const userName = req.query.userName;
+
+//     const rootMatch = {};
+
+//     // Search & Filter conditions
+//     if (filters.search) {
+//       const regex = new RegExp(filters.search, "i");
+//       rootMatch.$or = [
+//         { name: { $regex: regex } },
+//         { phone: { $regex: regex } },
+//         { location: { $regex: regex } },
+//       ];
+//     }
+//     if (filters.name) rootMatch.name = { $regex: filters.name, $options: "i" };
+//     if (filters.phone) rootMatch.phone = filters.phone;
+//     if (filters.location) rootMatch.location = { $regex: filters.location, $options: "i" };
+
+//     // Assigned To filter (from dropdown or role)
+//     if (assignedTo) {
+//       const assignedArray = assignedTo.split(",").map((a) => a.trim());
+//       rootMatch.assignedTo = assignedArray.length === 1 ? assignedArray[0] : { $in: assignedArray };
+//     } 
+
+//     // Role-based filtering
+//     if (userRole === "Sales Agent" && userName) {
+//       rootMatch.assignedTo = userName;
+//     }
+//     if (userRole === "Retention Agent" && userName) {
+//       rootMatch.assignedTo = userName;
+//     }
+
+//     // Created At filter
+//     if (createdAt) {
+//       const dateStart = new Date(createdAt);
+//       dateStart.setHours(0, 0, 0, 0);
+//       const dateEnd = new Date(createdAt);
+//       dateEnd.setHours(23, 59, 59, 999);
+//       rootMatch.createdAt = { $gte: dateStart, $lte: dateEnd };
+//     }
+
+//     // Open / Won / Lost status filter
+//     const openStatuses = [
+//       "New Lead", "CONS Scheduled", "CONS Done", "Call Back Later",
+//       "On Follow Up", "CNP", "Switch Off"
+//     ];
+//     const lostStatuses = [
+//       "General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost",
+//       "Ordered from Other Sources", "Budget issue"
+//     ];
+//     const wonStatuses = ["Sales Done"];
+
+//     if (status === "Open") {
+//       rootMatch.leadStatus = { $in: openStatuses };
+//     } else if (status === "Won") {
+//       rootMatch.leadStatus = { $in: wonStatuses };
+//     } else if (status === "Lost") {
+//       rootMatch.leadStatus = { $in: lostStatuses };
+//     }
+
+//     // Tag-based filters
+//     const orClauses = [];
+//     const today = new Date();
+//     today.setHours(0, 0, 0, 0);
+//     const tomorrow = new Date(today);
+//     tomorrow.setDate(tomorrow.getDate() + 1);
+//     const afterTomorrow = new Date(tomorrow);
+//     afterTomorrow.setDate(afterTomorrow.getDate() + 1);
+//     const deadStatuses = [...lostStatuses, "Switch Off"];
+
+//     if (tags.includes("Missed")) {
+//       orClauses.push({
+//         $and: [
+//           { followUpDate: { $lt: today } },
+//           { leadStatus: { $nin: deadStatuses } },
+//         ],
+//       });
+//     }
+//     if (tags.includes("Today")) {
+//       orClauses.push({ followUpDate: { $gte: today, $lt: tomorrow } });
+//     }
+//     if (tags.includes("Tomorrow")) {
+//       orClauses.push({ followUpDate: { $gte: tomorrow, $lt: afterTomorrow } });
+//     }
+//     if (tags.includes("CONS Scheduled")) {
+//       orClauses.push({ leadStatus: "CONS Scheduled" });
+//     }
+//     if (tags.includes("CONS Done")) {
+//       orClauses.push({ leadStatus: "CONS Done" });
+//     }
+//     if (tags.includes("Sales Done")) {
+//       orClauses.push({ leadStatus: "Sales Done" });
+//     }
+//     if (tags.includes("CNP")) {
+//       orClauses.push({ leadStatus: "CNP" });
+//     }
+//     if (tags.includes("On Follow Up")) {
+//       orClauses.push({ leadStatus: "On Follow Up" });
+//     }
+//     if (tags.includes("New Lead")) {
+//       orClauses.push({ leadStatus: "New Lead" });
+//     }
+//     if (tags.includes("Call Back Later")) {
+//       orClauses.push({ leadStatus: "Call Back Later" });
+//     }
+
+//     if (orClauses.length) {
+//       rootMatch.$or = orClauses;
+//     }
+
+//     // Sorting
+//     let sortStage = { createdAt: -1 };
+//     if (sortBy === "asc") sortStage = { name: 1 };
+//     if (sortBy === "desc") sortStage = { name: -1 };
+//     if (sortBy === "oldest") sortStage = { createdAt: 1 };
+
+//     const [customers, total] = await Promise.all([
+//       Customer.find(rootMatch)
+//         .sort(sortStage)
+//         .skip(skip !== null && !isNaN(skip) ? skip : (page - 1) * limit)
+//         .limit(limit),
+//       Customer.countDocuments(rootMatch),
+//     ]);
+
+//     res.json({
+//       customers,
+//       totalCustomers: total,
+//       totalPages: Math.ceil(total / limit),
+//       currentPage: page,
+//     });
+//   } catch (err) {
+//     console.error("Error fetching customers:", err);
+//     res.status(500).json({ message: "Server error", error: err.message });
+//   }
+// });
+
 router.get("/api/customers", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -77,7 +225,8 @@ router.get("/api/customers", async (req, res) => {
     // Assigned To filter (from dropdown or role)
     if (assignedTo) {
       const assignedArray = assignedTo.split(",").map((a) => a.trim());
-      rootMatch.assignedTo = assignedArray.length === 1 ? assignedArray[0] : { $in: assignedArray };
+      rootMatch.assignedTo =
+        assignedArray.length === 1 ? assignedArray[0] : { $in: assignedArray };
     }
 
     // Role-based filtering
@@ -99,12 +248,21 @@ router.get("/api/customers", async (req, res) => {
 
     // Open / Won / Lost status filter
     const openStatuses = [
-      "New Lead", "CONS Scheduled", "CONS Done", "Call Back Later",
-      "On Follow Up", "CNP", "Switch Off"
+      "New Lead",
+      "CONS Scheduled",
+      "CONS Done",
+      "Call Back Later",
+      "On Follow Up",
+      "CNP",
+      "Switch Off",
     ];
     const lostStatuses = [
-      "General Query", "Fake Lead", "Invalid Number", "Not Interested-Lost",
-      "Ordered from Other Sources", "Budget issue"
+      "General Query",
+      "Fake Lead",
+      "Invalid Number",
+      "Not Interested-Lost",
+      "Ordered from Other Sources", 
+      "Budget issue",
     ];
     const wonStatuses = ["Sales Done"];
 
@@ -124,13 +282,17 @@ router.get("/api/customers", async (req, res) => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const afterTomorrow = new Date(tomorrow);
     afterTomorrow.setDate(afterTomorrow.getDate() + 1);
+
     const deadStatuses = [...lostStatuses, "Switch Off"];
+    // Exclude Sales Done from Missed ONLY for Sales Agent
+    const excludeStatusesForMissed =
+      userRole === "Sales Agent" ? [...deadStatuses, "Sales Done"] : deadStatuses;
 
     if (tags.includes("Missed")) {
       orClauses.push({
         $and: [
           { followUpDate: { $lt: today } },
-          { leadStatus: { $nin: deadStatuses } },
+          { leadStatus: { $nin: excludeStatusesForMissed } },
         ],
       });
     }
@@ -162,8 +324,14 @@ router.get("/api/customers", async (req, res) => {
       orClauses.push({ leadStatus: "Call Back Later" });
     }
 
+    // Safely merge tag ORs with existing search ORs (if any)
     if (orClauses.length) {
-      rootMatch.$or = orClauses;
+      if (rootMatch.$or) {
+        // already have a search $or -> keep it AND add tag $or
+        rootMatch.$and = [...(rootMatch.$and || []), { $or: orClauses }];
+      } else {
+        rootMatch.$or = orClauses;
+      }
     }
 
     // Sorting
@@ -193,6 +361,7 @@ router.get("/api/customers", async (req, res) => {
 });
 
 
+
 router.get("/api/customers/counts", async (req, res) => {
   try {
     const { role, userName } = req.query;
@@ -220,6 +389,9 @@ router.get("/api/customers/counts", async (req, res) => {
       "Budget issue",
       "Switch Off",
     ];
+
+    const excludeStatusesForMissed =
+      role === "Sales Agent" ? [...deadStatuses, "Sales Done"] : deadStatuses;
 
     const [openCount, wonCount, lostCount, todayCount, missedCount, tomorrowCount, newLeadCount] =
       await Promise.all([
@@ -256,11 +428,11 @@ router.get("/api/customers/counts", async (req, res) => {
           ...matchStage,
           followUpDate: { $gte: today, $lt: tomorrow },
         }),
-        // Missed
+        // Missed — 👇 use dynamic exclusion list
         Customer.countDocuments({
           ...matchStage,
           followUpDate: { $lt: today },
-          leadStatus: { $nin: deadStatuses },
+          leadStatus: { $nin: excludeStatusesForMissed },
         }),
         // Tomorrow
         Customer.countDocuments({

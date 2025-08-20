@@ -70,6 +70,8 @@ const markRTORoute = require("./operations/markRTO");
 const AbandonedCheckout = require('./models/AbandonedCheckout');
 const abandonedRouter = require('./routes/abandoned'); 
 
+const financeDashboard = require("./routes/financeDashboard");
+
 const app = express();
 const PORT = process.env.PORT || 5001; 
 
@@ -191,6 +193,8 @@ app.use('/api/operations', OrderSummeryOperations);
 app.use(markRTORoute);
 
 app.use("/api/abandoned", abandonedRouter);
+
+app.use("/api/finance", financeDashboard);
 
 mongoose.connect(process.env.MONGO_URI, { 
   useNewUrlParser: true,
