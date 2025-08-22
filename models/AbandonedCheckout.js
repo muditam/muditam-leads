@@ -4,30 +4,23 @@ const mongoose = require("mongoose");
 const ItemSchema = new mongoose.Schema(
   {
     sku: String,
-    title: String,          // product name/title
-    variantTitle: String,   // e.g., "Large / Red"
+    title: String,          // product title/name ("Dress - X")
+    variantTitle: String,   // if present
     quantity: Number,
-    unitPrice: Number,      // store in minor units (paise)
-    finalLinePrice: Number, // line total after discounts (minor units)
+    unitPrice: Number,      // minor units if possible (e.g., 47700)
+    finalLinePrice: Number, // minor units (after discounts); fallback qty * unitPrice
   },
   { _id: false }
 );
 
 const AbandonedCheckoutSchema = new mongoose.Schema(
   {
-    // Primary idempotency keys (from GoKwik)
-    requestId:  { type: String, index: true }, // request_id
-    cId:        { type: String, index: true }, // c_id
-    token:      { type: String, index: true }, // token
-
-    // Back-compat/general ids
-    eventId:    { type: String, index: true, unique: true, sparse: true },
-    checkoutId: { type: String, index: true },
+    // Idempotency keys
+    eventId:    { type: String, index: true, unique: true, sparse: true }, // request_id
+    checkoutId: { type: String, index: true },                              // token
     orderId:    { type: String, index: true },
 
-    isAbandoned: { type: Boolean, default: false },
-
-    type: { type: String, default: "abandoned_cart", index: true },
+    type: { type: String, default: "abandoned_checkout", index: true },
 
     customer: {
       name:  String,
@@ -39,11 +32,15 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
     itemCount: Number,
 
     currency: { type: String, default: "INR" },
-    total: Number, // cart total in minor units (paise)
+    total: Number, // store in minor units (paise)
 
-    abcUrl: String, // link back to cart (abc_url)
+    // Extras useful for recovery & auditing
+    recoveryUrl: String,  // abc_url
+    ip: String,
+    userAgent: String,
+    city: String,
 
-    eventAt:    { type: Date, default: Date.now }, // created_at from payload
+    eventAt:    { type: Date, default: Date.now }, // created_at from provider
     receivedAt: { type: Date, default: Date.now },
 
     notified: { type: Boolean, default: false },
@@ -55,7 +52,7 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// For range queries and fast scrolling
+// helpful for time range listing
 AbandonedCheckoutSchema.index({ eventAt: -1, _id: -1 });
 
 module.exports = mongoose.model("AbandonedCheckout", AbandonedCheckoutSchema);

@@ -78,6 +78,18 @@ const priceMap = {
     "3 months": 3495,
     "4 months": 4495,
   },
+  "Nerve Fix": {
+    "1 month": 780,
+    "2 months": 1490,
+    "3 months": 1995,
+    "4 months": 1995,
+  },
+  "Core Essentials": {
+    "1 month": 475,
+    "2 months": 895,
+    "3 months": 1295,
+    "4 months": 2500,
+  },
   "HbA1c - Blood Test": {
     "1 month": 300,
     "2 months": 300,
@@ -158,6 +170,18 @@ const variantMap = {
     "2 months": "51200287703350",
     "3 months": "51200287736118",
     "4 months": "51200287768886",
+  },
+  "Nerve Fix": {
+    "1 month": "52393986326838",
+    "2 months": "52393986359606",
+    "3 months": "52393986392374",
+    "4 months": "52393986392374",
+  },
+  "Core Essentials": {
+    "1 month": "52863565922614",
+    "2 months": "52863565955382",
+    "3 months": "52863565988150",
+    "4 months": "52863568085302",
   },
   "HbA1c - Blood Test": { 
     "1 month": "51848104247606",
@@ -312,6 +336,14 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/PG_2_c7332d00-50b9-476e-aeb3-005babd4b95d.webp?v=1744875711",
         description: "Supports Gut Health with Probiotic Formula"
       },
+      "Nerve Fix": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Front.webp?v=1752491888",
+        description: "Promotes nerve health and comfort"
+      },
+      "Core Essentials": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Front_9a3bfb2e-5f0b-48ae-95e1-f53042f93dad.webp?v=1755690194",
+        description: "Power of 78 Ingredients in 1 Multivitamin"
+      },
       "HbA1c - Blood Test": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
         description: "Body Check-Up"
@@ -338,9 +370,11 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       "Stress & Sleep": "Sleep",
       "Chandraprabha Vati": "Kidney",
       "Heart Defend Pro": "Heart",
-      "Performance Forever": "Vitality",
+      "Performance Forever": "Vitality", 
       "Power Gut": "Gut",
       "Shilajit with Gold": "Immunity",
+      "Nerve Fix": "Nerve",
+      "Core Essentials": "Multivitamin", 
     };
 
 
@@ -2284,6 +2318,14 @@ selectedProducts.forEach(product => {
                 "Shilajit with Gold": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/3_93373f2d-4618-4852-9292-1c6e098269c6.webp?v=1735212913",
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/8_2e0bf5d6-01a3-4d2e-8765-26756e96d2d9.webp?v=1735212913"
+                },
+                  "Nerve Fix": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_7dd0d0e8-5c57-43b8-b43f-8b629203ed17.webp?v=1754998798",
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/4_5f0a474b-383a-4c32-b49b-636f38ae8965.webp?v=1754998798"
+                },
+                  "Core Essentials": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_a0d38c9b-31e4-46c4-a9fa-bac9661d9b68.webp?v=1755844750",
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/10_3bde0bef-2ed4-4092-8b87-b6baa8c44b6c.webp?v=1755844750"
                 }
               };
 

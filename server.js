@@ -76,7 +76,7 @@ const UndeliveredordersRoute = require('./operations/undelivered-orders');
 const app = express();
 const PORT = process.env.PORT || 5001; 
 
-const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
+const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];  
 
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
@@ -211,6 +211,204 @@ const httpsAgent = new https.Agent({
   secureProtocol: 'TLSv1_2_method'
 });
 
+// tolerant number parser
+function toNumberLoose(v) {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "number" && !Number.isNaN(v)) return v;
+  if (typeof v === "string") {
+    const cleaned = v.replace(/[^\d.\-]/g, "");
+    if (!cleaned) return undefined;
+    const n = Number(cleaned);
+    return Number.isNaN(n) ? undefined : n;
+  }
+  if (typeof v === "object") {
+    return toNumberLoose(v.amount ?? v.value ?? v.price ?? v.total ?? v.gross ?? v.net);
+  }
+  return undefined;
+}
+const pickFirst = (...vals) => vals.find(v => v !== undefined && v !== null && v !== "");
+
+// convert a **major-unit** string/number to **minor units** integer (INR → paise)
+function majorToMinor(v) {
+  const n = toNumberLoose(v);
+  if (n === undefined) return undefined;
+  return Math.round(n * 100);
+}
+
+// from your payload, decides if it's abandoned
+function isAbandoned(root, mergedTypeText = "") {
+  if (root?.is_abandoned === true) return true;
+  const txt = String(mergedTypeText || "").toLowerCase();
+  if (/abandon/.test(txt)) return true;
+  if (root?.status === "abandoned" || root?.checkout_status === "abandoned" || root?.cart_status === "abandoned") return true;
+  return false;
+}
+
+// if provider doesn't give an id, hash the raw body for idempotency
+function hashId(buf) {
+  try { return crypto.createHash("sha256").update(buf).digest("hex"); }
+  catch { return undefined; }
+}
+
+// --- PLACE THIS ROUTE BEFORE any global app.use(express.json()) ---
+app.post(
+  "/api/webhook",
+  bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
+  bodyParser.urlencoded({ verify: rawSaver, extended: false, limit: "2mb", type: ["application/x-www-form-urlencoded"] }),
+  bodyParser.text({ verify: rawSaver, type: ["text/plain"], limit: "2mb" }),
+  async (req, res) => {
+    try {
+      const ctype = (req.headers["content-type"] || "").split(";")[0];
+      const raw = req.rawBody || Buffer.from("");
+
+      // Optional HMAC
+      const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET;
+      const sig = req.get("X-GK-Signature") || req.get("x-gk-signature");
+      if (sharedSecret && sig) {
+        const digest = crypto.createHmac("sha256", sharedSecret).update(raw).digest("hex");
+        const ok = sig.replace(/^sha256=/, "") === digest;
+        if (!ok) return res.status(401).send("Invalid signature");
+      }
+
+      // Parse body into event
+      let event;
+      if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
+        event = req.body;
+      } else if (ctype === "application/x-www-form-urlencoded") {
+        const params = req.body;
+        if (typeof params.payload === "string") {
+          try { event = JSON.parse(params.payload); } catch { event = params; }
+        } else event = params;
+      } else if (ctype === "text/plain") {
+        const str = typeof req.body === "string" ? req.body : raw.toString("utf8");
+        try { event = JSON.parse(str); } catch { event = { text: str }; }
+      } else {
+        try { event = JSON.parse(raw.toString("utf8")); }
+        catch {
+          console.error("Unsupported Content-Type or non-JSON body:", { contentType: ctype, bodyPreview: raw.toString("utf8").slice(0, 500) });
+          return res.status(400).send("Unsupported body format");
+        }
+      }
+
+      // Unwrap if needed
+      const root = event?.data || event?.payload || event;
+
+      // Merge type-ish fields for detection/logging
+      const typeText = [
+        event?.type, event?.event, event?.topic, event?.event_type,
+        root?.event, root?.event_type, root?.event_name, root?.name
+      ].filter(Boolean).join("|");
+
+      // *** MAP FIELDS BASED ON YOUR SAMPLE PAYLOAD ***
+      const eventId    = pickFirst(root.request_id, event.id, event.event_id) || hashId(raw);
+      const checkoutId = pickFirst(root.token, root.checkout_id, root.cart_id, root.checkout_token);
+      const orderId    = pickFirst(root.order_id, root.orderId);
+
+      // Customer: prefer explicit "customer", then "address"
+      const cust = root.customer || {};
+      const addr = root.address || {};
+      const customer = {
+        name:  pickFirst(
+                 [cust.firstname, cust.lastname].filter(Boolean).join(" ").trim(),
+                 addr.firstname || addr.lastname ? [addr.firstname, addr.lastname].filter(Boolean).join(" ").trim() : undefined
+               ),
+        email: pickFirst(cust.email, addr.email),
+        phone: pickFirst(cust.phone, addr.phone),
+      };
+
+      // Items: from root.items
+      const itemsSrc = Array.isArray(root.items) ? root.items : [];
+      const items = itemsSrc.map((it) => {
+        const qty = Number(pickFirst(it.quantity, it.qty, 1)) || 1;
+
+        // Unit price preference (your sample uses minor units already, e.g., 47700)
+        const unitMinor = toNumberLoose(pickFirst(it.final_price, it.price, it.original_price)) ?? 0;
+
+        // Final line price (sample has final_line_price in minor units)
+        const lineMinor = toNumberLoose(pickFirst(it.final_line_price, it.line_price)) ?? unitMinor * qty;
+
+        const variantTitle =
+          it.variant_title ||
+          [it.option1, it.option2, it.option3].filter(Boolean).join(" / ") ||
+          "";
+
+        return {
+          sku: it.sku || String(it.variant_id || it.id || ""),
+          title: it.title || it.product_title || "",
+          variantTitle,
+          quantity: qty,
+          unitPrice: unitMinor,
+          finalLinePrice: lineMinor,
+        };
+      });
+
+      // Currency & totals
+      const currency = pickFirst(root.currency, "INR");
+
+      // Prefer minor-unit totals; if only major provided, convert to minor
+      // Sample: total_price: "477.0000" (major), items carry minor (47700)
+      const totalMinor =
+        toNumberLoose(root.total_price) !== undefined
+          ? majorToMinor(root.total_price)
+          : (items.reduce((s, it) => s + (it.finalLinePrice || 0), 0) || majorToMinor(root.items_subtotal_price) || 0);
+
+      // Event time
+      const eventAt =
+        (root.created_at && new Date(root.created_at)) ||
+        (event.timestamp && new Date(event.timestamp)) ||
+        new Date();
+
+      // Build normalized doc
+      const normalized = {
+        eventId,
+        checkoutId,
+        orderId,
+        type: "abandoned_checkout",
+        customer,
+        items,
+        itemCount: items.length,
+        currency,
+        total: totalMinor,
+        recoveryUrl: root.abc_url,
+        ip: root.ip,
+        userAgent: root.user_agent,
+        city: root.city,
+        eventAt,
+        receivedAt: new Date(),
+        raw: event,
+      };
+
+      // Detect abandoned
+      const abandoned = isAbandoned(root, typeText);
+      console.log("✅ Webhook Abandoned:", {
+        abandoned,
+        eventId: normalized.eventId,
+        checkoutId: normalized.checkoutId,
+        totalMinor: normalized.total,
+        items: normalized.itemCount,
+        phone: normalized.customer.phone,
+      });
+
+      // Persist ONLY if abandoned=true (to match dashboard)
+      if (abandoned) {
+        // Strong idempotency: request_id unique; fallback uses hash
+        const query = normalized.eventId ? { eventId: normalized.eventId } : { checkoutId: normalized.checkoutId, eventAt: normalized.eventAt };
+        await AbandonedCheckout.findOneAndUpdate(
+          query,
+          { $setOnInsert: normalized },
+          { upsert: true, new: true }
+        );
+      }
+
+      // ACK only after successful processing (so GoKwik retries on failures)
+      return res.status(200).send("ok");
+    } catch (err) {
+      console.error("Webhook error:", err);
+      // Return non-2xx on failure so GoKwik retries (prevents data loss)
+      return res.status(500).send("server error");
+    }
+  }
+);
 
 async function fetchAllOrders(url, accessToken, allOrders = []) {
   try {
