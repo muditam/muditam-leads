@@ -71,6 +71,7 @@ const AbandonedCheckout = require('./models/AbandonedCheckout');
 const abandonedRouter = require('./routes/abandoned'); 
 
 const financeDashboard = require("./routes/financeDashboard");
+const UndeliveredordersRoute = require('./operations/undelivered-orders');
 
 const app = express();
 const PORT = process.env.PORT || 5001; 
@@ -196,6 +197,8 @@ app.use("/api/abandoned", abandonedRouter);
 
 app.use("/api/finance", financeDashboard);
 
+app.use('/api/orders', UndeliveredordersRoute);
+
 mongoose.connect(process.env.MONGO_URI, { 
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -208,199 +211,6 @@ const httpsAgent = new https.Agent({
   secureProtocol: 'TLSv1_2_method'
 });
 
-
-function toNumberLoose(v) {
-  if (v === null || v === undefined) return undefined;
-  if (typeof v === "number" && !Number.isNaN(v)) return v;
-  if (typeof v === "string") {
-    const cleaned = v.replace(/[^\d.\-]/g, "");
-    if (!cleaned) return undefined;
-    const n = Number(cleaned);
-    return Number.isNaN(n) ? undefined : n;
-  }
-  if (typeof v === "object") {
-    return toNumberLoose(v.amount ?? v.value ?? v.price ?? v.total ?? v.gross ?? v.net);
-  }
-  return undefined;
-}
-
-function majorStringToMinor(s) {
-  const n = toNumberLoose(s);
-  if (n === undefined) return undefined;
-  // round to paise
-  return Math.round(n * 100);
-}
-
-function pickFirst(...vals) {
-  for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
-  return undefined;
-}
-
-app.post(
-  "/api/webhook",
-  bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
-  bodyParser.urlencoded({ verify: rawSaver, extended: false, limit: "2mb", type: ["application/x-www-form-urlencoded"] }),
-  bodyParser.text({ verify: rawSaver, type: ["text/plain"], limit: "2mb" }),
-  async (req, res) => {
-    try {
-      const ctype = (req.headers["content-type"] || "").split(";")[0];
-      const raw = req.rawBody || Buffer.from("");
-
-      // Optional HMAC
-      const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET;
-      const sig = req.get("X-GK-Signature") || req.get("x-gk-signature");
-      if (sharedSecret && sig) {
-        const digest = require("crypto").createHmac("sha256", sharedSecret).update(raw).digest("hex");
-        const ok = sig.replace(/^sha256=/, "") === digest;
-        if (!ok) return res.status(401).send("Invalid signature");
-      }
-
-      // Parse
-      let payload;
-      if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
-        payload = req.body;
-      } else if (ctype === "application/x-www-form-urlencoded") {
-        const params = req.body;
-        if (typeof params.payload === "string") {
-          try { payload = JSON.parse(params.payload); } catch { payload = params; }
-        } else payload = params;
-      } else if (ctype === "text/plain") {
-        const str = typeof req.body === "string" ? req.body : raw.toString("utf8");
-        try { payload = JSON.parse(str); } catch { payload = { text: str }; }
-      } else {
-        try { payload = JSON.parse(raw.toString("utf8")); }
-        catch {
-          console.error("Unsupported Content-Type or non-JSON body:", { contentType: ctype, bodyPreview: raw.toString("utf8").slice(0, 500) });
-          return res.status(400).send("Unsupported body format");
-        }
-      }
-
-      // GoKwik sends the abandoned cart body "flat" (no .data). Use it directly:
-      const root = payload?.data || payload?.payload || payload;
-
-      // === Map identifiers & abandonment ===
-      const requestId = root.request_id || root.requestId;
-      const cId       = root.c_id || root.cId;
-      const token     = root.token;
-
-      const isAbandoned = !!(root.is_abandoned === true);
-
-      // Build strong idempotency key
-      const eventId =
-        requestId ||
-        cId ||
-        token ||
-        req.get("ce-id") ||
-        undefined;
-
-      // Customer
-      const addr = root.address || {};
-      const cust = root.customer || {};
-      const customer = {
-        name:  [addr.firstname || cust.firstname, addr.lastname || cust.lastname].filter(Boolean).join(" ").trim() || addr.name || "",
-        email: cust.email || addr.email || "",
-        phone: cust.phone || addr.phone || "",
-      };
-
-      // Items (GoKwik sample uses minor units in item.price/final_line_price)
-      const itemsSrc = Array.isArray(root.items) ? root.items : [];
-      const items = itemsSrc.map((it) => {
-        const qty = Number(pickFirst(it.quantity, it.qty, 1)) || 1;
-
-        // Prefer provided minor-unit fields
-        const unitPriceMinor =
-          toNumberLoose(pickFirst(it.final_price_per_unit, it.discounted_price_per_unit, it.unit_price, it.price, it.original_price)) ?? 0;
-
-        const finalLineMinor =
-          toNumberLoose(pickFirst(it.final_line_price, it.line_price_final, it.discounted_total_price, it.total, it.price_total, it.line_price)) ??
-          unitPriceMinor * qty;
-
-        const variantTitle =
-          it.variant_title || it.variant ||
-          [it.option1, it.option2, it.option3].filter(Boolean).join(" / ") || "";
-
-        return {
-          sku: it.sku || it.variant_sku || String(it.variant_id || it.id || ""),
-          title: it.title || it.product_title || it.name || "",
-          variantTitle,
-          quantity: qty,
-          unitPrice: unitPriceMinor,
-          finalLinePrice: finalLineMinor,
-        };
-      });
-
-      // Currency + totals: sample has major strings at root, minor ints in items
-      const currency = root.currency || "INR";
-
-      // Prefer explicit root total (major string), convert to minor; else sum items
-      const totalMinor =
-        majorStringToMinor(pickFirst(root.total_price, root.items_subtotal_price, root.original_total_price)) ??
-        items.reduce((s, it) => s + (it.finalLinePrice || 0), 0);
-
-      // Timestamps
-      const eventAt = root.created_at ? new Date(root.created_at) : new Date();
-
-      const normalized = {
-        requestId,
-        cId,
-        token,
-        eventId,                  // for idempotency
-        checkoutId: token,        // useful alias
-        orderId: undefined,
-        isAbandoned,
-        type: "abandoned_cart",
-        customer,
-        items,
-        itemCount: items.length,
-        currency,
-        total: totalMinor,
-        abcUrl: root.abc_url || "",
-        eventAt,
-        receivedAt: new Date(),
-        raw: payload,
-      };
-
-      console.log("✅ GoKwik Abandoned Cart:", {
-        requestId: normalized.requestId,
-        token: normalized.token,
-        isAbandoned: normalized.isAbandoned,
-        items: normalized.itemCount,
-        totalMinor: normalized.total,
-        phone: normalized.customer.phone,
-      });
-
-      // Save everything that is marked abandoned (this matches GoKwik dashboard semantics)
-      if (normalized.isAbandoned) {
-        const query = normalized.eventId
-          ? { eventId: normalized.eventId }
-          : (normalized.token ? { checkoutId: normalized.token } : { "customer.phone": normalized.customer.phone, eventAt: { $gte: new Date(eventAt.getTime() - 5 * 60 * 1000) } });
-
-        await AbandonedCheckout.findOneAndUpdate(
-          query,
-          {
-            $setOnInsert: normalized,
-            // If the same request_id arrives again with updated totals/items, keep latest important fields
-            $set: {
-              total: normalized.total,
-              items: normalized.items,
-              itemCount: normalized.itemCount,
-              customer: normalized.customer,
-              abcUrl: normalized.abcUrl,
-              currency: normalized.currency,
-              isAbandoned: normalized.isAbandoned,
-            },
-          },
-          { upsert: true, new: true }
-        );
-      }
-
-      return res.status(200).send("ok");
-    } catch (err) {
-      console.error("Webhook error:", err);
-      return res.status(500).send("server error");
-    }
-  }
-);
 
 async function fetchAllOrders(url, accessToken, allOrders = []) {
   try {

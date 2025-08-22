@@ -77,7 +77,7 @@ router.put("/api/shopify/orders/:orderId/note", async (req, res) => {
   const headers = {
     "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
     "Content-Type": "application/json",
-  };
+  }; 
 
   try {
     const url = `https://${SHOPIFY_STORE_NAME}/admin/api/${SHOPIFY_API_VERSION}/orders/${orderId}.json`;
@@ -94,6 +94,5 @@ router.put("/api/shopify/orders/:orderId/note", async (req, res) => {
     return res.status(500).json({ error: "Failed to update order note on Shopify." });
   }
 });
-
 
 module.exports = router;

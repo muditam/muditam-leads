@@ -11,7 +11,7 @@ const ShopifyFinanceOrderSchema = new mongoose.Schema(
     totalPrice: { type: Number, default: 0 }, 
     lmsNote: { type: String, default: "" }, 
     shopifyId: { type: Number, index: true },
-  },
+  }, 
   { timestamps: true }
 );
 
