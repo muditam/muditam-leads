@@ -4,20 +4,19 @@ const mongoose = require("mongoose");
 const ItemSchema = new mongoose.Schema(
   {
     sku: String,
-    title: String,          // product title/name
-    variantTitle: String,   // if present
+    title: String,
+    variantTitle: String,
     quantity: Number,
-    unitPrice: Number,      // store minor units (e.g., 47700 paise)
-    finalLinePrice: Number, // minor units (after discounts); fallback qty * unitPrice
+    unitPrice: Number,      // minor units
+    finalLinePrice: Number, // minor units
   },
   { _id: false }
 );
 
 const AbandonedCheckoutSchema = new mongoose.Schema(
   {
-    // Idempotency keys
-    eventId:    { type: String, index: true, unique: true, sparse: true }, // e.g., request_id
-    checkoutId: { type: String, index: true },                              // e.g., token
+    eventId:    { type: String, index: true, unique: true, sparse: true },
+    checkoutId: { type: String, index: true },
     orderId:    { type: String, index: true },
 
     type: { type: String, default: "abandoned_checkout", index: true },
@@ -32,26 +31,31 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
     itemCount: Number,
 
     currency: { type: String, default: "INR" },
-    total: Number, // store minor units (paise)
+    total: Number, // minor units
 
-    // Link shown in UI
-    recoveryUrl: String,  // e.g., abc_url
+    recoveryUrl: String,
 
-    // Timestamps used for range filtering
-    eventAt:    { type: Date, default: Date.now }, // created_at from provider
+    eventAt:    { type: Date, default: Date.now },
     receivedAt: { type: Date, default: Date.now },
 
-    // Raw payload for debugging/audit
+    // PERSISTED assignment
+    assignedExpert: {
+      _id: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" },
+      fullName: String,
+      email: String,
+      role: String,
+    },
+    assignedAt: Date,
+
     raw: mongoose.Schema.Types.Mixed,
   },
   { timestamps: true }
 );
 
-// helpful for time range listing / sorting
 AbandonedCheckoutSchema.index({ eventAt: -1, _id: -1 });
-
-// light indexes to speed up common lookups/searches used by the UI
 AbandonedCheckoutSchema.index({ "customer.phone": 1 });
 AbandonedCheckoutSchema.index({ "items.title": 1 });
+// fast filter by assigned/unassigned
+AbandonedCheckoutSchema.index({ "assignedExpert._id": 1 });
 
 module.exports = mongoose.model("AbandonedCheckout", AbandonedCheckoutSchema);
