@@ -1,6 +1,8 @@
 // routes/abandoned.js
 const express = require("express");
 const AbandonedCheckout = require("../models/AbandonedCheckout");
+const Employee = require("../models/Employee");
+const Customer = require("../models/Customer"); // <- your schema from the message
 
 const router = express.Router();
 
@@ -48,22 +50,52 @@ router.get("/", async (req, res) => {
   }
 });
 
-// POST /api/abandoned/:id/notify
-router.post("/:id/notify", async (req, res) => {
+// POST /api/abandoned/:id/assign-expert
+// Creates a Customer document from the abandoned checkout + selected expert.
+router.post("/:id/assign-expert", async (req, res) => {
   try {
     const { id } = req.params;
-    const doc = await AbandonedCheckout.findById(id);
-    if (!doc) return res.status(404).json({ error: "not_found" });
+    const { expertId } = req.body;
 
-    // TODO: call your WhatsApp/SMS/Email service here
-    await AbandonedCheckout.findByIdAndUpdate(id, {
-      $set: { notified: true, notifiedAt: new Date(), notifyChannel: "manual" },
+    if (!expertId) {
+      return res.status(400).json({ error: "missing_expertId" });
+    }
+
+    const ab = await AbandonedCheckout.findById(id).lean();
+    if (!ab) return res.status(404).json({ error: "not_found" });
+
+    const emp = await Employee.findById(expertId).lean();
+    if (!emp) return res.status(400).json({ error: "invalid_expert" });
+
+    if (!ab.customer?.phone) {
+      return res.status(400).json({ error: "missing_phone" });
+    }
+
+    // Map lookingFor from first product title
+    const firstTitle = (Array.isArray(ab.items) && ab.items[0]?.title) ? String(ab.items[0].title) : "";
+    let lookingFor = "Others";
+    if (/karela\s*jamun\s*fizz/i.test(firstTitle)) lookingFor = "Diabetes";
+    else if (/liver\s*fix/i.test(firstTitle)) lookingFor = "Fatty Liver";
+
+    const customerDoc = new Customer({
+      name: ab.customer?.name || "",
+      phone: ab.customer?.phone || "",
+      age: 0,
+      location: "",
+      lookingFor,
+      assignedTo: emp.fullName,
+      followUpDate: new Date(),                         // required by schema
+      leadSource: "Abandoned Cart",
+      leadDate: ab.eventAt ? new Date(ab.eventAt) : new Date(), // required by schema
+      // leadStatus defaults to "New Lead"; subLeadStatus optional
     });
 
-    res.json({ ok: true });
+    await customerDoc.save();
+
+    return res.json({ ok: true, customerId: customerDoc._id });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "notify_failed" });
+    console.error("assign-expert error:", e);
+    res.status(500).json({ error: "assign_failed" });
   }
 });
 
