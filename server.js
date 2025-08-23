@@ -91,125 +91,6 @@ app.use(cors({
     return callback(null, true); 
   } 
 }));
- 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization"); 
-  next();
-});
-
-app.use(express.json());
-
-app.use("/api/templates", templateRoutes);
-app.use("/api/shopify", shopifyProductsRoute);
-app.use("/api/shopify", shopifyOrdersRoute);
-app.use("/api/shopify", ShopifyPush);
-app.use("/api/razorpay", razorpayRoutes);
-app.use("/api/shopify", shopifyRoutes);
-app.use("/api/my-orders", myOrdersRoutes); 
-
-app.use(retentionSalesRoutes);
-
-app.use('/', exportLeadsRouter);
- 
-app.use("/api/leads/retention", activeCountsRoute);
- 
-app.use('/api', summaryRoutes);
- 
-app.use('/api/dashboard', dashboardRoutes);
-
-app.use("/api/order-by-id", orderByIdRoutes);
-
-app.use("/api/orders/combined", combinedOrdersRoute);
- 
-app.use(customerRoutes);
- 
-app.use("/api/consultation-details", consultationDetailsRoutes);
-
-app.use("/", consultationProxyRoutes);
- 
-app.use("/api/consultation-full-history", consultationFullHistoryRoute);
- 
-app.use("/api/consultation-followup", consultationFollowupRoute);
- 
-app.use("/api/leads", duplicateNumbersRoutes);
-app.use("/api/duplicate-leads", duplicateNumbersRoutes);
-
-app.use(ordersDatesRoute);
-
-app.use(uploadToWasabi);
-
-app.use("/api/details", detailsRoutes);
-
-app.use('/api/escalations', escalationRoutes);
-
-app.use("/api/orders", orderRoutes);
-
-app.use(getActiveProductsRoute);
-
-app.use('/api/phonepe', phonepeRoutes);
-
-app.use('/api/myorders/download', downloadRoute);
-
-app.use("/api/delivery", deliveryStatusRoutes);
-
-app.use("/api/merged-sales", mergedSalesRoutes);
-
-app.use("/api/deliver-history", employeeRoutes);
-
-app.use('/api/shipway', shipwayRoutes);
-
-app.use('/api/reachout-logs', reachoutRoutes);
-
-app.use('/api/leads', leadTransfer);
-
-app.use('/api/search', searchRoutes); 
-
-app.use(Addemployee);
-
-app.use('/api', authRoutes);
-
-app.use('/api', clickToCallRoutes);
-
-app.use("/api/finance", financeRoutes);
-
-app.use("/api/razorpay", razorpaySettlementRoutes);
-
-app.use("/api/easebuzz", GokwikSettlementRoutes);
-
-app.use("/api/phonepe", phonepeFinance);
-
-app.use("/api/bluedart", Bluedart);
-
-app.use("/api/delhivery", Delhivery);
-
-app.use("/api/dtdc", DTDC); 
-
-app.use('/api/operations', OrderSummeryOperations);
-
-app.use(markRTORoute);
-
-app.use("/api/abandoned", abandonedRouter);
-
-app.use("/api/finance", financeDashboard);
-
-app.use('/api/orders', UndeliveredordersRoute);
-
-mongoose.connect(process.env.MONGO_URI, { 
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err)); 
-
-
-const httpsAgent = new https.Agent({
-  rejectUnauthorized: true,
-  secureProtocol: 'TLSv1_2_method'
-});
 
 // tolerant number parser
 function toNumberLoose(v) {
@@ -253,7 +134,7 @@ function hashId(buf) {
 // --- PLACE THIS ROUTE BEFORE any global app.use(express.json()) ---
 app.post(
   "/api/webhook",
-  bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
+  bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }), 
   bodyParser.urlencoded({ verify: rawSaver, extended: false, limit: "2mb", type: ["application/x-www-form-urlencoded"] }),
   bodyParser.text({ verify: rawSaver, type: ["text/plain"], limit: "2mb" }),
   async (req, res) => {
@@ -261,7 +142,7 @@ app.post(
       const ctype = (req.headers["content-type"] || "").split(";")[0];
       const raw = req.rawBody || Buffer.from("");
 
-      // Optional HMAC
+      // Optional HMAC 
       const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET;
       const sig = req.get("X-GK-Signature") || req.get("x-gk-signature");
       if (sharedSecret && sig) {
@@ -409,6 +290,125 @@ app.post(
     }
   }
 );
+ 
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization"); 
+  next();
+});
+
+app.use(express.json());
+
+app.use("/api/templates", templateRoutes);
+app.use("/api/shopify", shopifyProductsRoute);
+app.use("/api/shopify", shopifyOrdersRoute);
+app.use("/api/shopify", ShopifyPush);
+app.use("/api/razorpay", razorpayRoutes);
+app.use("/api/shopify", shopifyRoutes);
+app.use("/api/my-orders", myOrdersRoutes); 
+
+app.use(retentionSalesRoutes);
+
+app.use('/', exportLeadsRouter);
+ 
+app.use("/api/leads/retention", activeCountsRoute);
+ 
+app.use('/api', summaryRoutes);
+ 
+app.use('/api/dashboard', dashboardRoutes);
+
+app.use("/api/order-by-id", orderByIdRoutes);
+
+app.use("/api/orders/combined", combinedOrdersRoute);
+ 
+app.use(customerRoutes);
+ 
+app.use("/api/consultation-details", consultationDetailsRoutes);
+
+app.use("/", consultationProxyRoutes);
+ 
+app.use("/api/consultation-full-history", consultationFullHistoryRoute);
+ 
+app.use("/api/consultation-followup", consultationFollowupRoute);
+ 
+app.use("/api/leads", duplicateNumbersRoutes);
+app.use("/api/duplicate-leads", duplicateNumbersRoutes);
+
+app.use(ordersDatesRoute);
+
+app.use(uploadToWasabi);
+
+app.use("/api/details", detailsRoutes);
+
+app.use('/api/escalations', escalationRoutes);
+
+app.use("/api/orders", orderRoutes);
+
+app.use(getActiveProductsRoute);
+
+app.use('/api/phonepe', phonepeRoutes);
+
+app.use('/api/myorders/download', downloadRoute);
+
+app.use("/api/delivery", deliveryStatusRoutes);
+
+app.use("/api/merged-sales", mergedSalesRoutes);
+
+app.use("/api/deliver-history", employeeRoutes);
+
+app.use('/api/shipway', shipwayRoutes);
+
+app.use('/api/reachout-logs', reachoutRoutes);
+
+app.use('/api/leads', leadTransfer);
+
+app.use('/api/search', searchRoutes); 
+
+app.use(Addemployee);
+
+app.use('/api', authRoutes);
+
+app.use('/api', clickToCallRoutes);
+
+app.use("/api/finance", financeRoutes);
+
+app.use("/api/razorpay", razorpaySettlementRoutes);
+
+app.use("/api/easebuzz", GokwikSettlementRoutes);
+
+app.use("/api/phonepe", phonepeFinance);
+
+app.use("/api/bluedart", Bluedart);
+
+app.use("/api/delhivery", Delhivery);
+
+app.use("/api/dtdc", DTDC); 
+
+app.use('/api/operations', OrderSummeryOperations);
+
+app.use(markRTORoute);
+
+app.use("/api/abandoned", abandonedRouter);
+
+app.use("/api/finance", financeDashboard);
+
+app.use('/api/orders', UndeliveredordersRoute);
+
+mongoose.connect(process.env.MONGO_URI, { 
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+}).then(() => console.log('MongoDB connected'))
+  .catch((err) => console.error('MongoDB connection error:', err)); 
+
+
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: true,
+  secureProtocol: 'TLSv1_2_method'
+});
 
 async function fetchAllOrders(url, accessToken, allOrders = []) {
   try {
