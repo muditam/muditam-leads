@@ -9,101 +9,151 @@ const router = express.Router();
 
 /* ------------------------- helpers ------------------------- */
 
-function normalizePhone(p) {
-  if (!p) return "";
-  const digits = String(p).replace(/\D/g, "");
-  return digits.length >= 10 ? digits.slice(-10) : digits;
-}
-function escapeRx(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function nameOnly(s) {
-  // strip " (email)" patterns if present
-  return String(s || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+function normalizePhoneTo10(phone) {
+  if (!phone) return "";
+  const digits = String(phone).replace(/\D/g, "");
+  // Keep the last 10 digits (typical Indian MSISDN)
+  return digits.slice(-10);
 }
 
-/**
- * Find best employee for a given normalized phone (last10) using Customer/Lead.
- * Priority: Retention Agent > any other agent.
- * Returns an Employee doc or null.
- */
-async function findBestEmployeeForLast10(last10) {
-  if (!last10) return null;
+// attempt to match an Employee by a raw name field that may contain "Name (email)"
+async function findEmployeeByNameLike(raw) {
+  if (!raw) return null;
+  const nameOnly = String(raw).trim().replace(/\s*\(.+\)\s*$/, ""); // remove " (email)" if present
+  if (!nameOnly) return null;
+  const emp = await Employee.findOne({
+    fullName: new RegExp(`^${nameOnly}$`, "i"),
+    status: { $regex: /^active$/i },
+  }).lean();
+  return emp || null;
+}
 
-  const suffixRx = new RegExp(`${escapeRx(last10)}$`);
+// choose preferred employee (Retention Agent wins; else Sales Agent; else first)
+function choosePreferredEmployee(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  // unique by _id
+  const unique = [];
+  const seen = new Set();
+  for (const c of candidates) {
+    if (c && c._id && !seen.has(String(c._id))) {
+      seen.add(String(c._id));
+      unique.push(c);
+    }
+  }
+  if (unique.length === 0) return null;
+  const retention = unique.find((c) => c.role === "Retention Agent");
+  if (retention) return retention;
+  const sales = unique.find((c) => c.role === "Sales Agent");
+  if (sales) return sales;
+  return unique[0];
+}
 
-  const [cust, lead] = await Promise.all([
-    Customer.findOne({ phone: { $regex: suffixRx } }).sort({ createdAt: -1 }).lean(),
-    Lead.findOne({ contactNumber: { $regex: suffixRx } }).sort({ _id: -1 }).lean(),
+// Given a phone, look into Customer/Lead and try to discover an already assigned expert.
+// Returns an Employee doc (lean) or null.
+async function findExistingExpertForPhone(phone) {
+  const n10 = normalizePhoneTo10(phone);
+  if (!n10) return null;
+
+  // find any customers/leads whose phone/contactNumber ends with these 10 digits
+  const [customers, leads] = await Promise.all([
+    Customer.find({ phone: { $regex: `${n10}$` } }).lean(),
+    Lead.find({ contactNumber: { $regex: `${n10}$` } }).lean(),
   ]);
 
-  // Collect candidate names (strings)
-  const candidates = [];
-  if (cust?.assignedTo) candidates.push(nameOnly(cust.assignedTo));
-  if (lead?.healthExpertAssigned) candidates.push(nameOnly(lead.healthExpertAssigned)); // retention
-  if (lead?.agentAssigned) candidates.push(nameOnly(lead.agentAssigned));               // sales
-  const uniqueNames = [...new Set(candidates.filter(Boolean))];
-  if (uniqueNames.length === 0) return null;
-
-  // Resolve names to employees
-  const employees = await Employee.find({
-    fullName: { $in: uniqueNames },
-    status: "active",
-  }).lean();
-
-  if (!employees || employees.length === 0) return null;
-
-  // Prefer Retention Agent
-  const retention = employees.find((e) => e.role === "Retention Agent");
-  if (retention) return retention;
-
-  // Otherwise any match (e.g., Sales Agent)
-  return employees[0] || null;
-}
-
-/**
- * For a list of AbandonedCheckout docs (unassigned), attempt to
- * auto-assign based on existing Customer/Lead using phone.
- * Mutates DB only; does not return modified docs.
- */
-async function autoAssignBatch(docs) {
-  const now = new Date();
-  for (const d of docs) {
-    const last10 = normalizePhone(d?.customer?.phone);
-    if (!last10) continue;
-
-    const emp = await findBestEmployeeForLast10(last10);
-    if (!emp) continue;
-
-    await AbandonedCheckout.updateOne(
-      { _id: d._id, "assignedExpert._id": { $exists: false } },
-      {
-        $set: {
-          assignedExpert: {
-            _id: emp._id,
-            fullName: emp.fullName,
-            email: emp.email,
-            role: emp.role,
-          },
-          assignedAt: now,
-        },
-      }
-    );
+  const candidateNames = [];
+  for (const c of customers || []) {
+    if (c.assignedTo) candidateNames.push(c.assignedTo);
   }
+  for (const l of leads || []) {
+    if (l.healthExpertAssigned) candidateNames.push(l.healthExpertAssigned);
+    if (l.agentAssigned) candidateNames.push(l.agentAssigned);
+  }
+
+  if (candidateNames.length === 0) return null;
+
+  const foundEmployees = [];
+  for (const nm of candidateNames) {
+    const emp = await findEmployeeByNameLike(nm);
+    if (emp) foundEmployees.push(emp);
+  }
+
+  if (foundEmployees.length === 0) return null;
+  return choosePreferredEmployee(foundEmployees);
 }
 
-/* -------------------------- routes -------------------------- */
+// Auto-assign a batch of unassigned docs (matching a given filter) if an existing expert is found.
+// Returns number of docs updated.
+async function autoAssignUnassignedMatching(filter, limit = 100) {
+  const toScan = await AbandonedCheckout.find({
+    ...filter,
+    "assignedExpert._id": { $exists: false },
+  })
+    .sort({ eventAt: -1, _id: -1 })
+    .limit(limit)
+    .lean();
 
-// GET /api/abandoned?query=&start=&end=&page=1&limit=50&assigned=assigned|unassigned
+  let updated = 0;
+
+  for (const doc of toScan) {
+    const phone = doc?.customer?.phone;
+    const expert = await findExistingExpertForPhone(phone);
+    if (expert) {
+      await AbandonedCheckout.updateOne(
+        { _id: doc._id },
+        {
+          $set: {
+            assignedExpert: {
+              _id: expert._id,
+              fullName: expert.fullName,
+              email: expert.email,
+              role: expert.role,
+            },
+            assignedAt: new Date(),
+          },
+        }
+      );
+      updated++;
+    }
+  }
+  return updated;
+}
+
+// map product title to lookingFor
+function mapLookingForFromTitle(title = "") {
+  const t = String(title).toLowerCase();
+  if (/karela\s*jamun\s*fizz/.test(t)) return "Diabetes";
+  if (/liver\s*fix/.test(t)) return "Fatty Liver";
+  return "Others";
+}
+
+/* ------------------------- GET list ------------------------- */
+/**
+ * GET /api/abandoned
+ * Query:
+ *  - query: text search
+ *  - start, end: ISO datetimes
+ *  - page, limit
+ *  - assigned: "assigned" | "unassigned" | (omit for all)
+ *  - expertId: filter assigned expert (used for agent's own view)
+ */
 router.get("/", async (req, res) => {
   try {
-    const { query = "", start = "", end = "", page = 1, limit = 50, assigned = "" } = req.query;
+    const {
+      query = "",
+      start = "",
+      end = "",
+      page = 1,
+      limit = 50,
+      assigned = "",          // 'assigned' | 'unassigned'
+      expertId = "",          // show only this expert's leads (used by agents)
+    } = req.query;
 
-    const base = {};
+    const q = {};
 
+    // text search
     if (query) {
-      const rx = new RegExp(escapeRx(query.trim()), "i");
-      base.$or = [
+      const rx = new RegExp(query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      q.$or = [
         { "customer.name": rx },
         { "customer.email": rx },
         { "customer.phone": rx },
@@ -116,42 +166,37 @@ router.get("/", async (req, res) => {
       ];
     }
 
+    // date filter
     if (start || end) {
-      base.eventAt = {};
-      if (start) base.eventAt.$gte = new Date(start);
-      if (end) base.eventAt.$lte = new Date(end);
+      q.eventAt = {};
+      if (start) q.eventAt.$gte = new Date(start);
+      if (end) q.eventAt.$lte = new Date(end);
     }
 
-    // Build the filter with assigned toggle
-    const q = { ...base };
+    // assigned / unassigned filter
     if (assigned === "assigned") {
-      q["assignedExpert._id"] = { $exists: true, $ne: null };
+      q["assignedExpert._id"] = { $exists: true };
+      if (expertId) {
+        q["assignedExpert._id"] = { $exists: true, $eq: expertId };
+      }
     } else if (assigned === "unassigned") {
-      q.$and = (q.$and || []).concat([
-        { $or: [{ assignedExpert: { $exists: false } }, { "assignedExpert._id": { $exists: false } }] },
-      ]);
+      q["assignedExpert._id"] = { $exists: false };
+    }
+
+    // If user is browsing Unassigned, proactively auto-assign any that already
+    // exist in Customer/Lead (by phone) to keep views consistent.
+    if (assigned === "unassigned") {
+      const updated = await autoAssignUnassignedMatching(q, 200);
+      if (updated > 0) {
+        // re-apply filter since some moved to 'assigned'
+        // Nothing else to do; we just continue to fetch the page now.
+      }
     }
 
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
     const pageSize = Math.max(parseInt(limit, 10) || 50, 1);
     const skip = (pageNum - 1) * pageSize;
 
-    // If user asked for Unassigned, first try auto-assign for THIS page's slice,
-    // then re-run the query so freshly assigned rows disappear from unassigned.
-    if (assigned === "unassigned") {
-      const candidateSlice = await AbandonedCheckout.find(q)
-        .sort({ eventAt: -1, _id: -1 })
-        .skip(skip)
-        .limit(pageSize)
-        .select("_id customer.phone")
-        .lean();
-
-      if (candidateSlice.length) {
-        await autoAssignBatch(candidateSlice);
-      }
-    }
-
-    // Final list after potential auto-assign
     const [items, total] = await Promise.all([
       AbandonedCheckout.find(q).sort({ eventAt: -1, _id: -1 }).skip(skip).limit(pageSize).lean(),
       AbandonedCheckout.countDocuments(q),
@@ -159,90 +204,131 @@ router.get("/", async (req, res) => {
 
     res.json({ items, total, page: pageNum, limit: pageSize });
   } catch (e) {
-    console.error("GET /api/abandoned error:", e);
+    console.error(e);
     res.status(500).json({ error: "server_error" });
   }
 });
 
-// POST /api/abandoned/:id/assign-expert
-// If same phone exists in Customer/Lead, prefer Retention Agent and ONLY assign on AbandonedCheckout (no Customer insert).
-// Else, create a Customer document and persist assignment.
+/* ------------------------- Assign expert ------------------------- */
+/**
+ * POST /api/abandoned/:id/assign-expert
+ * Body: { expertId }
+ *
+ * Behavior:
+ *  - normalize phone, check Customer/Lead for existing records
+ *  - if an existing expert is found:
+ *      - prefer Retention Agent when multiple
+ *      - set AbandonedCheckout.assignedExpert to that expert
+ *      - DO NOT create a new Customer
+ *  - else (no existing record):
+ *      - set AbandonedCheckout.assignedExpert to provided expertId
+ *      - create a new Customer using mapping rules
+ */
 router.post("/:id/assign-expert", async (req, res) => {
   try {
     const { id } = req.params;
     const { expertId } = req.body;
 
-    const ab = await AbandonedCheckout.findById(id);
+    if (!expertId) {
+      return res.status(400).json({ error: "missing_expertId" });
+    }
+
+    const ab = await AbandonedCheckout.findById(id).lean();
     if (!ab) return res.status(404).json({ error: "not_found" });
 
-    const last10 = normalizePhone(ab?.customer?.phone);
-    if (!last10) return res.status(400).json({ error: "missing_phone" });
+    const postedExpert = await Employee.findById(expertId).lean();
+    if (!postedExpert) return res.status(400).json({ error: "invalid_expert" });
 
-    // 1) Check if we can auto-deduce expert from existing Customer/Lead (Retention priority)
-    const preEmp = await findBestEmployeeForLast10(last10);
-    if (preEmp) {
-      const now = new Date();
-      ab.assignedExpert = {
-        _id: preEmp._id,
-        fullName: preEmp.fullName,
-        email: preEmp.email,
-        role: preEmp.role,
-      };
-      ab.assignedAt = now;
-      await ab.save();
+    const phone = ab?.customer?.phone;
+    if (!phone) return res.status(400).json({ error: "missing_phone" });
 
-      // Do NOT create a Customer doc in this path
+    // Look for existing expert via Customer/Lead (by phone)
+    const existingExpert = await findExistingExpertForPhone(phone);
+
+    let finalExpert = postedExpert; // default to posted expert
+    let createdCustomer = false;
+
+    if (existingExpert) {
+      // Prefer existing (and its retention priority is already handled)
+      finalExpert = existingExpert;
+
+      // If already in either collection, do NOT create a new Customer
+      // (the doc will now show directly under Assigned)
+      await AbandonedCheckout.updateOne(
+        { _id: ab._id },
+        {
+          $set: {
+            assignedExpert: {
+              _id: finalExpert._id,
+              fullName: finalExpert.fullName,
+              email: finalExpert.email,
+              role: finalExpert.role,
+            },
+            assignedAt: new Date(),
+          },
+        }
+      );
+
       return res.json({
         ok: true,
-        assignedExpert: ab.assignedExpert,
-        assignedAt: now.toISOString(),
+        assignedAt: new Date().toISOString(),
+        expert: {
+          _id: finalExpert._id,
+          fullName: finalExpert.fullName,
+          email: finalExpert.email,
+          role: finalExpert.role,
+        },
+        createdCustomer: false,
         usedExistingAssignment: true,
       });
     }
 
-    // 2) No pre-existing expert found — fall back to the expert selected in UI
-    if (!expertId) return res.status(400).json({ error: "missing_expertId" });
+    // No existing records → assign to posted expert & create a new Customer
+    const firstItemTitle = Array.isArray(ab.items) && ab.items.length ? ab.items[0].title : "";
+    const lookingFor = mapLookingForFromTitle(firstItemTitle);
 
-    const emp = await Employee.findById(expertId).lean();
-    if (!emp) return res.status(400).json({ error: "invalid_expert" });
-
-    // lookingFor mapping from first product title
-    const firstTitle = Array.isArray(ab.items) && ab.items[0]?.title ? String(ab.items[0].title) : "";
-    let lookingFor = "Others";
-    if (/karela\s*jamun\s*fizz/i.test(firstTitle)) lookingFor = "Diabetes";
-    else if (/liver\s*fix/i.test(firstTitle)) lookingFor = "Fatty Liver";
-
-    // Create Customer doc (your requested behavior when no prior record exists)
     const customerDoc = new Customer({
       name: ab.customer?.name || "",
-      phone: ab.customer?.phone || "",
+      phone: phone,
       age: 0,
       location: "",
       lookingFor,
-      assignedTo: emp.fullName,
+      assignedTo: postedExpert.fullName,
       followUpDate: new Date(),
       leadSource: "Abandoned Cart",
       leadDate: ab.eventAt ? new Date(ab.eventAt) : new Date(),
+      // leadStatus default "New Lead"
     });
     await customerDoc.save();
+    createdCustomer = true;
 
-    // Persist assignment on AbandonedCheckout so it sticks on refresh
-    const now = new Date();
-    ab.assignedExpert = {
-      _id: emp._id,
-      fullName: emp.fullName,
-      email: emp.email,
-      role: emp.role,
-    };
-    ab.assignedAt = now;
-    await ab.save();
+    await AbandonedCheckout.updateOne(
+      { _id: ab._id },
+      {
+        $set: {
+          assignedExpert: {
+            _id: postedExpert._id,
+            fullName: postedExpert.fullName,
+            email: postedExpert.email,
+            role: postedExpert.role,
+          },
+          assignedAt: new Date(),
+        },
+      }
+    );
 
     return res.json({
       ok: true,
-      customerId: customerDoc._id,
-      assignedExpert: ab.assignedExpert,
-      assignedAt: now.toISOString(),
+      assignedAt: new Date().toISOString(),
+      expert: {
+        _id: postedExpert._id,
+        fullName: postedExpert.fullName,
+        email: postedExpert.email,
+        role: postedExpert.role,
+      },
+      createdCustomer,
       usedExistingAssignment: false,
+      customerId: customerDoc._id,
     });
   } catch (e) {
     console.error("assign-expert error:", e);

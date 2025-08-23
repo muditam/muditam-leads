@@ -52,10 +52,13 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Queries & filters
 AbandonedCheckoutSchema.index({ eventAt: -1, _id: -1 });
 AbandonedCheckoutSchema.index({ "customer.phone": 1 });
 AbandonedCheckoutSchema.index({ "items.title": 1 });
-// fast filter by assigned/unassigned
 AbandonedCheckoutSchema.index({ "assignedExpert._id": 1 });
+
+// ✅ Helps the webhook fallback upsert when eventId is absent
+AbandonedCheckoutSchema.index({ checkoutId: 1, eventAt: 1 });
 
 module.exports = mongoose.model("AbandonedCheckout", AbandonedCheckoutSchema);
