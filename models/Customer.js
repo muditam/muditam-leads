@@ -13,7 +13,7 @@ const CustomerSchema = new mongoose.Schema({
   leadStatus: { type: String, default: "New Lead" },
   subLeadStatus: { type: String },
   createdAt: { type: Date, default: Date.now },
-  dateAndTime: { type: Date, default: () => new Date() },  
+  dateAndTime: { type: Date, default: () => new Date() },   
 }); 
 
 module.exports = mongoose.model("Customer", CustomerSchema);
