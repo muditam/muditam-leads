@@ -8,7 +8,7 @@ const Lead = require("../models/Lead");
 
 const router = express.Router();
 
-/* helpers (same as you had) */
+/* helpers */
 function normalizePhoneTo10(phone) {
   if (!phone) return "";
   const digits = String(phone).replace(/\D/g, "");
@@ -100,6 +100,9 @@ function mapLookingForFromTitle(title = "") {
   if (/liver\s*fix/.test(t)) return "Fatty Liver";
   return "Others";
 }
+function escapeRegex(s = "") {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /* -------- GET /api/abandoned -------- */
 router.get("/", async (req, res) => {
@@ -110,14 +113,15 @@ router.get("/", async (req, res) => {
       end = "",
       page = 1,
       limit = 50,
-      assigned = "",   // 'assigned' | 'unassigned'
-      expertId = "",   // filter for one expert (agent view)
+      assigned = "",       // 'assigned' | 'unassigned'
+      expertId = "",       // ObjectId of Employee
+      expertEmail = "",    // fallback: filter by email
     } = req.query;
 
     const q = {};
 
     if (query) {
-      const rx = new RegExp(query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const rx = new RegExp(escapeRegex(query.trim()), "i");
       q.$or = [
         { "customer.name": rx },
         { "customer.email": rx },
@@ -137,15 +141,13 @@ router.get("/", async (req, res) => {
       if (end) q.eventAt.$lte = new Date(end);
     }
 
-    // Convert expertId -> ObjectId if valid
-    let expertObjectId = null;
-    if (expertId && mongoose.Types.ObjectId.isValid(expertId)) {
-      expertObjectId = new mongoose.Types.ObjectId(expertId);
-    }
-
+    // assigned / unassigned
     if (assigned === "assigned") {
-      if (expertObjectId) {
-        q["assignedExpert._id"] = expertObjectId;
+      // prefer id filter, else email
+      if (expertId && mongoose.Types.ObjectId.isValid(expertId)) {
+        q["assignedExpert._id"] = new mongoose.Types.ObjectId(expertId);
+      } else if (expertEmail) {
+        q["assignedExpert.email"] = new RegExp(`^${escapeRegex(expertEmail)}$`, "i");
       } else {
         q["assignedExpert._id"] = { $exists: true };
       }
@@ -153,9 +155,9 @@ router.get("/", async (req, res) => {
       q["assignedExpert._id"] = { $exists: false };
     }
 
+    // proactively auto-assign while viewing "unassigned"
     if (assigned === "unassigned") {
       await autoAssignUnassignedMatching(q, 200);
-      // (some may have moved to 'assigned' after auto-assign)
     }
 
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
@@ -193,6 +195,7 @@ router.post("/:id/assign-expert", async (req, res) => {
     const phone = ab?.customer?.phone;
     if (!phone) return res.status(400).json({ error: "missing_phone" });
 
+    // prefer existing expert (Customer/Lead) if any
     const existingExpert = await findExistingExpertForPhone(phone);
 
     if (existingExpert) {
@@ -225,6 +228,7 @@ router.post("/:id/assign-expert", async (req, res) => {
       });
     }
 
+    // otherwise, assign to posted expert + create a Customer
     const firstItemTitle = Array.isArray(ab.items) && ab.items.length ? ab.items[0].title : "";
     const lookingFor = mapLookingForFromTitle(firstItemTitle);
 
