@@ -6,7 +6,7 @@ const LeadSchema = new mongoose.Schema({
   name: String,
   contactNumber: String, 
   leadSource: String,    
-  enquiryFor: String, 
+  enquiryFor: String,  
   customerType: String, 
   agentAssigned: String,
   productPitched: [String], 

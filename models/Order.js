@@ -9,7 +9,9 @@ const OrderSchema = new mongoose.Schema({
   full_name: { type: String },
   carrier_title: { type: String },  
   selfUpdated: { type: Boolean, default: false },
-  last_updated_at: { type: Date, default: Date.now }
+  last_updated_at: { type: Date, default: Date.now },
+  email_count: { type: Number, default: 0 },
+  threadId: { type: String },  
 }, { timestamps: true }); 
 
 module.exports = mongoose.model('Order', OrderSchema); 

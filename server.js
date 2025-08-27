@@ -73,6 +73,8 @@ const abandonedRouter = require('./routes/abandoned');
 const financeDashboard = require("./routes/financeDashboard");
 const UndeliveredordersRoute = require('./operations/undelivered-orders');
 
+const zohoMailRoutes = require("./routes/zohoMail");
+
 const app = express();
 const PORT = process.env.PORT || 5001; 
 
@@ -390,6 +392,8 @@ app.use("/api/abandoned", abandonedRouter);
 app.use("/api/finance", financeDashboard);
 
 app.use('/api/orders', UndeliveredordersRoute);
+
+app.use("/api/zoho", zohoMailRoutes);
 
 mongoose.connect(process.env.MONGO_URI, { 
   useNewUrlParser: true,
@@ -913,7 +917,7 @@ app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
 });
 
 const upload = multer({
-  dest: "uploads/",
+  dest: "uploads/", 
   fileFilter: (req, file, cb) => {
     const filetypes = /csv|xlsx/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
@@ -932,14 +936,35 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
 
     const requiredFields = ["Date", "Name", "Contact No"];
     const errors = [];
+    const validLeads = [];
 
-    const leads = rows.map((row, index) => {
+    // Collect all numbers from uploaded file
+    const contactNumbers = rows
+      .map(row => row["Contact No"])
+      .filter(Boolean)
+      .map(num => String(num).trim());
+
+    // Find which already exist in DB
+    const existing = await Lead.find({
+      contactNumber: { $in: contactNumbers }
+    }).select("contactNumber");
+
+    const existingSet = new Set(existing.map(e => e.contactNumber));
+
+    rows.forEach((row, index) => {
       const missingFields = requiredFields.filter((field) => !row[field]);
       if (missingFields.length > 0) {
         errors.push(`Row ${index + 2} is missing mandatory fields: ${missingFields.join(", ")}`);
-        return null;
+        return;
       }
-      return {
+
+      // Skip if contact already exists
+      if (existingSet.has(String(row["Contact No"]).trim())) {
+        errors.push(`Row ${index + 2} skipped - contact number already exists`);
+        return;
+      }
+
+      validLeads.push({
         date: new Date().toISOString().split("T")[0],
         time: row.Time || "",
         name: row.Name,
@@ -968,20 +993,24 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
         repeatDosageOrdered: row["Repeat Dosage Ordered"] || "",
         retentionStatus: row["Retention Status"] || "",
         rtRemark: row["RT-Remark"] || "",
-      };
+      });
     });
 
-    if (errors.length > 0) {
+    if (errors.length > 0 && validLeads.length === 0) {
       return res.status(400).json({ success: false, error: errors.join(". ") });
     }
 
-    await Lead.insertMany(leads.filter(Boolean));
-    res.json({ success: true });
+    if (validLeads.length > 0) {
+      await Lead.insertMany(validLeads);
+    }
+
+    res.json({ success: true, skipped: errors, inserted: validLeads.length });
   } catch (err) {
     console.error("Error processing file:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
+
 
 
 app.get('/api/leads/check-duplicate', async (req, res) => {

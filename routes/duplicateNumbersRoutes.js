@@ -2,47 +2,66 @@
 
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
+const Employee = require("../models/Employee");
 
-// Helper to normalize numbers
+// ------------------------ Helpers ------------------------
+
 function normalizeNumber(num) {
   if (!num) return "";
   num = num.replace(/\D/g, ""); // Remove all non-digits
   return num.slice(-10); // Last 10 digits
 }
 
-// GET /api/duplicate-leads/duplicates
+function exprMatchLast10Digits(fieldPath, normalized) {
+  return {
+    $expr: {
+      $eq: [
+        {
+          $substr: [
+            { $replaceAll: { input: fieldPath, find: /\D/g, replacement: "" } },
+            -10,
+            10
+          ]
+        },
+        normalized
+      ]
+    }
+  };
+}
+
+const isValidObjectId = (v) => {
+  try {
+    return !!(v && mongoose.Types.ObjectId.isValid(v));
+  } catch {
+    return false;
+  }
+};
+
+// ------------------------ Endpoints ------------------------
+
+/**
+ * GET /api/duplicate-leads/duplicates
+ */
 router.get("/duplicates", async (req, res) => {
   try {
-    // 1. Fetch all leads with normalized numbers
     const leads = await Lead.aggregate([
       {
         $addFields: {
           normalizedNumber: {
             $let: {
-              vars: {
-                digits: {
-                  $regexFind: {
-                    input: "$contactNumber",
-                    regex: /(\d{10})$/
-                  }
-                }
-              },
+              vars: { digits: { $regexFind: { input: "$contactNumber", regex: /(\d{10})$/ } } },
               in: "$$digits.match"
             }
           }
         }
       },
-      {
-        $match: {
-          normalizedNumber: { $exists: true, $ne: null, $ne: "" }
-        }
-      },
+      { $match: { normalizedNumber: { $exists: true, $ne: null, $ne: "" } } },
       {
         $project: {
-          _id: 1,
-          name: 1,
+          _id: 1, name: 1,
           contactNumber: "$contactNumber",
           agentAssigned: 1,
           leadStatus: 1,
@@ -55,39 +74,26 @@ router.get("/duplicates", async (req, res) => {
       }
     ]);
 
-    // 2. Fetch all customers with normalized numbers
     const customers = await Customer.aggregate([
       {
         $addFields: {
           normalizedNumber: {
             $let: {
-              vars: {
-                digits: {
-                  $regexFind: {
-                    input: "$phone",
-                    regex: /(\d{10})$/
-                  }
-                }
-              },
+              vars: { digits: { $regexFind: { input: "$phone", regex: /(\d{10})$/ } } },
               in: "$$digits.match"
             }
           }
         }
       },
-      {
-        $match: {
-          normalizedNumber: { $exists: true, $ne: null, $ne: "" }
-        }
-      },
+      { $match: { normalizedNumber: { $exists: true, $ne: null, $ne: "" } } },
       {
         $project: {
-          _id: 1,
-          name: 1,
-          contactNumber: "$phone", // so frontend is consistent
-          agentAssigned: null, // customers don't have this
+          _id: 1, name: 1,
+          contactNumber: "$phone",
+          agentAssigned: null,
           leadStatus: "$leadStatus",
           salesStatus: null,
-          healthExpertAssigned: "$assignedTo", // map assignedTo
+          healthExpertAssigned: "$assignedTo",
           retentionStatus: null,
           normalizedNumber: 1,
           type: { $literal: "customer" }
@@ -95,10 +101,7 @@ router.get("/duplicates", async (req, res) => {
       }
     ]);
 
-    // 3. Combine leads & customers
     const all = leads.concat(customers);
-
-    // 4. Group by normalizedNumber
     const groupsMap = {};
     for (const doc of all) {
       const norm = doc.normalizedNumber;
@@ -106,12 +109,11 @@ router.get("/duplicates", async (req, res) => {
       groupsMap[norm].push(doc);
     }
 
-    // 5. Only include groups with more than 1 record (i.e. duplicates)
     const duplicateGroups = Object.entries(groupsMap)
       .filter(([_, group]) => group.length > 1)
       .map(([normalizedNumber, group]) => ({
         contactNumber: normalizedNumber,
-        leads: group // contains both leads and customers
+        leads: group
       }));
 
     res.json(duplicateGroups);
@@ -121,7 +123,9 @@ router.get("/duplicates", async (req, res) => {
   }
 });
 
-// PUT update duplicate group: Updates all leads with the normalized contact number
+/**
+ * PUT /api/duplicate-leads/update-duplicate-group
+ */
 router.put("/update-duplicate-group", async (req, res) => {
   try {
     const { oldContactNumber, updatedData } = req.body;
@@ -130,14 +134,7 @@ router.put("/update-duplicate-group", async (req, res) => {
     }
     const normalized = normalizeNumber(oldContactNumber);
     const updateResult = await Lead.updateMany(
-      {
-        $expr: {
-          $eq: [
-            { $substr: [{ $replaceAll: { input: "$contactNumber", find: /\D/g, replacement: "" } }, -10, 10] },
-            normalized
-          ]
-        }
-      },
+      exprMatchLast10Digits("$contactNumber", normalized),
       { $set: updatedData }
     );
     res.json({ message: "Duplicate group updated", updateResult });
@@ -147,9 +144,9 @@ router.put("/update-duplicate-group", async (req, res) => {
   }
 });
 
-// DELETE duplicate group: Deletes all leads with the normalized contact number
-
-// DELETE group: Deletes all leads and customers with the normalized contact number
+/**
+ * DELETE /api/duplicate-leads/duplicate-number
+ */
 router.delete("/duplicate-number", async (req, res) => {
   try {
     const { contactNumber } = req.body;
@@ -158,27 +155,10 @@ router.delete("/duplicate-number", async (req, res) => {
     }
     const normalized = normalizeNumber(contactNumber);
 
-    // Delete from Lead
-    const leadDeleteResult = await Lead.deleteMany({
-      $expr: {
-        $eq: [
-          { $substr: [{ $replaceAll: { input: "$contactNumber", find: /\D/g, replacement: "" } }, -10, 10] },
-          normalized
-        ]
-      }
-    });
+    const leadDeleteResult = await Lead.deleteMany(exprMatchLast10Digits("$contactNumber", normalized));
+    const customerDeleteResult = await Customer.deleteMany(exprMatchLast10Digits("$phone", normalized));
 
-    // Delete from Customer
-    const customerDeleteResult = await Customer.deleteMany({
-      $expr: {
-        $eq: [
-          { $substr: [{ $replaceAll: { input: "$phone", find: /\D/g, replacement: "" } }, -10, 10] },
-          normalized
-        ]
-      }
-    });
-
-    res.json({ 
+    res.json({
       message: "Leads and Customers with duplicate group deleted",
       leadDeleteResult,
       customerDeleteResult
@@ -188,15 +168,16 @@ router.delete("/duplicate-number", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
- 
-// DELETE row-wise: Delete a single record by its type and _id
+
+/**
+ * DELETE /api/duplicate-leads/:type/:id
+ */
 router.delete("/:type/:id", async (req, res) => {
   const { type, id } = req.params;
   try {
     if (type === "lead") {
-      await Lead.findByIdAndDelete(id); 
-      return res.json({ message: "Lead deleted" }); 
-      
+      await Lead.findByIdAndDelete(id);
+      return res.json({ message: "Lead deleted" });
     } else if (type === "customer") {
       await Customer.findByIdAndDelete(id);
       return res.json({ message: "Customer deleted" });
@@ -209,5 +190,176 @@ router.delete("/:type/:id", async (req, res) => {
   }
 });
 
+/**
+ * DELETE /api/duplicate-leads/cleanup-duplicates
+ *
+ * New rules:
+ * 1) If Lead retentionStatus = Active or Black and has a healthExpertAssigned → delete Customer.
+ * 2) Delete Customers if their assignedTo is an Employee with role = Admin.
+ * 3) Delete Leads with retentionStatus = Lost.
+ */
+router.delete("/cleanup-duplicates", async (req, res) => {
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+
+    // Leads
+    const leads = await Lead.aggregate([
+      {
+        $addFields: {
+          normalizedNumber: {
+            $let: {
+              vars: { digits: { $regexFind: { input: "$contactNumber", regex: /(\d{10})$/ } } },
+              in: "$$digits.match"
+            }
+          }
+        }
+      },
+      { $match: { normalizedNumber: { $exists: true, $ne: null, $ne: "" } } },
+      {
+        $project: {
+          _id: 1, name: 1,
+          contactNumber: 1,
+          healthExpertAssigned: 1,
+          retentionStatus: 1,
+          normalizedNumber: 1,
+          createdAt: 1, updatedAt: 1,
+          type: { $literal: "lead" }
+        }
+      }
+    ]).session(session);
+
+    // Customers
+    const customers = await Customer.aggregate([
+      {
+        $addFields: {
+          normalizedNumber: {
+            $let: {
+              vars: { digits: { $regexFind: { input: "$phone", regex: /(\d{10})$/ } } },
+              in: "$$digits.match"
+            }
+          }
+        }
+      },
+      { $match: { normalizedNumber: { $exists: true, $ne: null, $ne: "" } } },
+      {
+        $project: {
+          _id: 1, name: 1,
+          phone: 1,
+          assignedTo: 1,
+          normalizedNumber: 1,
+          createdAt: 1, updatedAt: 1,
+          type: { $literal: "customer" }
+        }
+      }
+    ]).session(session);
+
+    // Group
+    const groups = new Map();
+    for (const l of leads) {
+      if (!groups.has(l.normalizedNumber)) groups.set(l.normalizedNumber, { leads: [], customers: [] });
+      groups.get(l.normalizedNumber).leads.push(l);
+    }
+    for (const c of customers) {
+      if (!groups.has(c.normalizedNumber)) groups.set(c.normalizedNumber, { leads: [], customers: [] });
+      groups.get(c.normalizedNumber).customers.push(c);
+    }
+
+    // Preload Employee docs safely
+    const assignedVals = [];
+    for (const { customers: C } of groups.values()) {
+      for (const c of C) if (c.assignedTo) assignedVals.push(c.assignedTo);
+    }
+
+    const objIds = [];
+    const names = [];
+    for (const v of assignedVals) {
+      if (isValidObjectId(v)) objIds.push(new mongoose.Types.ObjectId(v));
+      else if (typeof v === "string" && v.trim()) names.push(v.trim());
+    }
+
+    const empQueryOr = [];
+    if (objIds.length) empQueryOr.push({ _id: { $in: objIds } });
+    if (names.length) {
+      empQueryOr.push({ fullName: { $in: names } });
+      empQueryOr.push({ email: { $in: names } });
+    }
+
+    let empDocs = [];
+    if (empQueryOr.length) {
+      empDocs = await Employee.find({ $or: empQueryOr }).session(session);
+    }
+
+    const empById = new Map(empDocs.map(e => [String(e._id), e]));
+    const empByName = new Map(empDocs.map(e => [e.fullName?.toLowerCase(), e]));
+    const empByEmail = new Map(empDocs.map(e => [e.email?.toLowerCase(), e]));
+
+    function getEmployee(value) {
+      if (!value) return null;
+      if (isValidObjectId(value)) return empById.get(String(value));
+      const k = String(value).toLowerCase();
+      return empByName.get(k) || empByEmail.get(k);
+    }
+
+    // Decide deletions
+    const toDeleteLeadIds = new Set();
+    const toDeleteCustomerIds = new Set();
+
+    for (const { leads: L, customers: C } of groups.values()) {
+      // Rule 1: Lead Active/Black + HE → delete Customer
+      const hasActiveOrBlackLead = L.some(l =>
+        ["active", "black"].includes((l.retentionStatus || "").toLowerCase()) &&
+        !!l.healthExpertAssigned
+      );
+      if (hasActiveOrBlackLead && C.length > 0) {
+        for (const cust of C) toDeleteCustomerIds.add(String(cust._id));
+      }
+
+      // Rule 2: Customers assigned to Admin → delete
+      for (const cust of C) {
+        const emp = getEmployee(cust.assignedTo);
+        if (emp && emp.role && emp.role.toLowerCase() === "admin") {
+          toDeleteCustomerIds.add(String(cust._id));
+        }
+      }
+
+      // Rule 3: Lost Leads → delete
+      for (const l of L) {
+        if ((l.retentionStatus || "").toLowerCase() === "lost") {
+          toDeleteLeadIds.add(String(l._id));
+        }
+      }
+    }
+
+    // Execute deletions
+    let leadDeleteResult = { deletedCount: 0 };
+    let customerDeleteResult = { deletedCount: 0 };
+
+    if (toDeleteLeadIds.size > 0) {
+      leadDeleteResult = await Lead.deleteMany({ _id: { $in: [...toDeleteLeadIds] } }, { session });
+    }
+    if (toDeleteCustomerIds.size > 0) {
+      customerDeleteResult = await Customer.deleteMany({ _id: { $in: [...toDeleteCustomerIds] } }, { session });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.json({
+      message: "Cleanup completed with new rules",
+      summary: {
+        leadsDeleted: leadDeleteResult.deletedCount,
+        customersDeleted: customerDeleteResult.deletedCount
+      },
+      deletedLeadIds: [...toDeleteLeadIds],
+      deletedCustomerIds: [...toDeleteCustomerIds]
+    });
+  } catch (err) {
+    await session.abortTransaction().catch(() => {});
+    session.endSession();
+    console.error("Error in cleanup-duplicates:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
 module.exports = router;

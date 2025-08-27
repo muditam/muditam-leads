@@ -16,7 +16,7 @@ const s3 = new AWS.S3({
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// Get all escalations
+// Get all escalations 
 router.get('/', async (req, res) => {
   try {
     const escalations = await Escalation.find();
