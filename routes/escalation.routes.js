@@ -16,13 +16,53 @@ const s3 = new AWS.S3({
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// Get all escalations 
 router.get('/', async (req, res) => {
   try {
-    const escalations = await Escalation.find();
-    res.json(escalations);
+    const {
+      page = 1,
+      limit = 50,
+      status,            // e.g. "Open,In Progress" or "Closed"
+      assignedTo,
+      search,            // matches orderId/name/contactNumber
+      sortBy = 'createdAt',
+      order = 'desc',
+    } = req.query;
+
+    const filter = {};
+    if (status) {
+      filter.status = { $in: status.split(',').map(s => s.trim()) };
+    }
+    if (assignedTo) {
+      filter.assignedTo = assignedTo;
+    }
+    if (search && String(search).trim()) {
+      const s = String(search).trim();
+      filter.$or = [
+        { orderId:       new RegExp(s, 'i') },
+        { name:          new RegExp(s, 'i') },
+        { contactNumber: new RegExp(s, 'i') },
+      ];
+    }
+
+    const sort = { [sortBy]: order === 'asc' ? 1 : -1 };
+    const pageNum = Math.max(1, Number(page));
+    const perPage = Math.min(200, Math.max(1, Number(limit)));
+    const skip = (pageNum - 1) * perPage;
+
+    const [data, total] = await Promise.all([
+      Escalation.find(filter)
+        .sort(sort)
+        .skip(skip)
+        .limit(perPage)
+        .select('date orderId name contactNumber agentName query attachedFileUrls status assignedTo remark resolvedDate createdAt')
+        .lean(),  // much faster, smaller payloads
+      Escalation.countDocuments(filter),
+    ]);
+
+    res.json({ data, total, page: pageNum, limit: perPage });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Failed to fetch escalations:', err);
+    res.status(500).json({ error: 'Failed to fetch escalations' });
   }
 });
 
@@ -93,7 +133,6 @@ router.put('/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to update escalation' });
   }
 });
- 
 
 // Delete escalation by ID
 router.delete('/:id', async (req, res) => {
@@ -108,5 +147,4 @@ router.delete('/:id', async (req, res) => {
     }
   });
   
-
 module.exports = router;

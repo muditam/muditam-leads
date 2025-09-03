@@ -42,9 +42,10 @@ const LeadSchema = new mongoose.Schema({
     }
   ],  
   rtSubcells: [
-    {
+    { 
       date: String,
       value: String,
+      by: String,
     }
   ],
   details: {

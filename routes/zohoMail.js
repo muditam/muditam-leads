@@ -69,30 +69,37 @@ async function getAccountId(token) {
 }
 
 /* ---------------- Utils ---------------- */
+// Updated render function to convert \n to <br> for HTML emails
 function render(template, v) {
   if (!template) return "";
-   const vars = Object.fromEntries(
-     Object.entries(v || {}).map(([k, val]) => [String(k).toLowerCase(), val ?? ""])
-   );
-  // also alias common synonyms
-   if (vars["order_id"] && !vars["order id"]) vars["order id"] = vars["order_id"];
-   if (vars["tracking_number"] && !vars["awb"]) vars["awb"] = vars["tracking_number"];
-   if (vars["order_date"] && !vars["order date"]) vars["order date"] = vars["order_date"];
-   if (vars["agent_name"] && !vars["agent name"]) vars["agent name"] = vars["agent_name"];
- 
-   let out = String(template);
-   // {{ token }}
-   out = out.replace(/{{\s*([^}]+)\s*}}/gi, (_, raw) => {
-     const key = String(raw).trim().toLowerCase();
-     return vars[key] ?? "";
-   });
-   // { token } (legacy)
-   out = out.replace(/{\s*([^}]+)\s*}/gi, (_, raw) => {
-     const key = String(raw).trim().toLowerCase();
-     return vars[key] ?? "";
-   });
-   return out;
- }
+  const vars = Object.fromEntries(
+    Object.entries(v || {}).map(([k, val]) => [String(k).toLowerCase(), val ?? ""])
+  );
+  
+  // Common variable aliases
+  if (vars["order_id"] && !vars["order id"]) vars["order id"] = vars["order_id"];
+  if (vars["tracking_number"] && !vars["awb"]) vars["awb"] = vars["tracking_number"];
+  if (vars["order_date"] && !vars["order date"]) vars["order date"] = vars["order_date"];
+  if (vars["agent_name"] && !vars["agent name"]) vars["agent name"] = vars["agent_name"];
+
+  let out = String(template);
+  // Handle {{ token }} style
+  out = out.replace(/{{\s*([^}]+)\s*}}/gi, (_, raw) => {
+    const key = String(raw).trim().toLowerCase();
+    return vars[key] ?? "";
+  });
+
+  // Handle legacy { token } style
+  out = out.replace(/{\s*([^}]+)\s*}/gi, (_, raw) => {
+    const key = String(raw).trim().toLowerCase();
+    return vars[key] ?? "";
+  });
+
+  // Convert newlines to <br> for HTML formatting
+  out = out.replace(/\n/g, "<br>");
+
+  return out;
+}
 
 function stripHtml(html = "") {
   return String(html)
@@ -119,25 +126,25 @@ const SUBJECT_TEMPLATES = {
  };
 
 const CONTENT_TEMPLATES = {
-   fakeRemark:
-     "Dear Team,\nThe tracking for AWB {{tracking_number}} shows Fake Remark, which is incorrect. Customer wants the Shipment on priority basis. Kindly deliver at the earliest.\nRegards,\n{{Agent_Name}}",
-   notReceived:
-     "Dear Team,\nAWB {{tracking_number}} is marked delivered, but the consignee has not received it. Please check and resolve urgently.\nRegards,\n{{Agent_Name}}",
-   delayed:
-     "Dear Team,\nAWB {{tracking_number}} dispatched on {{order date}} has crossed the expected delivery time. Kindly arrange delivery without further delay.\nRegards,\n{{Agent_Name}}",
-   doorstep:
-     "Dear Team,\nKindly ensure AWB {{tracking_number}} is delivered at the customer’s doorstep as committed. Please arrange delivery on priority.\nRegards,\n{{Agent_Name}}",
-   wrongOtp:
-     "Dear Team,\nFor AWB {{tracking_number}}, the courier boy took OTP from the customer under false pretext for cancellation. Please investigate and reattempt delivery immediately.\nRegards,\n{{Agent_Name}}",
-   codToPrepaid:
-     "Dear Team,\nPlease change the payment mode for AWB {{tracking_number}} from COD to Prepaid and process delivery accordingly.\nRegards,\n{{Agent_Name}}",
-   rto:
-     "Dear Team,\nPlease initiate RTO for AWB {{tracking_number}} and confirm once updated in the system.\nRegards,\n{{Agent_Name}}",
-   urgentDelivery:
-     "Dear Team,\nThis shipment AWB {{tracking_number}} is critical. Kindly ensure delivery to the customer today without fail.\nRegards,\n{{Agent_Name}}",
- };
+  fakeRemark:
+    "Dear Team,\n\nThe tracking for AWB {{tracking_number}} shows Fake Remark,\nwhich is incorrect.\nCustomer wants the Shipment on priority basis.\nKindly deliver at the earliest.\n\nRegards,\n{{Agent_Name}}",
+  notReceived:
+    "Dear Team,\n\nAWB {{tracking_number}} is marked delivered,\nbut the consignee has not received it.\nPlease check and resolve urgently.\n\nRegards,\n{{Agent_Name}}",
+  delayed:
+    "Dear Team,\n\nAWB {{tracking_number}} dispatched on {{order date}} has crossed the expected delivery time.\nKindly arrange delivery without further delay.\n\nRegards,\n{{Agent_Name}}",
+  doorstep:
+    "Dear Team,\n\nKindly ensure AWB {{tracking_number}} is delivered at the customer’s doorstep as committed.\nPlease arrange delivery on priority.\n\nRegards,\n{{Agent_Name}}",
+  wrongOtp:
+    "Dear Team,\n\nFor AWB {{tracking_number}}, the courier boy took OTP from the customer under false pretext for cancellation.\nPlease investigate and reattempt delivery immediately.\n\nRegards,\n{{Agent_Name}}",
+  codToPrepaid:
+    "Dear Team,\n\nPlease change the payment mode for AWB {{tracking_number}} from COD to Prepaid and process delivery accordingly.\n\nRegards,\n{{Agent_Name}}",
+  rto:
+    "Dear Team,\n\nPlease initiate RTO for AWB {{tracking_number}} and confirm once updated in the system.\n\nRegards,\n{{Agent_Name}}",
+  urgentDelivery:
+    "Dear Team,\n\nThis shipment AWB {{tracking_number}} is critical.\nKindly ensure delivery to the customer today without fail.\n\nRegards,\n{{Agent_Name}}",
+};
 
-// Normalize "Name <email@x>" → "email@x"
+// Normalize "Name <email@x>" → "email@x" 
 function toEmail(s = "") {
   const m = String(s).match(/<([^>]+)>/);
   return (m ? m[1] : s).trim().toLowerCase();
@@ -311,18 +318,25 @@ router.post("/send-email", async (req, res) => {
 const upload = multer({ dest: "uploads/" });
 
 async function sendOneEmail({ token, accountId, from, toAddress, subject, content, files }) {
+  // Ensure the content has <br> for line breaks in HTML
+  const formattedContent = content.replace(/\n/g, "<br>");
+
   const url = `${MAIL_BASE}/api/accounts/${accountId}/messages`;
+
   if (files && files.length) {
     const fd = new FormData();
     fd.append("fromAddress", from);
     fd.append("toAddress", toAddress);
     fd.append("subject", subject);
-    fd.append("content", content);
+    fd.append("content", formattedContent); // Use the formatted content
     fd.append("askReceipt", "no");
     fd.append("mailFormat", "html");
+    
+    // Add attachments if present
     files.forEach((f) => {
       fd.append("attachments", fs.createReadStream(f.path), { filename: f.originalname });
     });
+
     const r = await axios.post(url, fd, {
       headers: { Authorization: `Zoho-oauthtoken ${token}`, ...fd.getHeaders() },
       maxContentLength: Infinity,
@@ -335,10 +349,11 @@ async function sendOneEmail({ token, accountId, from, toAddress, subject, conten
       fromAddress: from,
       toAddress,
       subject,
-      content,
+      content: formattedContent, // Use the formatted content
       askReceipt: "no",
-      mailFormat: "html",
+      mailFormat: "html", // Ensure mail format is HTML for line breaks
     };
+
     const r = await axios.post(url, payload, {
       headers: {
         Authorization: `Zoho-oauthtoken ${token}`,

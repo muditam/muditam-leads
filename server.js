@@ -75,6 +75,9 @@ const UndeliveredordersRoute = require('./operations/undelivered-orders');
 
 const zohoMailRoutes = require("./routes/zohoMail");
 
+const smartfloRoutes = require("./routes/smartflo"); 
+const smartfloRealtime = require("./routes/smartflo-realtime");
+
 const app = express();
 const PORT = process.env.PORT || 5001; 
 
@@ -367,14 +370,14 @@ app.use(Addemployee);
 
 app.use('/api', authRoutes);
 
-app.use('/api', clickToCallRoutes);
+app.use('/api/dialer', clickToCallRoutes); 
 
-app.use("/api/finance", financeRoutes);
+app.use("/api/finance", financeRoutes); 
 
 app.use("/api/razorpay", razorpaySettlementRoutes);
 
 app.use("/api/easebuzz", GokwikSettlementRoutes);
-
+  
 app.use("/api/phonepe", phonepeFinance);
 
 app.use("/api/bluedart", Bluedart);
@@ -395,7 +398,11 @@ app.use('/api/orders', UndeliveredordersRoute);
 
 app.use("/api/zoho", zohoMailRoutes);
 
-mongoose.connect(process.env.MONGO_URI, { 
+app.use("/api/smartflo", smartfloRoutes);
+
+app.use("/api/smartflo", smartfloRealtime);
+
+mongoose.connect(process.env.MONGO_URI, {  
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
@@ -421,7 +428,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
       console.error("No orders found in response:", response.data);
       return allOrders;
     }
-
+ 
     const fetchedOrders = response.data.orders.map(order => {
       let phone = '';
       if (order.customer && order.customer.default_address && order.customer.default_address.phone) {
@@ -434,7 +441,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
         order_id: order.name,
         name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : '',
         contact_number: phone,
-        created_at: order.created_at,
+        created_at: order.created_at, 
         total_price: order.total_price,
         payment_gateway_names: order.payment_gateway_names,
         line_items: order.line_items,
