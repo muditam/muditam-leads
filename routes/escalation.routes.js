@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const AWS = require('aws-sdk');
 const Escalation = require('../models/escalation.model');
+const Order = require('../models/Order');
 
 // Configure AWS S3 (Wasabi)
 const s3 = new AWS.S3({
@@ -26,7 +27,7 @@ router.get('/', async (req, res) => {
       search,            // matches orderId/name/contactNumber
       sortBy = 'createdAt',
       order = 'desc',
-    } = req.query;
+    } = req.query; 
 
     const filter = {};
     if (status) {
@@ -54,13 +55,13 @@ router.get('/', async (req, res) => {
         .sort(sort)
         .skip(skip)
         .limit(perPage)
-        .select('date orderId name contactNumber agentName query attachedFileUrls status assignedTo remark resolvedDate createdAt')
+        .select('date orderId name contactNumber agentName query attachedFileUrls status assignedTo remark resolvedDate reason createdAt trackingId')
         .lean(),  // much faster, smaller payloads
       Escalation.countDocuments(filter),
     ]);
 
     res.json({ data, total, page: pageNum, limit: perPage });
-  } catch (err) {
+  } catch (err) { 
     console.error('Failed to fetch escalations:', err);
     res.status(500).json({ error: 'Failed to fetch escalations' });
   }
@@ -85,18 +86,39 @@ router.post('/', upload.array('attachedFiles'), async (req, res) => {
       }
     }
 
+    const rawOrder = String(req.body.orderId || '').trim();
+
+    if (/#/i.test(rawOrder) || /^\s*#\s*ma/i.test(rawOrder)) {
+     return res.status(400).json({ error: 'Add order id without #MA' });
+    }
+
+    const digits = rawOrder.replace(/\D/g, '');
+    if (!digits) {
+      return res.status(400).json({ error: 'Invalid order id' });
+    }
+    const normalizedOrderId = `MA${digits}`;
+ 
+    const orderDoc = await Order.findOne({
+      order_id: { $in: [normalizedOrderId, `#${normalizedOrderId}`] }
+    }).select('tracking_number').lean();
+
+    const trackingId = orderDoc?.tracking_number || '';
+
+
     const escalation = new Escalation({
       date: req.body.date,
-      orderId: req.body.orderId,
+      orderId: normalizedOrderId,
       name: req.body.name,
       contactNumber: req.body.contactNumber,
       agentName: req.body.agentName,
       query: req.body.query,
-      attachedFileUrls: fileUrls, // plural array here
+      attachedFileUrls: fileUrls,  
       status: req.body.status || 'Open',
       assignedTo: req.body.assignedTo || '',
-      remark: req.body.remark || '',
+      remark: req.body.remark || '', 
       resolvedDate: req.body.resolvedDate || '',
+      reason: req.body.reason || '',
+      trackingId,
     });
 
     const saved = await escalation.save();

@@ -95,7 +95,7 @@ router.post("/campaign", async (req, res) => {
     const missing = [];
     if (!payload.disposition_list) missing.push("disposition_list (or SMARTFLO_DISPOSITION_LIST_ID env)");
     if (!payload.outbound_caller_id) missing.push("outbound_caller_id (from Employee.callerId)");
-    if (!payload.agent || !payload.agent.length) missing.push("agent (from Employee.agentNumber)");
+    if (!payload.agent || !payload.agent.length) missing.push("agent (from Employee.agentNumber)"); 
 
     if (missing.length) {
       return res.status(400).json({

@@ -15,6 +15,7 @@ const https = require('https');
 const cron = require('node-cron');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
+const compression = require('compression');
 const TransferRequest = require('./models/TransferRequests');
 const shopifyProductsRoute = require("./services/shopifyProducts"); 
 const shopifyOrdersRoute = require("./services/shopifyOrders");
@@ -76,14 +77,18 @@ const UndeliveredordersRoute = require('./operations/undelivered-orders');
 const zohoMailRoutes = require("./routes/zohoMail");
 
 const smartfloRoutes = require("./routes/smartflo"); 
-const smartfloRealtime = require("./routes/smartflo-realtime");
+
+const ReturnDeliveredRoutes = require("./routes/ReturnDelivered"); 
+
+const dietTemplatesRouter = require("./routes/dietTemplatesadmin"); 
 
 const app = express();
 const PORT = process.env.PORT || 5001; 
+app.use(compression());
 
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];  
 
-dns.setServers(['8.8.8.8', '1.1.1.1']);
+dns.setServers(['8.8.8.8', '1.1.1.1']); 
 
 const rawSaver = (req, res, buf) => { req.rawBody = buf; };
 
@@ -400,14 +405,15 @@ app.use("/api/zoho", zohoMailRoutes);
 
 app.use("/api/smartflo", smartfloRoutes);
 
-app.use("/api/smartflo", smartfloRealtime);
+app.use("/api", ReturnDeliveredRoutes); 
+
+app.use("/api/diet-templates", dietTemplatesRouter);
 
 mongoose.connect(process.env.MONGO_URI, {  
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err)); 
-
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
@@ -642,25 +648,29 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
   return totalFetched;
 };
 
+ 
+const phoneLast10 = (v = "") => String(v).replace(/\D/g, "").slice(-10);
 
-// POST /api/leads/by-phones
+ 
 app.post('/api/leads/by-phones', async (req, res) => {
   const { phoneNumbers } = req.body;
   if (!Array.isArray(phoneNumbers)) {
     return res.status(400).json({ message: 'phoneNumbers should be an array' });
   }
 
-  const cleanedPhones = phoneNumbers.map((phone) => phone.replace(/[^\d]/g, ""));
-  try {
-    const leads = await Lead.find({
-      contactNumber: { $in: cleanedPhones },
-    });
+  // Create unique list of last-10 digits
+  const last10List = [...new Set(phoneNumbers.map((p) => phoneLast10(p)).filter(Boolean))];
+  // Build regex array that matches numbers ending with those 10 digits
+  const regexes = last10List.map((p) => new RegExp(`${p}$`));
 
+  try {
+    const leads = await Lead.find({ contactNumber: { $in: regexes } });
     res.json(leads);
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+
 
 
 app.post('/api/shipway/fetch-orders', async (req, res) => {
@@ -1020,13 +1030,32 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
 
 
 
+// app.get('/api/leads/check-duplicate', async (req, res) => {
+//   const { contactNumber } = req.query;
+
+//   try {
+//     const last10 = normalizePhone(contactNumber);
+//     const lead = await Lead.findOne({ contactNumber: { $regex: new RegExp(`${last10}$`) } });
+//     if (lead) {
+//       return res.status(200).json({ exists: true, leadId: lead._id });
+//     }
+//     return res.status(200).json({ exists: false });
+//   } catch (error) {
+//     console.error("Error checking duplicate:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// });
+
 app.get('/api/leads/check-duplicate', async (req, res) => {
   const { contactNumber } = req.query;
 
   try {
-    const lead = await Lead.findOne({ contactNumber });
+    const last10 = phoneLast10(contactNumber);
+    // Match any stored number that ENDS with these 10 digits (works with +91/0/91 stored values)
+    const lead = await Lead.findOne({ contactNumber: { $regex: new RegExp(`${last10}$`) } });
+
     if (lead) {
-      return res.status(200).json({ exists: true });
+      return res.status(200).json({ exists: true, leadId: lead._id });
     }
     return res.status(200).json({ exists: false });
   } catch (error) {
@@ -1040,7 +1069,7 @@ app.get('/api/leads', async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus, sortBy = '_id', sortOrder = 'desc' } = req.query;
   const filterCriteria = JSON.parse(filters);
 
-  const parseDate = (dateString) => {
+  const parseDate = (dateString) => { 
     if (!dateString) return null;
     const parsedDate = new Date(dateString);
     return isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString().split("T")[0];
@@ -1135,8 +1164,23 @@ app.get('/api/leads', async (req, res) => {
 });
 
 
+// app.post('/api/leads', async (req, res) => {
+//   try {
+//     const newLead = new Lead(req.body);
+//     await newLead.save();
+//     res.status(201).json({ message: 'Lead added successfully', lead: newLead });
+//   } catch (error) {
+//     console.error('Error adding lead:', error);
+//     res.status(500).json({ message: 'Error adding lead', error });
+//   }
+// });
+
 app.post('/api/leads', async (req, res) => {
   try {
+    if (req.body.contactNumber) {
+      req.body.contactNumber = phoneLast10(req.body.contactNumber);
+    }
+
     const newLead = new Lead(req.body);
     await newLead.save();
     res.status(201).json({ message: 'Lead added successfully', lead: newLead });
@@ -1147,10 +1191,35 @@ app.post('/api/leads', async (req, res) => {
 });
 
 
+
+// app.put('/api/leads/:id', async (req, res) => {
+//   const { id } = req.params;
+
+//   try {
+//     const updatedLead = await Lead.findByIdAndUpdate(id, req.body, {
+//       new: true,
+//       runValidators: true, 
+//     });
+
+//     if (!updatedLead) {
+//       return res.status(404).json({ message: 'Lead not found' });
+//     }
+
+//     res.status(200).json({ message: 'Lead updated successfully', lead: updatedLead });
+//   } catch (error) {
+//     console.error('Error updating lead:', error);
+//     res.status(500).json({ message: 'Error updating lead', error: error.message });
+//   }
+// });
+
 app.put('/api/leads/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
+    if (req.body.contactNumber) {
+      req.body.contactNumber = phoneLast10(req.body.contactNumber);
+    }
+
     const updatedLead = await Lead.findByIdAndUpdate(id, req.body, {
       new: true,
       runValidators: true,
@@ -1166,6 +1235,7 @@ app.put('/api/leads/:id', async (req, res) => {
     res.status(500).json({ message: 'Error updating lead', error: error.message });
   }
 });
+
 
 
 app.delete('/api/leads/:id', async (req, res) => {
@@ -1668,6 +1738,22 @@ app.get('/api/consultation-history', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   } 
+});
+
+app.post('/api/webhooks/crm', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    console.log('CRM webhook received:', JSON.stringify(payload));
+
+    // TODO: Match with your CRM (by phone/email/orderId) and upsert as needed. 
+    // Example:
+    // await upsertCustomerInCRM(payload);
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Webhook error:', err);
+    res.status(500).json({ success: false });
+  }
 });
 
 // Start Server

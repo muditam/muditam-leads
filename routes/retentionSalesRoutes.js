@@ -1368,75 +1368,166 @@ router.get('/api/retention-sales/all', async (req, res) => {
 });
 
 
+// router.get('/api/retention-sales/allapi', async (req, res) => {
+//   try {
+//     const { orderCreatedBy } = req.query;
+//     const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
+//     const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {}; 
+
+//     // Step 1: Fetch data in parallel
+//     const [retentionSales, myOrders] = await Promise.all([
+//       RetentionSales.find(retentionQuery).lean(),
+//       MyOrder.find(myOrderQuery).lean(),
+//     ]);
+
+//     // Step 2: Transform MyOrder entries
+//     const transformedMyOrders = myOrders.map((order) => {
+//       const upsellAmount = Number(order.upsellAmount || 0);
+//       const partialPayment = Number(order.partialPayment || 0);
+//       const totalPrice = Number(order.totalPrice || 0);
+//       return {
+//         _id: order._id,
+//         date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "", 
+//         name: order.customerName,
+//         contactNumber: order.phone,
+//         productsOrdered: order.productOrdered,
+//         dosageOrdered: order.dosageOrdered,
+//         upsellAmount,
+//         partialPayment,
+//         amountPaid: totalPrice + partialPayment + upsellAmount,
+//         modeOfPayment: order.paymentMethod,
+//         shipway_status: order.shipway_status || "",
+//         orderId: order.orderId,
+//         orderCreatedBy: order.agentName,
+//         remarks: order.selfRemark || "",
+//         source: "MyOrder"
+//       };
+//     });
+
+//     const combinedData = [...retentionSales, ...transformedMyOrders];
+
+//     // Step 3: Batch fetch shipway data (only for missing statuses and valid orderId)
+//     const orderIdsToFetch = combinedData
+//       .filter(sale => sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === ""))
+//       .map(sale => sale.orderId.replace(/^#/, ""));
+
+//     const uniqueOrderIds = [...new Set(orderIdsToFetch)];
+
+//     const orderRecords = await Order.find({
+//       order_id: { $in: uniqueOrderIds }
+//     }, { order_id: 1, shipment_status: 1 }).lean();
+
+//     const orderMap = {};
+//     orderRecords.forEach(order => {
+//       orderMap[order.order_id] = order.shipment_status;
+//     });
+
+//     // Step 4: Fill missing shipway_status from map
+//     combinedData.forEach(sale => {
+//       if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
+//         const normalizedId = sale.orderId.replace(/^#/, "");
+//         sale.shipway_status = orderMap[normalizedId] || "";
+//       }
+//     });
+
+//     // Step 5: Sort descending by date
+//     combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+//     res.status(200).json(combinedData);
+//   } catch (error) {
+//     console.error("Error fetching combined retention sales:", error);
+//     res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
+//   }
+// });
+
 router.get('/api/retention-sales/allapi', async (req, res) => {
   try {
     const { orderCreatedBy } = req.query;
-    const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
-    const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {}; 
 
-    // Step 1: Fetch data in parallel
+    const toInFilter = (q) => {
+      if (!q) return undefined;
+      const arr = Array.isArray(q) ? q : [q];
+      const clean = arr.map(s => String(s).trim()).filter(Boolean);
+      return clean.length ? { $in: clean } : undefined;
+    };
+
+    const agentFilter = toInFilter(orderCreatedBy);
+    const retentionQuery = agentFilter ? { orderCreatedBy: agentFilter } : {};
+    const myOrderQuery   = agentFilter ? { agentName: agentFilter } : {};
+
+    // Only select the fields you actually render in the table
     const [retentionSales, myOrders] = await Promise.all([
-      RetentionSales.find(retentionQuery).lean(),
-      MyOrder.find(myOrderQuery).lean(),
+      RetentionSales.find(retentionQuery)
+        .select('date name contactNumber productsOrdered dosageOrdered amountPaid modeOfPayment orderId shipway_status orderCreatedBy remarks')
+        .lean(),
+      MyOrder.find(myOrderQuery)
+        .select('orderDate customerName phone productOrdered dosageOrdered upsellAmount partialPayment totalPrice paymentMethod shipway_status orderId agentName selfRemark')
+        .lean(),
     ]);
 
-    // Step 2: Transform MyOrder entries
     const transformedMyOrders = myOrders.map((order) => {
-      const upsellAmount = Number(order.upsellAmount || 0);
+      const upsellAmount   = Number(order.upsellAmount || 0);
       const partialPayment = Number(order.partialPayment || 0);
-      const totalPrice = Number(order.totalPrice || 0);
+      const totalPrice     = Number(order.totalPrice || 0);
+      const dt = order.orderDate ? new Date(order.orderDate) : null;
+
       return {
         _id: order._id,
-        date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "", 
-        name: order.customerName,
-        contactNumber: order.phone,
-        productsOrdered: order.productOrdered,
-        dosageOrdered: order.dosageOrdered,
+        date: dt ? dt.toISOString().split('T')[0] : '',
+        name: order.customerName ?? '',
+        contactNumber: order.phone ?? '',
+        productsOrdered: order.productOrdered ?? '',
+        dosageOrdered: order.dosageOrdered ?? '',
         upsellAmount,
         partialPayment,
         amountPaid: totalPrice + partialPayment + upsellAmount,
-        modeOfPayment: order.paymentMethod,
-        shipway_status: order.shipway_status || "",
-        orderId: order.orderId,
-        orderCreatedBy: order.agentName,
-        remarks: order.selfRemark || "",
-        source: "MyOrder"
+        modeOfPayment: order.paymentMethod ?? '',
+        shipway_status: order.shipway_status ?? '',
+        orderId: order.orderId ?? '',
+        orderCreatedBy: order.agentName ?? '',
+        remarks: order.selfRemark ?? '',
+        source: 'MyOrder',
       };
     });
 
     const combinedData = [...retentionSales, ...transformedMyOrders];
 
-    // Step 3: Batch fetch shipway data (only for missing statuses and valid orderId)
+    // Backfill shipway status only where missing
     const orderIdsToFetch = combinedData
-      .filter(sale => sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === ""))
-      .map(sale => sale.orderId.replace(/^#/, ""));
-
+      .filter(s => s.orderId && (!s.shipway_status || !s.shipway_status.trim()))
+      .map(s => String(s.orderId).replace(/^#/, ''));
     const uniqueOrderIds = [...new Set(orderIdsToFetch)];
 
-    const orderRecords = await Order.find({
-      order_id: { $in: uniqueOrderIds }
-    }, { order_id: 1, shipment_status: 1 }).lean();
+    let orderMap = {};
+    if (uniqueOrderIds.length) {
+      const orderRecords = await Order.find(
+        { order_id: { $in: uniqueOrderIds } },
+        { order_id: 1, shipment_status: 1, _id: 0 }
+      ).lean();
+      orderMap = orderRecords.reduce((acc, o) => {
+        acc[o.order_id] = o.shipment_status || '';
+        return acc;
+      }, {});
+    }
 
-    const orderMap = {};
-    orderRecords.forEach(order => {
-      orderMap[order.order_id] = order.shipment_status;
-    });
-
-    // Step 4: Fill missing shipway_status from map
-    combinedData.forEach(sale => {
-      if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
-        const normalizedId = sale.orderId.replace(/^#/, "");
-        sale.shipway_status = orderMap[normalizedId] || "";
+    for (const sale of combinedData) {
+      if (sale.orderId && (!sale.shipway_status || !sale.shipway_status.trim())) {
+        const normalizedId = String(sale.orderId).replace(/^#/, '');
+        sale.shipway_status = orderMap[normalizedId] || '';
       }
-    });
+    }
 
-    // Step 5: Sort descending by date
-    combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Single sort (desc)
+    combinedData.sort((a, b) => {
+      const ta = a.date ? new Date(a.date).getTime() : 0;
+      const tb = b.date ? new Date(b.date).getTime() : 0;
+      return tb - ta;
+    });
 
     res.status(200).json(combinedData);
   } catch (error) {
-    console.error("Error fetching combined retention sales:", error);
-    res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });
+    console.error('Error fetching combined retention sales:', error);
+    res.status(500).json({ message: 'Error fetching combined retention sales', error: error.message });
   }
 });
 
@@ -1542,96 +1633,6 @@ router.put('/api/retention-sales/all/:id', async (req, res) => {
   }
 });
 
-// router.get('/api/retention-sales/progress', async (req, res) => {
-//   const { name } = req.query;
-//   if (!name) return res.status(400).json({ message: "Name is required" });
-
-//   const now = new Date();
-//   const yyyy = now.getFullYear();
-//   const mm = String(now.getMonth() + 1).padStart(2, '0');
-//   const firstDay = `${yyyy}-${mm}-01`;
-//   const lastDayNum = new Date(yyyy, now.getMonth() + 1, 0).getDate();
-//   const lastDay = `${yyyy}-${mm}-${String(lastDayNum).padStart(2, '0')}`;
-
-//   try {
-//     // 1. RetentionSales sum
-//     const rsData = await RetentionSales.aggregate([
-//       {
-//         $match: {
-//           orderCreatedBy: name,
-//           date: { $gte: firstDay, $lte: lastDay }
-//         }
-//       },
-//       {
-//         $group: {
-//           _id: null,
-//           total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
-//         }
-//       }
-//     ]);
-//     const retentionTotal = rsData.length ? rsData[0].total : 0;
-
-//     // 2. MyOrder sum
-//     const startDateObj = new Date(firstDay + "T00:00:00");
-//     const endDateObj = new Date(lastDay + "T23:59:59.999");
-//     const moData = await MyOrder.aggregate([
-//       {
-//         $match: {
-//           agentName: name,
-//           orderDate: { $gte: startDateObj, $lte: endDateObj }
-//         }
-//       },
-//       {
-//         $project: {
-//           amountPaid: {
-//             $add: [
-//               { $toDouble: { $ifNull: ["$totalPrice", 0] } },
-//               { $toDouble: { $ifNull: ["$partialPayment", 0] } },
-//               { $toDouble: { $ifNull: ["$upsellAmount", 0] } }
-//             ]
-//           }
-//         }
-//       },
-//       {
-//         $group: {
-//           _id: null,
-//           total: { $sum: "$amountPaid" }
-//         }
-//       }
-//     ]);
-//     const myOrderTotal = moData.length ? moData[0].total : 0;
-
-//     // 3. Lead schema sales sum
-//     const leadsData = await Lead.aggregate([
-//       {
-//         $match: {
-//           agentAssigned: name,
-//           salesStatus: "Sales Done",
-//           date: { $gte: firstDay, $lte: lastDay }
-//         }
-//       },
-//       {
-//         $group: {
-//           _id: null,
-//           total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
-//         }
-//       }
-//     ]);
-//     const leadsTotal = leadsData.length ? leadsData[0].total : 0;
-
-//     // 4. Return combined total 
-//     res.json({
-//       total: retentionTotal + myOrderTotal + leadsTotal,
-//       retentionSales: retentionTotal,
-//       myOrderSales: myOrderTotal,
-//       leadSales: leadsTotal
-//     });
-//   } catch (err) {
-//     console.error("Error in retention-sales/progress:", err);
-//     res.status(500).json({ message: "Error calculating progress" });
-//   }
-// });
-
 router.get('/api/retention-sales/progress', async (req, res) => {
   const { name, from, to } = req.query;
   if (!name) return res.status(400).json({ message: "Name is required" }); 
@@ -1662,7 +1663,7 @@ router.get('/api/retention-sales/progress', async (req, res) => {
       {
         $group: {
           _id: null,
-          total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
+          total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } } 
         }
       }
     ]);

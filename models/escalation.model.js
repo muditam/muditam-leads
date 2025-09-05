@@ -12,6 +12,8 @@ const EscalationSchema = new mongoose.Schema({
   assignedTo: String,
   remark: String,
   resolvedDate: String,
+  reason: String,
+  trackingId: { type: String, default: '' }, 
 }, { timestamps: true });
 
 // indexes to speed up list pages & filters

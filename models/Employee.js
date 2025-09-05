@@ -8,7 +8,7 @@ const EmployeeSchema = new mongoose.Schema({
   password: { type: String, required: true }, 
   agentNumber: { type: String, required: true }, 
   async: { type: Number, default: 1 },
-  status: { type: String, default: "active" },
+  status: { type: String, default: "active" }, 
   target: { type: Number, default: 0 },
   hasTeam: { type: Boolean, default: false },
   joiningDate: { type: Date, default: null },
