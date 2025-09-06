@@ -16,7 +16,7 @@ router.get('/undelivered', async (req, res) => {
     let dateMatch = null;
     if (startDateStr || endDateStr) {
       const start = new Date(`${startDateStr || endDateStr}T00:00:00.000Z`);
-      const end   = new Date(`${endDateStr || startDateStr}T23:59:59.999Z`);
+      const end   = new Date(`${endDateStr || startDateStr}T23:59:59.999Z`); 
       dateMatch = { order_date: { $gte: start, $lte: end } };
     }
 
@@ -26,10 +26,10 @@ router.get('/undelivered', async (req, res) => {
       if (statuses.length) statusMatch = { shipment_status: { $in: statuses } };
     }
 
-    const now = new Date();
+    const now = new Date(); 
 
     const preStages = [
-      { $match: { shipment_status: { $nin: ['Delivered', 'RTO Delivered', 'Shipment Booked'] } } },
+      { $match: { shipment_status: { $nin: ['Delivered', 'RTO Delivered', 'Shipment Booked', 'Status Pending'] } } },
       ...(dateMatch ? [{ $match: dateMatch }] : []),
       ...(statusMatch ? [{ $match: statusMatch }] : []),
 

@@ -919,7 +919,7 @@ router.get("/replies/list", async (req, res) => {
     const mapped = messages.map((m) => {
       const fromRaw = extractFromAddress(m);
       const fromEmail = toEmail(fromRaw);
-      const isSelf = !!fromEmail && fromEmail === senderEmail;
+      const isSelf = !!fromEmail && fromEmail === senderEmail; 
       const text =
         m?.summary ||
         stripHtml(m?.content || m?.snippet || m?.plainTextContent || "") ||
