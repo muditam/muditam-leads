@@ -82,10 +82,22 @@ const ReturnDeliveredRoutes = require("./routes/ReturnDelivered");
 
 const dietTemplatesRouter = require("./routes/dietTemplatesadmin"); 
 
+const dietPlansRouter = require("./routes/dietPlans");
+
 const app = express();
 const PORT = process.env.PORT || 5001; 
-app.use(compression());
 
+app.use(
+  compression({
+    filter: (req, res) => {
+      const type = res.getHeader('Content-Type') || '';
+      if (String(type).includes('text/event-stream')) return false;
+      return compression.filter(req, res);
+    }
+  })
+);
+
+ 
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];  
 
 dns.setServers(['8.8.8.8', '1.1.1.1']); 
@@ -293,11 +305,33 @@ app.post(
   }
 );
 
+// --- SSE HUB (per-DID) ---
+const sseClients = new Map(); // did -> Set(res)
+
+function addSseClient(did, res) {
+  if (!sseClients.has(did)) sseClients.set(did, new Set());
+  sseClients.get(did).add(res);
+}
+function removeSseClient(did, res) {
+  const set = sseClients.get(did);
+  if (!set) return;
+  set.delete(res);
+  if (set.size === 0) sseClients.delete(did);
+}
+function sseSend(did, payload) {
+  const set = sseClients.get(String(did || '').trim());
+  if (!set || set.size === 0) return;
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const res of set) { try { res.write(data); } catch {} }
+}
+
+
  
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization"); 
@@ -402,18 +436,93 @@ app.use("/api/finance", financeDashboard);
 app.use('/api/orders', UndeliveredordersRoute);
 
 app.use("/api/zoho", zohoMailRoutes);
-
+ 
 app.use("/api/smartflo", smartfloRoutes);
 
 app.use("/api", ReturnDeliveredRoutes); 
 
 app.use("/api/diet-templates", dietTemplatesRouter);
 
+app.use("/api/diet-plans", dietPlansRouter);
+
 mongoose.connect(process.env.MONGO_URI, {  
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err)); 
+
+
+// Agents subscribe once with their DID/callerId (e.g. /api/sse?did=91806...)
+app.get('/api/sse', (req, res) => {
+  const { did } = req.query;
+  if (!did) return res.status(400).send('Missing did');
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  addSseClient(String(did), res);
+
+  const ping = setInterval(() => { try { res.write(':\n\n'); } catch {} }, 15000);
+  req.on('close', () => { clearInterval(ping); removeSseClient(String(did), res); });
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', did: String(did) })}\n\n`);
+});
+
+const urlencoded = bodyParser.urlencoded({ extended: false });
+const jsonParser = bodyParser.json();
+
+
+app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
+  try {
+    const p = req.body || {};
+    // Smartflo "Call Received on Server" variables
+    const uuid   = p.$uuid || p.uuid || p.$UUID || p.UUID;
+    const callId = p.$call_id || p.call_id;
+    const didRaw = p.$call_to_number || p.call_to_number;
+    const callerRaw =
+      p.$caller_id_number || p.caller_id_number ||
+      p.$customer_no_with_prefix || p.customer_no_with_prefix || '';
+
+    const did = String(didRaw || '').trim();
+    const ani = String(callerRaw || '').replace(/\D/g, '').slice(-10); // normalize to last-10
+
+    // Look up existing lead in your DB
+    let lead = null;
+    if (ani) {
+      lead = await Lead.findOne({
+        contactNumber: { $regex: new RegExp(`${ani}$`) }
+      }).select('_id name agentAssigned lastOrderDate');
+    }
+
+    // Build event for frontend popup
+    const event = {
+      type: 'incoming_call',
+      callId: callId || uuid,
+      uuid: uuid || callId,
+      did,
+      ani,
+      start_stamp: p.$start_stamp || p.start_stamp || new Date().toISOString(),
+      known: !!lead,
+      lead: lead ? { 
+        _id: String(lead._id),
+        name: lead.name || '',
+        agentAssigned: lead.agentAssigned || '',
+        lastOrderDate: lead.lastOrderDate || ''
+      } : null,
+    };
+
+    // Push realtime to all listeners of this DID
+    if (did) sseSend(did, event);
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Webhook error:', err);
+    res.status(500).json({ success: false });
+  }
+});
+
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
@@ -1029,23 +1138,6 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
 });
 
 
-
-// app.get('/api/leads/check-duplicate', async (req, res) => {
-//   const { contactNumber } = req.query;
-
-//   try {
-//     const last10 = normalizePhone(contactNumber);
-//     const lead = await Lead.findOne({ contactNumber: { $regex: new RegExp(`${last10}$`) } });
-//     if (lead) {
-//       return res.status(200).json({ exists: true, leadId: lead._id });
-//     }
-//     return res.status(200).json({ exists: false });
-//   } catch (error) {
-//     console.error("Error checking duplicate:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// });
-
 app.get('/api/leads/check-duplicate', async (req, res) => {
   const { contactNumber } = req.query;
 
@@ -1163,18 +1255,6 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
-
-// app.post('/api/leads', async (req, res) => {
-//   try {
-//     const newLead = new Lead(req.body);
-//     await newLead.save();
-//     res.status(201).json({ message: 'Lead added successfully', lead: newLead });
-//   } catch (error) {
-//     console.error('Error adding lead:', error);
-//     res.status(500).json({ message: 'Error adding lead', error });
-//   }
-// });
-
 app.post('/api/leads', async (req, res) => {
   try {
     if (req.body.contactNumber) {
@@ -1189,28 +1269,6 @@ app.post('/api/leads', async (req, res) => {
     res.status(500).json({ message: 'Error adding lead', error });
   }
 });
-
-
-
-// app.put('/api/leads/:id', async (req, res) => {
-//   const { id } = req.params;
-
-//   try {
-//     const updatedLead = await Lead.findByIdAndUpdate(id, req.body, {
-//       new: true,
-//       runValidators: true, 
-//     });
-
-//     if (!updatedLead) {
-//       return res.status(404).json({ message: 'Lead not found' });
-//     }
-
-//     res.status(200).json({ message: 'Lead updated successfully', lead: updatedLead });
-//   } catch (error) {
-//     console.error('Error updating lead:', error);
-//     res.status(500).json({ message: 'Error updating lead', error: error.message });
-//   }
-// });
 
 app.put('/api/leads/:id', async (req, res) => {
   const { id } = req.params;
@@ -1738,22 +1796,6 @@ app.get('/api/consultation-history', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   } 
-});
-
-app.post('/api/webhooks/crm', async (req, res) => {
-  try {
-    const payload = req.body || {};
-    console.log('CRM webhook received:', JSON.stringify(payload));
-
-    // TODO: Match with your CRM (by phone/email/orderId) and upsert as needed. 
-    // Example:
-    // await upsertCustomerInCRM(payload);
-
-    res.status(200).json({ success: true });
-  } catch (err) {
-    console.error('Webhook error:', err);
-    res.status(500).json({ success: false });
-  }
 });
 
 // Start Server

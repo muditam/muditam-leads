@@ -14,12 +14,11 @@ const DietTemplateSchema = new mongoose.Schema(
     tags: { type: [String], default: [], index: true },
     status: {
       type: String,
-      enum: ["draft", "published", "archived"],
-      default: "draft",
+      enum: ["draft", "published", "archived"], 
       index: true,
     },
     version: { type: Number, default: 1 },
-    body: { type: mongoose.Schema.Types.Mixed, required: true }, // validated in routes
+    body: { type: mongoose.Schema.Types.Mixed, required: true },  
 
     createdBy: { type: String },
     updatedBy: { type: String },

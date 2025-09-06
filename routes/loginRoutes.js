@@ -30,6 +30,8 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: user.role,
         hasTeam: user.hasTeam,   
+        callerId: user.callerId, 
+        agentNumber: user.agentNumber,
       },
     });
   } catch (error) {

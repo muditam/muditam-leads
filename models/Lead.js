@@ -31,7 +31,7 @@ const LeadSchema = new mongoose.Schema({
   repeatDosageOrdered: String, 
   retentionStatus: String,
   communicationMethod: String,  
-  preferredLanguage: String,
+  preferredLanguage: String, 
   rtRemark: String, 
   rowColor: String,  
   images: [
