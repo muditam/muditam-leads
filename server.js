@@ -90,12 +90,18 @@ const PORT = process.env.PORT || 5001;
 app.use(
   compression({
     filter: (req, res) => {
-      const type = res.getHeader('Content-Type') || '';
-      if (String(type).includes('text/event-stream')) return false;
+      // absolutely never compress SSE
+      if (req.path === '/api/sse') return false;
+
+      // also skip if content-type is already set to SSE
+      const type = String(res.getHeader('Content-Type') || '');
+      if (type.includes('text/event-stream')) return false;
+
       return compression.filter(req, res);
-    }
+    },
   })
 );
+
 
  
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];  
@@ -465,23 +471,38 @@ mongoose.connect(process.env.MONGO_URI, {
 
 app.get('/api/sse', (req, res) => {
   const { did } = req.query;
-  const key = didKey(did);
-  if (!key) return res.status(400).send('Missing did');
+  if (!did) return res.status(400).send('Missing did');
 
-  // ... (CORS headers as you already have) ...
+  // Tell proxies NOT to buffer/compress this
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('X-Accel-Buffering', 'no');  
+
+  // Some runtimes benefit from this:
+  req.socket?.setKeepAlive?.(true);
+  req.socket?.setNoDelay?.(true);
+
+  // Flush headers immediately
   res.flushHeaders?.();
 
-  addSseClient(key, res);
+  addSseClient(String(did), res);
 
-  const ping = setInterval(() => { try { res.write(':\n\n'); } catch {} }, 15000);
-  req.on('close', () => { clearInterval(ping); removeSseClient(key, res); });
+  // heartbeat to prevent 55s idle router timeout
+  const ping = setInterval(() => {
+    try { res.write(':\n\n'); } catch {}
+  }, 15000);
 
-  res.write(`data: ${JSON.stringify({ type: 'connected', did: key })}\n\n`);
+  req.on('close', () => {
+    clearInterval(ping);
+    removeSseClient(String(did), res);
+    try { res.end(); } catch {}
+  });
+
+  // initial message so the client sees it's open
+  res.write(`data: ${JSON.stringify({ type: 'connected', did: String(did) })}\n\n`);
 });
+
  
 const urlencoded = bodyParser.urlencoded({ extended: false });
 const jsonParser  = bodyParser.json();
