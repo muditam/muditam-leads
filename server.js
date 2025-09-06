@@ -305,27 +305,38 @@ app.post(
   }
 );
 
-// --- SSE HUB (per-DID) ---
-const sseClients = new Map(); // did -> Set(res)
+const sseClients = new Map(); // key -> Set(res)
+ 
+function didKey(v) {
+  return String(v || "").replace(/\D/g, "").slice(-10);
+}
 
 function addSseClient(did, res) {
-  if (!sseClients.has(did)) sseClients.set(did, new Set());
-  sseClients.get(did).add(res);
+  const key = didKey(did);
+  if (!key) return;
+  if (!sseClients.has(key)) sseClients.set(key, new Set());
+  sseClients.get(key).add(res);
 }
+
 function removeSseClient(did, res) {
-  const set = sseClients.get(did);
+  const key = didKey(did);
+  const set = sseClients.get(key);
   if (!set) return;
   set.delete(res);
-  if (set.size === 0) sseClients.delete(did);
+  if (set.size === 0) sseClients.delete(key);
 }
+
 function sseSend(did, payload) {
-  const set = sseClients.get(String(did || '').trim());
-  if (!set || set.size === 0) return;
+  const key = didKey(did);
+  const set = sseClients.get(key);
+  if (!set || set.size === 0) {
+    console.log("[SSE] No clients for DID", { did, key });
+    return;
+  }
   const data = `data: ${JSON.stringify(payload)}\n\n`;
   for (const res of set) { try { res.write(data); } catch {} }
+  console.log("[SSE] Sent event", { key, listeners: set.size, type: payload?.type });
 }
-
-
  
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -452,43 +463,51 @@ mongoose.connect(process.env.MONGO_URI, {
   .catch((err) => console.error('MongoDB connection error:', err)); 
 
 
-// Agents subscribe once with their DID/callerId (e.g. /api/sse?did=91806...)
 app.get('/api/sse', (req, res) => {
   const { did } = req.query;
-  if (!did) return res.status(400).send('Missing did');
+  const key = didKey(did);
+  if (!key) return res.status(400).send('Missing did');
 
+  // ... (CORS headers as you already have) ...
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
-  addSseClient(String(did), res);
+  addSseClient(key, res);
 
   const ping = setInterval(() => { try { res.write(':\n\n'); } catch {} }, 15000);
-  req.on('close', () => { clearInterval(ping); removeSseClient(String(did), res); });
+  req.on('close', () => { clearInterval(ping); removeSseClient(key, res); });
 
-  res.write(`data: ${JSON.stringify({ type: 'connected', did: String(did) })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: 'connected', did: key })}\n\n`);
 });
-
+ 
 const urlencoded = bodyParser.urlencoded({ extended: false });
-const jsonParser = bodyParser.json();
-
+const jsonParser  = bodyParser.json();
 
 app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
   try {
     const p = req.body || {};
+
     // Smartflo "Call Received on Server" variables
-    const uuid   = p.$uuid || p.uuid || p.$UUID || p.UUID;
-    const callId = p.$call_id || p.call_id;
-    const didRaw = p.$call_to_number || p.call_to_number;
+    const uuid      = p.$uuid || p.uuid || p.$UUID || p.UUID;
+    const callId    = p.$call_id || p.call_id;
+    const didRaw    = p.$call_to_number || p.call_to_number;                 // may be 91..., +91..., 0...
     const callerRaw =
       p.$caller_id_number || p.caller_id_number ||
       p.$customer_no_with_prefix || p.customer_no_with_prefix || '';
 
-    const did = String(didRaw || '').trim();
-    const ani = String(callerRaw || '').replace(/\D/g, '').slice(-10); // normalize to last-10
+    // Normalize keys
+    const didKeyStr = didKey(didRaw);                                        // <- normalized DID used for SSE
+    const ani       = String(callerRaw || '').replace(/\D/g, '').slice(-10); // caller last-10
 
-    // Look up existing lead in your DB
+    // Optional logging to verify routing
+    console.log("[CRM webhook] incoming call", {
+      uuid, callId, didRaw, didKey: didKeyStr, ani
+    });
+
+    // DB lookup by last-10
     let lead = null;
     if (ani) {
       lead = await Lead.findOne({
@@ -496,16 +515,16 @@ app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
       }).select('_id name agentAssigned lastOrderDate');
     }
 
-    // Build event for frontend popup
+    // Event for frontend
     const event = {
       type: 'incoming_call',
       callId: callId || uuid,
       uuid: uuid || callId,
-      did,
+      did: didKeyStr,                                                        // expose normalized DID to UI
       ani,
       start_stamp: p.$start_stamp || p.start_stamp || new Date().toISOString(),
       known: !!lead,
-      lead: lead ? { 
+      lead: lead ? {
         _id: String(lead._id),
         name: lead.name || '',
         agentAssigned: lead.agentAssigned || '',
@@ -513,13 +532,13 @@ app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
       } : null,
     };
 
-    // Push realtime to all listeners of this DID
-    if (did) sseSend(did, event);
+    // Push realtime to all listeners of this DID (use normalized key)
+    if (didKeyStr) sseSend(didKeyStr, event);
 
-    res.status(200).json({ success: true });
+    return res.status(200).json({ success: true });
   } catch (err) {
     console.error('Webhook error:', err);
-    res.status(500).json({ success: false });
+    return res.status(500).json({ success: false });
   }
 });
 
