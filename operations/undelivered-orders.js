@@ -32,8 +32,7 @@ router.get('/undelivered', async (req, res) => {
       { $match: { shipment_status: { $nin: ['Delivered', 'RTO Delivered', 'Shipment Booked', 'Status Pending'] } } },
       ...(dateMatch ? [{ $match: dateMatch }] : []),
       ...(statusMatch ? [{ $match: statusMatch }] : []),
-
-      // compute age -> priority (kept as-is; your UI already overrides with "Present" when hasEscalation is true)
+ 
       {
         $addFields: {
           ageDays: {

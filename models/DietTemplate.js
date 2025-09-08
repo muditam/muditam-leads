@@ -18,11 +18,11 @@ const DietTemplateSchema = new mongoose.Schema(
       index: true,
     },
     version: { type: Number, default: 1 },
-    body: { type: mongoose.Schema.Types.Mixed, required: true },  
+    body: { type: mongoose.Schema.Types.Mixed, required: true },    
 
     createdBy: { type: String },
     updatedBy: { type: String },
-  },
+  }, 
   { timestamps: true }
 );
 

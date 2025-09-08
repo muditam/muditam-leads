@@ -24,7 +24,7 @@ const weekly14Schema = {
         };
         return p;
       }, {}),
-      additionalProperties: false,
+      additionalProperties: false, 
     },
   },
   additionalProperties: false,
@@ -179,5 +179,17 @@ router.patch("/:id/status", async (req, res) => {
   if (!doc) return res.status(404).json({ error: "Not found" });
   res.json(doc);
 });
+
+// DELETE template
+router.delete("/:id", async (req, res) => {
+  try {
+    const doc = await DietTemplate.findByIdAndDelete(req.params.id);
+    if (!doc) return res.status(404).json({ error: "Not found" });
+    res.json({ ok: true, deletedId: doc._id });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Failed to delete template" });
+  }
+});
+
 
 module.exports = router;
