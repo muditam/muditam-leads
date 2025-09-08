@@ -105,7 +105,6 @@ app.use(
 );
 
 
-
 const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
 
 dns.setServers(['8.8.8.8', '1.1.1.1']);
@@ -457,14 +456,14 @@ app.use('/api/orders', UndeliveredordersRoute);
 app.use("/api/zoho", zohoMailRoutes);
 
 app.use("/api/smartflo", smartfloRoutes);
-
+ 
 app.use("/api", ReturnDeliveredRoutes);
 
 app.use("/api/diet-templates", dietTemplatesRouter);
 
 app.use("/api/diet-plans", dietPlansRouter);
 
-app.use("/api/orders", ordersRouter);
+app.use("/api/orders-shopify", ordersRouter);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -805,7 +804,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
 const phoneLast10 = (v = "") => String(v).replace(/\D/g, "").slice(-10);
 
 
-app.post('/api/leads/by-phones', async (req, res) => {
+app.post('/api/leads/by-phones', async (req, res) => { 
   const { phoneNumbers } = req.body;
   if (!Array.isArray(phoneNumbers)) {
     return res.status(400).json({ message: 'phoneNumbers should be an array' });
