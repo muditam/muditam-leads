@@ -1,14 +1,14 @@
 require('dotenv').config();
 
 const express = require('express');
-const mongoose = require('mongoose'); 
+const mongoose = require('mongoose');
 const dns = require('dns');
 const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
 const Customer = require('./models/Customer');
-const ConsultationDetails = require('./models/ConsultationDetails');  
+const ConsultationDetails = require('./models/ConsultationDetails');
 const XLSX = require("xlsx");
 const axios = require('axios');
 const https = require('https');
@@ -17,15 +17,15 @@ const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const compression = require('compression');
 const TransferRequest = require('./models/TransferRequests');
-const shopifyProductsRoute = require("./services/shopifyProducts"); 
+const shopifyProductsRoute = require("./services/shopifyProducts");
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
 const razorpayRoutes = require("./services/razorpay");
-const shopifyRoutes = require("./routes/shopifyRoutes"); 
+const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
-const activeCountsRoute = require("./routes/activeCountsRoute"); 
+const activeCountsRoute = require("./routes/activeCountsRoute");
 const summaryRoutes = require('./routes/summaryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const myOrdersRoutes = require("./routes/myOrders");
@@ -37,7 +37,7 @@ const combinedOrdersRoute = require("./routes/combinedOrders");
 const customerRoutes = require("./routes/customerRoutes");
 const consultationDetailsRoutes = require("./routes/consultationDetailsRoutes");
 const consultationProxyRoutes = require("./routes/consultationProxy");
-const consultationFullHistoryRoute = require("./routes/consultationFullHistory");  
+const consultationFullHistoryRoute = require("./routes/consultationFullHistory");
 const consultationFollowupRoute = require("./routes/consultationFollowup");
 const duplicateNumbersRoutes = require("./routes/duplicateNumbersRoutes");
 const ordersDatesRoute = require("./routes/orders-dates");
@@ -69,25 +69,25 @@ const OrderSummeryOperations = require('./operations/OrderSummeryOperations');
 
 const markRTORoute = require("./operations/markRTO");
 const AbandonedCheckout = require('./models/AbandonedCheckout');
-const abandonedRouter = require('./routes/abandoned'); 
+const abandonedRouter = require('./routes/abandoned');
 
 const financeDashboard = require("./routes/financeDashboard");
 const UndeliveredordersRoute = require('./operations/undelivered-orders');
 
 const zohoMailRoutes = require("./routes/zohoMail");
 
-const smartfloRoutes = require("./routes/smartflo"); 
+const smartfloRoutes = require("./routes/smartflo");
 
-const ReturnDeliveredRoutes = require("./routes/ReturnDelivered"); 
+const ReturnDeliveredRoutes = require("./routes/ReturnDelivered");
 
-const dietTemplatesRouter = require("./routes/dietTemplatesadmin"); 
+const dietTemplatesRouter = require("./routes/dietTemplatesadmin");
 
 const dietPlansRouter = require("./routes/dietPlans");
 
 const ordersRouter = require("./routes/ShopifyOrderDB");
 
 const app = express();
-const PORT = process.env.PORT || 5001; 
+const PORT = process.env.PORT || 5001;
 
 app.use(
   compression({
@@ -105,21 +105,21 @@ app.use(
 );
 
 
- 
-const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];  
 
-dns.setServers(['8.8.8.8', '1.1.1.1']); 
+const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
+
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const rawSaver = (req, res, buf) => { req.rawBody = buf; };
 
 app.use(cors({
-  origin: function (origin, callback) { 
+  origin: function (origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(new Error('Not allowed by CORS')); 
+      return callback(new Error('Not allowed by CORS'));
     }
-    return callback(null, true); 
-  } 
+    return callback(null, true);
+  }
 }));
 
 // tolerant number parser
@@ -217,9 +217,9 @@ app.post(
       const rawForHash = raw?.length ? raw : Buffer.from(JSON.stringify(event || {}));
 
       // IDs
-      const eventId    = pickFirst(root.request_id, event.id, event.event_id) || hashId(rawForHash);
+      const eventId = pickFirst(root.request_id, event.id, event.event_id) || hashId(rawForHash);
       const checkoutId = pickFirst(root.token, root.checkout_id, root.cart_id, root.checkout_token);
-      const orderId    = pickFirst(root.order_id, root.orderId);
+      const orderId = pickFirst(root.order_id, root.orderId);
 
       // Customer
       const cust = root.customer || {};
@@ -263,11 +263,11 @@ app.post(
         toNumberLoose(root.total_price) !== undefined
           ? majorToMinor(root.total_price)
           : (
-              items.reduce((s, it) => s + (it.finalLinePrice || 0), 0) ||
-              majorToMinor(root.items_subtotal_price) ||
-              majorToMinor(root.original_total_price) ||
-              0
-            );
+            items.reduce((s, it) => s + (it.finalLinePrice || 0), 0) ||
+            majorToMinor(root.items_subtotal_price) ||
+            majorToMinor(root.original_total_price) ||
+            0
+          );
 
       // Event time
       const eventAt =
@@ -314,7 +314,7 @@ app.post(
 );
 
 const sseClients = new Map(); // key -> Set(res)
- 
+
 function didKey(v) {
   return String(v || "").replace(/\D/g, "").slice(-10);
 }
@@ -342,10 +342,10 @@ function sseSend(did, payload) {
     return;
   }
   const data = `data: ${JSON.stringify(payload)}\n\n`;
-  for (const res of set) { try { res.write(data); } catch {} }
+  for (const res of set) { try { res.write(data); } catch { } }
   console.log("[SSE] Sent event", { key, listeners: set.size, type: payload?.type });
 }
- 
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -353,7 +353,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Credentials", "true");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization"); 
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
   next();
 });
 
@@ -365,32 +365,32 @@ app.use("/api/shopify", shopifyOrdersRoute);
 app.use("/api/shopify", ShopifyPush);
 app.use("/api/razorpay", razorpayRoutes);
 app.use("/api/shopify", shopifyRoutes);
-app.use("/api/my-orders", myOrdersRoutes); 
+app.use("/api/my-orders", myOrdersRoutes);
 
 app.use(retentionSalesRoutes);
 
 app.use('/', exportLeadsRouter);
- 
+
 app.use("/api/leads/retention", activeCountsRoute);
- 
+
 app.use('/api', summaryRoutes);
- 
+
 app.use('/api/dashboard', dashboardRoutes);
 
 app.use("/api/order-by-id", orderByIdRoutes);
 
 app.use("/api/orders/combined", combinedOrdersRoute);
- 
+
 app.use(customerRoutes);
- 
+
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
 app.use("/", consultationProxyRoutes);
- 
+
 app.use("/api/consultation-full-history", consultationFullHistoryRoute);
- 
+
 app.use("/api/consultation-followup", consultationFollowupRoute);
- 
+
 app.use("/api/leads", duplicateNumbersRoutes);
 app.use("/api/duplicate-leads", duplicateNumbersRoutes);
 
@@ -422,27 +422,27 @@ app.use('/api/reachout-logs', reachoutRoutes);
 
 app.use('/api/leads', leadTransfer);
 
-app.use('/api/search', searchRoutes); 
+app.use('/api/search', searchRoutes);
 
 app.use(Addemployee);
 
 app.use('/api', authRoutes);
 
-app.use('/api/dialer', clickToCallRoutes); 
+app.use('/api/dialer', clickToCallRoutes);
 
-app.use("/api/finance", financeRoutes); 
+app.use("/api/finance", financeRoutes);
 
 app.use("/api/razorpay", razorpaySettlementRoutes);
 
 app.use("/api/easebuzz", GokwikSettlementRoutes);
-  
+
 app.use("/api/phonepe", phonepeFinance);
 
 app.use("/api/bluedart", Bluedart);
 
 app.use("/api/delhivery", Delhivery);
 
-app.use("/api/dtdc", DTDC); 
+app.use("/api/dtdc", DTDC);
 
 app.use('/api/operations', OrderSummeryOperations);
 
@@ -455,22 +455,22 @@ app.use("/api/finance", financeDashboard);
 app.use('/api/orders', UndeliveredordersRoute);
 
 app.use("/api/zoho", zohoMailRoutes);
- 
+
 app.use("/api/smartflo", smartfloRoutes);
 
-app.use("/api", ReturnDeliveredRoutes); 
+app.use("/api", ReturnDeliveredRoutes);
 
-app.use("/api/diet-templates", dietTemplatesRouter); 
+app.use("/api/diet-templates", dietTemplatesRouter);
 
 app.use("/api/diet-plans", dietPlansRouter);
 
 app.use("/api/orders", ordersRouter);
 
-mongoose.connect(process.env.MONGO_URI, {  
+mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err)); 
+  .catch((err) => console.error('MongoDB connection error:', err));
 
 
 app.get('/api/sse', (req, res) => {
@@ -481,7 +481,7 @@ app.get('/api/sse', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');  
+  res.setHeader('X-Accel-Buffering', 'no');
 
   // Some runtimes benefit from this:
   req.socket?.setKeepAlive?.(true);
@@ -494,38 +494,38 @@ app.get('/api/sse', (req, res) => {
 
   // heartbeat to prevent 55s idle router timeout
   const ping = setInterval(() => {
-    try { res.write(':\n\n'); } catch {}
+    try { res.write(':\n\n'); } catch { }
   }, 15000);
 
   req.on('close', () => {
     clearInterval(ping);
     removeSseClient(String(did), res);
-    try { res.end(); } catch {}
+    try { res.end(); } catch { }
   });
 
   // initial message so the client sees it's open
   res.write(`data: ${JSON.stringify({ type: 'connected', did: String(did) })}\n\n`);
 });
 
- 
+
 const urlencoded = bodyParser.urlencoded({ extended: false });
-const jsonParser  = bodyParser.json();
+const jsonParser = bodyParser.json();
 
 app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
   try {
     const p = req.body || {};
 
     // Smartflo "Call Received on Server" variables
-    const uuid      = p.$uuid || p.uuid || p.$UUID || p.UUID;
-    const callId    = p.$call_id || p.call_id;
-    const didRaw    = p.$call_to_number || p.call_to_number;                 // may be 91..., +91..., 0...
+    const uuid = p.$uuid || p.uuid || p.$UUID || p.UUID;
+    const callId = p.$call_id || p.call_id;
+    const didRaw = p.$call_to_number || p.call_to_number;                 // may be 91..., +91..., 0...
     const callerRaw =
       p.$caller_id_number || p.caller_id_number ||
       p.$customer_no_with_prefix || p.customer_no_with_prefix || '';
 
     // Normalize keys
     const didKeyStr = didKey(didRaw);                                        // <- normalized DID used for SSE
-    const ani       = String(callerRaw || '').replace(/\D/g, '').slice(-10); // caller last-10
+    const ani = String(callerRaw || '').replace(/\D/g, '').slice(-10); // caller last-10
 
     // Optional logging to verify routing
     console.log("[CRM webhook] incoming call", {
@@ -587,7 +587,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
       console.error("No orders found in response:", response.data);
       return allOrders;
     }
- 
+
     const fetchedOrders = response.data.orders.map(order => {
       let phone = '';
       if (order.customer && order.customer.default_address && order.customer.default_address.phone) {
@@ -600,7 +600,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
         order_id: order.name,
         name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : '',
         contact_number: phone,
-        created_at: order.created_at, 
+        created_at: order.created_at,
         total_price: order.total_price,
         payment_gateway_names: order.payment_gateway_names,
         line_items: order.line_items,
@@ -801,10 +801,10 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
   return totalFetched;
 };
 
- 
+
 const phoneLast10 = (v = "") => String(v).replace(/\D/g, "").slice(-10);
 
- 
+
 app.post('/api/leads/by-phones', async (req, res) => {
   const { phoneNumbers } = req.body;
   if (!Array.isArray(phoneNumbers)) {
@@ -1087,7 +1087,7 @@ app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
 });
 
 const upload = multer({
-  dest: "uploads/", 
+  dest: "uploads/",
   fileFilter: (req, file, cb) => {
     const filetypes = /csv|xlsx/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
@@ -1205,7 +1205,7 @@ app.get('/api/leads', async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus, sortBy = '_id', sortOrder = 'desc' } = req.query;
   const filterCriteria = JSON.parse(filters);
 
-  const parseDate = (dateString) => { 
+  const parseDate = (dateString) => {
     if (!dateString) return null;
     const parsedDate = new Date(dateString);
     return isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString().split("T")[0];
@@ -1216,7 +1216,7 @@ app.get('/api/leads', async (req, res) => {
 
     if (filterCriteria.name) query.name = { $regex: filterCriteria.name, $options: 'i' };
     if (filterCriteria.contactNumber) query.contactNumber = filterCriteria.contactNumber;
-    if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource }; 
+    if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
 
     if (filterCriteria.startDate || filterCriteria.endDate) {
       query.date = {};
@@ -1230,7 +1230,7 @@ app.get('/api/leads', async (req, res) => {
       }
       if (Object.keys(query.date).length === 0) delete query.date;
     }
- 
+
     if (filterCriteria.lastOrderDate) {
       const parsedlastOrderDate = parseDate(filterCriteria.lastOrderDate);
       if (parsedlastOrderDate) {
@@ -1363,7 +1363,7 @@ function getReminderType(nextFollowupDate) {
   today.setHours(0, 0, 0, 0);
   const followupDate = new Date(nextFollowupDate);
   followupDate.setHours(0, 0, 0, 0);
-  const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24)); 
+  const diffInDays = Math.ceil((followupDate - today) / (1000 * 60 * 60 * 24));
   if (isNaN(diffInDays)) return "NotSet";
   if (diffInDays < 0) return "Missed";
   if (diffInDays === 0) return "Today";
@@ -1420,72 +1420,130 @@ app.get("/api/leads/retention", async (req, res) => {
       match.healthExpertAssigned = { $in: arr };
     }
 
-    // Add calculated reminder with MongoDB $addFields
     const addFieldsStage = {
       $addFields: {
         calculatedReminder: {
           $switch: {
             branches: [
               {
+                // Not set at all
                 case: {
                   $or: [
                     { $eq: ["$rtNextFollowupDate", null] },
                     { $eq: ["$rtNextFollowupDate", ""] },
                     { $eq: ["$rtNextFollowupDate", undefined] },
-                  ]
+                  ],
                 },
-                then: "NotSet"
+                then: "NotSet",
               },
             ],
             default: {
               $let: {
                 vars: {
-                  followup: {
+                  // Try strict YYYY-MM-DD first
+                  dYmd: {
                     $dateFromString: {
                       dateString: "$rtNextFollowupDate",
-                    }
+                      format: "%Y-%m-%d",
+                      onError: null,
+                      onNull: null,
+                    },
                   },
-                  today: {
-                    $dateFromParts: {
-                      year: { $year: { $toDate: "$$NOW" } },
-                      month: { $month: { $toDate: "$$NOW" } },
-                      day: { $dayOfMonth: { $toDate: "$$NOW" } }
-                    }
+                  // Then a general parse (ISO etc.)
+                  dGeneral: {
+                    $dateFromString: {
+                      dateString: "$rtNextFollowupDate",
+                      onError: null,
+                      onNull: null,
+                    },
+                  },
+                  // Detect an Excel serial day (either number or a 4-6 digit numeric string)
+                  excelDays: {
+                    $cond: [
+                      {
+                        $or: [
+                          { $and: [{ $isNumber: "$rtNextFollowupDate" }, { $lte: ["$rtNextFollowupDate", 100000] }] },
+                          {
+                            $and: [
+                              { $eq: [{ $type: "$rtNextFollowupDate" }, "string"] },
+                              { $regexMatch: { input: "$rtNextFollowupDate", regex: /^[0-9]{4,6}$/ } }
+                            ]
+                          }
+                        ]
+                      },
+                      { $toInt: "$rtNextFollowupDate" },
+                      null
+                    ]
+                  },
+                  // Today at midnight IST
+                  todayIST: {
+                    $dateTrunc: {
+                      date: "$$NOW",
+                      unit: "day",
+                      timezone: "Asia/Kolkata",
+                    },
                   }
                 },
                 in: {
-                  $switch: {
-                    branches: [
-                      // Missed: Date is before today
-                      {
-                        case: {
-                          $lt: [
-                            { $subtract: ["$$followup", "$$today"] }, 0
-                          ]
-                        },
-                        then: "Missed"
-                      },
-                      // Today: Date is today
-                      {
-                        case: {
-                          $eq: [
-                            { $trunc: { $divide: [{ $subtract: ["$$followup", "$$today"] }, 1000 * 60 * 60 * 24] } }, 0
-                          ]
-                        },
-                        then: "Today"
-                      },
-                      // Tomorrow: Date is tomorrow
-                      {
-                        case: {
-                          $eq: [
-                            { $trunc: { $divide: [{ $subtract: ["$$followup", "$$today"] }, 1000 * 60 * 60 * 24] } }, 1
-                          ]
-                        },
-                        then: "Tomorrow"
-                      },
-                    ],
-                    // Later: Any other future date
-                    default: "Later"
+                  $let: {
+                    vars: {
+                      // Coalesce followupDate: dYmd -> dGeneral -> excel conversion -> null
+                      followupDate: {
+                        $cond: [
+                          { $ne: ["$$dYmd", null] }, "$$dYmd",
+                          {
+                            $cond: [
+                              { $ne: ["$$dGeneral", null] }, "$$dGeneral",
+                              {
+                                $cond: [
+                                  { $ne: ["$$excelDays", null] },
+                                  {
+                                    $dateAdd: {
+                                      startDate: { $toDate: "1899-12-30T00:00:00Z" },
+                                      unit: "day",
+                                      amount: "$$excelDays",
+                                    }
+                                  },
+                                  null
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    in: {
+                      $cond: [
+                        // If still null -> NotSet
+                        { $eq: ["$$followupDate", null] },
+                        "NotSet",
+                        // Else compute D = followup - today in days (IST)
+                        {
+                          $let: {
+                            vars: {
+                              d: {
+                                $dateDiff: {
+                                  startDate: "$$todayIST",
+                                  endDate: "$$followupDate",
+                                  unit: "day",
+                                  timezone: "Asia/Kolkata",
+                                }
+                              }
+                            },
+                            in: {
+                              $switch: {
+                                branches: [
+                                  { case: { $lt: ["$$d", 0] }, then: "Missed" },
+                                  { case: { $eq: ["$$d", 0] }, then: "Today" },
+                                  { case: { $eq: ["$$d", 1] }, then: "Tomorrow" },
+                                ],
+                                default: "Later"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
                   }
                 }
               }
@@ -1599,10 +1657,10 @@ app.get('/api/leads/retentions', async (req, res) => {
   const { fullName, email } = req.query;
 
   if (!fullName || !email) {
-    return res.status(400).json({ message: 'Full name and email are required' }); 
+    return res.status(400).json({ message: 'Full name and email are required' });
   }
 
-  try { 
+  try {
     const leads = await Lead.find({
       healthExpertAssigned: { $in: [fullName, `${fullName} (${email})`] },
       salesStatus: "Sales Done",
@@ -1610,18 +1668,18 @@ app.get('/api/leads/retentions', async (req, res) => {
     res.status(200).json(leads);
   } catch (error) {
     console.error('Error fetching retention leads:', error);
-    res.status(500).json({ message: 'Error fetching retention leads', error }); 
+    res.status(500).json({ message: 'Error fetching retention leads', error });
   }
 });
-  
+
 
 app.patch('/api/leads/:id/images', async (req, res) => {
   const leadId = req.params.id;
-  const { images } = req.body;  
+  const { images } = req.body;
 
   try {
     const lead = await Lead.findById(leadId);
-    if (!lead) return res.status(404).json({ message: 'Lead not found' }); 
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
     lead.images = images; // replace images array
     await lead.save();
@@ -1632,7 +1690,7 @@ app.patch('/api/leads/:id/images', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
- 
+
 app.post('/api/leads/:id/reachout-log', async (req, res) => {
   try {
     const { id } = req.params;
@@ -1677,7 +1735,7 @@ app.get('/api/leads/new-orders', async (req, res) => {
   try {
     // Extract page, limit, and other filter parameters from query
     const { page = 1, limit = 30, ...filters } = req.query;
-  
+
     const query = {
       salesStatus: "Sales Done",
       agentAssigned: { $nin: ['Admin', 'Online Order'] }
@@ -1820,7 +1878,7 @@ app.get('/api/leads/:id', async (req, res) => {
     res.status(200).json(lead);
   } catch (error) {
     console.error("Error fetching lead:", error);
-    res.status(500).json({ message: "Error fetching lead", error: error.message }); 
+    res.status(500).json({ message: "Error fetching lead", error: error.message });
   }
 });
 
@@ -1839,7 +1897,7 @@ app.get('/api/consultation-history', async (req, res) => {
     res.json({ consultations });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  } 
+  }
 });
 
 // Start Server

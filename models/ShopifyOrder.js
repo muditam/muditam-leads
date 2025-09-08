@@ -18,7 +18,7 @@ const AddressSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
+ 
 // Normalize Indian numbers → last 10 digits
 function normalizePhone(phone) {
   if (!phone) return "";
