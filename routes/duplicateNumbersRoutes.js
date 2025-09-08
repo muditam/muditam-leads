@@ -44,24 +44,35 @@ const isValidObjectId = (v) => {
 
 /**
  * GET /api/duplicate-leads/duplicates
+ * Server-side pagination of duplicate groups
+ * Query: page (1-based), limit
+ * Response: { page, limit, totalGroups, groups: [{ contactNumber, leads: [...] }] }
  */
 router.get("/duplicates", async (req, res) => {
   try {
-    const leads = await Lead.aggregate([
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const skip = (page - 1) * limit;
+
+    // Pipeline for Leads
+    const leadStage = [
       {
         $addFields: {
           normalizedNumber: {
             $let: {
-              vars: { digits: { $regexFind: { input: "$contactNumber", regex: /(\d{10})$/ } } },
-              in: "$$digits.match"
-            }
-          }
-        }
+              vars: {
+                digits: { $regexFind: { input: "$contactNumber", regex: /(\d{10})$/ } },
+              },
+              in: "$$digits.match",
+            },
+          },
+        },
       },
       { $match: { normalizedNumber: { $exists: true, $ne: null, $ne: "" } } },
       {
         $project: {
-          _id: 1, name: 1,
+          _id: 1,
+          name: 1,
           contactNumber: "$contactNumber",
           agentAssigned: 1,
           leadStatus: 1,
@@ -69,54 +80,103 @@ router.get("/duplicates", async (req, res) => {
           healthExpertAssigned: 1,
           retentionStatus: 1,
           normalizedNumber: 1,
-          type: { $literal: "lead" }
-        }
-      }
-    ]);
-
-    const customers = await Customer.aggregate([
-      {
-        $addFields: {
-          normalizedNumber: {
-            $let: {
-              vars: { digits: { $regexFind: { input: "$phone", regex: /(\d{10})$/ } } },
-              in: "$$digits.match"
-            }
-          }
-        }
+          type: { $literal: "lead" },
+        },
       },
-      { $match: { normalizedNumber: { $exists: true, $ne: null, $ne: "" } } },
+    ];
+
+    // We'll use unionWith to bring in Customers with aligned fields
+    const pipeline = [
+      ...leadStage,
+      {
+        $unionWith: {
+          coll: Customer.collection.name,
+          pipeline: [
+            {
+              $addFields: {
+                normalizedNumber: {
+                  $let: {
+                    vars: {
+                      digits: { $regexFind: { input: "$phone", regex: /(\d{10})$/ } },
+                    },
+                    in: "$$digits.match",
+                  },
+                },
+              },
+            },
+            { $match: { normalizedNumber: { $exists: true, $ne: null, $ne: "" } } },
+            {
+              $project: {
+                _id: 1,
+                name: 1,
+                contactNumber: "$phone",
+                agentAssigned: null,
+                leadStatus: "$leadStatus",
+                salesStatus: null,
+                healthExpertAssigned: "$assignedTo",
+                retentionStatus: null,
+                normalizedNumber: 1,
+                type: { $literal: "customer" },
+              },
+            },
+          ],
+        },
+      },
+      // Group by normalizedNumber and keep an array of docs
+      {
+        $group: {
+          _id: "$normalizedNumber",
+          docs: {
+            $push: {
+              _id: "$_id",
+              name: "$name",
+              contactNumber: "$contactNumber",
+              agentAssigned: "$agentAssigned",
+              leadStatus: "$leadStatus",
+              salesStatus: "$salesStatus",
+              healthExpertAssigned: "$healthExpertAssigned",
+              retentionStatus: "$retentionStatus",
+              type: "$type",
+            },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      // Only duplicates (more than one doc with same last-10)
+      { $match: { count: { $gt: 1 } } },
+      // Optional: sort by count desc then by contact number (string)
+      { $sort: { count: -1, _id: 1 } },
       {
         $project: {
-          _id: 1, name: 1,
-          contactNumber: "$phone",
-          agentAssigned: null,
-          leadStatus: "$leadStatus",
-          salesStatus: null,
-          healthExpertAssigned: "$assignedTo",
-          retentionStatus: null,
-          normalizedNumber: 1,
-          type: { $literal: "customer" }
-        }
-      }
-    ]);
+          _id: 0,
+          contactNumber: "$_id",
+          leads: "$docs",
+        },
+      },
+      // Facet for pagination + total count
+      {
+        $facet: {
+          data: [{ $skip: skip }, { $limit: limit }],
+          total: [{ $count: "totalGroups" }],
+        },
+      },
+      {
+        $project: {
+          groups: "$data",
+          totalGroups: { $ifNull: [{ $arrayElemAt: ["$total.totalGroups", 0] }, 0] },
+        },
+      },
+    ];
 
-    const all = leads.concat(customers);
-    const groupsMap = {};
-    for (const doc of all) {
-      const norm = doc.normalizedNumber;
-      if (!groupsMap[norm]) groupsMap[norm] = [];
-      groupsMap[norm].push(doc);
-    }
+    const aggResult = await Lead.aggregate(pipeline).allowDiskUse(true);
+    const { groups = [], totalGroups = 0 } = aggResult[0] || {};
 
-    const duplicateGroups = Object.entries(groupsMap)
-      .filter(([_, group]) => group.length > 1)
-      .map(([normalizedNumber, group]) => ({
-        contactNumber: normalizedNumber,
-        leads: group
-      }));
-
-    res.json(duplicateGroups);
+    res.json({
+      page,
+      limit,
+      totalGroups,
+      groups,
+    });
   } catch (err) {
     console.error("Error fetching duplicates:", err);
     res.status(500).json({ error: "Server error" });
@@ -155,13 +215,17 @@ router.delete("/duplicate-number", async (req, res) => {
     }
     const normalized = normalizeNumber(contactNumber);
 
-    const leadDeleteResult = await Lead.deleteMany(exprMatchLast10Digits("$contactNumber", normalized));
-    const customerDeleteResult = await Customer.deleteMany(exprMatchLast10Digits("$phone", normalized));
+    const leadDeleteResult = await Lead.deleteMany(
+      exprMatchLast10Digits("$contactNumber", normalized)
+    );
+    const customerDeleteResult = await Customer.deleteMany(
+      exprMatchLast10Digits("$phone", normalized)
+    );
 
     res.json({
       message: "Leads and Customers with duplicate group deleted",
       leadDeleteResult,
-      customerDeleteResult
+      customerDeleteResult,
     });
   } catch (err) {
     console.error("Error deleting duplicate group:", err);
@@ -193,10 +257,7 @@ router.delete("/:type/:id", async (req, res) => {
 /**
  * DELETE /api/duplicate-leads/cleanup-duplicates
  *
- * New rules:
- * 1) If Lead retentionStatus = Active or Black and has a healthExpertAssigned → delete Customer.
- * 2) Delete Customers if their assignedTo is an Employee with role = Admin.
- * 3) Delete Leads with retentionStatus = Lost.
+ * Rules unchanged
  */
 router.delete("/cleanup-duplicates", async (req, res) => {
   const session = await mongoose.startSession();

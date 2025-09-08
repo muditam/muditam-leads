@@ -84,6 +84,8 @@ const dietTemplatesRouter = require("./routes/dietTemplatesadmin");
 
 const dietPlansRouter = require("./routes/dietPlans");
 
+const ordersRouter = require("./routes/ShopifyOrderDB");
+
 const app = express();
 const PORT = process.env.PORT || 5001; 
 
@@ -458,9 +460,11 @@ app.use("/api/smartflo", smartfloRoutes);
 
 app.use("/api", ReturnDeliveredRoutes); 
 
-app.use("/api/diet-templates", dietTemplatesRouter);
+app.use("/api/diet-templates", dietTemplatesRouter); 
 
 app.use("/api/diet-plans", dietPlansRouter);
+
+app.use("/api/orders", ordersRouter);
 
 mongoose.connect(process.env.MONGO_URI, {  
   useNewUrlParser: true,
