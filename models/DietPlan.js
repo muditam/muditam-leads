@@ -52,3 +52,4 @@ DietPlanSchema.index({ "customer.leadId": 1, startDate: -1 });
 DietPlanSchema.index({ "customer.name": 1, startDate: -1 });
 
 module.exports = mongoose.model("DietPlan", DietPlanSchema);
+

@@ -27,3 +27,5 @@ const DietTemplateSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model("DietTemplate", DietTemplateSchema);
+
+
