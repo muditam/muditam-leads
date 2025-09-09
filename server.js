@@ -390,7 +390,7 @@ app.use(customerRoutes);
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
 app.use("/", consultationProxyRoutes);
-app.use("/", dietPlanProxy);
+app.use("/proxy/consultation", dietPlanProxy);
 
 app.use("/api/consultation-full-history", consultationFullHistoryRoute);
 

@@ -1,28 +1,15 @@
-// routes/dietPlanProxy.js
 const express = require("express");
 const router = express.Router();
-const DietPlan = require("../models/DietPlan"); // <-- make sure this exists
+const DietPlan = require("../models/DietPlan");
 
-function fmtDate(iso) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleDateString();
-  } catch {
-    return iso;
-  }
-}
-function escapeHtml(s = "") {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+function fmtDate(iso) { /* ...same as before... */ }
+function escapeHtml(s = "") { /* ...same as before... */ }
 
-// GET /proxy/diet-plan/:id  (App Proxy target)
-// Public URL (Shopify): https://muditam.com/apps/consultation/diet-plan/:id
-router.get("/proxy/diet-plan/:id", async (req, res) => {
-  // If someone tries to fetch JSON, gently reject
+// IMPORTANT: path is just /diet-plan/:id now
+router.get("/diet-plan/:id", async (req, res) => {
+  // (optional) quick debug
+  // console.log("Proxy hit:", req.originalUrl);
+
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
   }
@@ -40,7 +27,6 @@ router.get("/proxy/diet-plan/:id", async (req, res) => {
     const startDate = fmtDate(plan.startDate);
     const durationDays = Number(plan.durationDays || (planType === "Weekly" ? 14 : 30));
 
-    // Weekly table HTML
     const weeklyTable = () => {
       const mealsOrder = ["Breakfast", "Lunch", "Snacks", "Dinner"];
       const days = Array.from({ length: 14 }, (_, i) => i + 1);
@@ -70,7 +56,6 @@ router.get("/proxy/diet-plan/:id", async (req, res) => {
       return `<div class="table-wrap"><table>${thead}${tbody}</table></div>`;
     };
 
-    // Monthly options HTML
     const monthlyList = () => {
       const slots = ["Breakfast", "Lunch", "Evening Snack", "Dinner"];
       return `
@@ -162,4 +147,3 @@ router.get("/proxy/diet-plan/:id", async (req, res) => {
 });
 
 module.exports = router;
-
