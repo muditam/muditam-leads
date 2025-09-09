@@ -239,7 +239,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
     // Fetch customer data using customerId
     const customer = await Customer.findById(customerId).lean();
     if (!customer) {
-      return res.status(404).send("Customer not found.");
+      return res.status(404).send("Customer not found."); 
     }
 
     // Fetch consultation details using customerId

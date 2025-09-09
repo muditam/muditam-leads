@@ -37,6 +37,7 @@ const combinedOrdersRoute = require("./routes/combinedOrders");
 const customerRoutes = require("./routes/customerRoutes");
 const consultationDetailsRoutes = require("./routes/consultationDetailsRoutes");
 const consultationProxyRoutes = require("./routes/consultationProxy");
+const dietPlanProxy = require("./routes/dietPlanProxy");
 const consultationFullHistoryRoute = require("./routes/consultationFullHistory");
 const consultationFollowupRoute = require("./routes/consultationFollowup");
 const duplicateNumbersRoutes = require("./routes/duplicateNumbersRoutes");
@@ -389,6 +390,7 @@ app.use(customerRoutes);
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
 app.use("/", consultationProxyRoutes);
+app.use("/", dietPlanProxy);
 
 app.use("/api/consultation-full-history", consultationFullHistoryRoute);
 
