@@ -1,12 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const ShopifyOrder = require("../models/ShopifyOrder");
-
 const router = express.Router();
-
-// Optional: enforce TLS 1.2 (sometimes helps with Node+Shopify)
-/// const https = require("https");
-/// const tlsAgent = new https.Agent({ secureProtocol: "TLSv1_2_method" });
 
 function shopifyBase(store) {
   return `https://${store}.myshopify.com/admin/api/2024-04`;
@@ -40,7 +35,6 @@ function preferAddress(o) {
 }
 
 function getContact(o) {
-  // “their number from address line” → prefer address phones
   return (
     o.shipping_address?.phone ||
     o.customer?.default_address?.phone ||
@@ -73,7 +67,13 @@ function mapOrder(o) {
       o.customer?.default_address?.name ||
       "",
     contactNumber: contact || "",
+
     orderDate: o.created_at ? new Date(o.created_at) : null,
+
+    // NEW: system timestamps for incremental sync
+    shopifyCreatedAt: o.created_at ? new Date(o.created_at) : null,
+    shopifyUpdatedAt: o.updated_at ? new Date(o.updated_at) : null,
+
     amount: Number(o.total_price || 0),
     paymentGatewayNames,
     modeOfPayment:
@@ -84,16 +84,44 @@ function mapOrder(o) {
     currency: o.currency || "",
     financial_status: o.financial_status || "",
     fulfillment_status: o.fulfillment_status || "",
+
+    cancelled_at: o.cancelled_at ? new Date(o.cancelled_at) : null,
+    cancel_reason: o.cancel_reason || null,
   };
 }
 
 /**
+ * Internal helper to page through a given URL until done; upserts orders
+ */
+async function pageAndUpsertAll(url, headers) {
+  let fetched = 0, created = 0, updated = 0;
+
+  while (url) {
+    const resp = await axios.get(url, { headers });
+    const orders = resp.data?.orders || [];
+    fetched += orders.length;
+
+    for (const raw of orders) {
+      const doc = mapOrder(raw);
+      const resUp = await ShopifyOrder.updateOne(
+        { orderId: doc.orderId },
+        { $set: doc },
+        { upsert: true }
+      );
+      if (resUp.upsertedCount) created += 1;
+      else if (resUp.matchedCount) updated += 1;
+    }
+
+    const links = parseLinkHeader(resp.headers.link);
+    url = links.next || null;
+  }
+
+  return { fetched, created, updated };
+}
+
+/**
  * GET /api/orders/sync-all
- * Fetches **ALL** orders from Shopify (from the very first order) using page_info pagination.
- * Saves/updates them in Mongo (upsert by orderId).
- *
- * Optional query params:
- *   - limit: page size (default 250, max 250)
+ * (unchanged) — pulls the entire history from the very first order
  */
 router.get("/sync-all", async (req, res) => {
   try {
@@ -101,52 +129,127 @@ router.get("/sync-all", async (req, res) => {
     if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
       return res.status(400).json({ error: "Missing Shopify env vars" });
     }
-
     const base = shopifyBase(SHOPIFY_STORE_NAME);
     const limit = Math.min(parseInt(req.query.limit || "250", 10) || 250, 250);
 
-    let url = `${base}/orders.json?status=any&limit=${limit}`;
+    const url = `${base}/orders.json?status=any&limit=${limit}`;
     const headers = {
       "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
       "Content-Type": "application/json",
     };
 
-    let fetched = 0;
-    let created = 0;
-    let updated = 0;
-
-    while (url) {
-      const resp = await axios.get(url, { headers /*, httpsAgent: tlsAgent */ });
-      const orders = resp.data?.orders || [];
-      fetched += orders.length;
-
-      // Upsert each order by Shopify numeric id
-      for (const raw of orders) {
-        const doc = mapOrder(raw);
-        const resUp = await ShopifyOrder.updateOne(
-          { orderId: doc.orderId },
-          { $set: doc },
-          { upsert: true }
-        );
-        if (resUp.upsertedCount) created += 1;
-        else if (resUp.matchedCount) updated += 1;
-      }
-
-      const links = parseLinkHeader(resp.headers.link);
-      url = links.next || null;
-    }
-
-    res.json({ ok: true, fetched, created, updated });
+    const stats = await pageAndUpsertAll(url, headers);
+    res.json({ ok: true, mode: "full", ...stats });
   } catch (err) {
     console.error("sync-all error:", err?.response?.data || err);
     res.status(500).json({ error: "Failed to sync all orders", details: err?.message || err });
   }
 });
 
+
+router.get("/sync-incremental", async (req, res) => {
+  try {
+    const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
+    if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
+      return res.status(400).json({ error: "Missing Shopify env vars" });
+    }
+
+    // Determine starting watermark
+    let sinceISO = req.query.since;
+    if (!sinceISO) {
+      const latest = await ShopifyOrder.findOne({}, { shopifyUpdatedAt: 1 })
+        .sort({ shopifyUpdatedAt: -1 })
+        .lean();
+      const baseDate = latest?.shopifyUpdatedAt ? new Date(latest.shopifyUpdatedAt) : new Date("2000-01-01T00:00:00Z");
+      // 5-minute safety buffer
+      baseDate.setMinutes(baseDate.getMinutes() - 5);
+      sinceISO = baseDate.toISOString();
+    }
+
+    const base = shopifyBase(SHOPIFY_STORE_NAME);
+    const limit = Math.min(parseInt(req.query.limit || "250", 10) || 250, 250);
+
+    // Filter by updated_at_min so we get both brand-new and modified orders
+    // (Shopify cursor pagination still works with this filter.)
+    let url = `${base}/orders.json?status=any&limit=${limit}&updated_at_min=${encodeURIComponent(sinceISO)}`;
+
+    const headers = {
+      "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+      "Content-Type": "application/json",
+    };
+
+    const stats = await pageAndUpsertAll(url, headers);
+    res.json({ ok: true, mode: "incremental", since: sinceISO, ...stats });
+  } catch (err) {
+    console.error("sync-incremental error:", err?.response?.data || err);
+    res.status(500).json({ error: "Failed to sync incrementally", details: err?.message || err });
+  }
+});
+
 /**
- * GET /api/orders
- * List saved orders from Mongo with pagination/filters
- *   ?page=1&limit=50&phone=XXXXXXXXXX&source=web
+ * (Optional) GET /api/orders/sync-range
+ * Pull changes by UPDATED time within a date range.
+ *   ?from=2025-09-01&to=2025-09-08
+ */
+router.get("/sync-range", async (req, res) => {
+  try {
+    const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
+    if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
+      return res.status(400).json({ error: "Missing Shopify env vars" });
+    }
+    const from = req.query.from ? new Date(`${req.query.from}T00:00:00.000Z`) : null;
+    const to   = req.query.to   ? new Date(`${req.query.to}T23:59:59.999Z`) : null;
+    if (!from || !to || isNaN(from) || isNaN(to)) {
+      return res.status(400).json({ error: "Provide valid from/to (YYYY-MM-DD)" });
+    }
+    const base = shopifyBase(SHOPIFY_STORE_NAME);
+    const limit = Math.min(parseInt(req.query.limit || "250", 10) || 250, 250);
+
+    let url = `${base}/orders.json?status=any&limit=${limit}` +
+              `&updated_at_min=${encodeURIComponent(from.toISOString())}` +
+              `&updated_at_max=${encodeURIComponent(to.toISOString())}`;
+
+    const headers = {
+      "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+      "Content-Type": "application/json",
+    };
+
+    const stats = await pageAndUpsertAll(url, headers);
+    res.json({ ok: true, mode: "range", from: from.toISOString(), to: to.toISOString(), ...stats });
+  } catch (err) {
+    console.error("sync-range error:", err?.response?.data || err);
+    res.status(500).json({ error: "Failed to sync range", details: err?.message || err });
+  }
+});
+
+/**
+ * (Optional) GET /api/orders/refresh/:orderId
+ * Force-refresh a single order by its numeric Shopify ID.
+ */
+router.get("/refresh/:orderId", async (req, res) => {
+  try {
+    const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
+    const id = req.params.orderId;
+    if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
+      return res.status(400).json({ error: "Missing Shopify env vars" });
+    }
+    if (!id) return res.status(400).json({ error: "orderId required" });
+
+    const url = `${shopifyBase(SHOPIFY_STORE_NAME)}/orders/${id}.json`;
+    const headers = { "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN, "Content-Type": "application/json" };
+    const { data } = await axios.get(url, { headers });
+    const doc = mapOrder(data.order);
+    await ShopifyOrder.updateOne({ orderId: doc.orderId }, { $set: doc }, { upsert: true });
+    res.json({ ok: true, orderId: doc.orderId });
+  } catch (err) {
+    console.error("refresh-one error:", err?.response?.data || err);
+    res.status(500).json({ error: "Failed to refresh order", details: err?.message || err });
+  }
+});
+
+/**
+ * (unchanged) GET /api/orders
+ * List orders with pagination & filters
  */
 router.get("/", async (req, res) => {
   try {

@@ -90,6 +90,12 @@ const priceMap = {
     "3 months": 1295,
     "4 months": 2500,
   },
+  "Omega Fuel": {
+    "1 month": 495,
+    "2 months": 850,
+    "3 months": 1195,
+    "4 months": 2195, 
+  },
   "HbA1c - Blood Test": {
     "1 month": 300,
     "2 months": 300,
@@ -182,6 +188,12 @@ const variantMap = {
     "2 months": "52863565955382",
     "3 months": "52863565988150",
     "4 months": "52863568085302",
+  },
+  "Omega Fuel": {
+    "1 month": "52874150838582",
+    "2 months": "52874150871350",
+    "3 months": "52874150904118",
+    "4 months": "52874150936886",
   },
   "HbA1c - Blood Test": { 
     "1 month": "51848104247606",
@@ -344,6 +356,10 @@ router.get("/proxy/consultation/:id", async (req, res) => {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Front_9a3bfb2e-5f0b-48ae-95e1-f53042f93dad.webp?v=1755690194",
         description: "Power of 78 Ingredients in 1 Multivitamin"
       },
+      "Omega Fuel": {
+        image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Front_33f6e8bd-b348-44a7-8435-21858cf89730.webp?v=1755930603",
+        description: "Supports Joint Flexibility and Heart Health"
+      },
       "HbA1c - Blood Test": {
         image: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/blood_test.webp?v=1744881342",
         description: "Body Check-Up"
@@ -375,6 +391,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       "Shilajit with Gold": "Immunity",
       "Nerve Fix": "Nerve",
       "Core Essentials": "Multivitamin", 
+      "Omega Fuel": "Heart",  
     };
 
 
@@ -2322,6 +2339,10 @@ selectedProducts.forEach(product => {
                   "Nerve Fix": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_7dd0d0e8-5c57-43b8-b43f-8b629203ed17.webp?v=1754998798",
                   secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/4_5f0a474b-383a-4c32-b49b-636f38ae8965.webp?v=1754998798"
+                },
+                "Omega Fuel": {
+                  firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_0655c36a-9776-4a23-afe8-3ec176e129df.webp?v=1756197217",
+                  secondImage: "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/4_5081061a-71bf-4580-9aba-a2bc479cbf87.webp?v=1756197217"  
                 },
                   "Core Essentials": {
                   firstImage:  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/2_a0d38c9b-31e4-46c4-a9fa-bac9661d9b68.webp?v=1755844750",

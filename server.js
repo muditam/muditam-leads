@@ -86,6 +86,10 @@ const dietPlansRouter = require("./routes/dietPlans");
 
 const ordersRouter = require("./routes/ShopifyOrderDB");
 
+const cohartDataApiRouter = require("./routes/cohart-dataApi");
+
+const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders");
+
 const app = express();
 const PORT = process.env.PORT || 5001;
 
@@ -465,6 +469,10 @@ app.use("/api/diet-plans", dietPlansRouter);
 
 app.use("/api/orders-shopify", ordersRouter);
 
+app.use("/cohart-dataApi", cohartDataApiRouter);
+
+app.use("/api", allProductsFromOrdersRoute);
+
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -589,7 +597,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
 
     const fetchedOrders = response.data.orders.map(order => {
       let phone = '';
-      if (order.customer && order.customer.default_address && order.customer.default_address.phone) {
+      if (order.customer && order.customer.default_address && order.customer.default_address.phone) { 
         phone = order.customer.default_address.phone.replace(/^\+91/, '').trim();
       } else {
         console.warn(`Order ${order.id} is missing customer phone or address.`);

@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
 
 const ProductSchema = new mongoose.Schema(
-  { title: String, quantity: Number, sku: String, variant_id: Number, price: Number },
+  { title: String, quantity: Number, sku: String, variant_id: Number, price: Number, month: { type: String, default: "" },             
+    cohort: { type: String, default: "" }, },
   { _id: false }
 );
 
@@ -14,7 +15,7 @@ const AddressSchema = new mongoose.Schema(
     city: String,
     province: String,
     zip: String,
-    country: String,
+    country: String, 
   },
   { _id: false }
 );
@@ -59,3 +60,4 @@ ShopifyOrderSchema.pre("save", function (next) {
 });
 
 module.exports = mongoose.model("ShopifyOrder", ShopifyOrderSchema);
+
