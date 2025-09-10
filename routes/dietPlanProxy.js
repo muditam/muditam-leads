@@ -56,15 +56,13 @@ function addDays(dateObj, n) {
   return d;
 }
 
-// Pull an optional time and split main/note from a meal string
+// Extract optional HH:MM time and split main/note
 function parseMeal(raw) {
   const out = { time: "", main: "", note: "" };
   if (!raw) return out;
   const s = String(raw);
-
   const t = s.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
   out.time = t ? t[0] : "";
-
   const cleaned = t ? s.replace(t[0], "").trim() : s.trim();
   const parts = cleaned.split(/\r?\n+/);
   out.main = parts[0] || "";
@@ -75,7 +73,7 @@ function parseMeal(raw) {
 // ---------- HTML builders ----------
 function coverPageHtml({ whenText = "", doctorText = "" }) {
   return `
-<section class="page cover">
+<section class="page cover tall">
   <div class="cover-card">
     <h1>
       <span>DIETARY ROADMAP TO</span><br/>
@@ -96,7 +94,7 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
 
 function basicDetailsHtml({ name = "—", phone = "—" }) {
   return `
-<section class="page details">
+<section class="page details tall">
   <div class="details-card">
     <div class="pin"></div>
     <h2>BASIC DETAILS</h2>
@@ -114,10 +112,10 @@ function basicDetailsHtml({ name = "—", phone = "—" }) {
 </section>`;
 }
 
-// ---- PAGE 3+ (DAY) — tight margins + double frame + watch icon time ----
+// ---- PAGE 3+ (DAY) — no background image here & no min-height ----
 function dayPageHtml({ dayIndex, dateIso, meals }) {
   return `
-<section class="page sheet-bg">
+<section class="page sheet-plain">
   <div class="sheet">
     <div class="sheet-inner">
       <div class="topbar">
@@ -156,7 +154,7 @@ function dayPageHtml({ dayIndex, dateIso, meals }) {
 </section>`;
 }
 
-// Monthly page reuses the same “sheet” styling
+// Monthly page reuses the same sheet styling (no bg, no min-height)
 function monthlyPageHtml({ slots }) {
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
@@ -173,7 +171,7 @@ function monthlyPageHtml({ slots }) {
   }).join("");
 
   return `
-<section class="page sheet-bg">
+<section class="page sheet-plain">
   <div class="sheet">
     <div class="sheet-inner">
       <div class="topbar">
@@ -187,7 +185,7 @@ function monthlyPageHtml({ slots }) {
 </section>`;
 }
 
-// ---------- CSS (tuned to your reference; very tight page padding) ----------
+// ---------- CSS ----------
 const CSS = `
 :root{
   --green:#2f7a2f;
@@ -203,15 +201,17 @@ html,body{
   font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif;
 }
 
-/* A4 page — max ~10px padding around everything */
+/* Page: NO min-height by default (so slide 3+ can shrink). */
 .page{
-  width:210mm; min-height:297mm;
+  width:210mm;
   margin:0 auto; page-break-after:always;
   display:flex; align-items:center; justify-content:center;
-  padding:10px;               /* << tight edges, as requested */
+  padding:10px; /* tight edges */
 }
+/* Only slides 1–2 get A4 height */
+.tall{ min-height:297mm; }
 
-/* ---- COVER ---- */
+/* ---- COVER (with BG image) ---- */
 .cover{ background:url("${BG_COVER}") center/cover no-repeat; }
 .cover-card{
   width:100%; max-width:600px;
@@ -232,7 +232,7 @@ html,body{
 .pill-title{ font-weight:800; font-size:18px; text-align:center; }
 .pill-sub{ color:#2a532a; font-size:13px; text-align:center; margin-top:6px; }
 
-/* ---- DETAILS ---- */
+/* ---- DETAILS (with BG image) ---- */
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; }
 .details-card{
   position:relative; width:100%; max-width:620px; background:#fff;
@@ -258,22 +258,21 @@ html,body{
 .dt{ color:var(--green); font-weight:700; }
 .dd{ color:#222; }
 
-/* ---- SHEET (DAY/MONTH) — double frame & compact padding ---- */
-.sheet-bg{
-  background:#f3f4f2 url("${BG_DETAILS}") center/cover no-repeat;
-  background-blend-mode:soft-light;
+/* ---- SHEET (DAY/MONTH) — NO background image, NO min-height ---- */
+.sheet-plain{
+  background:#f7f8f7; /* solid neutral bg, no image */
 }
 
-/* Outer dark frame + inner light frame */
+/* Double frame */
 .sheet{
   width:100%; background:#fff;
-  border:12px solid var(--green);       /* OUTER dark */
-  border-radius:6px; padding:6px;       /* area between frames */
+  border:12px solid var(--green);       /* outer dark */
+  border-radius:6px; padding:6px;       /* space between frames */
 }
 .sheet-inner{
-  border:6px solid var(--green-light);  /* INNER light */
+  border:6px solid var(--green-light);  /* inner light */
   border-radius:2px; background:#fff;
-  padding:10px;                         /* super tight inner padding */
+  padding:10px;                         /* compact */
 }
 
 /* Header bar */
@@ -304,13 +303,13 @@ html,body{
 .meal-main{ color:#1e1e1e; font-size:14px; line-height:1.45; }
 .meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:4px; }
 
-/* Green separator that begins after the left column */
+/* Green separator */
 .sep{
   height:3px; background:#2f7a2f; width:100%;
   margin:12px 0 6px;
 }
 
-/* Monthly slots use same rhythm */
+/* Monthly */
 .slot h3{ margin:0 0 6px; color:#2f7a2f; }
 .time-inline{ color:#666; font-weight:500; }
 .opts{ margin:0; padding-left:18px; }
@@ -323,7 +322,7 @@ html,body{
 }
 `;
 
-// ---------- ROUTE ---------- 
+// ---------- ROUTE ----------
 router.get("/diet-plan/:id", async (req, res) => {
   // HTML only
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
@@ -359,13 +358,13 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     const pages = [];
 
-    // Slide 1
+    // Slide 1 (tall, with BG image)
     pages.push(coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" }));
 
-    // Slide 2
+    // Slide 2 (tall, with BG image)
     pages.push(basicDetailsHtml({ name: custName, phone: custPhone }));
 
-    // Slide 3+
+    // Slide 3+ (NO bg image, NO min-height)
     if (planType === "Weekly") {
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
