@@ -56,14 +56,12 @@ function addDays(dateObj, n) {
   return d;
 }
 
-// Extracts (optional) time and a main + note from a meal string.
-// e.g. "Vegetable Sandwich...\nFitting: ..." -> {time:"", main:"Vegetable Sandwich...", note:"Fitting: ..." }
+// Pull an optional time and split main/note from a meal string
 function parseMeal(raw) {
   const out = { time: "", main: "", note: "" };
   if (!raw) return out;
   const s = String(raw);
 
-  // try to find a HH:MM time inside (won't break text if not present)
   const t = s.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
   out.time = t ? t[0] : "";
 
@@ -116,7 +114,7 @@ function basicDetailsHtml({ name = "—", phone = "—" }) {
 </section>`;
 }
 
-// ---- PAGE 3+ (DAY) — EXACT sheet look from your screenshot ----
+// ---- PAGE 3+ (DAY) — tight margins + double frame + watch icon time ----
 function dayPageHtml({ dayIndex, dateIso, meals }) {
   return `
 <section class="page sheet-bg">
@@ -136,17 +134,19 @@ function dayPageHtml({ dayIndex, dateIso, meals }) {
           <div class="mealname">${m}</div>
           ${
             parsed.time
-              ? `<div class="time"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>${escapeHtml(parsed.time)}</div>`
+              ? `<div class="time">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  ${escapeHtml(parsed.time)}
+                </div>`
               : ""
           }
         </div>
         <div class="rightcol">
           <div class="meal-main">${escapeHtml(parsed.main || "—")}</div>
-          ${
-            parsed.note
-              ? `<div class="meal-note">${escapeHtml(parsed.note)}</div>`
-              : ""
-          }
+          ${parsed.note ? `<div class="meal-note">${escapeHtml(parsed.note)}</div>` : ""}
           <div class="sep"></div>
         </div>
       </div>`;
@@ -156,7 +156,7 @@ function dayPageHtml({ dayIndex, dateIso, meals }) {
 </section>`;
 }
 
-// Monthly page keeps the same sheet aesthetic
+// Monthly page reuses the same “sheet” styling
 function monthlyPageHtml({ slots }) {
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
@@ -187,7 +187,7 @@ function monthlyPageHtml({ slots }) {
 </section>`;
 }
 
-// ---------- CSS (tuned to match your left screenshot) ----------
+// ---------- CSS (tuned to your reference; very tight page padding) ----------
 const CSS = `
 :root{
   --green:#2f7a2f;
@@ -203,11 +203,12 @@ html,body{
   font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif;
 }
 
+/* A4 page — max ~10px padding around everything */
 .page{
   width:210mm; min-height:297mm;
-  margin:0 auto 18px; page-break-after:always;
+  margin:0 auto; page-break-after:always;
   display:flex; align-items:center; justify-content:center;
-  padding:14mm; /* screenshot shows generous margins */
+  padding:10px;               /* << tight edges, as requested */
 }
 
 /* ---- COVER ---- */
@@ -257,55 +258,59 @@ html,body{
 .dt{ color:var(--green); font-weight:700; }
 .dd{ color:#222; }
 
-/* ---- SHEET (DAY/MONTH) — matches left screenshot ---- */
+/* ---- SHEET (DAY/MONTH) — double frame & compact padding ---- */
 .sheet-bg{
   background:#f3f4f2 url("${BG_DETAILS}") center/cover no-repeat;
   background-blend-mode:soft-light;
 }
 
+/* Outer dark frame + inner light frame */
 .sheet{
-  width:100%; height:auto; background:#fff;
-  border:12px solid var(--green);         /* OUTER dark green frame */
-  border-radius:6px; padding:6mm;         /* space before inner frame */
+  width:100%; background:#fff;
+  border:12px solid var(--green);       /* OUTER dark */
+  border-radius:6px; padding:6px;       /* area between frames */
 }
 .sheet-inner{
-  border:6px solid var(--green-light);    /* INNER light green frame */
+  border:6px solid var(--green-light);  /* INNER light */
   border-radius:2px; background:#fff;
-  padding:12px 16px 20px;
+  padding:10px;                         /* super tight inner padding */
 }
 
+/* Header bar */
 .topbar{
   display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center;
-  background:#e9f3e1; border:1px solid #d5e7cd;
-  border-radius:4px; padding:12px 14px; margin-bottom:16px;
+  background:#e7f2de; border:1px solid #d1e5c7;
+  border-radius:4px; padding:10px 12px; margin-bottom:10px;
 }
 .cell{ font-size:14px; }
 .mid{ text-align:center; }
 .right{ text-align:right; color:#2d2d2d; }
 .strong{ font-weight:800; color:#2b6a2b; }
 
+/* Meal rows */
 .mealrow{
-  display:grid; grid-template-columns:160px 1fr; gap:12px; align-items:flex-start;
-  margin:10px 0 0;
+  display:grid; grid-template-columns:180px 1fr; gap:12px; align-items:flex-start;
+  margin-top:6px;
 }
-.left{ padding-top:4px; }
-.mealname{ font-weight:800; color:#2b6a2b; }
+.left{ display:flex; flex-direction:column; align-items:flex-start; }
+.mealname{ font-weight:800; color:#2b6a2b; line-height:1; }
 .time{
-  display:flex; align-items:center; gap:8px; color:#2b2b2b; font-size:13px; margin-top:6px;
+  display:flex; align-items:flex-start; gap:8px; color:#2b2b2b; font-size:13px;
+  margin-top:6px; line-height:1;
 }
-.time svg{ width:16px; height:16px; opacity:.9; }
+.time svg{ width:15px; height:15px; opacity:.95; margin-top:1px; }
 
 .rightcol{ position:relative; }
 .meal-main{ color:#1e1e1e; font-size:14px; line-height:1.45; }
 .meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:4px; }
 
-/* the green separator line that starts after the left column */
+/* Green separator that begins after the left column */
 .sep{
   height:3px; background:#2f7a2f; width:100%;
-  margin:14px 0 4px;
+  margin:12px 0 6px;
 }
 
-/* Monthly slots reuse the same typography */
+/* Monthly slots use same rhythm */
 .slot h3{ margin:0 0 6px; color:#2f7a2f; }
 .time-inline{ color:#666; font-weight:500; }
 .opts{ margin:0; padding-left:18px; }
@@ -318,9 +323,9 @@ html,body{
 }
 `;
 
-// ---------- ROUTE ----------
-// Public URL (Shopify app proxy): https://muditam.com/apps/consultation/diet-plan/:id
+// ---------- ROUTE ---------- 
 router.get("/diet-plan/:id", async (req, res) => {
+  // HTML only
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
   }
@@ -328,11 +333,11 @@ router.get("/diet-plan/:id", async (req, res) => {
   try {
     const planId = req.params.id;
 
-    // 1) Fetch plan (flattened schema)
+    // 1) Fetch plan
     const doc = await DietPlan.findById(planId).lean();
     if (!doc) return res.status(404).send("Diet plan not found.");
 
-    // 2) Get customer from Lead if present
+    // 2) Enrich from Lead if available
     let custName = doc.customer?.name || "";
     let custPhone = doc.customer?.phone || "";
     if (doc.customer?.leadId) {
@@ -347,20 +352,20 @@ router.get("/diet-plan/:id", async (req, res) => {
     custName = custName || "Customer";
     custPhone = custPhone || "—";
 
-    // 3) Pages
+    // 3) Build pages
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
     const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
     const pages = [];
 
-    // Slide 1 (approved)
+    // Slide 1
     pages.push(coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" }));
 
-    // Slide 2 (approved)
+    // Slide 2
     pages.push(basicDetailsHtml({ name: custName, phone: custPhone }));
 
-    // Slide 3+ (sheet)
+    // Slide 3+
     if (planType === "Weekly") {
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
