@@ -12,6 +12,8 @@ const BG_DETAILS =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801";
 const TAILORED_IMG =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_6_2.png?v=1757500742";
+const TAILORED_BG =
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1379.png?v=1757501741";
 
 const MEALS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
 const MONTHLY_SLOTS = ["Breakfast", "Lunch", "Evening Snack", "Dinner"];
@@ -176,7 +178,7 @@ function dayPageHtml({ dayIndex, dateIso, meals, times }) {
 </section>`;
 }
 
-// ---- Tailored Diet slide (after Day 1) ----
+// ---- Tailored Diet slide (ALWAYS LAST) ----
 function tailoredDietHtml({ conditions = [], goals = [] }) {
   const condText = niceList(conditions) || "your condition";
   const goalText = niceList(goals) || "health goals";
@@ -360,7 +362,10 @@ html,body{
 .dash{ color:#888; }
 
 /* ---- Tailored Diet slide ---- */
-.tailor{ background:#eef5e9; }
+/* Use your full-bleed background image; no extra green background */
+.tailor{
+  background:url("${TAILORED_BG}") center/cover no-repeat;
+}
 .tailor-card{
   position:relative; width:100%; max-width:560px;
   background:linear-gradient(180deg,#3a8a33 0%, #2b6e27 100%);
@@ -444,7 +449,6 @@ router.get("/diet-plan/:id", async (req, res) => {
     // Slide 3+ (weekly or monthly)
     if (planType === "Weekly") {
       const times = doc.weeklyTimes || {};
-
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
         const meals = {
@@ -453,20 +457,6 @@ router.get("/diet-plan/:id", async (req, res) => {
           Snacks: (doc.fortnight?.Snacks || [])[i] || "",
           Dinner: (doc.fortnight?.Dinner || [])[i] || "",
         };
-
-        // Day 1 page
-        if (i === 0) {
-          pages.push(dayPageHtml({ dayIndex: i, dateIso: d, meals, times }));
-          // Insert the tailored slide right after Day 1
-          pages.push(
-            tailoredDietHtml({
-              conditions: Array.isArray(doc.conditions) ? doc.conditions : [],
-              goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
-            })
-          );
-          continue;
-        }
-        // Day 2..N
         pages.push(dayPageHtml({ dayIndex: i, dateIso: d, meals, times }));
       }
     } else {
@@ -476,16 +466,16 @@ router.get("/diet-plan/:id", async (req, res) => {
         "Evening Snack": doc.monthly?.["Evening Snack"] || { time: "", options: [] },
         Dinner: doc.monthly?.Dinner || { time: "", options: [] },
       };
-      // Third slide (monthly)
       pages.push(monthlyPageHtml({ slots }));
-      // Tailored slide after monthly page
-      pages.push(
-        tailoredDietHtml({
-          conditions: Array.isArray(doc.conditions) ? doc.conditions : [],
-          goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
-        })
-      );
     }
+
+    // ALWAYS append Tailored Diet slide at the very end
+    pages.push(
+      tailoredDietHtml({
+        conditions: Array.isArray(doc.conditions) ? doc.conditions : [],
+        goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
+      })
+    );
 
     // 4) HTML
     const html = `<!doctype html>
