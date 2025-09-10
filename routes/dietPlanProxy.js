@@ -56,6 +56,24 @@ function addDays(dateObj, n) {
   return d;
 }
 
+// Extracts (optional) time and a main + note from a meal string.
+// e.g. "Vegetable Sandwich...\nFitting: ..." -> {time:"", main:"Vegetable Sandwich...", note:"Fitting: ..." }
+function parseMeal(raw) {
+  const out = { time: "", main: "", note: "" };
+  if (!raw) return out;
+  const s = String(raw);
+
+  // try to find a HH:MM time inside (won't break text if not present)
+  const t = s.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
+  out.time = t ? t[0] : "";
+
+  const cleaned = t ? s.replace(t[0], "").trim() : s.trim();
+  const parts = cleaned.split(/\r?\n+/);
+  out.main = parts[0] || "";
+  out.note = parts.slice(1).join(" ").trim();
+  return out;
+}
+
 // ---------- HTML builders ----------
 function coverPageHtml({ whenText = "", doctorText = "" }) {
   return `
@@ -98,24 +116,39 @@ function basicDetailsHtml({ name = "—", phone = "—" }) {
 </section>`;
 }
 
-/* ---- PAGE 3+ (DAY) — compact floating card with double border ---- */
+// ---- PAGE 3+ (DAY) — EXACT sheet look from your screenshot ----
 function dayPageHtml({ dayIndex, dateIso, meals }) {
   return `
-<section class="page day">
-  <div class="frame">
-    <div class="pad">
-      <div class="head">
-        <div class="hcell strong">DAY ${dayIndex + 1}</div>
-        <div class="hcell mid strong">${escapeHtml(weekday(dateIso))}</div>
-        <div class="hcell right">${escapeHtml(isoYYYYMMDD(dateIso))}</div>
+<section class="page sheet-bg">
+  <div class="sheet">
+    <div class="sheet-inner">
+      <div class="topbar">
+        <div class="cell strong">DAY ${dayIndex + 1}</div>
+        <div class="cell mid strong">${escapeHtml(weekday(dateIso))}</div>
+        <div class="cell right">${escapeHtml(isoYYYYMMDD(dateIso))}</div>
       </div>
 
       ${MEALS.map((m) => {
-        const v = meals[m] || "";
+        const parsed = parseMeal(meals[m] || "");
         return `
-      <div class="section">
-        <div class="mealname">${m}</div>
-        <div class="mealval">${escapeHtml(v || "—")}</div>
+      <div class="mealrow">
+        <div class="left">
+          <div class="mealname">${m}</div>
+          ${
+            parsed.time
+              ? `<div class="time"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>${escapeHtml(parsed.time)}</div>`
+              : ""
+          }
+        </div>
+        <div class="rightcol">
+          <div class="meal-main">${escapeHtml(parsed.main || "—")}</div>
+          ${
+            parsed.note
+              ? `<div class="meal-note">${escapeHtml(parsed.note)}</div>`
+              : ""
+          }
+          <div class="sep"></div>
+        </div>
       </div>`;
       }).join("")}
     </div>
@@ -123,11 +156,11 @@ function dayPageHtml({ dayIndex, dateIso, meals }) {
 </section>`;
 }
 
-/* ---- Monthly options reusing the same card style ---- */
+// Monthly page keeps the same sheet aesthetic
 function monthlyPageHtml({ slots }) {
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
-    const time = s.time ? ` <span class="time">(${escapeHtml(s.time)})</span>` : "";
+    const time = s.time ? ` <span class="time-inline">(${escapeHtml(s.time)})</span>` : "";
     const opts = (s.options || []).length
       ? `<ul class="opts">${s.options.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`
       : `<p class="dash">—</p>`;
@@ -135,15 +168,18 @@ function monthlyPageHtml({ slots }) {
       <div class="slot">
         <h3>${slot}${time}</h3>
         ${opts}
+        <div class="sep"></div>
       </div>`;
   }).join("");
 
   return `
-<section class="page day">
-  <div class="frame">
-    <div class="pad">
-      <div class="head head--month">
-        <div class="hcell strong">MONTHLY OPTIONS</div>
+<section class="page sheet-bg">
+  <div class="sheet">
+    <div class="sheet-inner">
+      <div class="topbar">
+        <div class="cell strong">MONTHLY OPTIONS</div>
+        <div></div>
+        <div></div>
       </div>
       ${blocks}
     </div>
@@ -151,9 +187,15 @@ function monthlyPageHtml({ slots }) {
 </section>`;
 }
 
-// ---------- CSS (exact look to your right-hand mock) ----------
+// ---------- CSS (tuned to match your left screenshot) ----------
 const CSS = `
-:root { --green:#2f7a2f; --green-700:#236223; --ink:#111; --muted:#666; }
+:root{
+  --green:#2f7a2f;
+  --green-700:#225f22;
+  --green-light:#a6caa6;
+  --ink:#111;
+  --muted:#666;
+}
 
 *{ box-sizing:border-box; }
 html,body{
@@ -161,14 +203,14 @@ html,body{
   font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif;
 }
 
-/* A4 page */
 .page{
-  width:210mm; min-height:297mm; margin:0 auto 18px;
+  width:210mm; min-height:297mm;
+  margin:0 auto 18px; page-break-after:always;
   display:flex; align-items:center; justify-content:center;
-  padding:20mm 14mm; page-break-after:always;
+  padding:14mm; /* screenshot shows generous margins */
 }
 
-/* ---- PAGE 1 (COVER) ---- */
+/* ---- COVER ---- */
 .cover{ background:url("${BG_COVER}") center/cover no-repeat; }
 .cover-card{
   width:100%; max-width:600px;
@@ -180,8 +222,8 @@ html,body{
   margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px;
   text-transform:uppercase; font-size:28px;
 }
-.cover-card .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
-.cover-card .subtitle{ margin:0 0 22px; font-size:15px; line-height:1.5; color:#ebffeb; }
+.rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
+.subtitle{ margin:0 0 22px; font-size:15px; line-height:1.5; color:#ebffeb; }
 .cta-pill{
   display:inline-block; background:#fff; border-radius:12px; padding:14px 18px;
   color:var(--green-700); min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18);
@@ -189,14 +231,14 @@ html,body{
 .pill-title{ font-weight:800; font-size:18px; text-align:center; }
 .pill-sub{ color:#2a532a; font-size:13px; text-align:center; margin-top:6px; }
 
-/* ---- PAGE 2 (DETAILS) ---- */
+/* ---- DETAILS ---- */
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; }
 .details-card{
   position:relative; width:100%; max-width:620px; background:#fff;
   border-radius:20px; padding:24px 26px 18px;
   box-shadow:0 12px 40px rgba(0,0,0,.18); border:1px solid #e6f0e6;
 }
-.details-card .pin{
+.pin{
   position:absolute; width:42px; height:42px; top:-21px; left:50%;
   transform:translateX(-50%); border-radius:50%;
   background:radial-gradient(circle at 35% 35%, #ffffff 0 35%, #dcdcdc 70%, #bdbdbd 100%);
@@ -215,55 +257,57 @@ html,body{
 .dt{ color:var(--green); font-weight:700; }
 .dd{ color:#222; }
 
-/* ---- PAGE 3+ (DAY/MONTH) — card layout ---- */
-/* background with subtle texture and lots of open space */
-.day{
-  background:#f7faf7 url("${BG_DETAILS}") center/cover no-repeat;
+/* ---- SHEET (DAY/MONTH) — matches left screenshot ---- */
+.sheet-bg{
+  background:#f3f4f2 url("${BG_DETAILS}") center/cover no-repeat;
   background-blend-mode:soft-light;
-  /* Put card lower on the page like your mock */
-  align-items:flex-end; justify-content:center;
-  padding-top:60mm; padding-bottom:28mm;
 }
 
-/* compact floating card with double green border + drop shadow */
-.frame{
-  width:75%;                     /* narrower card for generous whitespace */
-  border-radius:14px;
-  border:10px solid #97c698;     /* light green outer ring */
-  box-shadow:
-    inset 0 0 0 6px #2f7a2f,     /* dark inner ring */
-    0 10px 20px rgba(0,0,0,.20); /* outer shadow */
-  background:transparent;
+.sheet{
+  width:100%; height:auto; background:#fff;
+  border:12px solid var(--green);         /* OUTER dark green frame */
+  border-radius:6px; padding:6mm;         /* space before inner frame */
 }
-.pad{
-  background:#fff; border-radius:8px; padding:16px 18px;
+.sheet-inner{
+  border:6px solid var(--green-light);    /* INNER light green frame */
+  border-radius:2px; background:#fff;
+  padding:12px 16px 20px;
 }
 
-/* header bar inside card */
-.head{
+.topbar{
   display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center;
-  background:#f1f7f1; border:1px solid #dbe7db;
-  border-radius:6px; padding:10px 12px; margin-bottom:12px;
+  background:#e9f3e1; border:1px solid #d5e7cd;
+  border-radius:4px; padding:12px 14px; margin-bottom:16px;
 }
-.head--month{ grid-template-columns:1fr; }
-.hcell{ font-size:14px; }
+.cell{ font-size:14px; }
 .mid{ text-align:center; }
-.right{ text-align:right; color:#444; }
+.right{ text-align:right; color:#2d2d2d; }
 .strong{ font-weight:800; color:#2b6a2b; }
 
-/* meal sections — thin separators + bold titles */
-.section{
-  padding:16px 6px; border-top:1px solid #e6ede4;
+.mealrow{
+  display:grid; grid-template-columns:160px 1fr; gap:12px; align-items:flex-start;
+  margin:10px 0 0;
 }
-.section:first-of-type{ border-top:1px solid #e6ede4; }
-.mealname{ font-weight:800; color:#2b6a2b; margin-bottom:6px; }
-.mealval{ color:#202020; line-height:1.5; font-size:14px; white-space:pre-wrap; }
+.left{ padding-top:4px; }
+.mealname{ font-weight:800; color:#2b6a2b; }
+.time{
+  display:flex; align-items:center; gap:8px; color:#2b2b2b; font-size:13px; margin-top:6px;
+}
+.time svg{ width:16px; height:16px; opacity:.9; }
 
-/* monthly slots reuse the rhythm */
-.slot{ border-top:1px solid #e6ede4; padding:16px 6px; }
-.slot:first-of-type{ border-top:1px solid #e6ede4; }
+.rightcol{ position:relative; }
+.meal-main{ color:#1e1e1e; font-size:14px; line-height:1.45; }
+.meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:4px; }
+
+/* the green separator line that starts after the left column */
+.sep{
+  height:3px; background:#2f7a2f; width:100%;
+  margin:14px 0 4px;
+}
+
+/* Monthly slots reuse the same typography */
 .slot h3{ margin:0 0 6px; color:#2f7a2f; }
-.slot .time{ color:#666; font-weight:500; }
+.time-inline{ color:#666; font-weight:500; }
 .opts{ margin:0; padding-left:18px; }
 .dash{ color:#888; }
 
@@ -275,7 +319,7 @@ html,body{
 `;
 
 // ---------- ROUTE ----------
-// Public URL (Shopify proxy mapping):  https://muditam.com/apps/consultation/diet-plan/:id
+// Public URL (Shopify app proxy): https://muditam.com/apps/consultation/diet-plan/:id
 router.get("/diet-plan/:id", async (req, res) => {
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
@@ -284,11 +328,11 @@ router.get("/diet-plan/:id", async (req, res) => {
   try {
     const planId = req.params.id;
 
-    // 1) Fetch plan (flattened DietPlan schema)
+    // 1) Fetch plan (flattened schema)
     const doc = await DietPlan.findById(planId).lean();
     if (!doc) return res.status(404).send("Diet plan not found.");
 
-    // 2) Enrich from Lead when available
+    // 2) Get customer from Lead if present
     let custName = doc.customer?.name || "";
     let custPhone = doc.customer?.phone || "";
     if (doc.customer?.leadId) {
@@ -303,22 +347,20 @@ router.get("/diet-plan/:id", async (req, res) => {
     custName = custName || "Customer";
     custPhone = custPhone || "—";
 
-    // 3) Build pages
+    // 3) Pages
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
     const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
     const pages = [];
 
-    // Slide 1
-    pages.push(
-      coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" })
-    );
+    // Slide 1 (approved)
+    pages.push(coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" }));
 
-    // Slide 2
+    // Slide 2 (approved)
     pages.push(basicDetailsHtml({ name: custName, phone: custPhone }));
 
-    // Slide 3+
+    // Slide 3+ (sheet)
     if (planType === "Weekly") {
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
@@ -340,7 +382,7 @@ router.get("/diet-plan/:id", async (req, res) => {
       pages.push(monthlyPageHtml({ slots }));
     }
 
-    // 4) Send HTML
+    // 4) HTML
     const html = `<!doctype html>
 <html lang="en">
 <head>
