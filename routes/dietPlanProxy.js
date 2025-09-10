@@ -9,9 +9,9 @@ const Lead = require("../models/Lead");
 const BG_COVER =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_3_3.png?v=1757425422";
 const BG_DETAILS =
-  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801";
-const TAILORED_IMG =
-  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_6_2.png?v=1757500742"; 
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801"; 
+const TAILORED_BG =
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1379.png?v=1757501741";
 
 const MEALS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
 const MONTHLY_SLOTS = ["Breakfast", "Lunch", "Evening Snack", "Dinner"];
@@ -188,8 +188,7 @@ function tailoredDietHtml({ conditions = [], goals = [] }) {
     <h2>TAILORED DIET CHART</h2>
     <div class="t-rule"></div>
     <p class="t-msg">${escapeHtml(msg)}</p>
-    <div class="bowl-wrap">
-      <img src="${TAILORED_IMG}" alt="" />
+    <div class="bowl-wrap"> 
     </div>
   </div>
 </section>`;
@@ -361,8 +360,10 @@ html,body{
 
 /* ---- Tailored Diet slide ---- */
 /* Use your full-bleed background image; no extra green background */
- 
-.tailor-card{  max-width:560px; 
+.tailor{
+  background:url("${TAILORED_BG}") center/cover no-repeat;
+}
+.tailor-card{  width:100%; max-width:560px; 
   color:#fff; border-radius:28px; padding:28px 26px 120px;  
   text-align:center;
 }
