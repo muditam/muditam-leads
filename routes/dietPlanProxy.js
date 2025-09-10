@@ -98,7 +98,7 @@ function basicDetailsHtml({ name = "—", phone = "—" }) {
 </section>`;
 }
 
-// 🔧 NEW: Day page restyled to your reference
+/* ---- PAGE 3+ (DAY) — compact floating card with double border ---- */
 function dayPageHtml({ dayIndex, dateIso, meals }) {
   return `
 <section class="page day">
@@ -113,16 +113,17 @@ function dayPageHtml({ dayIndex, dateIso, meals }) {
       ${MEALS.map((m) => {
         const v = meals[m] || "";
         return `
-        <div class="section">
-          <div class="mealname">${m}</div>
-          <div class="mealval">${escapeHtml(v || "—")}</div>
-        </div>`;
+      <div class="section">
+        <div class="mealname">${m}</div>
+        <div class="mealval">${escapeHtml(v || "—")}</div>
+      </div>`;
       }).join("")}
     </div>
   </div>
 </section>`;
 }
 
+/* ---- Monthly options reusing the same card style ---- */
 function monthlyPageHtml({ slots }) {
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
@@ -150,14 +151,9 @@ function monthlyPageHtml({ slots }) {
 </section>`;
 }
 
-// ---------- CSS ----------
+// ---------- CSS (exact look to your right-hand mock) ----------
 const CSS = `
-:root {
-  --green:#2f7a2f;
-  --green-700:#236223;
-  --ink:#111;
-  --muted:#666;
-}
+:root { --green:#2f7a2f; --green-700:#236223; --ink:#111; --muted:#666; }
 
 *{ box-sizing:border-box; }
 html,body{
@@ -173,9 +169,7 @@ html,body{
 }
 
 /* ---- PAGE 1 (COVER) ---- */
-.cover{
-  background:url("${BG_COVER}") center/cover no-repeat;
-}
+.cover{ background:url("${BG_COVER}") center/cover no-repeat; }
 .cover-card{
   width:100%; max-width:600px;
   background:linear-gradient(180deg,#3a8a33 0%, #2b6e27 100%);
@@ -196,9 +190,7 @@ html,body{
 .pill-sub{ color:#2a532a; font-size:13px; text-align:center; margin-top:6px; }
 
 /* ---- PAGE 2 (DETAILS) ---- */
-.details{
-  background:url("${BG_DETAILS}") center/cover no-repeat;
-}
+.details{ background:url("${BG_DETAILS}") center/cover no-repeat; }
 .details-card{
   position:relative; width:100%; max-width:620px; background:#fff;
   border-radius:20px; padding:24px 26px 18px;
@@ -223,51 +215,53 @@ html,body{
 .dt{ color:var(--green); font-weight:700; }
 .dd{ color:#222; }
 
-/* ---- PAGE 3+ (DAY / MONTH) ---- */
-/* page bg with faint food texture */
+/* ---- PAGE 3+ (DAY/MONTH) — card layout ---- */
+/* background with subtle texture and lots of open space */
 .day{
-  background:#f2f5f1 url("${BG_DETAILS}") center/cover no-repeat;
+  background:#f7faf7 url("${BG_DETAILS}") center/cover no-repeat;
   background-blend-mode:soft-light;
+  /* Put card lower on the page like your mock */
+  align-items:flex-end; justify-content:center;
+  padding-top:60mm; padding-bottom:28mm;
 }
-/* outer double green frame */
+
+/* compact floating card with double green border + drop shadow */
 .frame{
-  width:88%; margin:0 auto; border-radius:12px;
-  border:12px solid #97c698;             /* light green ring */
-  box-shadow:inset 0 0 0 6px #2f7a2f,     /* inner dark ring */
-             0 6px 14px rgba(0,0,0,.18);  /* outer drop shadow */
+  width:75%;                     /* narrower card for generous whitespace */
+  border-radius:14px;
+  border:10px solid #97c698;     /* light green outer ring */
+  box-shadow:
+    inset 0 0 0 6px #2f7a2f,     /* dark inner ring */
+    0 10px 20px rgba(0,0,0,.20); /* outer shadow */
   background:transparent;
 }
 .pad{
-  background:#fff; border-radius:6px; padding:14px 16px;
+  background:#fff; border-radius:8px; padding:16px 18px;
 }
 
-/* header bar */
+/* header bar inside card */
 .head{
   display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center;
   background:#f1f7f1; border:1px solid #dbe7db;
-  border-radius:4px; padding:10px 12px; margin-bottom:10px;
+  border-radius:6px; padding:10px 12px; margin-bottom:12px;
 }
-.head--month{ grid-template-columns:1fr; text-align:left; }
+.head--month{ grid-template-columns:1fr; }
 .hcell{ font-size:14px; }
 .mid{ text-align:center; }
 .right{ text-align:right; color:#444; }
 .strong{ font-weight:800; color:#2b6a2b; }
 
-/* meal sections (thin separators, bold titles) */
+/* meal sections — thin separators + bold titles */
 .section{
-  padding:16px 6px;
-  border-top:1px solid #e4ede4;
+  padding:16px 6px; border-top:1px solid #e6ede4;
 }
-.section:first-of-type{ border-top:1px solid #e4ede4; }
+.section:first-of-type{ border-top:1px solid #e6ede4; }
 .mealname{ font-weight:800; color:#2b6a2b; margin-bottom:6px; }
 .mealval{ color:#202020; line-height:1.5; font-size:14px; white-space:pre-wrap; }
 
-/* monthly slots reuse same typographic rhythm */
-.slot{
-  border-top:1px solid #e4ede4;
-  padding:16px 6px;
-}
-.slot:first-of-type{ border-top:1px solid #e4ede4; }
+/* monthly slots reuse the rhythm */
+.slot{ border-top:1px solid #e6ede4; padding:16px 6px; }
+.slot:first-of-type{ border-top:1px solid #e6ede4; }
 .slot h3{ margin:0 0 6px; color:#2f7a2f; }
 .slot .time{ color:#666; font-weight:500; }
 .opts{ margin:0; padding-left:18px; }
@@ -316,23 +310,15 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     const pages = [];
 
-    // slide 1
+    // Slide 1
     pages.push(
-      coverPageHtml({
-        whenText: prettyDDMonthYYYY(start),
-        doctorText: "", // add doctor's name here if you store it
-      })
+      coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" })
     );
 
-    // slide 2
-    pages.push(
-      basicDetailsHtml({
-        name: custName,
-        phone: custPhone,
-      })
-    );
+    // Slide 2
+    pages.push(basicDetailsHtml({ name: custName, phone: custPhone }));
 
-    // slide 3+
+    // Slide 3+
     if (planType === "Weekly") {
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
