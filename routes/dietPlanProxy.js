@@ -56,7 +56,7 @@ function addDays(dateObj, n) {
   return d;
 }
 
-// ---------- HTML builders (match your designs) ----------
+// ---------- HTML builders ----------
 function coverPageHtml({ whenText = "", doctorText = "" }) {
   return `
 <section class="page cover">
@@ -65,14 +65,11 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
       <span>DIETARY ROADMAP TO</span><br/>
       <span>HEALTHY LIFESTYLE</span>
     </h1>
-
     <div class="rule"></div>
-
     <p class="subtitle">
       Starting is the hardest part<br/>
       Congratulations on taking the leap!
     </p>
-
     <div class="cta-pill">
       <div class="pill-title">Onboarding Consultation</div>
       <div class="pill-sub">${escapeHtml(whenText)}${doctorText ? ` | ${escapeHtml(doctorText)}` : ""}</div>
@@ -101,30 +98,24 @@ function basicDetailsHtml({ name = "—", phone = "—" }) {
 </section>`;
 }
 
+// 🔧 NEW: Day page restyled to your reference
 function dayPageHtml({ dayIndex, dateIso, meals }) {
   return `
 <section class="page day">
-  <div class="sheet">
-    <div class="sheet-inner">
-      <div class="day-head">
-        <div class="cell strong">DAY ${dayIndex + 1}</div>
-        <div class="cell center strong">${escapeHtml(weekday(dateIso))}</div>
-        <div class="cell right">${escapeHtml(isoYYYYMMDD(dateIso))}</div>
+  <div class="frame">
+    <div class="pad">
+      <div class="head">
+        <div class="hcell strong">DAY ${dayIndex + 1}</div>
+        <div class="hcell mid strong">${escapeHtml(weekday(dateIso))}</div>
+        <div class="hcell right">${escapeHtml(isoYYYYMMDD(dateIso))}</div>
       </div>
 
       ${MEALS.map((m) => {
         const v = meals[m] || "";
-        if (!(v && String(v).trim())) {
-          // still keep an empty row to match your layout
-        }
         return `
-        <div class="meal-row">
-          <div class="meal-title">${m}</div>
-          <div class="meal-right">
-            <div class="meal-body">
-              ${escapeHtml(v || "—")}
-            </div>
-          </div>
+        <div class="section">
+          <div class="mealname">${m}</div>
+          <div class="mealval">${escapeHtml(v || "—")}</div>
         </div>`;
       }).join("")}
     </div>
@@ -148,16 +139,18 @@ function monthlyPageHtml({ slots }) {
 
   return `
 <section class="page day">
-  <div class="sheet">
-    <div class="sheet-inner">
-      <div class="month-head strong">MONTHLY OPTIONS</div>
+  <div class="frame">
+    <div class="pad">
+      <div class="head head--month">
+        <div class="hcell strong">MONTHLY OPTIONS</div>
+      </div>
       ${blocks}
     </div>
   </div>
 </section>`;
 }
 
-// ---------- CSS (faithful to the screenshots) ----------
+// ---------- CSS ----------
 const CSS = `
 :root {
   --green:#2f7a2f;
@@ -167,37 +160,34 @@ const CSS = `
 }
 
 *{ box-sizing:border-box; }
-html,body{ margin:0; padding:0; background:#f6f7f9; color:var(--ink);
-  font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif; }
+html,body{
+  margin:0; padding:0; background:#f6f7f9; color:var(--ink);
+  font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif;
+}
 
 /* A4 page */
 .page{
-  width:210mm; min-height:297mm; margin:0 auto 18px; display:flex;
-  align-items:center; justify-content:center; padding:20mm 14mm;
-  page-break-after:always;
+  width:210mm; min-height:297mm; margin:0 auto 18px;
+  display:flex; align-items:center; justify-content:center;
+  padding:20mm 14mm; page-break-after:always;
 }
 
 /* ---- PAGE 1 (COVER) ---- */
 .cover{
-  background-image:url("${BG_COVER}");
-  background-size:cover; background-position:center; background-repeat:no-repeat;
+  background:url("${BG_COVER}") center/cover no-repeat;
 }
 .cover-card{
-  width:100%; max-width:600px; background:linear-gradient(180deg,#3a8a33 0%, #2b6e27 100%);
-  border-radius:28px; padding:32px 28px; text-align:center;
+  width:100%; max-width:600px;
+  background:linear-gradient(180deg,#3a8a33 0%, #2b6e27 100%);
+  border-radius:28px; padding:32px 28px; text-align:center; color:#fff;
   box-shadow:0 18px 40px rgba(0,0,0,.25);
-  color:#fff;
 }
 .cover-card h1{
   margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px;
   text-transform:uppercase; font-size:28px;
 }
-.cover-card .rule{
-  height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28);
-}
-.cover-card .subtitle{
-  margin:0 0 22px; font-size:15px; line-height:1.5; color:#ebffeb;
-}
+.cover-card .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
+.cover-card .subtitle{ margin:0 0 22px; font-size:15px; line-height:1.5; color:#ebffeb; }
 .cta-pill{
   display:inline-block; background:#fff; border-radius:12px; padding:14px 18px;
   color:var(--green-700); min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18);
@@ -207,18 +197,18 @@ html,body{ margin:0; padding:0; background:#f6f7f9; color:var(--ink);
 
 /* ---- PAGE 2 (DETAILS) ---- */
 .details{
-  background-image:url("${BG_DETAILS}");
-  background-size:cover; background-position:center; background-repeat:no-repeat;
+  background:url("${BG_DETAILS}") center/cover no-repeat;
 }
 .details-card{
-  position:relative; width:100%; max-width:620px; background:#fff; border-radius:20px;
-  padding:24px 26px 18px; box-shadow:0 12px 40px rgba(0,0,0,.18);
-  border:1px solid #e6f0e6;
+  position:relative; width:100%; max-width:620px; background:#fff;
+  border-radius:20px; padding:24px 26px 18px;
+  box-shadow:0 12px 40px rgba(0,0,0,.18); border:1px solid #e6f0e6;
 }
 .details-card .pin{
-  position:absolute; width:42px; height:42px; top:-21px; left:50%; transform:translateX(-50%);
+  position:absolute; width:42px; height:42px; top:-21px; left:50%;
+  transform:translateX(-50%); border-radius:50%;
   background:radial-gradient(circle at 35% 35%, #ffffff 0 35%, #dcdcdc 70%, #bdbdbd 100%);
-  border-radius:50%; box-shadow:0 6px 12px rgba(0,0,0,.22);
+  box-shadow:0 6px 12px rgba(0,0,0,.22);
 }
 .details-card h2{
   margin:4px 0 14px; text-align:center; color:var(--green); letter-spacing:.6px;
@@ -233,45 +223,54 @@ html,body{ margin:0; padding:0; background:#f6f7f9; color:var(--ink);
 .dt{ color:var(--green); font-weight:700; }
 .dd{ color:#222; }
 
-/* ---- DAY / MONTHLY PAGES ---- */
+/* ---- PAGE 3+ (DAY / MONTH) ---- */
+/* page bg with faint food texture */
 .day{
-  background:#efefef url("${BG_DETAILS}") center/cover no-repeat; /* subtle texture */
+  background:#f2f5f1 url("${BG_DETAILS}") center/cover no-repeat;
   background-blend-mode:soft-light;
 }
-.sheet{
-  width:100%; background:#f9faf8; border-radius:8px; padding:10px;
-  border:12px solid #a6caa6; box-shadow: inset 0 0 0 6px #2f7a2f;
+/* outer double green frame */
+.frame{
+  width:88%; margin:0 auto; border-radius:12px;
+  border:12px solid #97c698;             /* light green ring */
+  box-shadow:inset 0 0 0 6px #2f7a2f,     /* inner dark ring */
+             0 6px 14px rgba(0,0,0,.18);  /* outer drop shadow */
+  background:transparent;
 }
-.sheet-inner{ background:#fff; border-radius:4px; padding:12px 14px; }
+.pad{
+  background:#fff; border-radius:6px; padding:14px 16px;
+}
 
-.day-head{
-  display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:10px;
+/* header bar */
+.head{
+  display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center;
+  background:#f1f7f1; border:1px solid #dbe7db;
+  border-radius:4px; padding:10px 12px; margin-bottom:10px;
 }
-.cell{ font-size:14px; }
-.center{ text-align:center; }
+.head--month{ grid-template-columns:1fr; text-align:left; }
+.hcell{ font-size:14px; }
+.mid{ text-align:center; }
 .right{ text-align:right; color:#444; }
 .strong{ font-weight:800; color:#2b6a2b; }
 
-.meal-row{
-  padding:10px 0; border-top:2px solid #e1e9e1;
+/* meal sections (thin separators, bold titles) */
+.section{
+  padding:16px 6px;
+  border-top:1px solid #e4ede4;
 }
-.meal-row:first-of-type{ border-top:2px solid #e1e9e1; }
-.meal-title{
-  font-weight:800; color:#2b6a2b; margin-bottom:4px; font-size:14px;
-}
-.meal-right{ display:block; }
-.meal-body{
-  color:#222; font-size:14px; line-height:1.45; white-space:pre-wrap;
-}
+.section:first-of-type{ border-top:1px solid #e4ede4; }
+.mealname{ font-weight:800; color:#2b6a2b; margin-bottom:6px; }
+.mealval{ color:#202020; line-height:1.5; font-size:14px; white-space:pre-wrap; }
 
-.month-head{ font-size:16px; margin-bottom:8px; }
-
+/* monthly slots reuse same typographic rhythm */
 .slot{
-  border:1px solid #e6efe6; border-radius:10px; padding:10px 12px; margin:10px 0;
+  border-top:1px solid #e4ede4;
+  padding:16px 6px;
 }
+.slot:first-of-type{ border-top:1px solid #e4ede4; }
 .slot h3{ margin:0 0 6px; color:#2f7a2f; }
 .slot .time{ color:#666; font-weight:500; }
-.opts{ margin:0; padding-left:20px; }
+.opts{ margin:0; padding-left:18px; }
 .dash{ color:#888; }
 
 /* print */
@@ -284,7 +283,6 @@ html,body{ margin:0; padding:0; background:#f6f7f9; color:var(--ink);
 // ---------- ROUTE ----------
 // Public URL (Shopify proxy mapping):  https://muditam.com/apps/consultation/diet-plan/:id
 router.get("/diet-plan/:id", async (req, res) => {
-  // If someone tries JSON, keep this HTML-only
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
   }
@@ -292,7 +290,7 @@ router.get("/diet-plan/:id", async (req, res) => {
   try {
     const planId = req.params.id;
 
-    // 1) Fetch plan (your flattened DietPlan schema)
+    // 1) Fetch plan (flattened DietPlan schema)
     const doc = await DietPlan.findById(planId).lean();
     if (!doc) return res.status(404).send("Diet plan not found.");
 
@@ -314,12 +312,11 @@ router.get("/diet-plan/:id", async (req, res) => {
     // 3) Build pages
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
-    const duration =
-      Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
+    const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
     const pages = [];
 
-    // First slide (exact look)
+    // slide 1
     pages.push(
       coverPageHtml({
         whenText: prettyDDMonthYYYY(start),
@@ -327,7 +324,7 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
-    // Second slide (details with pin & BG2)
+    // slide 2
     pages.push(
       basicDetailsHtml({
         name: custName,
@@ -335,6 +332,7 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
+    // slide 3+
     if (planType === "Weekly") {
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
@@ -344,21 +342,13 @@ router.get("/diet-plan/:id", async (req, res) => {
           Snacks: (doc.fortnight?.Snacks || [])[i] || "",
           Dinner: (doc.fortnight?.Dinner || [])[i] || "",
         };
-        pages.push(
-          dayPageHtml({
-            dayIndex: i,
-            dateIso: d,
-            meals,
-          })
-        );
+        pages.push(dayPageHtml({ dayIndex: i, dateIso: d, meals }));
       }
     } else {
-      // Monthly (options) page in A4-sheet style
       const slots = {
         Breakfast: doc.monthly?.Breakfast || { time: "", options: [] },
         Lunch: doc.monthly?.Lunch || { time: "", options: [] },
-        "Evening Snack":
-          doc.monthly?.["Evening Snack"] || { time: "", options: [] },
+        "Evening Snack": doc.monthly?.["Evening Snack"] || { time: "", options: [] },
         Dinner: doc.monthly?.Dinner || { time: "", options: [] },
       };
       pages.push(monthlyPageHtml({ slots }));
