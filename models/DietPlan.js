@@ -1,6 +1,7 @@
 // models/DietPlan.js
 const mongoose = require("mongoose");
 
+/** Subdocs **/
 const MonthlySlotSchema = new mongoose.Schema(
   {
     time: { type: String, default: "" },
@@ -8,6 +9,26 @@ const MonthlySlotSchema = new mongoose.Schema(
   },
   { _id: false }
 );
+
+// Basic health profile captured in the UI (Age, Height, Weight, BMI)
+const HealthProfileSchema = new mongoose.Schema(
+  {
+    age: { type: Number, min: 0, max: 130 },
+    heightCm: { type: Number, min: 0 },
+    weightKg: { type: Number, min: 0 },
+    bmi: { type: Number, min: 0 }, // auto-calculated if not supplied
+  },
+  { _id: false }
+);
+
+// Keep conditions constrained to known values (custom goals remain free-form)
+const CONDITION_ENUM = [
+  "Diabetes",
+  "Fatty Liver",
+  "High Cholesterol",
+  "Thyroid",
+  "Digestive Issues",
+];
 
 const DietPlanSchema = new mongoose.Schema(
   {
@@ -25,7 +46,7 @@ const DietPlanSchema = new mongoose.Schema(
     startDate: { type: Date, required: true, index: true },
     durationDays: { type: Number, required: true },
 
-    // Weekly(14) body
+    // Weekly (14) body
     fortnight: {
       Breakfast: { type: [String], default: undefined },
       Lunch: { type: [String], default: undefined },
@@ -33,13 +54,27 @@ const DietPlanSchema = new mongoose.Schema(
       Dinner: { type: [String], default: undefined },
     },
 
-    // Monthly(body)
+    // Weekly meal times (editable in UI)
+    weeklyTimes: {
+      Breakfast: { type: String, default: "" },
+      Lunch: { type: String, default: "" },
+      Snacks: { type: String, default: "" },
+      Dinner: { type: String, default: "" },
+    },
+
+    // Monthly (options) body
     monthly: {
       Breakfast: { type: MonthlySlotSchema, default: undefined },
       Lunch: { type: MonthlySlotSchema, default: undefined },
       "Evening Snack": { type: MonthlySlotSchema, default: undefined },
       Dinner: { type: MonthlySlotSchema, default: undefined },
     },
+
+    // NEW: Health profile & goals
+    healthProfile: { type: HealthProfileSchema, default: {} },
+    conditions: { type: [String], enum: CONDITION_ENUM, default: [] },
+    // Goals are free-form so you can add/delete custom ones from the UI
+    healthGoals: { type: [String], default: [] },
 
     createdBy: { type: String, default: "system" },
     version: { type: Number, default: 1 },
@@ -48,8 +83,18 @@ const DietPlanSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+/** Indexes **/
 DietPlanSchema.index({ "customer.leadId": 1, startDate: -1 });
 DietPlanSchema.index({ "customer.name": 1, startDate: -1 });
 
-module.exports = mongoose.model("DietPlan", DietPlanSchema);
+/** Optional: auto-calc BMI on save if height/weight are present **/
+DietPlanSchema.pre("save", function (next) {
+  const hp = this.healthProfile || {};
+  if (hp && hp.heightCm > 0 && hp.weightKg > 0) {
+    const bmi = hp.weightKg / Math.pow(hp.heightCm / 100, 2);
+    this.healthProfile.bmi = Math.round(bmi * 10) / 10;
+  }
+  next();
+});
 
+module.exports = mongoose.model("DietPlan", DietPlanSchema);

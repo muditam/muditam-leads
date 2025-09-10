@@ -6,25 +6,70 @@ const addFormats = require("ajv-formats");
 
 const router = express.Router();
 
+/* ---------------- Helpers (normalizers) ---------------- */
+const MEALS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
+const FORTNIGHT_DAYS = 14;
+
+function normalizeWeeklyBody(body) {
+  if (!body || typeof body !== "object") return body;
+
+  // Ensure fortnight exists and each meal is a 14-length string array
+  const fortnight = body.fortnight || {};
+  const normalizedFortnight = {};
+  MEALS.forEach((meal) => {
+    const arr = Array.isArray(fortnight[meal]) ? [...fortnight[meal]] : [];
+    // slice/pad strictly to 14
+    const fixed = arr.slice(0, FORTNIGHT_DAYS);
+    while (fixed.length < FORTNIGHT_DAYS) fixed.push("");
+    normalizedFortnight[meal] = fixed.map((v) => (typeof v === "string" ? v : String(v ?? "")));
+  });
+
+  // Ensure weeklyTimes exists with all meals; allow empty strings and trim
+  const wt = body.weeklyTimes || {};
+  const normalizedWeeklyTimes = {};
+  MEALS.forEach((meal) => {
+    const raw = wt[meal];
+    normalizedWeeklyTimes[meal] = (typeof raw === "string" ? raw : "").trim();
+  });
+
+  return {
+    ...body,
+    fortnight: normalizedFortnight,
+    weeklyTimes: normalizedWeeklyTimes,
+  };
+}
+
 /* ---------------- JSON Schemas ---------------- */
 const weekly14Schema = {
   $id: "weekly-14",
   type: "object",
-  required: ["fortnight"],
+  required: ["fortnight", "weeklyTimes"],
   properties: {
     fortnight: {
       type: "object",
-      required: ["Breakfast", "Lunch", "Snacks", "Dinner"],
-      properties: ["Breakfast", "Lunch", "Snacks", "Dinner"].reduce((p, meal) => {
+      required: MEALS,
+      properties: MEALS.reduce((p, meal) => {
         p[meal] = {
           type: "array",
-          minItems: 14,
-          maxItems: 14,
+          minItems: FORTNIGHT_DAYS,
+          maxItems: FORTNIGHT_DAYS,
           items: { type: "string" },
         };
         return p;
       }, {}),
-      additionalProperties: false, 
+      additionalProperties: false,
+    },
+    weeklyTimes: {
+      type: "object",
+      required: MEALS,
+      properties: {
+        // minLength: 0 means empty string is allowed (UI may keep it blank)
+        Breakfast: { type: "string", minLength: 0 },
+        Lunch: { type: "string", minLength: 0 },
+        Snacks: { type: "string", minLength: 0 },
+        Dinner: { type: "string", minLength: 0 },
+      },
+      additionalProperties: false,
     },
   },
   additionalProperties: false,
@@ -57,6 +102,7 @@ const monthlyOptionsSchema = {
       required: ["Breakfast", "Lunch", "Evening Snack", "Dinner"],
       properties: {
         Breakfast: slotSchema(),
+        // You can keep Mid-Morning Snack as optional, or remove this line if unused:
         "Mid-Morning Snack": slotSchema(),
         Lunch: slotSchema(),
         "Evening Snack": slotSchema(),
@@ -114,9 +160,16 @@ router.get("/:id", async (req, res) => {
 // CREATE template
 router.post("/", async (req, res) => {
   try {
-    const { name, type, category, tags, status, body } = req.body;
+    const { name, type, category, tags, status } = req.body;
+    let { body } = req.body;
+
     if (!name || !type || !body) {
       return res.status(400).json({ error: "name, type, body are required" });
+    }
+
+    // Backfill/normalize weekly body (keeps older clients safe)
+    if (type === "weekly-14") {
+      body = normalizeWeeklyBody(body);
     }
 
     validateBody(type, body);
@@ -142,18 +195,30 @@ router.post("/", async (req, res) => {
 // UPDATE template
 router.put("/:id", async (req, res) => {
   try {
-    const { name, category, tags, status, body, type } = req.body;
+    const { name, category, tags, status, type } = req.body;
+    let { body } = req.body;
+
     const doc = await DietTemplate.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: "Not found" });
 
-    if (typeof type === "string" && type !== doc.type) doc.type = type;
-    if (body) validateBody(doc.type, body);
+    // Allow type change (rare)
+    if (typeof type === "string" && type !== doc.type) {
+      doc.type = type;
+    }
+
+    // If a new body is provided, normalize & validate it
+    if (body) {
+      if (doc.type === "weekly-14") {
+        body = normalizeWeeklyBody(body);
+      }
+      validateBody(doc.type, body);
+      doc.body = body;
+    }
 
     if (name) doc.name = name.trim();
     if (category !== undefined) doc.category = category;
     if (tags !== undefined) doc.tags = Array.isArray(tags) ? tags : [];
     if (status) doc.status = status;
-    if (body) doc.body = body;
 
     doc.version = (doc.version || 1) + 1;
     doc.updatedBy = req.user?.email || "system";
@@ -190,6 +255,5 @@ router.delete("/:id", async (req, res) => {
     res.status(500).json({ error: e.message || "Failed to delete template" });
   }
 });
-
 
 module.exports = router;

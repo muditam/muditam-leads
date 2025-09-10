@@ -10,6 +10,8 @@ const BG_COVER =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_3_3.png?v=1757425422";
 const BG_DETAILS =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801";
+const TAILORED_IMG =
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_6_2.png?v=1757500742";
 
 const MEALS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
 const MONTHLY_SLOTS = ["Breakfast", "Lunch", "Evening Snack", "Dinner"];
@@ -55,6 +57,27 @@ function addDays(dateObj, n) {
   d.setDate(d.getDate() + n);
   return d;
 }
+function round1(n) {
+  return Math.round(n * 10) / 10;
+}
+function computeBMI(heightCm, weightKg) {
+  if (!heightCm || !weightKg) return "";
+  const h = Number(heightCm) / 100;
+  if (!h) return "";
+  return String(round1(Number(weightKg) / (h * h)));
+}
+function fmtOrDash(v, unit = "") {
+  if (v === 0) return "0" + (unit ? ` ${unit}` : "");
+  if (!v && v !== 0) return "—";
+  return `${v}${unit ? ` ${unit}` : ""}`;
+}
+function niceList(arr = []) {
+  const a = arr.map((s) => String(s || "").trim()).filter(Boolean);
+  if (!a.length) return "";
+  if (a.length === 1) return a[0];
+  if (a.length === 2) return `${a[0]} and ${a[1]}`;
+  return `${a.slice(0, -1).join(", ")}, and ${a[a.length - 1]}`;
+}
 
 // Extract optional HH:MM time and split main/note
 function parseMeal(raw) {
@@ -92,28 +115,26 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
 </section>`;
 }
 
-function basicDetailsHtml({ name = "—", phone = "—" }) {
+function basicDetailsHtml({ name = "—", phone = "—", age = "", height = "", weight = "", bmi = "" }) {
   return `
 <section class="page details tall">
   <div class="details-card">
     <div class="pin"></div>
     <h2>BASIC DETAILS</h2>
     <div class="rows">
-      <div class="row">
-        <div class="dt">Name</div>
-        <div class="dd">${escapeHtml(name)}</div>
-      </div>
-      <div class="row">
-        <div class="dt">Contact</div>
-        <div class="dd">${escapeHtml(phone)}</div>
-      </div>
+      <div class="row"><div class="dt">Name</div><div class="dd">${escapeHtml(name)}</div></div>
+      <div class="row"><div class="dt">Contact</div><div class="dd">${escapeHtml(phone)}</div></div>
+      <div class="row"><div class="dt">Age</div><div class="dd">${escapeHtml(fmtOrDash(age))}</div></div>
+      <div class="row"><div class="dt">Height</div><div class="dd">${escapeHtml(fmtOrDash(height, "cm"))}</div></div>
+      <div class="row"><div class="dt">Weight</div><div class="dd">${escapeHtml(fmtOrDash(weight, "kg"))}</div></div>
+      <div class="row"><div class="dt">BMI</div><div class="dd">${escapeHtml(bmi || "—")}</div></div>
     </div>
   </div>
 </section>`;
 }
 
 // ---- PAGE 3+ (DAY) — no background image here & no min-height ----
-function dayPageHtml({ dayIndex, dateIso, meals }) {
+function dayPageHtml({ dayIndex, dateIso, meals, times }) {
   return `
 <section class="page sheet-plain">
   <div class="sheet">
@@ -126,29 +147,49 @@ function dayPageHtml({ dayIndex, dateIso, meals }) {
 
       ${MEALS.map((m) => {
         const parsed = parseMeal(meals[m] || "");
+        const mealTime = (times && times[m]) ? String(times[m]).trim() : parsed.time;
         return `
       <div class="mealrow">
         <div class="left">
           <div class="mealname">${m}</div>
+        </div>
+        <div class="rightcol">
+          <div class="meal-main">${escapeHtml(parsed.main || "—")}</div>
           ${
-            parsed.time
-              ? `<div class="time">
+            mealTime
+              ? `<div class="time-under">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
                     <path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                   </svg>
-                  ${escapeHtml(parsed.time)}
+                  ${escapeHtml(mealTime)}
                 </div>`
               : ""
           }
-        </div>
-        <div class="rightcol">
-          <div class="meal-main">${escapeHtml(parsed.main || "—")}</div>
           ${parsed.note ? `<div class="meal-note">${escapeHtml(parsed.note)}</div>` : ""}
           <div class="sep"></div>
         </div>
       </div>`;
       }).join("")}
+    </div>
+  </div>
+</section>`;
+}
+
+// ---- Tailored Diet slide (after Day 1) ----
+function tailoredDietHtml({ conditions = [], goals = [] }) {
+  const condText = niceList(conditions) || "your condition";
+  const goalText = niceList(goals) || "health goals";
+  const msg = `This plan is designed to help manage your ${condText} by creating a moderate calorie deficit with balanced, low-glycemic meals. It emphasizes high-fiber foods and adjusted meal timings, including an earlier dinner, to align with your routine and improve digestion. This consistent, nutrient-dense approach will support better ${goalText} while also improving your overall wellness.`;
+
+  return `
+<section class="page tailor tall">
+  <div class="tailor-card">
+    <h2>TAILORED DIET CHART</h2>
+    <div class="t-rule"></div>
+    <p class="t-msg">${escapeHtml(msg)}</p>
+    <div class="bowl-wrap">
+      <img src="${TAILORED_IMG}" alt="" />
     </div>
   </div>
 </section>`;
@@ -208,7 +249,7 @@ html,body{
   display:flex; align-items:center; justify-content:center;
   padding:10px; /* tight edges */
 }
-/* Only slides 1–2 get A4 height */
+/* Slides 1–2 and Tailored slide get A4 height */
 .tall{ min-height:297mm; }
 
 /* ---- COVER (with BG image) ---- */
@@ -260,7 +301,7 @@ html,body{
 
 /* ---- SHEET (DAY/MONTH) — NO background image, NO min-height ---- */
 .sheet-plain{
-  background:#f7f8f7; /* solid neutral bg, no image */
+  background:#f7f8f7; /* solid bg, no image */
 }
 
 /* Double frame */
@@ -293,15 +334,18 @@ html,body{
 }
 .left{ display:flex; flex-direction:column; align-items:flex-start; }
 .mealname{ font-weight:800; color:#2b6a2b; line-height:1; }
-.time{
-  display:flex; align-items:flex-start; gap:8px; color:#2b2b2b; font-size:13px;
-  margin-top:6px; line-height:1;
-}
-.time svg{ width:15px; height:15px; opacity:.95; margin-top:1px; }
 
 .rightcol{ position:relative; }
 .meal-main{ color:#1e1e1e; font-size:14px; line-height:1.45; }
-.meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:4px; }
+
+/* time under meal (right column) */
+.time-under{
+  display:flex; align-items:flex-start; gap:8px;
+  color:#2b2b2b; font-size:13px; line-height:1; margin-top:6px;
+}
+.time-under svg{ width:15px; height:15px; opacity:.95; margin-top:1px; }
+
+.meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:6px; }
 
 /* Green separator */
 .sep{
@@ -314,6 +358,26 @@ html,body{
 .time-inline{ color:#666; font-weight:500; }
 .opts{ margin:0; padding-left:18px; }
 .dash{ color:#888; }
+
+/* ---- Tailored Diet slide ---- */
+.tailor{ background:#eef5e9; }
+.tailor-card{
+  position:relative; width:100%; max-width:560px;
+  background:linear-gradient(180deg,#3a8a33 0%, #2b6e27 100%);
+  color:#fff; border-radius:28px; padding:28px 26px 120px; /* extra bottom for bowl overlap */
+  box-shadow:0 18px 40px rgba(0,0,0,.22);
+  text-align:center;
+}
+.tailor-card h2{
+  margin:0; font-size:28px; line-height:1.2; font-weight:800; letter-spacing:.2px;
+}
+.t-rule{ height:1px; background:rgba(255,255,255,.35); width:80%; margin:12px auto 14px; }
+.t-msg{ margin:0; font-size:14px; line-height:1.6; color:#f4fff4; }
+.bowl-wrap{
+  position:absolute; left:50%; bottom:-20px; transform:translateX(-50%);
+  width:92%; pointer-events:none;
+}
+.bowl-wrap img{ width:100%; height:auto; display:block; }
 
 /* print */
 @media print{
@@ -351,6 +415,10 @@ router.get("/diet-plan/:id", async (req, res) => {
     custName = custName || "Customer";
     custPhone = custPhone || "—";
 
+    // Health profile for slide 2
+    const hp = doc.healthProfile || {};
+    const bmiValue = hp.bmi || computeBMI(hp.heightCm, hp.weightKg);
+
     // 3) Build pages
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
@@ -358,14 +426,25 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     const pages = [];
 
-    // Slide 1 (tall, with BG image)
+    // Slide 1
     pages.push(coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" }));
 
-    // Slide 2 (tall, with BG image)
-    pages.push(basicDetailsHtml({ name: custName, phone: custPhone }));
+    // Slide 2
+    pages.push(
+      basicDetailsHtml({
+        name: custName,
+        phone: custPhone,
+        age: hp.age,
+        height: hp.heightCm,
+        weight: hp.weightKg,
+        bmi: bmiValue,
+      })
+    );
 
-    // Slide 3+ (NO bg image, NO min-height)
+    // Slide 3+ (weekly or monthly)
     if (planType === "Weekly") {
+      const times = doc.weeklyTimes || {};
+
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
         const meals = {
@@ -374,7 +453,21 @@ router.get("/diet-plan/:id", async (req, res) => {
           Snacks: (doc.fortnight?.Snacks || [])[i] || "",
           Dinner: (doc.fortnight?.Dinner || [])[i] || "",
         };
-        pages.push(dayPageHtml({ dayIndex: i, dateIso: d, meals }));
+
+        // Day 1 page
+        if (i === 0) {
+          pages.push(dayPageHtml({ dayIndex: i, dateIso: d, meals, times }));
+          // Insert the tailored slide right after Day 1
+          pages.push(
+            tailoredDietHtml({
+              conditions: Array.isArray(doc.conditions) ? doc.conditions : [],
+              goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
+            })
+          );
+          continue;
+        }
+        // Day 2..N
+        pages.push(dayPageHtml({ dayIndex: i, dateIso: d, meals, times }));
       }
     } else {
       const slots = {
@@ -383,7 +476,15 @@ router.get("/diet-plan/:id", async (req, res) => {
         "Evening Snack": doc.monthly?.["Evening Snack"] || { time: "", options: [] },
         Dinner: doc.monthly?.Dinner || { time: "", options: [] },
       };
+      // Third slide (monthly)
       pages.push(monthlyPageHtml({ slots }));
+      // Tailored slide after monthly page
+      pages.push(
+        tailoredDietHtml({
+          conditions: Array.isArray(doc.conditions) ? doc.conditions : [],
+          goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
+        })
+      );
     }
 
     // 4) HTML
