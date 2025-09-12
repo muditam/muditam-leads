@@ -91,19 +91,12 @@ function isPresent(v) {
   return v !== undefined && v !== null && String(v).trim() !== "";
 }
 
-// Improved parseMeal: recognizes more time formats (HH:MM, H AM/PM, H:MMAM, 8am, 8 am, 08:30 etc.)
+// Keep parseMeal for notes & main text only (we won't use its time now)
 function parseMeal(raw) {
   const out = { time: "", main: "", note: "" };
   if (!raw) return out;
   const s = String(raw).trim();
-
-  // Common time patterns: 08:30, 8:30, 8:30am, 8:30 am, 8am, 8 am, 08 AM, 20:15
-  const timeRegex = /\b((?:[01]?\d|2[0-3])(?::[0-5]\d)?\s?(?:am|pm|AM|PM)?)\b/;
-  const m = s.match(timeRegex);
-  out.time = m ? m[0].trim() : "";
-
-  const cleaned = out.time ? s.replace(m[0], "").trim() : s;
-  const parts = cleaned.split(/\r?\n+/);
+  const parts = s.split(/\r?\n+/);
   out.main = parts[0] || "";
   out.note = parts.slice(1).join(" ").trim();
   return out;
@@ -158,7 +151,7 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 </section>`;
 }
 
-// ---- PAGE 3+ (DAY) — no background image here & no min-height ----
+// ---- PAGE 3+ (DAY) — time now under meal name (left column) & raw ----
 function dayPageHtml({ dayIndex, dateIso, meals, times }) {
   return `
 <section class="page sheet-plain">
@@ -172,31 +165,28 @@ function dayPageHtml({ dayIndex, dateIso, meals, times }) {
 
       ${MEALS.map((m) => {
         const parsed = parseMeal(meals[m] || "");
-        // weeklyTimes (times) takes precedence; fallback to parsed time from meal text
-        const mealTime =
-          (times && String(times[m] || "").trim()) || parsed.time || "";
+        // Show EXACT weekly time value as entered; no trimming/formatting; no fallback to parsed time
+        const mealTimeRaw =
+          times && Object.prototype.hasOwnProperty.call(times, m)
+            ? String(times[m] ?? "")
+            : "";
+
         return `
       <div class="mealrow">
         <div class="left">
           <div class="mealname">${m}</div>
+          ${
+            mealTimeRaw
+              ? `<div class="meal-time">${escapeHtml(mealTimeRaw)}</div>`
+              : ""
+          }
         </div>
         <div class="rightcol">
           <div class="meal-main">${escapeHtml(parsed.main || "—")}</div>
-          ${
-            mealTime
-              ? `<div class="time-under">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
-                    <path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                  ${escapeHtml(mealTime)}
-                </div>`
-              : ""
-          }
           ${parsed.note ? `<div class="meal-note">${escapeHtml(parsed.note)}</div>` : ""}
-          <div class="sep"></div>
         </div>
-      </div>`;
+      </div>
+      <div class="sep"></div>`;
       }).join("")}
     </div>
   </div>
@@ -283,7 +273,7 @@ function monthlyPageHtml({ slots }) {
   </div>
 </section>`;
 }
- 
+
 const CSS = `
 :root{
   --green:#543087;
@@ -304,7 +294,7 @@ html,body{
   width:210mm;
   margin:0 auto; page-break-after:always;
   display:flex; align-items:center; justify-content:center;
-  padding:10px; /* tight edges */
+  padding:15px; /* tight edges */
 }
 /* Slides 1–2 + Tailored + Notes get A4 height */
 .tall{ min-height:297mm; }
@@ -313,32 +303,32 @@ html,body{
 .cover{ background:url("${BG_COVER}") center/cover no-repeat; }
 .cover-card{
   width:100%; max-width:450px;
-  background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%) 
-  border-radius:28px; padding:62px 28px; text-align:center; color:#fff;
+  background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
+  border-radius:28px; padding:92px 18px; text-align:center; color:#fff;
   box-shadow:0 18px 40px rgba(0,0,0,.25);
 }
 .cover-card h1{
   margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px;
-  text-transform:uppercase; font-size:28px;
+  text-transform:uppercase; font-size:38px;
 }
 .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
-.subtitle{ margin:0 0 22px; font-size:15px; line-height:1.5; color:#ebffeb; }
+.subtitle{ margin:0 0 22px; font-size:21px; line-height:1.5; }
 .cta-pill{
   display:inline-block; background:#fff; border-radius:12px; padding:14px 18px;
   color:var(--green-700); min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18);
 }
-.pill-title{ font-weight:800; font-size:18px; text-align:center; }
-.pill-sub{ color:#2a532a; font-size:13px; text-align:center; margin-top:6px; }
-
+.pill-title{ font-weight:800; font-size:25px; text-align:center; }
+.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; }
+ 
 /* ---- DETAILS (with BG image) ---- */
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; }
 .details-card{
-  position:relative; width:100%; max-width:620px; background:#fff;
-  border-radius:20px; padding:24px 26px 18px;
+  position:relative; width:100%; max-width:430px; background:#fff;
+  border-radius:20px; padding:38px 26px 38px;
   box-shadow:0 12px 40px rgba(0,0,0,.18); border:1px solid #e6f0e6;
 }
 .pin{
-  position:absolute; width:42px; height:42px; top:-21px; left:50%;
+  position:absolute; width:62px; height:62px; top:-45px; left:50%;
   transform:translateX(-50%); border-radius:50%;
   background:radial-gradient(circle at 35% 35%, #ffffff 0 35%, #dcdcdc 70%, #bdbdbd 100%);
   box-shadow:0 6px 12px rgba(0,0,0,.22);
@@ -351,7 +341,7 @@ html,body{
 .row{
   display:grid; grid-template-columns:140px 1fr; align-items:center;
   padding:12px 6px; border-bottom:1px dashed #e3e9e3;
-}
+} 
 .row:last-child{ border-bottom:none; }
 .dt{ color:var(--green); font-weight:700; }
 .dd{ color:#222; }
@@ -365,24 +355,22 @@ html,body{
 .sheet{
   width:100%; background:#fff;
   border:12px solid var(--green);       /* outer dark */
-  border-radius:6px; padding:6px;       /* space between frames */
+  border-radius:6px;
 }
-.sheet-inner{
-  border:6px solid var(--green-light);  /* inner light */
-  border-radius:2px; background:#fff;
+.sheet-inner{ 
   padding:10px;                         /* compact */
 }
 
 /* Header bar */
 .topbar{
-  display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center;
-  background:#e7f2de; border:1px solid #d1e5c7;
-  border-radius:4px; padding:10px 12px; margin-bottom:10px;
+  display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center; 
+  background:#EEE2FF;  
+  border-radius:4px; padding:10px 12px; margin:-10px -10px 10px -10px;
 }
 .cell{ font-size:14px; }
 .mid{ text-align:center; }
 .right{ text-align:right; color:#2d2d2d; }
-.strong{ font-weight:800; color:#2b6a2b; }
+.strong{ font-weight:500; color:black; }
 
 /* Meal rows */
 .mealrow{
@@ -390,23 +378,22 @@ html,body{
   margin-top:6px;
 }
 .left{ display:flex; flex-direction:column; align-items:flex-start; }
-.mealname{ font-weight:800; color:#2b6a2b; line-height:1; }
+.mealname{ font-weight:800; line-height:1; }
+
+/* NEW: time shown under the meal name (left column) */
+.meal-time{
+  margin-top:6px;
+  font-size:13px;
+  color:#2b2b2b;
+}
 
 .rightcol{ position:relative; }
 .meal-main{ color:#1e1e1e; font-size:14px; line-height:1.45; }
-
-/* time under meal (right column) */
-.time-under{
-  display:flex; align-items:flex-start; gap:8px;
-  color:#2b2b2b; font-size:13px; line-height:1; margin-top:6px;
-}
-.time-under svg{ width:15px; height:15px; opacity:.95; margin-top:1px; }
-
 .meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:6px; }
 
-/* Green separator */
+/* Separator */
 .sep{
-  height:3px; background:#2f7a2f; width:100%;
+  height:3px; background:#543087; width:100%;
   margin:12px 0 6px;
 }
 
@@ -486,24 +473,18 @@ router.get("/diet-plan/:id", async (req, res) => {
         if (lead) {
           leadDetails = lead.details || {};
           custName = lead.name || custName || "Customer";
-          // Lead schema uses contactNumber
           custPhone = lead.contactNumber || custPhone || "—";
         }
-      } catch (err) {
-        // ignore
-      }
+      } catch {}
     }
     custName = custName || "Customer";
     custPhone = custPhone || "—";
 
     // Health fields: prefer plan fields (if present), otherwise fall back to lead.details
-    // Note: older DietPlan versions may not include healthProfile; read variations defensively.
-    const planHp = doc.healthProfile || doc.details || {}; // try both names if present
+    const planHp = doc.healthProfile || doc.details || {};
     const ageVal = planHp.age ?? leadDetails.age ?? "";
-    // Height might be stored as heightCm or height in different places
     const heightVal = planHp.heightCm ?? planHp.height ?? leadDetails.height ?? "";
     const weightVal = planHp.weightKg ?? planHp.weight ?? leadDetails.weight ?? "";
-    // Prefer stored BMI if present, otherwise compute
     const bmiStored = planHp.bmi ?? doc.bmi ?? "";
     const bmiValue = bmiStored || computeBMI(heightVal, weightVal) || "";
 
