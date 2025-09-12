@@ -11,7 +11,7 @@ const BG_COVER =
 const BG_DETAILS =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801";
 const TAILORED_BG =
-  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1379.png?v=1757501741";
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/A4_-_23.png?v=1757681972";
 const NOTES_BG =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_5_2.png?v=1757502951";
 
@@ -286,8 +286,8 @@ function monthlyPageHtml({ slots }) {
  
 const CSS = `
 :root{
-  --green:#2f7a2f;
-  --green-700:#225f22;
+  --green:#543087;
+  --green-700:#543087;
   --green-light:#a6caa6;
   --ink:#111;
   --muted:#666;
@@ -312,9 +312,9 @@ html,body{
 /* ---- COVER (with BG image) ---- */
 .cover{ background:url("${BG_COVER}") center/cover no-repeat; }
 .cover-card{
-  width:100%; max-width:600px;
-  background:linear-gradient(180deg,#3a8a33 0%, #2b6e27 100%);
-  border-radius:28px; padding:32px 28px; text-align:center; color:#fff;
+  width:100%; max-width:450px;
+  background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%) 
+  border-radius:28px; padding:62px 28px; text-align:center; color:#fff;
   box-shadow:0 18px 40px rgba(0,0,0,.25);
 }
 .cover-card h1{
@@ -422,10 +422,8 @@ html,body{
 }
 .tailor-card{
   width:100%; max-width:560px;
-  color:#fff; border-radius:28px; padding:28px 26px;
-  text-align:center; backdrop-filter: blur(0.2px);
-  background: linear-gradient(180deg, rgba(58,138,51,.95) 0%, rgba(43,110,39,.95) 100%);
-  box-shadow:0 18px 40px rgba(0,0,0,.22);
+  color:#fff; border-radius:28px; padding:8px 26px 150px;
+  text-align:center; 
 }
 .tailor-card h2{
   margin:0; font-size:28px; line-height:1.2; font-weight:800; letter-spacing:.2px;
@@ -438,9 +436,9 @@ html,body{
   background:url("${NOTES_BG}") center/cover no-repeat;
 }
 .notes-card{
-  width:100%; max-width:640px;
-  background: linear-gradient(180deg, rgba(58,138,51,.95) 0%, rgba(43,110,39,.95) 100%);
-  color:#fff; border-radius:28px; padding:28px 30px;
+  width:100%; max-width:450px;
+  background: linear-gradient(180deg, rgba(58,138,51,.95) 0%, rgba(43,110,39,.95) 100%); 
+  color:#fff; border-radius:28px; padding:68px 30px;
   box-shadow:0 18px 40px rgba(0,0,0,.22);
 }
 .notes-card h2{
@@ -576,7 +574,7 @@ router.get("/diet-plan/:id", async (req, res) => {
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Diet Plan • ${escapeHtml(custName)}</title>
   <meta name="robots" content="noindex, nofollow"/>
-  <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/>
+  <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/> 
   <style>${CSS}</style>
 </head>
 <body>
