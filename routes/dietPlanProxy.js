@@ -422,15 +422,35 @@ html,body{
 .notes{
   background:url("${NOTES_BG}") center/cover no-repeat; 
 }
+/* translucent / glassy notes card */
 .notes-card{
+  position: relative;                     /* needed for overlay */
   width:100%;
-  max-width:520px;                 /* slimmer, taller look */
-  background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
+  max-width:550px;
+  background: linear-gradient(
+    180deg,
+    rgba(126,93,173,.65) 0%,
+    rgba(84,48,135,.65) 100%
+  );                                      /* semi-transparent */
   color:#fff;
   border-radius:28px;
-  padding:32px 28px 36px;          /* comfy vertical padding */
-  box-shadow:0 18px 40px rgba(0,0,0,.22);
+  padding:38px 30px;
+  border:1px solid rgba(255,255,255,.25); /* subtle edge */
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%); /* Safari */
+  box-shadow: 0 18px 40px rgba(0,0,0,.22);
 }
+
+.notes-card::after{
+  content:"";
+  position:absolute; inset:0;
+  border-radius:inherit;
+  pointer-events:none;
+  background:
+    radial-gradient(40% 35% at 15% 15%, rgba(0,0,0,.18), transparent 60%),
+    radial-gradient(45% 35% at 85% 85%, rgba(0,0,0,.18), transparent 60%);
+}
+
 .notes-card h2{
   margin:0 0 8px;
   font-size:36px;                  /* strong title */
