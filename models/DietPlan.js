@@ -28,7 +28,7 @@ const DietPlanSchema = new mongoose.Schema(
     // Weekly (14) body 
     fortnight: { 
       Breakfast: { type: [String], default: undefined },
-      Lunch:     { type: [String], default: undefined },
+      Lunch:     { type: [String], default: undefined }, 
       Snacks:    { type: [String], default: undefined },
       Dinner:    { type: [String], default: undefined },
     },
