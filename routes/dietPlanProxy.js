@@ -294,12 +294,12 @@ html,body{
   width:210mm;
   margin:0 auto; page-break-after:always;
   display:flex; align-items:center; justify-content:center;
-  padding:15px; /* tight edges */
+  padding:10px; /* tight edges */
 }
 /* Slides 1–2 + Tailored + Notes get A4 height */
 .tall{ min-height:297mm; margin: 10px auto; }
 
-/* ---- COVER (with BG image) ---- */
+/* ---- COVER (with BG image) ---- */ 
 .cover{ background:url("${BG_COVER}") center/cover no-repeat; } 
 .cover-card{
   width:100%; max-width:450px;
@@ -354,11 +354,11 @@ html,body{
 /* Double frame */
 .sheet{
   width:100%; background:#fff;
-  border:12px solid var(--green);       /* outer dark */
+  border:8px solid var(--green);       /* outer dark */
   border-radius:6px;
 }
 .sheet-inner{ 
-  padding:10px;                         /* compact */
+  padding:10px;                        
 }
 
 /* Header bar */
@@ -420,25 +420,50 @@ html,body{
 
 /* ---- Dietitian Notes slide ---- */
 .notes{
-  background:url("${NOTES_BG}") center/cover no-repeat;
+  background:url("${NOTES_BG}") center/cover no-repeat; 
 }
 .notes-card{
-  width:100%; max-width:450px;
-  background: linear-gradient(180deg, rgba(58,138,51,.95) 0%, rgba(43,110,39,.95) 100%); 
-  color:#fff; border-radius:28px; padding:68px 30px;
+  width:100%;
+  max-width:520px;                 /* slimmer, taller look */
+  background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
+  color:#fff;
+  border-radius:28px;
+  padding:32px 28px 36px;          /* comfy vertical padding */
   box-shadow:0 18px 40px rgba(0,0,0,.22);
 }
 .notes-card h2{
-  margin:0 0 4px; font-size:28px; line-height:1.2; font-weight:800; letter-spacing:.2px;
+  margin:0 0 8px;
+  font-size:36px;                  /* strong title */
+  line-height:1.2;
+  font-weight:800;
+  letter-spacing:.4px;
   text-transform:uppercase;
+  text-align:left;                 /* left-aligned like mock */
 }
-.n-rule{ height:1px; background:rgba(255,255,255,.4); width:86%; margin:12px 0 8px; }
+.n-rule{
+  height:2px;                      /* slightly thicker */
+  background:rgba(255,255,255,.55);
+  width:100%;                      /* full card width */
+  margin:12px 0 16px;
+  border-radius:1px;
+}
 .notes-list{
-  margin:0; padding-left:22px; list-style:disc;
-  color:#eafdea; font-size:14px; line-height:1.7;
+  margin:0;
+  padding-left:22px;
+  list-style:disc;
+  font-size:18px;                  /* readable, not huge */
+  line-height:1.7;
+  color:rgba(255,255,255,.9);      /* soft white text */
 }
-.notes-list li{ margin:8px 0; }
 
+.notes-list li{
+  margin:10px 0;
+}
+
+/* white bullets like the mock */
+.notes-list li::marker{
+  color:#ffffff;
+}
 /* final image slide */
 .final-image img{ max-width:100%; height:auto; display:block; }
 
