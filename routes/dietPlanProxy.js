@@ -63,14 +63,15 @@ function round1(n) {
   return Math.round(n * 10) / 10;
 }
 function computeBMI(heightCm, weightKg) {
-  if (!heightCm || !weightKg) return "";
+  if (heightCm == null || weightKg == null) return "";
   const h = Number(heightCm) / 100;
-  if (!h) return "";
-  return String(round1(Number(weightKg) / (h * h)));
+  const w = Number(weightKg);
+  if (!h || !w || !isFinite(h) || !isFinite(w)) return "";
+  return String(round1(w / (h * h)));
 }
 function fmtOrDash(v, unit = "") {
   if (v === 0) return "0" + (unit ? ` ${unit}` : "");
-  if (!v && v !== 0) return "—";
+  if (v === "" || v == null) return "—";
   return `${v}${unit ? ` ${unit}` : ""}`;
 }
 function niceList(arr = []) {
@@ -79,6 +80,9 @@ function niceList(arr = []) {
   if (a.length === 1) return a[0];
   if (a.length === 2) return `${a[0]} and ${a[1]}`;
   return `${a.slice(0, -1).join(", ")}, and ${a[a.length - 1]}`;
+}
+function isPresent(v) {
+  return v !== undefined && v !== null && String(v).trim() !== "";
 }
 
 // Extract optional HH:MM time and split main/note
@@ -117,19 +121,28 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
 </section>`;
 }
 
-function basicDetailsHtml({ name = "—", phone = "—", age = "", height = "", weight = "", bmi = "" }) {
+// Only render rows that have values for optional fields (age/height/weight/BMI)
+function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bmi }) {
+  const rows = [];
+  const pushRow = (label, value) =>
+    rows.push(
+      `<div class="row"><div class="dt">${escapeHtml(label)}</div><div class="dd">${escapeHtml(value)}</div></div>`
+    );
+
+  pushRow("Name", name || "—");
+  pushRow("Contact", phone || "—");
+  if (isPresent(age)) pushRow("Age", fmtOrDash(age));
+  if (isPresent(height)) pushRow("Height", fmtOrDash(height, "cm"));
+  if (isPresent(weight)) pushRow("Weight", fmtOrDash(weight, "kg"));
+  if (isPresent(bmi)) pushRow("BMI", String(bmi));
+
   return `
 <section class="page details tall">
   <div class="details-card">
     <div class="pin"></div>
     <h2>BASIC DETAILS</h2>
     <div class="rows">
-      <div class="row"><div class="dt">Name</div><div class="dd">${escapeHtml(name)}</div></div>
-      <div class="row"><div class="dt">Contact</div><div class="dd">${escapeHtml(phone)}</div></div>
-      <div class="row"><div class="dt">Age</div><div class="dd">${escapeHtml(fmtOrDash(age))}</div></div>
-      <div class="row"><div class="dt">Height</div><div class="dd">${escapeHtml(fmtOrDash(height, "cm"))}</div></div>
-      <div class="row"><div class="dt">Weight</div><div class="dd">${escapeHtml(fmtOrDash(weight, "kg"))}</div></div>
-      <div class="row"><div class="dt">BMI</div><div class="dd">${escapeHtml(bmi || "—")}</div></div>
+      ${rows.join("")}
     </div>
   </div>
 </section>`;
@@ -204,7 +217,6 @@ function notesSlideHtml({ name = "You" }) {
     "Enjoy your Saturday cheat meal mindfully, but get right back on track the next day.",
     "Listen to your body. The morning fatigue should reduce as your nutrition improves.",
     "Consistency is the key to managing your health. You can do this",
-    // generic lifestyle add-ons from your text
     "Stay Active – Aim for 30–45 minutes of moderate exercise daily, such as walking, cycling, yoga, or swimming.",
     "Move After Meals – Take short walks (5–10 minutes) to support digestion and overall health.",
     "Prioritize Sleep – Aim for 7–8 hours of quality sleep to maintain energy and well-being.",
@@ -394,7 +406,6 @@ html,body{
 .dash{ color:#888; }
 
 /* ---- Tailored Diet slide ---- */
-/* full-bleed page bg (no extra green layer) */
 .tailor{
   background:url("${TAILORED_BG}") center/cover no-repeat;
 }
@@ -441,7 +452,6 @@ html,body{
 
 // ---------- ROUTE ----------
 router.get("/diet-plan/:id", async (req, res) => {
-  // HTML only
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
   }
@@ -470,7 +480,7 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     // Health profile for slide 2
     const hp = doc.healthProfile || {};
-    const bmiValue = hp.bmi || computeBMI(hp.heightCm, hp.weightKg);
+    const bmiValue = (hp.bmi ?? computeBMI(hp.heightCm, hp.weightKg)) || "";
 
     // 3) Build pages
     const planType = doc.planType || "Weekly";
@@ -517,14 +527,14 @@ router.get("/diet-plan/:id", async (req, res) => {
       pages.push(monthlyPageHtml({ slots }));
     }
 
-    // Append Tailored slide second-last
+    // Tailored slide second-last
     pages.push(
       tailoredDietHtml({
         conditions: Array.isArray(doc.conditions) ? doc.conditions : [],
         goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
       })
     );
-    // Append Dietitian Notes slide last
+    // Dietitian Notes slide last
     pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
 
     // 4) HTML
@@ -553,12 +563,3 @@ router.get("/diet-plan/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
-
-
-
-
-

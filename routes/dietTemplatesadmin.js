@@ -21,7 +21,7 @@ function normalizeWeeklyBody(body) {
     // slice/pad strictly to 14
     const fixed = arr.slice(0, FORTNIGHT_DAYS);
     while (fixed.length < FORTNIGHT_DAYS) fixed.push("");
-    normalizedFortnight[meal] = fixed.map((v) => (typeof v === "string" ? v : String(v ?? "")));
+    normalizedFortnight[meal] = fixed.map((v) => (typeof v === "string" ? v : String(v ?? ""))); 
   });
 
   // Ensure weeklyTimes exists with all meals; allow empty strings and trim
@@ -157,38 +157,34 @@ router.get("/:id", async (req, res) => {
   res.json(doc);
 });
 
-// CREATE template
+// routes/dietPlans.js (example create)
 router.post("/", async (req, res) => {
   try {
-    const { name, type, category, tags, status } = req.body;
-    let { body } = req.body;
+    const { customer = {}, plan = {} } = req.body;
+    const {
+      planType, templateId, templateLabel, templateType,
+      startDate, durationDays, fortnight, weeklyTimes, monthly,
+      healthProfile, conditions, healthGoals, notes
+    } = plan;
 
-    if (!name || !type || !body) {
-      return res.status(400).json({ error: "name, type, body are required" });
-    }
-
-    // Backfill/normalize weekly body (keeps older clients safe)
-    if (type === "weekly-14") {
-      body = normalizeWeeklyBody(body);
-    }
-
-    validateBody(type, body);
-
-    const doc = await DietTemplate.create({
-      name: name.trim(),
-      type,
-      category: category || null,
-      tags: Array.isArray(tags) ? tags : [],
-      status: status || "draft",
-      version: 1,
-      body,
-      createdBy: req.user?.email || "system",
-      updatedBy: req.user?.email || "system",
+    const doc = await DietPlan.create({
+      customer,
+      planType,
+      templateId,
+      templateLabel,
+      templateType,
+      startDate,
+      durationDays,
+      ...(planType === "Weekly" ? { fortnight, weeklyTimes } : { monthly }),
+      healthProfile: healthProfile || {},   // ← include this
+      conditions: Array.isArray(conditions) ? conditions : [],
+      healthGoals: Array.isArray(healthGoals) ? healthGoals : [],
+      notes: notes || "",
     });
 
     res.json(doc);
   } catch (e) {
-    res.status(e.status || 500).json({ error: e.message || "Failed to create template" });
+    res.status(400).json({ error: e.message || "Failed to create diet plan" });
   }
 });
 
