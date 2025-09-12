@@ -15,6 +15,10 @@ const TAILORED_BG =
 const NOTES_BG =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_5_2.png?v=1757502951";
 
+// Image to include on the last slide (as requested)
+const NOTES_IMAGE =
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/A4_-_17.png?v=1757678833";
+
 const MEALS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
 const MONTHLY_SLOTS = ["Breakfast", "Lunch", "Evening Snack", "Dinner"];
 
@@ -132,8 +136,8 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
   pushRow("Name", name || "—");
   pushRow("Contact", phone || "—");
   if (isPresent(age)) pushRow("Age", fmtOrDash(age));
-  if (isPresent(height)) pushRow("Height", fmtOrDash(height, "cm"));
   if (isPresent(weight)) pushRow("Weight", fmtOrDash(weight, "kg"));
+  if (isPresent(height)) pushRow("Height", fmtOrDash(height, "cm"));
   if (isPresent(bmi)) pushRow("BMI", String(bmi));
 
   return `
@@ -149,6 +153,7 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 }
 
 // ---- PAGE 3+ (DAY) — no background image here & no min-height ----
+// Note: mealTime shows under the meal main. We prefer doc.weeklyTimes[meal] first, else parsed time.
 function dayPageHtml({ dayIndex, dateIso, meals, times }) {
   return `
 <section class="page sheet-plain">
@@ -162,6 +167,7 @@ function dayPageHtml({ dayIndex, dateIso, meals, times }) {
 
       ${MEALS.map((m) => {
         const parsed = parseMeal(meals[m] || "");
+        // prefer explicit times provided in weeklyTimes (times param)
         const mealTime = (times && times[m]) ? String(times[m]).trim() : parsed.time;
         return `
       <div class="mealrow">
@@ -208,7 +214,8 @@ function tailoredDietHtml({ conditions = [], goals = [] }) {
 }
 
 // ---- Dietitian Notes slide (ALWAYS LAST) ----
-function notesSlideHtml({ name = "You" }) {
+// This now includes the requested NOTES_IMAGE at the top, and shows name/contact line inside notes as before.
+function notesSlideHtml({ name = "You", phone = "—" }) {
   const bullets = [
     `Stay hydrated, ${name}. Aim for 2–3 litres of water throughout the day.`,
     "Remember your 15-minute walk after lunch and dinner. It really helps with digestion and acidity.",
@@ -217,21 +224,21 @@ function notesSlideHtml({ name = "You" }) {
     "Enjoy your Saturday cheat meal mindfully, but get right back on track the next day.",
     "Listen to your body. The morning fatigue should reduce as your nutrition improves.",
     "Consistency is the key to managing your health. You can do this",
-    "Stay Active – Aim for 30–45 minutes of moderate exercise daily, such as walking, cycling, yoga, or swimming.",
-    "Move After Meals – Take short walks (5–10 minutes) to support digestion and overall health.",
-    "Prioritize Sleep – Aim for 7–8 hours of quality sleep to maintain energy and well-being.",
-    "Maintain a Sleep Routine – Keep a consistent sleep schedule and reduce screen time before bed.",
-    "Manage Stress – Practice meditation, deep breathing, or yoga to promote relaxation.",
-    "Stay Hydrated – Drink 8–10 glasses of water throughout the day.",
-    "Avoid Harmful Habits – Limit alcohol and avoid smoking for better overall health.",
-    "Limit Processed Foods – Choose whole, unprocessed foods to support overall wellness.",
-    "Practice Mindful Eating – Eat slowly, avoid distractions, and listen to your body’s hunger cues.",
-    "Maintain a Healthy Weight – Aim for a balanced lifestyle rather than extreme dieting.",
   ];
 
   return `
 <section class="page notes tall">
   <div class="notes-card">
+    <!-- requested image included here -->
+    <div style="text-align:center; margin-bottom:16px;">
+      <img src="${escapeHtml(NOTES_IMAGE)}" alt="Notes image" style="max-width:380px; width:90%; height:auto; border-radius:12px; box-shadow:0 8px 20px rgba(0,0,0,0.18);" />
+    </div>
+
+    <div style="text-align:center; margin-bottom:12px; color:#fff;">
+      <strong style="font-size:16px;">${escapeHtml(name)}</strong><br/>
+      <span style="opacity:0.9;">${escapeHtml(phone)}</span>
+    </div>
+
     <h2>DIETITIAN NOTES</h2>
     <div class="n-rule"></div>
     <ul class="notes-list">
@@ -271,8 +278,7 @@ function monthlyPageHtml({ slots }) {
   </div>
 </section>`;
 }
-
-// ---------- CSS ----------
+ 
 const CSS = `
 :root{
   --green:#2f7a2f;
@@ -429,11 +435,11 @@ html,body{
 .notes-card{
   width:100%; max-width:640px;
   background: linear-gradient(180deg, rgba(58,138,51,.95) 0%, rgba(43,110,39,.95) 100%);
-  color:#fff; border-radius:28px; padding:28px 30px;
+  color:#fff; border-radius:28px; padding:18px 22px;
   box-shadow:0 18px 40px rgba(0,0,0,.22);
 }
 .notes-card h2{
-  margin:0 0 4px; font-size:28px; line-height:1.2; font-weight:800; letter-spacing:.2px;
+  margin:8px 0 4px; font-size:22px; line-height:1.2; font-weight:800; letter-spacing:.2px;
   text-transform:uppercase;
 }
 .n-rule{ height:1px; background:rgba(255,255,255,.4); width:86%; margin:12px 0 8px; }
@@ -452,6 +458,7 @@ html,body{
 
 // ---------- ROUTE ----------
 router.get("/diet-plan/:id", async (req, res) => {
+  // HTML only
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
   }
@@ -463,24 +470,43 @@ router.get("/diet-plan/:id", async (req, res) => {
     const doc = await DietPlan.findById(planId).lean();
     if (!doc) return res.status(404).send("Diet plan not found.");
 
-    // 2) Enrich from Lead if available
+    // 2) Enrich from Lead if available (we will use lead.details as fallback)
     let custName = doc.customer?.name || "";
     let custPhone = doc.customer?.phone || "";
+    let lead = null;
     if (doc.customer?.leadId) {
       try {
-        const lead = await Lead.findById(doc.customer.leadId).lean();
+        lead = await Lead.findById(doc.customer.leadId).lean();
         if (lead) {
           custName = lead.name || custName || "Customer";
+          // prefer lead.contactNumber if available
           custPhone = lead.contactNumber || custPhone || "—";
         }
-      } catch {}
+      } catch (e) {
+        // silent
+      }
     }
+
     custName = custName || "Customer";
     custPhone = custPhone || "—";
 
-    // Health profile for slide 2
-    const hp = doc.healthProfile || {};
-    const bmiValue = (hp.bmi ?? computeBMI(hp.heightCm, hp.weightKg)) || "";
+    // Health profile: prefer doc.healthProfile, but fallback to lead.details for missing fields
+    const hpDoc = doc.healthProfile || {};
+    const leadDetails = (lead && lead.details) ? lead.details : {};
+
+    const mergedHP = {
+      // if hpDoc has the value (non-null/defined/non-empty) use it, else fallback to lead.details
+      age: hpDoc.age ?? leadDetails.age ?? undefined,
+      heightCm: hpDoc.heightCm ?? leadDetails.height ?? undefined,
+      weightKg: hpDoc.weightKg ?? leadDetails.weight ?? undefined,
+      bmi: hpDoc.bmi ?? undefined, // we'll compute below if missing
+    };
+
+    // Compute BMI if not set in hp
+    if (!isPresent(mergedHP.bmi) && isPresent(mergedHP.heightCm) && isPresent(mergedHP.weightKg)) {
+      const computed = computeBMI(mergedHP.heightCm, mergedHP.weightKg);
+      mergedHP.bmi = computed || undefined;
+    }
 
     // 3) Build pages
     const planType = doc.planType || "Weekly";
@@ -489,18 +515,18 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     const pages = [];
 
-    // Slide 1
+    // Slide 1 (cover)
     pages.push(coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" }));
 
-    // Slide 2
+    // Slide 2 (basic details) — show only fields that exist (Name & Contact always shown)
     pages.push(
       basicDetailsHtml({
         name: custName,
         phone: custPhone,
-        age: hp.age,
-        height: hp.heightCm,
-        weight: hp.weightKg,
-        bmi: bmiValue,
+        age: mergedHP.age,
+        height: mergedHP.heightCm,
+        weight: mergedHP.weightKg,
+        bmi: mergedHP.bmi,
       })
     );
 
@@ -534,8 +560,9 @@ router.get("/diet-plan/:id", async (req, res) => {
         goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
       })
     );
-    // Dietitian Notes slide last
-    pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
+
+    // Dietitian Notes slide last — includes the requested image and shows name/phone
+    pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You", phone: custPhone }));
 
     // 4) HTML
     const html = `<!doctype html>

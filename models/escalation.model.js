@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
 
 const EscalationSchema = new mongoose.Schema({
-  date: String,           // (optional) consider Date in future
+  date: String,            
   orderId: String,
-  name: String,
+  name: String, 
   contactNumber: String,
   agentName: String,
   query: String,
@@ -13,6 +13,8 @@ const EscalationSchema = new mongoose.Schema({
   remark: String,
   resolvedDate: String,
   reason: String,
+  amount: String,              
+  products: [String],
   trackingId: { type: String, default: '' }, 
 }, { timestamps: true });
 

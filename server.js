@@ -89,7 +89,7 @@ const ordersRouter = require("./routes/ShopifyOrderDB");
 
 const cohartDataApiRouter = require("./routes/cohart-dataApi");
 
-const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders");
+const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders"); 
 
 const app = express();
 const PORT = process.env.PORT || 5001;

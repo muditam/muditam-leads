@@ -13,21 +13,42 @@ const s3 = new AWS.S3({
   region: process.env.WASABI_REGION,
 });
 
-// Multer setup
+// Multer setup (memory)
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
+// Helpers
+const normalizeAmount = (val) => {
+  if (val === undefined || val === null) return '';
+  // keep only digits and decimal point; store as string (schema uses String)
+  const numeric = String(val).replace(/[^\d.]/g, '');
+  return numeric;
+};
+
+const normalizeProducts = (val) => {
+  // In multipart, repeating field yields array; single select yields string
+  let arr = Array.isArray(val) ? val : (val ? [val] : []);
+  // trim, dedupe, drop empties
+  const set = new Set();
+  for (const p of arr) {
+    const cleaned = String(p).trim();
+    if (cleaned) set.add(cleaned);
+  }
+  return Array.from(set);
+};
+
+// GET / — list with filters/pagination/sort
 router.get('/', async (req, res) => {
   try {
     const {
       page = 1,
       limit = 50,
-      status,            // e.g. "Open,In Progress" or "Closed"
+      status,            // "Open,In Progress" or "Closed"
       assignedTo,
       search,            // matches orderId/name/contactNumber
       sortBy = 'createdAt',
       order = 'desc',
-    } = req.query; 
+    } = req.query;
 
     const filter = {};
     if (status) {
@@ -55,19 +76,23 @@ router.get('/', async (req, res) => {
         .sort(sort)
         .skip(skip)
         .limit(perPage)
-        .select('date orderId name contactNumber agentName query attachedFileUrls status assignedTo remark resolvedDate reason createdAt trackingId')
-        .lean(),  // much faster, smaller payloads
+        .select(
+          'date orderId name contactNumber agentName query attachedFileUrls ' +
+          'status assignedTo remark resolvedDate reason createdAt trackingId ' +
+          'amount products'
+        )
+        .lean(),
       Escalation.countDocuments(filter),
     ]);
 
     res.json({ data, total, page: pageNum, limit: perPage });
-  } catch (err) { 
+  } catch (err) {
     console.error('Failed to fetch escalations:', err);
     res.status(500).json({ error: 'Failed to fetch escalations' });
   }
 });
 
-// Add escalation with optional file upload
+// POST / — create with optional file uploads
 router.post('/', upload.array('attachedFiles'), async (req, res) => {
   try {
     const fileUrls = [];
@@ -86,10 +111,10 @@ router.post('/', upload.array('attachedFiles'), async (req, res) => {
       }
     }
 
+    // Order ID normalization & validation
     const rawOrder = String(req.body.orderId || '').trim();
-
     if (/#/i.test(rawOrder) || /^\s*#\s*ma/i.test(rawOrder)) {
-     return res.status(400).json({ error: 'Add order id without #MA' });
+      return res.status(400).json({ error: 'Add order id without #MA' });
     }
 
     const digits = rawOrder.replace(/\D/g, '');
@@ -97,13 +122,19 @@ router.post('/', upload.array('attachedFiles'), async (req, res) => {
       return res.status(400).json({ error: 'Invalid order id' });
     }
     const normalizedOrderId = `MA${digits}`;
- 
+
+    // Lookup tracking number from Order collection
     const orderDoc = await Order.findOne({
-      order_id: { $in: [normalizedOrderId, `#${normalizedOrderId}`] }
-    }).select('tracking_number').lean();
+      order_id: { $in: [normalizedOrderId, `#${normalizedOrderId}`] },
+    })
+      .select('tracking_number')
+      .lean();
 
     const trackingId = orderDoc?.tracking_number || '';
 
+    // NEW: normalize amount & products
+    const amount = normalizeAmount(req.body.amount);
+    const products = normalizeProducts(req.body.products);
 
     const escalation = new Escalation({
       date: req.body.date,
@@ -112,12 +143,14 @@ router.post('/', upload.array('attachedFiles'), async (req, res) => {
       contactNumber: req.body.contactNumber,
       agentName: req.body.agentName,
       query: req.body.query,
-      attachedFileUrls: fileUrls,  
+      attachedFileUrls: fileUrls,
       status: req.body.status || 'Open',
       assignedTo: req.body.assignedTo || '',
-      remark: req.body.remark || '', 
+      remark: req.body.remark || '',
       resolvedDate: req.body.resolvedDate || '',
       reason: req.body.reason || '',
+      amount,
+      products,
       trackingId,
     });
 
@@ -129,22 +162,30 @@ router.post('/', upload.array('attachedFiles'), async (req, res) => {
   }
 });
 
-// Update escalation (editable fields only)
+// PUT /:id — update (editable fields only)
 router.put('/:id', async (req, res) => {
   try {
     const updateFields = {};
 
-    if (req.body.status !== undefined) updateFields.status = req.body.status;
-    if (req.body.assignedTo !== undefined) updateFields.assignedTo = req.body.assignedTo;
-    if (req.body.remark !== undefined) updateFields.remark = req.body.remark;
-    if (req.body.resolvedDate !== undefined) updateFields.resolvedDate = req.body.resolvedDate;
+    if (req.body.status !== undefined)      updateFields.status = req.body.status;
+    if (req.body.assignedTo !== undefined)  updateFields.assignedTo = req.body.assignedTo;
+    if (req.body.remark !== undefined)      updateFields.remark = req.body.remark;
+    if (req.body.resolvedDate !== undefined)updateFields.resolvedDate = req.body.resolvedDate;
+
+    // Allow updating amount & products (optional)
+    if (req.body.amount !== undefined) {
+      updateFields.amount = normalizeAmount(req.body.amount);
+    }
+    if (req.body.products !== undefined) {
+      updateFields.products = normalizeProducts(req.body.products);
+    }
 
     const updated = await Escalation.findByIdAndUpdate(
       req.params.id,
       { $set: updateFields },
       { new: true }
     );
- 
+
     if (!updated) {
       return res.status(404).json({ error: 'Escalation not found' });
     }
@@ -156,17 +197,18 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Delete escalation by ID
+// DELETE /:id — delete
 router.delete('/:id', async (req, res) => {
-    try {
-      const deleted = await Escalation.findByIdAndDelete(req.params.id);
-      if (!deleted) {
-        return res.status(404).json({ error: 'Escalation not found' });
-      }
-      res.json({ message: 'Escalation deleted successfully' });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to delete escalation' });
+  try {
+    const deleted = await Escalation.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Escalation not found' });
     }
-  });
-  
+    res.json({ message: 'Escalation deleted successfully' });
+  } catch (err) {
+    console.error('Failed to delete escalation:', err);
+    res.status(500).json({ error: 'Failed to delete escalation' });
+  }
+});
+
 module.exports = router;
