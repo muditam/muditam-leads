@@ -9,9 +9,11 @@ const Lead = require("../models/Lead");
 const BG_COVER =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_3_3.png?v=1757425422";
 const BG_DETAILS =
-  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801"; 
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801";
 const TAILORED_BG =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1379.png?v=1757501741";
+const NOTES_BG =
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_5_2.png?v=1757502951";
 
 const MEALS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
 const MONTHLY_SLOTS = ["Breakfast", "Lunch", "Evening Snack", "Dinner"];
@@ -176,7 +178,7 @@ function dayPageHtml({ dayIndex, dateIso, meals, times }) {
 </section>`;
 }
 
-// ---- Tailored Diet slide (ALWAYS LAST) ----
+// ---- Tailored Diet slide (SECOND-LAST) ----
 function tailoredDietHtml({ conditions = [], goals = [] }) {
   const condText = niceList(conditions) || "your condition";
   const goalText = niceList(goals) || "health goals";
@@ -188,8 +190,41 @@ function tailoredDietHtml({ conditions = [], goals = [] }) {
     <h2>TAILORED DIET CHART</h2>
     <div class="t-rule"></div>
     <p class="t-msg">${escapeHtml(msg)}</p>
-    <div class="bowl-wrap"> 
-    </div>
+  </div>
+</section>`;
+}
+
+// ---- Dietitian Notes slide (ALWAYS LAST) ----
+function notesSlideHtml({ name = "You" }) {
+  const bullets = [
+    `Stay hydrated, ${name}. Aim for 2–3 litres of water throughout the day.`,
+    "Remember your 15-minute walk after lunch and dinner. It really helps with digestion and acidity.",
+    "Pair this diet with your 15-minute bodyweight exercises twice a week for best results.",
+    "Share the prep hacks with your household help to make following this plan easier.",
+    "Enjoy your Saturday cheat meal mindfully, but get right back on track the next day.",
+    "Listen to your body. The morning fatigue should reduce as your nutrition improves.",
+    "Consistency is the key to managing your health. You can do this",
+    // generic lifestyle add-ons from your text
+    "Stay Active – Aim for 30–45 minutes of moderate exercise daily, such as walking, cycling, yoga, or swimming.",
+    "Move After Meals – Take short walks (5–10 minutes) to support digestion and overall health.",
+    "Prioritize Sleep – Aim for 7–8 hours of quality sleep to maintain energy and well-being.",
+    "Maintain a Sleep Routine – Keep a consistent sleep schedule and reduce screen time before bed.",
+    "Manage Stress – Practice meditation, deep breathing, or yoga to promote relaxation.",
+    "Stay Hydrated – Drink 8–10 glasses of water throughout the day.",
+    "Avoid Harmful Habits – Limit alcohol and avoid smoking for better overall health.",
+    "Limit Processed Foods – Choose whole, unprocessed foods to support overall wellness.",
+    "Practice Mindful Eating – Eat slowly, avoid distractions, and listen to your body’s hunger cues.",
+    "Maintain a Healthy Weight – Aim for a balanced lifestyle rather than extreme dieting.",
+  ];
+
+  return `
+<section class="page notes tall">
+  <div class="notes-card">
+    <h2>DIETITIAN NOTES</h2>
+    <div class="n-rule"></div>
+    <ul class="notes-list">
+      ${bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}
+    </ul>
   </div>
 </section>`;
 }
@@ -248,7 +283,7 @@ html,body{
   display:flex; align-items:center; justify-content:center;
   padding:10px; /* tight edges */
 }
-/* Slides 1–2 and Tailored slide get A4 height */
+/* Slides 1–2 + Tailored + Notes get A4 height */
 .tall{ min-height:297mm; }
 
 /* ---- COVER (with BG image) ---- */
@@ -359,24 +394,43 @@ html,body{
 .dash{ color:#888; }
 
 /* ---- Tailored Diet slide ---- */
-/* Use your full-bleed background image; no extra green background */
+/* full-bleed page bg (no extra green layer) */
 .tailor{
   background:url("${TAILORED_BG}") center/cover no-repeat;
 }
-.tailor-card{  width:100%; max-width:560px; 
-  color:#fff; border-radius:28px; padding:28px 26px 120px;  
-  text-align:center;
+.tailor-card{
+  width:100%; max-width:560px;
+  color:#fff; border-radius:28px; padding:28px 26px;
+  text-align:center; backdrop-filter: blur(0.2px);
+  background: linear-gradient(180deg, rgba(58,138,51,.95) 0%, rgba(43,110,39,.95) 100%);
+  box-shadow:0 18px 40px rgba(0,0,0,.22);
 }
 .tailor-card h2{
   margin:0; font-size:28px; line-height:1.2; font-weight:800; letter-spacing:.2px;
 }
 .t-rule{ height:1px; background:rgba(255,255,255,.35); width:80%; margin:12px auto 14px; }
 .t-msg{ margin:0; font-size:14px; line-height:1.6; color:#f4fff4; }
-.bowl-wrap{
-  position:absolute; left:50%; bottom:-20px; transform:translateX(-50%);
-  width:92%; pointer-events:none;
+
+/* ---- Dietitian Notes slide ---- */
+.notes{
+  background:url("${NOTES_BG}") center/cover no-repeat;
 }
-.bowl-wrap img{ width:100%; height:auto; display:block; }
+.notes-card{
+  width:100%; max-width:640px;
+  background: linear-gradient(180deg, rgba(58,138,51,.95) 0%, rgba(43,110,39,.95) 100%);
+  color:#fff; border-radius:28px; padding:28px 30px;
+  box-shadow:0 18px 40px rgba(0,0,0,.22);
+}
+.notes-card h2{
+  margin:0 0 4px; font-size:28px; line-height:1.2; font-weight:800; letter-spacing:.2px;
+  text-transform:uppercase;
+}
+.n-rule{ height:1px; background:rgba(255,255,255,.4); width:86%; margin:12px 0 8px; }
+.notes-list{
+  margin:0; padding-left:22px; list-style:disc;
+  color:#eafdea; font-size:14px; line-height:1.7;
+}
+.notes-list li{ margin:8px 0; }
 
 /* print */
 @media print{
@@ -463,13 +517,15 @@ router.get("/diet-plan/:id", async (req, res) => {
       pages.push(monthlyPageHtml({ slots }));
     }
 
-    // ALWAYS append Tailored Diet slide at the very end
+    // Append Tailored slide second-last
     pages.push(
       tailoredDietHtml({
         conditions: Array.isArray(doc.conditions) ? doc.conditions : [],
         goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
       })
     );
+    // Append Dietitian Notes slide last
+    pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
 
     // 4) HTML
     const html = `<!doctype html>
@@ -497,3 +553,12 @@ router.get("/diet-plan/:id", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+
+
+
+
+
+

@@ -1,7 +1,6 @@
 // models/DietPlan.js
 const mongoose = require("mongoose");
-
-/** Subdocs **/
+ 
 const MonthlySlotSchema = new mongoose.Schema(
   {
     time: { type: String, default: "" },
@@ -9,8 +8,7 @@ const MonthlySlotSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
-// Basic health profile captured in the UI (Age, Height, Weight, BMI)
+ 
 const HealthProfileSchema = new mongoose.Schema(
   {
     age: { type: Number, min: 0, max: 130 },
@@ -20,8 +18,7 @@ const HealthProfileSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
-// Keep conditions constrained to known values (custom goals remain free-form)
+ 
 const CONDITION_ENUM = [
   "Diabetes",
   "Fatty Liver",
@@ -47,7 +44,7 @@ const DietPlanSchema = new mongoose.Schema(
     durationDays: { type: Number, required: true },
 
     // Weekly (14) body
-    fortnight: {
+    fortnight: { 
       Breakfast: { type: [String], default: undefined },
       Lunch: { type: [String], default: undefined },
       Snacks: { type: [String], default: undefined },
@@ -69,11 +66,9 @@ const DietPlanSchema = new mongoose.Schema(
       "Evening Snack": { type: MonthlySlotSchema, default: undefined },
       Dinner: { type: MonthlySlotSchema, default: undefined },
     },
-
-    // NEW: Health profile & goals
+ 
     healthProfile: { type: HealthProfileSchema, default: {} },
-    conditions: { type: [String], enum: CONDITION_ENUM, default: [] },
-    // Goals are free-form so you can add/delete custom ones from the UI
+    conditions: { type: [String], enum: CONDITION_ENUM, default: [] }, 
     healthGoals: { type: [String], default: [] },
 
     createdBy: { type: String, default: "system" },
@@ -82,12 +77,10 @@ const DietPlanSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-/** Indexes **/
+ 
 DietPlanSchema.index({ "customer.leadId": 1, startDate: -1 });
 DietPlanSchema.index({ "customer.name": 1, startDate: -1 });
-
-/** Optional: auto-calc BMI on save if height/weight are present **/
+ 
 DietPlanSchema.pre("save", function (next) {
   const hp = this.healthProfile || {};
   if (hp && hp.heightCm > 0 && hp.weightKg > 0) {
