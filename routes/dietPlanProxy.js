@@ -297,10 +297,10 @@ html,body{
   padding:15px; /* tight edges */
 }
 /* Slides 1–2 + Tailored + Notes get A4 height */
-.tall{ min-height:297mm; }
+.tall{ min-height:297mm; margin: 10px auto; }
 
 /* ---- COVER (with BG image) ---- */
-.cover{ background:url("${BG_COVER}") center/cover no-repeat; }
+.cover{ background:url("${BG_COVER}") center/cover no-repeat; } 
 .cover-card{
   width:100%; max-width:450px;
   background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
@@ -309,7 +309,7 @@ html,body{
 }
 .cover-card h1{
   margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px;
-  text-transform:uppercase; font-size:38px;
+  text-transform:uppercase; font-size:35px;
 }
 .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
 .subtitle{ margin:0 0 22px; font-size:21px; line-height:1.5; }
@@ -393,7 +393,7 @@ html,body{
 
 /* Separator */
 .sep{
-  height:3px; background:#543087; width:100%;
+  height:2px; background:#543087; width:100%;
   margin:12px 0 6px;
 }
 
@@ -413,10 +413,10 @@ html,body{
   text-align:center; 
 }
 .tailor-card h2{
-  margin:0; font-size:28px; line-height:1.2; font-weight:800; letter-spacing:.2px;
+  margin:0; font-size:38px; line-height:1.2; font-weight:800; letter-spacing:.2px;
 }
-.t-rule{ height:1px; background:rgba(255,255,255,.35); width:80%; margin:12px auto 14px; }
-.t-msg{ margin:0; font-size:14px; line-height:1.6; color:#f4fff4; }
+.t-rule{ height:1px; background:rgba(255,255,255,.35); width:80%; margin:12px auto 14px; } 
+.t-msg{ margin:0; font-size:22px; line-height:1.6; color:#f4fff4; }
 
 /* ---- Dietitian Notes slide ---- */
 .notes{
