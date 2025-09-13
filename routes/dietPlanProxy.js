@@ -267,14 +267,17 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 
 // ---- Title slide after 2nd slide ----
 function nameTitleSlideHtml({ name = "Customer" }) {
-  const safeName = escapeHtml(name || "Customer");
+  const raw = String(name || "").trim();
+  const firstName = raw ? raw.split(/\s+/)[0] : "Customer";
+  const safeName = escapeHtml(firstName);
+
   return `
 <section class="page title tall">
-  <div class="title-card">
+  <div class="title-card" style="height:20mm; display:flex; align-items:center; justify-content:center;">
     <h2 class="big-title">${safeName}'s 14 Days Diet Plan</h2>
   </div>
 </section>`;
-}
+} 
 
 // ---- PAGE 3+ (DAY) ----
 function dayPageHtml({ dayIndex, dateIso, meals, times }) {
