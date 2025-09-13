@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 
+const DietTemplate = require("../models/DietTemplate");
 const DietPlan = require("../models/DietPlan");
 const Lead = require("../models/Lead");
 
@@ -67,7 +68,6 @@ function round1(n) {
   return Math.round(n * 10) / 10;
 }
 function computeBMI(heightCm, weightKg) {
-  // Accept either field names (heightCm/height, weightKg/weight)
   const hVal = heightCm == null ? undefined : Number(heightCm);
   const wVal = weightKg == null ? undefined : Number(weightKg);
   if (!hVal || !wVal || !isFinite(hVal) || !isFinite(wVal)) return "";
@@ -91,7 +91,7 @@ function isPresent(v) {
   return v !== undefined && v !== null && String(v).trim() !== "";
 }
 
-// Keep parseMeal for notes & main text only (we won't use its time now)
+// parse only main + note; time is taken from weeklyTimes
 function parseMeal(raw) {
   const out = { time: "", main: "", note: "" };
   if (!raw) return out;
@@ -100,6 +100,34 @@ function parseMeal(raw) {
   out.main = parts[0] || "";
   out.note = parts.slice(1).join(" ").trim();
   return out;
+}
+
+// ----- extra helpers for robust data -----
+function normalizeWeeklyTimes(wt) {
+  const out = {};
+  MEALS.forEach((m) => {
+    out[m] = typeof wt?.[m] === "string" ? wt[m] : "";
+  });
+  return out;
+}
+function hasAnyTime(wt) {
+  return MEALS.some((m) => ((wt?.[m] || "").trim().length > 0));
+}
+function pickFortnight(doc) {
+  // supports old docs with plan.fortnight
+  return doc.fortnight || doc.plan?.fortnight || {};
+}
+function pickMonthly(doc) {
+  return doc.monthly || doc.plan?.monthly || {};
+}
+function pickHealthProfile(doc, leadDetails = {}) {
+  const planHp = doc.healthProfile || doc.plan?.healthProfile || doc.details || {};
+  return {
+    age: planHp.age ?? leadDetails.age ?? "",
+    height: planHp.heightCm ?? planHp.height ?? leadDetails.height ?? "",
+    weight: planHp.weightKg ?? planHp.weight ?? leadDetails.weight ?? "",
+    bmi: planHp.bmi ?? doc.bmi ?? "",
+  };
 }
 
 // ---------- HTML builders ----------
@@ -124,7 +152,6 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
 </section>`;
 }
 
-// Only render optional rows if data present
 function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bmi }) {
   const rows = [];
   const pushRow = (label, value) =>
@@ -151,7 +178,7 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 </section>`;
 }
 
-// ---- PAGE 3+ (DAY) — time now under meal name (left column) & raw ----
+// ---- PAGE 3+ (DAY) ----
 function dayPageHtml({ dayIndex, dateIso, meals, times }) {
   return `
 <section class="page sheet-plain">
@@ -165,7 +192,6 @@ function dayPageHtml({ dayIndex, dateIso, meals, times }) {
 
       ${MEALS.map((m) => {
         const parsed = parseMeal(meals[m] || "");
-        // Show EXACT weekly time value as entered; no trimming/formatting; no fallback to parsed time
         const mealTimeRaw =
           times && Object.prototype.hasOwnProperty.call(times, m)
             ? String(times[m] ?? "")
@@ -250,7 +276,7 @@ function finalImageSlideHtml({ imageUrl }) {
 </section>`;
 }
 
-// Monthly page reuses the same sheet styling (no bg, no min-height)
+// Monthly page
 function monthlyPageHtml({ slots }) {
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
@@ -296,18 +322,15 @@ html,body{
   font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif;
 }
 
-/* Page: NO min-height by default (so slide 3+ can shrink). */
 .page{
   width:210mm;
   margin:0 auto; page-break-after:always;
   display:flex; align-items:center; justify-content:center;
-  padding:10px; /* tight edges */
+  padding:10px;
 }
-/* Slides 1–2 + Tailored + Notes get A4 height */
 .tall{ min-height:297mm; margin: 10px auto; }
 
-/* ---- COVER (with BG image) ---- */ 
-.cover{ background:url("${BG_COVER}") center/cover no-repeat; } 
+.cover{ background:url("${BG_COVER}") center/cover no-repeat; }
 .cover-card{
   width:100%; max-width:450px;
   background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
@@ -327,7 +350,6 @@ html,body{
 .pill-title{ font-weight:800; font-size:25px; text-align:center; }
 .pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; }
  
-/* ---- DETAILS (with BG image) ---- */
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; }
 .details-card{
   position:relative; width:100%; max-width:430px; background:#fff;
@@ -353,25 +375,18 @@ html,body{
 .dt{ color:var(--green); font-weight:700; }
 .dd{ color:#222; }
 
-/* ---- SHEET (DAY/MONTH) — NO background image, NO min-height ---- */
-.sheet-plain{
-  background:#f7f8f7; /* solid bg, no image */
-}
+.sheet-plain{ background:#f7f8f7; }
 
-/* Double frame */
 .sheet{
   width:100%; background:#fff;
-  border:8px solid var(--green);       /* outer dark */
+  border:8px solid var(--green);
   border-radius:6px;
 }
-.sheet-inner{ 
-  padding:10px;                        
-}
+.sheet-inner{ padding:10px; }
 
-/* Header bar */
 .topbar{
   display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center; 
-  background:#EEE2FF;  
+  background:#EEE2FF;
   border-radius:4px; padding:10px 12px; margin:-10px -10px 10px -10px;
 }
 .cell{ font-size:14px; }
@@ -379,14 +394,12 @@ html,body{
 .right{ text-align:right; font-size:14px; } 
 .strong{ font-weight:500; color:black; font-size: 20px; }
 
-/* Meal rows */
 .mealrow{
   display:grid; grid-template-columns:180px 1fr; gap:12px; align-items:flex-start; 
   margin-top:6px;
 }
 .left{ display:flex; flex-direction:column; align-items:flex-start; }
 .mealname{ font-weight:600; line-height:1; font-size: 18px; }
-
 
 .meal-time{
   margin-top:6px;
@@ -407,22 +420,17 @@ html,body{
 .meal-main{ color:#1e1e1e; font-size:20px; line-height:1.45; }
 .meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:6px; }
 
-/* Separator */
 .sep{
   height:2px; background:#543087; width:100%;
   margin:12px 0 6px; 
 }
 
-/* Monthly */
 .slot h3{ margin:0 0 6px; color:#2f7a2f; }
 .time-inline{ color:#666; font-weight:500; }
 .opts{ margin:0; padding-left:18px; }
 .dash{ color:#888; }
 
-/* ---- Tailored Diet slide ---- */
-.tailor{
-  background:url("${TAILORED_BG}") center/cover no-repeat;
-}
+.tailor{ background:url("${TAILORED_BG}") center/cover no-repeat; }
 .tailor-card{
   width:100%; max-width:560px;
   color:#fff; border-radius:28px; padding:8px 26px 150px;
@@ -434,29 +442,20 @@ html,body{
 .t-rule{ height:1px; background:rgba(255,255,255,.35); width:80%; margin:12px auto 14px; } 
 .t-msg{ margin:0; font-size:22px; line-height:1.6; color:#f4fff4; }
 
-/* ---- Dietitian Notes slide ---- */
-.notes{
-  background:url("${NOTES_BG}") center/cover no-repeat; 
-}
-/* translucent / glassy notes card */
+.notes{ background:url("${NOTES_BG}") center/cover no-repeat; }
 .notes-card{
-  position: relative;                     /* needed for overlay */
+  position: relative;
   width:100%;
   max-width:550px;
-  background: linear-gradient(
-    180deg,
-    rgba(126,93,173,.65) 0%,
-    rgba(84,48,135,.65) 100%
-  );                                      /* semi-transparent */
+  background: linear-gradient(180deg, rgba(126,93,173,.65) 0%, rgba(84,48,135,.65) 100%);
   color:#fff;
   border-radius:28px;
   padding:38px 30px;
-  border:1px solid rgba(255,255,255,.25); /* subtle edge */
+  border:1px solid rgba(255,255,255,.25);
   backdrop-filter: blur(10px) saturate(120%);
-  -webkit-backdrop-filter: blur(10px) saturate(120%); /* Safari */
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
   box-shadow: 0 18px 40px rgba(0,0,0,.22);
 }
-
 .notes-card::after{
   content:"";
   position:absolute; inset:0;
@@ -466,20 +465,19 @@ html,body{
     radial-gradient(40% 35% at 15% 15%, rgba(0,0,0,.18), transparent 60%),
     radial-gradient(45% 35% at 85% 85%, rgba(0,0,0,.18), transparent 60%);
 }
-
 .notes-card h2{
   margin:0 0 8px;
-  font-size:36px;                  /* strong title */
+  font-size:36px;
   line-height:1.2;
   font-weight:800;
   letter-spacing:.4px;
   text-transform:uppercase;
-  text-align:left;                 /* left-aligned like mock */
+  text-align:left;
 }
 .n-rule{
-  height:2px;                      /* slightly thicker */
+  height:2px;
   color:rgba(255,255,255,.7);
-  width:100%;                      /* full card width */
+  width:100%;
   margin:12px 0 16px;
   border-radius:1px;
 }
@@ -487,23 +485,15 @@ html,body{
   margin:0;
   padding-left:22px;
   list-style:disc;
-  font-size:18px;                  /* readable, not huge */
+  font-size:18px;
   line-height:1.7;
-  color:rgba(255,255,255,.95);       
+  color:rgba(255,255,255,.95);
 }
+.notes-list li{ margin:10px 0; }
+.notes-list li::marker{ color:#ffffff; }
 
-.notes-list li{
-  margin:10px 0;
-}
-
-/* white bullets like the mock */
-.notes-list li::marker{
-  color:#ffffff;
-}
-/* final image slide */
 .final-image img{ max-width:100%; height:auto; display:block; }
 
-/* print */
 @media print{
   body{ background:#fff; }
   .page{ margin:0; page-break-after:always; }
@@ -541,74 +531,92 @@ router.get("/diet-plan/:id", async (req, res) => {
     custName = custName || "Customer";
     custPhone = custPhone || "—";
 
-    // Health fields: prefer plan fields (if present), otherwise fall back to lead.details
-    const planHp = doc.healthProfile || doc.details || {};
-    const ageVal = planHp.age ?? leadDetails.age ?? "";
-    const heightVal = planHp.heightCm ?? planHp.height ?? leadDetails.height ?? "";
-    const weightVal = planHp.weightKg ?? planHp.weight ?? leadDetails.weight ?? "";
-    const bmiStored = planHp.bmi ?? doc.bmi ?? "";
-    const bmiValue = bmiStored || computeBMI(heightVal, weightVal) || "";
+    // Health fields
+    const hp = pickHealthProfile(doc, leadDetails);
+    const bmiValue = hp.bmi || computeBMI(hp.height, hp.weight) || "";
 
-    // 3) Build pages
+    // 3) Gather plan type & dates
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
     const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
+    // 4) Get times robustly
+    let weeklyTimes =
+      doc.weeklyTimes ||
+      doc.plan?.weeklyTimes ||
+      null;
+
+    // If still missing/empty, fall back to template's times
+    if (!hasAnyTime(weeklyTimes) && doc.templateId) {
+      try {
+        const tpl = await DietTemplate.findById(doc.templateId).lean();
+        weeklyTimes = tpl?.body?.weeklyTimes || weeklyTimes;
+      } catch {}
+    }
+    weeklyTimes = normalizeWeeklyTimes(weeklyTimes || {});
+
+    // 5) Build pages
     const pages = [];
 
     // Slide 1: Cover
     pages.push(coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" }));
 
-    // Slide 2: Basic details (show only present fields)
+    // Slide 2: Basic details
     pages.push(
       basicDetailsHtml({
         name: custName,
         phone: custPhone,
-        age: ageVal,
-        height: heightVal,
-        weight: weightVal,
+        age: hp.age,
+        height: hp.height,
+        weight: hp.weight,
         bmi: bmiValue,
       })
     );
 
     // Slide 3+ : plan content
     if (planType === "Weekly") {
-      const times = doc.weeklyTimes || {};
+      const fortnight = pickFortnight(doc);
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
         const meals = {
-          Breakfast: (doc.fortnight?.Breakfast || [])[i] || "",
-          Lunch: (doc.fortnight?.Lunch || [])[i] || "",
-          Snacks: (doc.fortnight?.Snacks || [])[i] || "",
-          Dinner: (doc.fortnight?.Dinner || [])[i] || "",
+          Breakfast: (fortnight?.Breakfast || [])[i] || "",
+          Lunch: (fortnight?.Lunch || [])[i] || "",
+          Snacks: (fortnight?.Snacks || [])[i] || "",
+          Dinner: (fortnight?.Dinner || [])[i] || "",
         };
-        pages.push(dayPageHtml({ dayIndex: i, dateIso: d, meals, times }));
+        pages.push(
+          dayPageHtml({
+            dayIndex: i,
+            dateIso: d,
+            meals,
+            times: weeklyTimes, // <- now reliably populated
+          })
+        );
       }
     } else {
+      const monthly = pickMonthly(doc);
       const slots = {
-        Breakfast: doc.monthly?.Breakfast || { time: "", options: [] },
-        Lunch: doc.monthly?.Lunch || { time: "", options: [] },
-        "Evening Snack": doc.monthly?.["Evening Snack"] || { time: "", options: [] },
-        Dinner: doc.monthly?.Dinner || { time: "", options: [] },
+        Breakfast: monthly?.Breakfast || { time: "", options: [] },
+        Lunch: monthly?.Lunch || { time: "", options: [] },
+        "Evening Snack": monthly?.["Evening Snack"] || { time: "", options: [] },
+        Dinner: monthly?.Dinner || { time: "", options: [] },
       };
       pages.push(monthlyPageHtml({ slots }));
     }
-
-    // Tailored slide (second-last)
+ 
     pages.push(
       tailoredDietHtml({
-        conditions: Array.isArray(doc.conditions) ? doc.conditions : [],
-        goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : [],
+        conditions: Array.isArray(doc.conditions) ? doc.conditions : doc.plan?.conditions || [],
+        goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : doc.plan?.healthGoals || [],
       })
     );
-
-    // Dietitian Notes slide (last content slide)
+ 
     pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
 
     // Final image slide (after notes)
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
-    // 4) HTML
+    // 6) HTML
     const html = `<!doctype html>
 <html lang="en">
 <head>

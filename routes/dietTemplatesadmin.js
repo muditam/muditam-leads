@@ -1,6 +1,7 @@
 // routes/dietTemplates.js
 const express = require("express");
 const DietTemplate = require("../models/DietTemplate");
+const DietPlan = require("../models/DietPlan");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
 
@@ -157,7 +158,6 @@ router.get("/:id", async (req, res) => {
   res.json(doc);
 });
 
-// routes/dietPlans.js (example create)
 router.post("/", async (req, res) => {
   try {
     const { customer = {}, plan = {} } = req.body;
@@ -175,7 +175,9 @@ router.post("/", async (req, res) => {
       templateType,
       startDate,
       durationDays,
-      ...(planType === "Weekly" ? { fortnight, weeklyTimes } : { monthly }),
+      ...(planType === "Weekly"
+        ? { fortnight, weeklyTimes }    // ⬅️ ensure this is saved
+        : { monthly }),
       healthProfile: healthProfile || {},
       conditions: Array.isArray(conditions) ? conditions : [],
       healthGoals: Array.isArray(healthGoals) ? healthGoals : [],
