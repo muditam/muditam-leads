@@ -11,7 +11,7 @@ const Employee = require("../models/Employee"); // used to resolve fullName
 const BG_COVER =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_3_3.png?v=1757425422";
 const BG_DETAILS =
-  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801";
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_10_99ec1555-1334-4a43-a4e3-859eb128955b.png?v=1757756165";
 const TAILORED_BG =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/A4_-_23.png?v=1757681972";
 const NOTES_BG =
@@ -146,6 +146,12 @@ function pickHealthProfile(doc, leadDetails = {}) {
 const isObjectIdString = (v) =>
   typeof v === "string" && /^[0-9a-fA-F]{24}$/.test(v);
 
+const isBogusName = (v) => {
+  if (typeof v !== "string") return false;
+  const low = v.trim().toLowerCase();
+  return ["system", "admin", "root", "muditam"].includes(low);
+};
+
 /**
  * Resolve a human-readable fullName for the "created by" field.
  * Order of precedence:
@@ -154,6 +160,10 @@ const isObjectIdString = (v) =>
  *   3) If createdBy is a 24-char ObjectId string -> lookup Employee by _id
  *   4) If createdBy looks like an email -> lookup Employee by email
  *   5) Otherwise assume it's already a full name
+ *
+ * Notes:
+ * - We NEVER display email; if we can't resolve to a full name, return "".
+ * - We treat placeholders like "system/admin/root/muditam" as empty.
  */
 async function resolveCreatorDisplay(doc, byOverride) {
   const override = (byOverride || "").trim();
@@ -164,55 +174,64 @@ async function resolveCreatorDisplay(doc, byOverride) {
 
   // If an object was stored previously
   if (typeof rawAny === "object" && rawAny) {
-    if (rawAny.fullName && String(rawAny.fullName).trim()) return String(rawAny.fullName).trim();
-    if (rawAny.name && String(rawAny.name).trim()) return String(rawAny.name).trim();
-
+    if (rawAny.fullName && String(rawAny.fullName).trim()) {
+      const s = String(rawAny.fullName).trim();
+      return isBogusName(s) ? "" : s;
+    }
+    if (rawAny.name && String(rawAny.name).trim()) {
+      const s = String(rawAny.name).trim();
+      return isBogusName(s) ? "" : s;
+    }
     // Try email/id present on the object
     if (rawAny.email && String(rawAny.email).includes("@")) {
       try {
         const emp = await Employee.findOne({ email: String(rawAny.email).trim() }).lean();
-        return emp?.fullName || String(rawAny.email).trim();
+        const s = emp?.fullName?.trim() || "";
+        return isBogusName(s) ? "" : s;
       } catch {
-        return String(rawAny.email).trim();
+        return "";
       }
     }
     if (rawAny._id && isObjectIdString(String(rawAny._id))) {
       try {
         const emp = await Employee.findById(String(rawAny._id)).lean();
-        return emp?.fullName || "";
+        const s = emp?.fullName?.trim() || "";
+        return isBogusName(s) ? "" : s;
       } catch {
         return "";
       }
     }
-    return ""; // object but no usable fields
+    return "";
   }
 
   // String path
   const raw = String(rawAny).trim();
-  if (!raw) return "";
+  if (!raw || isBogusName(raw)) return "";
 
   // If it looks like an ObjectId, try findById
   if (isObjectIdString(raw)) {
     try {
       const emp = await Employee.findById(raw).lean();
-      return emp?.fullName || "";
+      const s = emp?.fullName?.trim() || "";
+      return isBogusName(s) ? "" : s;
     } catch {
       return "";
     }
   }
 
-  // If it looks like an email, resolve to fullName
+  // If it looks like an email, resolve to fullName (no email fallback)
   if (raw.includes("@")) {
     try {
       const emp = await Employee.findOne({ email: raw }).lean();
-      return emp?.fullName || raw;
+      const s = emp?.fullName?.trim() || "";
+      return isBogusName(s) ? "" : s;
     } catch {
-      return raw;
+      return "";
     }
   }
 
   // Otherwise treat raw as already a full name
-  return raw;
+  return isBogusName(raw) ? "" : raw;
 }
 
 // ---------- HTML builders ----------
@@ -221,15 +240,15 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
 <section class="page cover tall">
   <div class="cover-card">
     <h1>
-      <span>YOUR PERSONALIZED GUIDE</span><br/>  
-      <span>TO WELLNESS</span>
+      <span>YOUR PERSONALIZED</span><br/>  
+      <span>GUIDE TO WELLNESS</span>
     </h1>
     <div class="rule"></div>
     <p class="subtitle"> Because small changes 
     <br/>create big transformations
     </p>
     <div class="cta-pill">
-      <div class="pill-title">Dieteary Consultation</div>
+      <div class="pill-title">Dieteary Consultation</div> 
       <div class="pill-sub">${escapeHtml(whenText)}${doctorText ? ` | ${escapeHtml(doctorText)}` : ""}</div>
     </div>
   </div>
@@ -682,7 +701,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     pages.push(
       coverPageHtml({
         whenText: prettyDDMonthYYYY(start),
-        doctorText: creatorDisplay, // full name resolved
+        doctorText: creatorDisplay, // full name resolved (suppresses system/email)
       })
     );
 

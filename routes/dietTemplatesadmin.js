@@ -3,7 +3,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const DietTemplate = require("../models/DietTemplate");
 const DietPlan = require("../models/DietPlan");
-const Employee = require("../models/Employee"); // <-- added
+const Employee = require("../models/Employee");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
 
@@ -137,31 +137,38 @@ function validateBody(type, body) {
 }
 
 /* ---------------- Employee name resolver ---------------- */
+function isBogusName(v) {
+  if (typeof v !== "string") return false;
+  const low = v.trim().toLowerCase();
+  return ["system", "admin", "root", "muditam"].includes(low);
+}
+
 async function resolveEmployeeFullName({ clientValue, reqUser }) {
-  // If client sent a non-empty string that isn't an email, assume it's already a full name
+  // If client sent a non-empty string and it's not an email, assume full name
   if (typeof clientValue === "string" && clientValue.trim()) {
     const v = clientValue.trim();
+    if (isBogusName(v)) return "";
     if (v.includes("@")) {
       const emp = await Employee.findOne({ email: v }).lean();
-      return emp?.fullName || v; // fallback to what we got
+      return emp?.fullName || ""; // no email fallback
     }
-    return v; // already a full name
+    return v; // full name from client
   }
 
   // Try req.user if available
-  if (reqUser?.fullName) return reqUser.fullName;
+  if (reqUser?.fullName && !isBogusName(reqUser.fullName)) return reqUser.fullName;
 
   if (reqUser?.email) {
     const emp = await Employee.findOne({ email: reqUser.email }).lean();
-    return emp?.fullName || reqUser.email;
+    return emp?.fullName || "";
   }
 
   if (reqUser?.id && mongoose.Types.ObjectId.isValid(reqUser.id)) {
     const emp = await Employee.findById(reqUser.id).lean();
-    if (emp?.fullName) return emp.fullName;
+    if (emp?.fullName && !isBogusName(emp.fullName)) return emp.fullName;
   }
 
-  return "MUDITAM";
+  return ""; // final fallback: show nothing rather than "system"
 }
 
 /* ---------------- Routes ---------------- */
@@ -183,7 +190,7 @@ router.get("/:id", async (req, res) => {
   res.json(doc);
 });
 
-// CREATE diet plan (kept here per your existing setup)
+// CREATE diet plan
 router.post("/", async (req, res) => {
   try {
     const { customer = {}, plan = {}, createdBy: createdByFromClient } = req.body;
@@ -193,7 +200,7 @@ router.post("/", async (req, res) => {
       healthProfile, conditions, healthGoals, notes
     } = plan;
 
-    // ALWAYS store a fullName in createdBy
+    // ALWAYS store a fullName in createdBy (or empty string)
     const createdBy = await resolveEmployeeFullName({
       clientValue: createdByFromClient,
       reqUser: req.user,
@@ -212,7 +219,7 @@ router.post("/", async (req, res) => {
       conditions: Array.isArray(conditions) ? conditions : [],
       healthGoals: Array.isArray(healthGoals) ? healthGoals : [],
       notes: notes || "",
-      createdBy, // <-- fullName only
+      createdBy,  
     });
 
     res.json(doc);
