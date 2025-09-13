@@ -398,7 +398,7 @@ function finalImageSlideHtml({ imageUrl }) {
   return `
 <section class="page final-image tall" style="background:#fff;">
   <div style="width:100%; max-width:800px; display:flex; align-items:center; justify-content:center; padding:18px;">
-    <img src="${escapeHtml(imageUrl)}" alt="Final Slide" crossOrigin="anonymous" style="width:100%; height:auto; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.12);"/>
+    <img src="${escapeHtml(imageUrl)}" alt="Final Slide" crossorigin="anonymous" style="width:100%; height:auto; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.12);"/>
   </div>
 </section>`;
 }
@@ -640,33 +640,35 @@ html,body{
   letter-spacing:.2px;
 }
 
-/* ---- Floating PDF button ---- */
-.pdf-fab{
+/* ------ Floating Download PDF button ------ */
+.fab{
   position:fixed;
-  right:20px;
-  bottom:20px;
-  z-index:99999;
-  display:flex;
-  align-items:center;
-  gap:8px;
+  right:18px;
+  bottom:18px;
+  z-index:9999;
+  background:#000;
+  color:#fff;
   border:none;
   border-radius:999px;
-  padding:12px 16px;
-  background:#543087;
-  color:#fff;
-  font-weight:600;
+  padding:12px 18px;
+  font-weight:700;
+  letter-spacing:.2px;
+  box-shadow:0 10px 20px rgba(0,0,0,.2);
   cursor:pointer;
-  box-shadow:0 10px 30px rgba(0,0,0,.18);
-  transition:transform .08s ease, opacity .2s ease, box-shadow .2s ease;
+  transition: transform .08s ease, opacity .2s ease;
 }
-.pdf-fab svg{ flex:0 0 auto; }
-.pdf-fab:hover{ transform:translateY(-1px); box-shadow:0 14px 34px rgba(0,0,0,.22); }
-.pdf-fab:disabled{ opacity:.7; cursor:not-allowed; }
+.fab:hover{ transform: translateY(-1px); }
+.fab:active{ transform: translateY(0); }
+.fab:disabled{ opacity:.6; cursor:not-allowed; }
 
+/* ignore this element when using html2canvas */
+[data-html2canvas-ignore] {}
+
+/* Hide the floating button in print */
 @media print{
   body{ background:#fff; }
   .page{ margin:0; page-break-after:always; }
-  .pdf-fab{ display:none !important; }
+  .fab{ display:none !important; }
 }
 `;
 
@@ -826,94 +828,115 @@ router.get("/diet-plan/:id", async (req, res) => {
     // Final image slide
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
-    // 7) HTML
-    const safeNameForFile = (custName || "Customer").replace(/[^\w\-]+/g, "_");
-    const fileName = `Diet-Plan_${safeNameForFile}_${isoYYYYMMDD(start)}.pdf`;
+    // 7) HTML (with floating PDF button + capture script)
+    const pdfSafeName = `Diet Plan - ${custName}`.replace(/[/\\?%*:|"<>]+/g, "-");
 
     const html = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Diet Plan • ${escapeHtml(custName)}</title>
+  <title>${escapeHtml(pdfSafeName)}</title>
   <meta name="robots" content="noindex, nofollow"/>
   <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/> 
   <style>${CSS}</style>
 </head>
 <body>
-  <!-- PDF root: everything inside this container will be exported -->
-  <div id="pdf-root">
-    ${pages.join("\n")}
-  </div>
+  ${pages.join("\n")}
 
-  <!-- Floating Download PDF button (kept outside #pdf-root so it won't appear in the PDF) -->
-  <button id="downloadFab" class="pdf-fab" aria-label="Download PDF" title="Download PDF">
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <path fill="currentColor" d="M5 20h14a1 1 0 0 0 1-1v-4h-2v3H6v-3H4v4a1 1 0 0 0 1 1zm7-3 5-5h-3V4h-4v8H7l5 5z"/>
-    </svg>
-    <span>Download PDF</span>
+  <!-- Floating Download PDF button -->
+  <button id="downloadPdfBtn" class="fab" data-html2canvas-ignore="true" aria-label="Download PDF">
+    Download PDF
   </button>
 
-  <!-- html2pdf bundle (includes html2canvas + jsPDF) -->
-  <script
-  src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
-  integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg=="
-  crossorigin="anonymous"
-  referrerpolicy="no-referrer"
-></script>
+  <!-- Libraries for client-side PDF capture -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNa5HqQq2nZk7gwXq1n4s8xU0z0oUuGJbE8i7pQp7k6X9Kq1w8zTg2u3XKpQf4y0mV7J+6q7Z5H3JqNfP4WQWg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-NaW4mTq1l6k3wJxv4WlD2xIYbS2tLr0rVZc1y+GQvYk3D1I3b9n2D6mM3l5E0jZk9A1HqQ2oUS7f1sV1BvQnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <script>
-    (function() {
-      const fab = document.getElementById('downloadFab');
-      const root = document.getElementById('pdf-root');
-      const FILE_NAME = ${JSON.stringify(fileName)};
+  (function(){
+    const PDF_NAME = ${JSON.stringify(pdfSafeName)};
+    const BG_URLS = ${JSON.stringify([BG_COVER, BG_DETAILS, TAILORED_BG, NOTES_BG, FINAL_IMAGE_URL])};
 
-      // Ensure inline images are loaded before rendering (background images are best-effort)
-      function waitForImages(container) {
-        const imgs = Array.from(container.querySelectorAll('img'));
-        const promises = imgs.map(img => {
-          if (img.complete && img.naturalWidth) return Promise.resolve();
-          return new Promise(res => {
-            img.addEventListener('load', res, { once: true });
-            img.addEventListener('error', res, { once: true });
+    function preload(urls){
+      return Promise.all((urls||[]).map(u => new Promise(res => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => res();
+        img.onerror = () => res(); // ignore failures, continue
+        img.src = u;
+      })));
+    }
+
+    function waitForAllImages(){
+      const imgs = Array.from(document.images || []);
+      const promises = imgs.map(img => {
+        if (img.complete) return Promise.resolve();
+        return new Promise(res => { img.onload = img.onerror = () => res(); });
+      });
+      return Promise.all(promises);
+    }
+
+    async function makePdf(){
+      const btn = document.getElementById('downloadPdfBtn');
+      if (!btn) return;
+      try{
+        btn.disabled = true;
+        btn.textContent = 'Preparing PDF…';
+
+        // Preload background images & inline images
+        await preload(BG_URLS);
+        await waitForAllImages();
+
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4'); // 210 x 297 mm A4
+
+        const slides = Array.from(document.querySelectorAll('.page'));
+        for (let i=0; i<slides.length; i++){
+          const el = slides[i];
+
+          // Ensure current slide is scrolled into view (for fonts/painting)
+          el.scrollIntoView({ block: 'center' });
+
+          // High-resolution render
+          const canvas = await html2canvas(el, {
+            scale: 2,           // sharper
+            useCORS: true,      // try CORS images
+            allowTaint: true,   // permit cross-origin backgrounds if needed
+            backgroundColor: '#ffffff',
+            logging: false,
           });
-        });
-        // small delay for background images/fonts to settle
-        promises.push(new Promise(res => setTimeout(res, 300)));
-        return Promise.all(promises);
-      }
 
-      async function downloadPDF() {
-        if (!root) return;
-        try {
-          fab.disabled = true;
-          const originalText = fab.innerHTML;
-          fab.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20zm0-18a8 8 0 1 0 0 16 8 8 0 0 0 0-16z"></path></svg><span>Generating…</span>';
+          const imgData = canvas.toDataURL('image/jpeg', 0.95);
+          const pageWidth = 210;
+          const pageHeight = 297;
 
-          await waitForImages(root);
+          pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
 
-          const opt = {
-            margin:       [0, 0, 0, 0],
-            filename:     FILE_NAME,
-            image:        { type: 'jpeg', quality: 0.95 },
-            html2canvas:  { scale: 2, useCORS: true, logging: false, letterRendering: true },
-            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak:    { mode: ['css','legacy'] } // obeys our .page page-breaks
-          };
-
-          await html2pdf().set(opt).from(root).save();
-
-          fab.innerHTML = originalText;
-          fab.disabled = false;
-        } catch (e) {
-          console.error('PDF generation failed:', e);
-          alert('Sorry, failed to generate PDF. Please try again.');
-          fab.disabled = false;
+          if (i < slides.length - 1) pdf.addPage();
         }
-      }
 
-      fab.addEventListener('click', downloadPDF);
-    })();
+        pdf.save(PDF_NAME + '.pdf');
+      } catch (e){
+        console.error('PDF generation failed:', e);
+        alert('Sorry, could not generate the PDF in the browser.');
+      } finally {
+        const btn = document.getElementById('downloadPdfBtn');
+        if (btn){
+          btn.disabled = false;
+          btn.textContent = 'Download PDF';
+        }
+        window.scrollTo({ top: 0 });
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', function(){
+      const btn = document.getElementById('downloadPdfBtn');
+      if (btn){
+        btn.addEventListener('click', makePdf);
+      }
+    });
+  })();
   </script>
 </body>
 </html>`;
