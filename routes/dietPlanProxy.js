@@ -135,12 +135,12 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
 <section class="page cover tall">
   <div class="cover-card">
     <h1>
-      <span>YOUR PERSONALIZED GUIDE</span><br/>  
-      <span>TO WELLNESS</span>
+      <span>YOUR PERSONALIZED</span><br/>  
+      <span>GUIDE TO WELLNESS</span>
     </h1>
     <div class="rule"></div>
-    <p class="subtitle"> Because small changes 
-    <br/>create big transformations
+    <p class="subtitle"> Because Small Changes 
+    <br/>Create Big Transformations!
     </p>
     <div class="cta-pill">
       <div class="pill-title">Dieteary Consultation</div>
@@ -176,9 +176,10 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 </section>`;
 }
 
-function dayPageHtml({ dayIndex, dateIso, meals, times }) {
+function dayPageHtml({ dayIndex, dateIso, meals, times }) { 
   return `
 <section class="page sheet-plain">
+ <div style="color: #543087; font-size: 20px;">${name}'s 14 Days Diet Plan</div>
   <div class="sheet">
     <div class="sheet-inner">
       <div class="topbar">
