@@ -855,7 +855,12 @@ router.get("/diet-plan/:id", async (req, res) => {
   </button>
 
   <!-- html2pdf bundle (includes html2canvas + jsPDF) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-YcsIPJWd8v1f7tJQ6c+3oTAVXv2P3p4gkzM0j5W8y1bT6wF4pH6v8V7C3bTkC1m2k8r6S8jK7lY7LQ9mY3G0dQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script
+  src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
+  integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg=="
+  crossorigin="anonymous"
+  referrerpolicy="no-referrer"
+></script>
 
   <script>
     (function() {
