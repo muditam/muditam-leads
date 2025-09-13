@@ -398,7 +398,7 @@ function finalImageSlideHtml({ imageUrl }) {
   return `
 <section class="page final-image tall" style="background:#fff;">
   <div style="width:100%; max-width:800px; display:flex; align-items:center; justify-content:center; padding:18px;">
-    <img src="${escapeHtml(imageUrl)}" alt="Final Slide" crossorigin="anonymous" style="width:100%; height:auto; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.12);"/>
+    <img src="${escapeHtml(imageUrl)}" alt="Final Slide" style="width:100%; height:auto; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.12);" crossOrigin="anonymous"/>
   </div>
 </section>`;
 }
@@ -640,36 +640,45 @@ html,body{
   letter-spacing:.2px;
 }
 
-/* ------ Floating Download PDF button ------ */
-.fab{
-  position:fixed;
-  right:18px;
-  bottom:18px;
-  z-index:9999;
-  background:#000;
-  color:#fff;
-  border:none;
-  border-radius:999px;
-  padding:12px 18px;
-  font-weight:700;
-  letter-spacing:.2px;
-  box-shadow:0 10px 20px rgba(0,0,0,.2);
-  cursor:pointer;
-  transition: transform .08s ease, opacity .2s ease;
-}
-.fab:hover{ transform: translateY(-1px); }
-.fab:active{ transform: translateY(0); }
-.fab:disabled{ opacity:.6; cursor:not-allowed; }
-
-/* ignore this element when using html2canvas */
-[data-html2canvas-ignore] {}
-
-/* Hide the floating button in print */
 @media print{
   body{ background:#fff; }
   .page{ margin:0; page-break-after:always; }
-  .fab{ display:none !important; }
 }
+
+/* ---- Floating PDF button & toast ---- */
+#pdfFab{
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 9999;
+  background: #543087;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.18);
+  cursor: pointer;
+}
+#pdfFab:disabled{ opacity:.6; cursor:not-allowed; }
+
+#pdfToast{
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  background: #111;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s ease, transform .25s ease;
+}
+#pdfToast.show{ opacity: 1; transform: translateX(-50%) translateY(-6px); }
 `;
 
 // ---------- ROUTE ----------
@@ -828,15 +837,16 @@ router.get("/diet-plan/:id", async (req, res) => {
     // Final image slide
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
-    // 7) HTML (with floating PDF button + capture script)
-    const pdfSafeName = `Diet Plan - ${custName}`.replace(/[/\\?%*:|"<>]+/g, "-");
+    // 7) HTML
+    const safeName = String(custName || "Diet Plan").trim();
+    const filename = `${safeName.replace(/[\\/:*?"<>|]+/g, "_")}_DietPlan.pdf`;
 
     const html = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>${escapeHtml(pdfSafeName)}</title>
+  <title>Diet Plan • ${escapeHtml(custName)}</title>
   <meta name="robots" content="noindex, nofollow"/>
   <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/> 
   <style>${CSS}</style>
@@ -845,97 +855,93 @@ router.get("/diet-plan/:id", async (req, res) => {
   ${pages.join("\n")}
 
   <!-- Floating Download PDF button -->
-  <button id="downloadPdfBtn" class="fab" data-html2canvas-ignore="true" aria-label="Download PDF">
-    Download PDF
-  </button>
+  <button id="pdfFab" type="button">Download PDF</button>
+  <div id="pdfToast">Generating PDF…</div>
 
-  <!-- Libraries for client-side PDF capture -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNa5HqQq2nZk7gwXq1n4s8xU0z0oUuGJbE8i7pQp7k6X9Kq1w8zTg2u3XKpQf4y0mV7J+6q7Z5H3JqNfP4WQWg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-NaW4mTq1l6k3wJxv4WlD2xIYbS2tLr0rVZc1y+GQvYk3D1I3b9n2D6mM3l5E0jZk9A1HqQ2oUS7f1sV1BvQnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- Load libraries WITHOUT SRI so the browser doesn't block them if hash mismatches -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <script>
   (function(){
-    const PDF_NAME = ${JSON.stringify(pdfSafeName)};
-    const BG_URLS = ${JSON.stringify([BG_COVER, BG_DETAILS, TAILORED_BG, NOTES_BG, FINAL_IMAGE_URL])};
+    const toast = document.getElementById('pdfToast');
+    const fab = document.getElementById('pdfFab');
+    const showToast = (msg, ms=1400) => {
+      if (!toast) return;
+      toast.textContent = msg;
+      toast.classList.add('show');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => toast.classList.remove('show'), ms);
+    };
 
-    function preload(urls){
-      return Promise.all((urls||[]).map(u => new Promise(res => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => res();
-        img.onerror = () => res(); // ignore failures, continue
-        img.src = u;
-      })));
-    }
-
-    function waitForAllImages(){
-      const imgs = Array.from(document.images || []);
-      const promises = imgs.map(img => {
-        if (img.complete) return Promise.resolve();
-        return new Promise(res => { img.onload = img.onerror = () => res(); });
-      });
-      return Promise.all(promises);
-    }
+    function pxToMm(px){ return px * 0.264583; } // 96dpi → mm
 
     async function makePdf(){
-      const btn = document.getElementById('downloadPdfBtn');
-      if (!btn) return;
       try{
-        btn.disabled = true;
-        btn.textContent = 'Preparing PDF…';
+        fab.disabled = true;
+        showToast('Preparing slides…');
 
-        // Preload background images & inline images
-        await preload(BG_URLS);
-        await waitForAllImages();
+        // Ensure libs are available
+        if (!window.html2canvas) throw new Error('html2canvas not loaded');
+        if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('jsPDF not loaded');
+
+        // Try to set crossOrigin on images before capture (helps CORS)
+        document.querySelectorAll('img').forEach(img => {
+          try { if (!img.crossOrigin) img.crossOrigin = 'anonymous'; } catch(e){}
+        });
 
         const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF('p', 'mm', 'a4'); // 210 x 297 mm A4
+        const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        const pageW = 210, pageH = 297;
 
-        const slides = Array.from(document.querySelectorAll('.page'));
-        for (let i=0; i<slides.length; i++){
-          const el = slides[i];
+        const pages = Array.from(document.querySelectorAll('.page'));
+        if (!pages.length) throw new Error('No slides found');
 
-          // Ensure current slide is scrolled into view (for fonts/painting)
-          el.scrollIntoView({ block: 'center' });
+        for (let i = 0; i < pages.length; i++){
+          const el = pages[i];
+          showToast(\`Rendering slide \${i+1}/\${pages.length}…\`, 2000);
 
-          // High-resolution render
+          // Render at higher scale for crisp output
           const canvas = await html2canvas(el, {
-            scale: 2,           // sharper
-            useCORS: true,      // try CORS images
-            allowTaint: true,   // permit cross-origin backgrounds if needed
+            useCORS: true,
+            allowTaint: false,
             backgroundColor: '#ffffff',
-            logging: false,
+            scale: Math.min(2, window.devicePixelRatio || 1.5)
           });
 
           const imgData = canvas.toDataURL('image/jpeg', 0.95);
-          const pageWidth = 210;
-          const pageHeight = 297;
 
-          pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+          // Fit to A4 while preserving aspect ratio and centering
+          const imgWmm = pxToMm(canvas.width);
+          const imgHmm = pxToMm(canvas.height);
 
-          if (i < slides.length - 1) pdf.addPage();
+          let renderW = pageW;
+          let renderH = imgHmm * (pageW / imgWmm);
+          if (renderH > pageH) {
+            renderH = pageH;
+            renderW = imgWmm * (pageH / imgHmm);
+          }
+          const offsetX = (pageW - renderW) / 2;
+          const offsetY = (pageH - renderH) / 2;
+
+          if (i > 0) doc.addPage('a4', 'p');
+          doc.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH);
         }
 
-        pdf.save(PDF_NAME + '.pdf');
-      } catch (e){
-        console.error('PDF generation failed:', e);
-        alert('Sorry, could not generate the PDF in the browser.');
+        showToast('Downloading PDF…');
+        doc.save(${JSON.stringify(filename)});
+        showToast('PDF ready!');
+      } catch(err){
+        console.error('PDF generation failed:', err);
+        alert('PDF generation failed: ' + (err && err.message ? err.message : err));
       } finally {
-        const btn = document.getElementById('downloadPdfBtn');
-        if (btn){
-          btn.disabled = false;
-          btn.textContent = 'Download PDF';
-        }
-        window.scrollTo({ top: 0 });
+        fab.disabled = false;
       }
     }
 
-    window.addEventListener('DOMContentLoaded', function(){
-      const btn = document.getElementById('downloadPdfBtn');
-      if (btn){
-        btn.addEventListener('click', makePdf);
-      }
-    });
+    fab?.addEventListener('click', makePdf, { passive: true });
   })();
   </script>
 </body>
