@@ -1,12 +1,11 @@
 // routes/dietPlanProxy.js
 const express = require("express");
-const mongoose = require("mongoose");               // <-- added
 const router = express.Router();
 
 const DietTemplate = require("../models/DietTemplate");
 const DietPlan = require("../models/DietPlan");
 const Lead = require("../models/Lead");
-const Employee = require("../models/Employee");     // <-- already added
+const Employee = require("../models/Employee"); // used to resolve fullName
 
 // ---------- constants ----------
 const BG_COVER =
@@ -93,6 +92,19 @@ function isPresent(v) {
   return v !== undefined && v !== null && String(v).trim() !== "";
 }
 
+// BMI category per requested ranges
+function bmiCategory(n) {
+  const b = Number(n);
+  if (!isFinite(b)) return "";
+  if (b < 18.5) return "Underweight";
+  if (b < 25) return "Normal weight";
+  if (b < 30) return "Overweight";
+  if (b < 35) return "Obesity (Class I)";
+  if (b < 40) return "Obesity (Class II)";
+  return "Obesity (Class III / Severe obesity)";
+}
+
+// parse only main + note; time is taken from weeklyTimes
 function parseMeal(raw) {
   const out = { time: "", main: "", note: "" };
   if (!raw) return out;
@@ -103,6 +115,7 @@ function parseMeal(raw) {
   return out;
 }
 
+// ----- extra helpers for robust data -----
 function normalizeWeeklyTimes(wt) {
   const out = {};
   MEALS.forEach((m) => {
@@ -129,18 +142,91 @@ function pickHealthProfile(doc, leadDetails = {}) {
   };
 }
 
+// --- createdBy resolver (fullName always) ---
+const isObjectIdString = (v) =>
+  typeof v === "string" && /^[0-9a-fA-F]{24}$/.test(v);
+
+/**
+ * Resolve a human-readable fullName for the "created by" field.
+ * Order of precedence:
+ *   1) Query override (?by=Full Name)
+ *   2) If createdBy is an object, prefer .fullName / .name / .email->lookup
+ *   3) If createdBy is a 24-char ObjectId string -> lookup Employee by _id
+ *   4) If createdBy looks like an email -> lookup Employee by email
+ *   5) Otherwise assume it's already a full name
+ */
+async function resolveCreatorDisplay(doc, byOverride) {
+  const override = (byOverride || "").trim();
+  if (override) return override;
+
+  const rawAny = doc.createdBy ?? doc.plan?.createdBy ?? "";
+  if (!rawAny) return "";
+
+  // If an object was stored previously
+  if (typeof rawAny === "object" && rawAny) {
+    if (rawAny.fullName && String(rawAny.fullName).trim()) return String(rawAny.fullName).trim();
+    if (rawAny.name && String(rawAny.name).trim()) return String(rawAny.name).trim();
+
+    // Try email/id present on the object
+    if (rawAny.email && String(rawAny.email).includes("@")) {
+      try {
+        const emp = await Employee.findOne({ email: String(rawAny.email).trim() }).lean();
+        return emp?.fullName || String(rawAny.email).trim();
+      } catch {
+        return String(rawAny.email).trim();
+      }
+    }
+    if (rawAny._id && isObjectIdString(String(rawAny._id))) {
+      try {
+        const emp = await Employee.findById(String(rawAny._id)).lean();
+        return emp?.fullName || "";
+      } catch {
+        return "";
+      }
+    }
+    return ""; // object but no usable fields
+  }
+
+  // String path
+  const raw = String(rawAny).trim();
+  if (!raw) return "";
+
+  // If it looks like an ObjectId, try findById
+  if (isObjectIdString(raw)) {
+    try {
+      const emp = await Employee.findById(raw).lean();
+      return emp?.fullName || "";
+    } catch {
+      return "";
+    }
+  }
+
+  // If it looks like an email, resolve to fullName
+  if (raw.includes("@")) {
+    try {
+      const emp = await Employee.findOne({ email: raw }).lean();
+      return emp?.fullName || raw;
+    } catch {
+      return raw;
+    }
+  }
+
+  // Otherwise treat raw as already a full name
+  return raw;
+}
+
 // ---------- HTML builders ----------
 function coverPageHtml({ whenText = "", doctorText = "" }) {
   return `
 <section class="page cover tall">
   <div class="cover-card">
     <h1>
-      <span>YOUR PERSONALIZED</span><br/>  
-      <span>GUIDE TO WELLNESS</span>
+      <span>YOUR PERSONALIZED GUIDE</span><br/>  
+      <span>TO WELLNESS</span>
     </h1>
     <div class="rule"></div>
-    <p class="subtitle"> Because Small Changes 
-    <br/>Create Big Transformations!
+    <p class="subtitle"> Because small changes 
+    <br/>create big transformations
     </p>
     <div class="cta-pill">
       <div class="pill-title">Dieteary Consultation</div>
@@ -162,7 +248,10 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
   if (isPresent(age)) pushRow("Age", fmtOrDash(age));
   if (isPresent(height)) pushRow("Height", fmtOrDash(height, "cm"));
   if (isPresent(weight)) pushRow("Weight", fmtOrDash(weight, "kg"));
-  if (isPresent(bmi)) pushRow("BMI", String(bmi));
+  if (isPresent(bmi)) {
+    const cat = bmiCategory(bmi);
+    pushRow("BMI", `BMI- ${escapeHtml(String(bmi))}${cat ? ` (${escapeHtml(cat)})` : ""}`);
+  }
 
   return `
 <section class="page details tall">
@@ -176,7 +265,19 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 </section>`;
 }
 
-function dayPageHtml({ dayIndex, dateIso, meals, times }) { 
+// ---- Title slide after 2nd slide ----
+function nameTitleSlideHtml({ name = "Customer" }) {
+  const safeName = escapeHtml(name || "Customer");
+  return `
+<section class="page title tall">
+  <div class="title-card">
+    <h2 class="big-title">${safeName}'s 14 Days Diet Plan</h2>
+  </div>
+</section>`;
+}
+
+// ---- PAGE 3+ (DAY) ----
+function dayPageHtml({ dayIndex, dateIso, meals, times }) {
   return `
 <section class="page sheet-plain">
   <div class="sheet">
@@ -223,6 +324,7 @@ ${mealTimeRaw
 </section>`; 
 }
 
+// ---- Tailored Diet slide (SECOND-LAST) ----
 function tailoredDietHtml({ conditions = [], goals = [] }) {
   const condText = niceList(conditions) || "your condition";
   const goalText = niceList(goals) || "health goals";
@@ -238,6 +340,7 @@ function tailoredDietHtml({ conditions = [], goals = [] }) {
 </section>`;
 }
 
+// ---- Dietitian Notes slide (ALWAYS LAST) ----
 function notesSlideHtml({ name = "You" }) {
   const bullets = [
     `Stay hydrated, ${name}. Aim for 2–3 litres of water throughout the day.`,
@@ -261,6 +364,7 @@ function notesSlideHtml({ name = "You" }) {
 </section>`;
 }
 
+// Final image slide (full-bleed image)
 function finalImageSlideHtml({ imageUrl }) {
   return `
 <section class="page final-image tall" style="background:#fff;">
@@ -270,6 +374,7 @@ function finalImageSlideHtml({ imageUrl }) {
 </section>`;
 }
 
+// Monthly page
 function monthlyPageHtml({ slots }) {
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
@@ -447,7 +552,7 @@ html,body{
   border:1px solid rgba(255,255,255,.25);
   backdrop-filter: blur(10px) saturate(120%);
   -webkit-backdrop-filter: blur(10px) saturate(120%);
-  box-shadow: 0 18px 40px rgba(0,0,0,.22);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.22);
 }
 .notes-card::after{
   content:"";
@@ -487,6 +592,23 @@ html,body{
 
 .final-image img{ max-width:100%; height:auto; display:block; }
 
+/* ---- New title slide styles ---- */
+.title-card{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:40px 16px;
+}
+.big-title{
+  margin:0;
+  text-align:center;
+  font-size:35px;
+  color:#543087;
+  font-weight:800;
+  letter-spacing:.2px;
+}
+
 @media print{
   body{ background:#fff; }
   .page{ margin:0; page-break-after:always; }
@@ -502,10 +624,11 @@ router.get("/diet-plan/:id", async (req, res) => {
   try {
     const planId = req.params.id;
 
+    // 1) Fetch plan
     const doc = await DietPlan.findById(planId).lean();
     if (!doc) return res.status(404).send("Diet plan not found.");
 
-    // Lead enrichment
+    // 2) Enrich from Lead if available (fall back to Lead.details)
     let custName = doc.customer?.name || "";
     let custPhone = doc.customer?.phone || "";
     let leadDetails = {};
@@ -526,30 +649,20 @@ router.get("/diet-plan/:id", async (req, res) => {
     const hp = pickHealthProfile(doc, leadDetails);
     const bmiValue = hp.bmi || computeBMI(hp.height, hp.weight) || "";
 
-    // Plan meta
+    // 3) Gather plan type & dates
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
     const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
-    // Resolve "created by" as FULL NAME, with overrides
-    let creatorDisplay = (req.query.by || "").trim();
-    if (!creatorDisplay && doc.createdBy) {
-      const raw = String(doc.createdBy).trim();
-      if (!raw) {
-        creatorDisplay = "";
-      } else if (mongoose.Types.ObjectId.isValid(raw)) {
-        const emp = await Employee.findById(raw).lean();
-        creatorDisplay = emp?.fullName || "";
-      } else if (raw.includes("@")) {
-        const emp = await Employee.findOne({ email: raw }).lean();
-        creatorDisplay = emp?.fullName || raw;
-      } else {
-        creatorDisplay = raw; // already a full name stored
-      }
-    }
+    // 4) Resolve "created by" as FULL NAME for cover pill
+    const creatorDisplay = await resolveCreatorDisplay(doc, req.query.by);
 
-    // Weekly times
-    let weeklyTimes = doc.weeklyTimes || doc.plan?.weeklyTimes || null;
+    // 5) Get weekly times robustly
+    let weeklyTimes =
+      doc.weeklyTimes ||
+      doc.plan?.weeklyTimes ||
+      null;
+
     if (!hasAnyTime(weeklyTimes) && doc.templateId) {
       try {
         const tpl = await DietTemplate.findById(doc.templateId).lean();
@@ -558,15 +671,18 @@ router.get("/diet-plan/:id", async (req, res) => {
     }
     weeklyTimes = normalizeWeeklyTimes(weeklyTimes || {});
 
-    // Build pages
+    // 6) Build pages
     const pages = [];
+
+    // Slide 1: Cover — show "date | fullName"
     pages.push(
       coverPageHtml({
         whenText: prettyDDMonthYYYY(start),
-        doctorText: creatorDisplay, // "date | fullName"
+        doctorText: creatorDisplay, // full name resolved
       })
     );
 
+    // Slide 2: Basic details
     pages.push(
       basicDetailsHtml({
         name: custName,
@@ -578,6 +694,12 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
+    // ---- NEW: Slide 3 (Title slide) only for Weekly (14-day) plans
+    if (planType === "Weekly") {
+      pages.push(nameTitleSlideHtml({ name: custName }));
+    }
+
+    // Slide 3+ : plan content (or 4+ if weekly)
     if (planType === "Weekly") {
       const fortnight = pickFortnight(doc);
       for (let i = 0; i < Math.min(duration, 14); i++) {
@@ -608,6 +730,7 @@ router.get("/diet-plan/:id", async (req, res) => {
       pages.push(monthlyPageHtml({ slots }));
     }
 
+    // Tailored slide
     pages.push(
       tailoredDietHtml({
         conditions: Array.isArray(doc.conditions) ? doc.conditions : doc.plan?.conditions || [],
@@ -615,9 +738,13 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
+    // Notes slide
     pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
+
+    // Final image slide
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
+    // 7) HTML
     const html = `<!doctype html>
 <html lang="en">
 <head>
