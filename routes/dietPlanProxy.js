@@ -467,16 +467,48 @@ html,body{
 }
 .cover-card h1{
   margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px;
-  text-transform:uppercase; font-size:35px;
+  text-transform:uppercase; font-size:35px; 
 }
 .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
 .subtitle{ margin:0 0 22px; font-size:21px; line-height:1.5; }
 .cta-pill{
-  display:inline-block; background:#fff; border-radius:12px; padding:14px 18px;
-  color: #543087; min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18); 
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 280px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  color: #543087;           
+  background: none;         
+  box-shadow: none;         
 }
-.pill-title{ font-weight:800; font-size:25px; text-align:center; color: #543087; }
-.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; color: #543087; }
+.cta-pill::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #ffffff; 
+  box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  z-index: 0;
+}
+.pill-title,
+.pill-sub{
+  position: relative;
+  z-index: 1;          
+  color: #543087;
+}
+.pill-title{
+  font-weight: 800;
+  font-size: 25px;
+  text-align: center;
+}
+.pill-sub{
+  font-size: 18px;
+  text-align: center;
+  margin-top: 6px;
+}
  
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; min-height: 180mm; } 
 .details-card{
@@ -908,7 +940,8 @@ router.get("/diet-plan/:id", async (req, res) => {
             useCORS: true,
             allowTaint: false,
             backgroundColor: '#ffffff',
-            scale: Math.min(2, window.devicePixelRatio || 1.5)
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            foreignObjectRendering: true 
           });
 
           const imgData = canvas.toDataURL('image/jpeg', 0.95);
