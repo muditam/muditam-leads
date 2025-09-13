@@ -167,6 +167,7 @@ async function resolveCreatorDisplay(doc, byOverride) {
   const rawAny = doc.createdBy ?? doc.plan?.createdBy ?? "";
   if (!rawAny) return "";
 
+  // If an object was stored previously
   if (typeof rawAny === "object" && rawAny) {
     if (rawAny.fullName && String(rawAny.fullName).trim()) {
       const s = String(rawAny.fullName).trim();
@@ -176,6 +177,7 @@ async function resolveCreatorDisplay(doc, byOverride) {
       const s = String(rawAny.name).trim();
       return isBogusName(s) ? "" : s;
     }
+    // Try email/id present on the object
     if (rawAny.email && String(rawAny.email).includes("@")) {
       try {
         const emp = await Employee.findOne({ email: String(rawAny.email).trim() }).lean();
@@ -193,8 +195,11 @@ async function resolveCreatorDisplay(doc, byOverride) {
     return "";
   }
 
+  // String path
   const raw = String(rawAny).trim();
   if (!raw || isBogusName(raw)) return "";
+
+  // If it looks like an ObjectId, try findById
   if (isObjectIdString(raw)) {
     try {
       const emp = await Employee.findById(raw).lean();
@@ -202,6 +207,8 @@ async function resolveCreatorDisplay(doc, byOverride) {
       return isBogusName(s) ? "" : s;
     } catch { return ""; }
   }
+
+  // If it looks like an email, resolve to fullName (no email fallback)
   if (raw.includes("@")) {
     try {
       const emp = await Employee.findOne({ email: raw }).lean();
@@ -209,6 +216,8 @@ async function resolveCreatorDisplay(doc, byOverride) {
       return isBogusName(s) ? "" : s;
     } catch { return ""; }
   }
+
+  // Otherwise treat raw as already a full name
   return isBogusName(raw) ? "" : raw;
 }
 
@@ -225,7 +234,7 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
     <p class="subtitle"> Because small changes 
     <br/>create big transformations
     </p>
-    <div class="cta-pill pdf-force-text">
+    <div class="cta-pill">
       <div class="pill-title">Dietary Consultation</div> 
       <div class="pill-sub">${escapeHtml(whenText)}${doctorText ? ` | ${escapeHtml(doctorText)}` : ""}</div>
     </div>
@@ -371,7 +380,7 @@ function finalImageSlideHtml({ imageUrl }) {
   return `
 <section class="page final-image tall" style="background:#fff;">
   <div style="width:100%; max-width:800px; display:flex; align-items:center; justify-content:center; padding:18px;">
-    <img src="${escapeHtml(imageUrl)}" alt="Final Slide" style="width:100%; height:auto; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.12);"/>
+    <img src="${escapeHtml(imageUrl)}" alt="Final Slide" style="width:100%; height:auto; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.12);" crossOrigin="anonymous"/>
   </div>
 </section>`;
 }
@@ -420,6 +429,8 @@ const CSS = `
 html,body{
   margin:0; padding:0; background:#f6f7f9; color:var(--ink);
   font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif; 
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .page{
@@ -437,32 +448,25 @@ html,body{
   background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
   border-radius:28px; padding:92px 18px; text-align:center; color:#fff;
   box-shadow:0 18px 40px rgba(0,0,0,.25);
+  position: relative; 
+  isolation: isolate; /* ensure proper stacking for child text */
 }
-
-/* Force pill text to render correctly in html2canvas */
-.pdf-force-text,
-.pdf-force-text *{
-  position: relative;
-  z-index: 10;
-  isolation: isolate;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  /* tiny shadow nudges canvas text painting without visible effect */
-  text-shadow: rgba(0,0,0,0.01) 0 0 1px;
-}
-
 .cover-card h1{
   margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px;
   text-transform:uppercase; font-size:35px;
 }
 .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
 .subtitle{ margin:0 0 22px; font-size:21px; line-height:1.5; }
+
+/* CTA pill with explicit stacking */
 .cta-pill{
-  display:inline-block; background:#fff; border-radius:12px; padding:14px 18px;
-  color:var(--green-700); min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:#fff; border-radius:12px; padding:14px 18px;
+  color:#543087; min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18);
+  position:relative; z-index: 5;
 }
-.pill-title{ font-weight:800; font-size:25px; text-align:center; }
-.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; }
+.pill-title{ font-weight:800; font-size:25px; text-align:center; color:#543087; position:relative; z-index:6; }
+.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; position:relative; z-index:6; }
  
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; min-height: 180mm; } 
 .details-card{
@@ -626,20 +630,45 @@ html,body{
   letter-spacing:.2px;
 }
 
-/* During capture, kill selection/caret/animations to avoid overlays */
-.pdf-capturing, .pdf-capturing *{
-  user-select: none !important;
-  -webkit-user-select: none !important;
-  caret-color: transparent !important;
-  animation: none !important;
-  transition: none !important;
-}
-.pdf-capturing ::selection{ background: transparent !important; }
-
 @media print{
   body{ background:#fff; }
   .page{ margin:0; page-break-after:always; }
 }
+
+/* ---- Floating PDF button & toast ---- */
+#pdfFab{
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 9999;
+  background: #543087;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.18);
+  cursor: pointer;
+}
+#pdfFab:disabled{ opacity:.6; cursor:not-allowed; }
+
+#pdfToast{
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  background: #111;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s ease, transform .25s ease;
+}
+#pdfToast.show{ opacity: 1; transform: translateX(-50%) translateY(-6px); }
 `;
 
 // ---------- ROUTE ----------
@@ -670,6 +699,7 @@ router.get("/diet-plan/:id", async (req, res) => {
           custName = lead.name || custName || "Customer";
           custPhone = lead.contactNumber || custPhone || "—";
 
+          // collect possible arrays from lead (top-level or in details)
           const lc =
             (Array.isArray(lead.conditions) && lead.conditions) ||
             (Array.isArray(leadDetails.conditions) && leadDetails.conditions) ||
@@ -720,7 +750,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     pages.push(
       coverPageHtml({
         whenText: prettyDDMonthYYYY(start),
-        doctorText: creatorDisplay,
+        doctorText: creatorDisplay, // full name resolved (suppresses system/email)
       })
     );
 
@@ -736,12 +766,12 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
-    // Title slide for weekly
+    // ---- NEW: Slide 3 (Title slide) only for Weekly (14-day) plans
     if (planType === "Weekly") {
       pages.push(nameTitleSlideHtml({ name: custName }));
     }
 
-    // Content slides
+    // Slide 3+ : plan content (or 4+ if weekly)
     if (planType === "Weekly") {
       const fortnight = pickFortnight(doc);
       for (let i = 0; i < Math.min(duration, 14); i++) {
@@ -772,13 +802,14 @@ router.get("/diet-plan/:id", async (req, res) => {
       pages.push(monthlyPageHtml({ slots }));
     }
 
-    // Conditions/goals (plan overrides lead)
+    // Decide final conditions/goals (plan first, then lead)
     const planConds = cleanStringArray(
       Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
     );
     const planGoals = cleanStringArray(
       Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
     );
+
     const finalConditions = planConds.length ? planConds : leadConditions;
     const finalGoals = planGoals.length ? planGoals : leadGoals;
 
@@ -796,7 +827,10 @@ router.get("/diet-plan/:id", async (req, res) => {
     // Final image slide
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
-    // 7) HTML (includes floating PDF button + capture scripts)
+    // 7) HTML
+    const safeName = String(custName || "Diet Plan").trim();
+    const filename = `${safeName.replace(/[\\/:*?"<>|]+/g, "_")}_DietPlan.pdf`;
+
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -811,98 +845,105 @@ router.get("/diet-plan/:id", async (req, res) => {
   ${pages.join("\n")}
 
   <!-- Floating Download PDF button -->
-  <button id="downloadPdfFab" aria-label="Download PDF"
-    style="
-      position:fixed; right:18px; bottom:18px; z-index:9999;
-      background:#543087; color:#fff; border:none; border-radius:999px;
-      padding:12px 18px; font-weight:700; box-shadow:0 8px 20px rgba(0,0,0,.25);
-      cursor:pointer;
-    ">
-    ⬇️ Download PDF
-  </button>
+  <button id="pdfFab" type="button">Download PDF</button>
+  <div id="pdfToast">Generating PDF…</div>
 
-  <!-- libs (no SRI to avoid integrity error) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+  <!-- Load libraries WITHOUT SRI so the browser doesn't block them if hash mismatches -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <script>
-    (function(){
-      const A4W = 210, A4H = 297;
+  (function(){
+    const toast = document.getElementById('pdfToast');
+    const fab = document.getElementById('pdfFab');
+    const showToast = (msg, ms=1400) => {
+      if (!toast) return;
+      toast.textContent = msg;
+      toast.classList.add('show');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => toast.classList.remove('show'), ms);
+    };
 
-      async function capturePage(el){
-        // Make sure fonts are ready and no selection overlays the canvas
-        try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch(e){}
-        try { const sel = window.getSelection && window.getSelection(); sel && sel.removeAllRanges && sel.removeAllRanges(); } catch(e){}
+    function pxToMm(px){ return px * 0.264583; } // 96dpi → mm
 
-        // html2canvas tuned to paint every glyph and allow CORS images
-        return await html2canvas(el, {
-          scale: 2,
-          backgroundColor: '#ffffff',
-          useCORS: true,
-          allowTaint: true,
-          imageTimeout: 0,
-          foreignObjectRendering: true,
-          letterRendering: true,
-          ignoreElements: (node) => node && node.id === 'downloadPdfFab'
+    async function waitForAssets(){
+      try{ if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch(e){}
+      const imgs = Array.from(document.images || []);
+      await Promise.all(imgs.map(img => (img.decode ? img.decode().catch(()=>{}) : Promise.resolve())));
+    }
+
+    async function makePdf(){
+      try{
+        fab.disabled = true;
+        showToast('Preparing slides…');
+
+        // Ensure libs are available
+        if (!window.html2canvas) throw new Error('html2canvas not loaded');
+        if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('jsPDF not loaded');
+
+        // Ensure fonts & images fully loaded
+        await waitForAssets();
+
+        // Set crossOrigin on images before capture (helps CORS)
+        document.querySelectorAll('img').forEach(img => {
+          try { if (!img.crossOrigin) img.crossOrigin = 'anonymous'; } catch(e){}
         });
-      }
 
-      function fitA4(canvas){
-        const w = canvas.width, h = canvas.height;
-        const ratio = w / h;
-        let targetW = A4W, targetH = targetW / ratio, x = 0, y = (A4H - targetH)/2;
-        if (targetH > A4H) {
-          targetH = A4H; targetW = A4H * ratio; x = (A4W - targetW)/2; y = 0;
-        }
-        return { x, y, w: targetW, h: targetH };
-      }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        const pageW = 210, pageH = 297;
 
-      async function makePdf(){
-        const btn = document.getElementById('downloadPdfFab');
-        if (!btn) return;
-        btn.disabled = true;
-        const oldText = btn.textContent;
-        btn.textContent = 'Preparing…';
-        document.documentElement.classList.add('pdf-capturing');
+        const pages = Array.from(document.querySelectorAll('.page'));
+        if (!pages.length) throw new Error('No slides found');
 
-        try{
-          const { jsPDF } = window.jspdf || {};
-          if (!jsPDF) throw new Error('jsPDF not available');
-          const pages = Array.from(document.querySelectorAll('.page'));
-          if (!pages.length) throw new Error('No pages to export');
+        for (let i = 0; i < pages.length; i++){
+          const el = pages[i];
+          showToast(\`Rendering slide \${i+1}/\${pages.length}…\`, 2000);
 
-          const doc = new jsPDF({ unit:'mm', format:'a4', compress:true, putOnlyUsedFonts:true });
+          // Render at higher scale for crisp output
+          const canvas = await html2canvas(el, {
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            letterRendering: true,
+            foreignObjectRendering: i === 0 // cover slide needs FO for complex stacking
+          });
 
-          for (let i=0;i<pages.length;i++){
-            // small tick lets layout settle (fonts/images)
-            await new Promise(r => setTimeout(r, 0));
-            const canvas = await capturePage(pages[i]);
-            const { x, y, w, h } = fitA4(canvas);
-            const img = canvas.toDataURL('image/jpeg', 0.95);
-            if (i>0) doc.addPage();
-            doc.addImage(img, 'JPEG', x, y, w, h);
+          const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+          // Fit to A4 while preserving aspect ratio and centering
+          const imgWmm = pxToMm(canvas.width);
+          const imgHmm = pxToMm(canvas.height);
+
+          let renderW = pageW;
+          let renderH = imgHmm * (pageW / imgWmm);
+          if (renderH > pageH) {
+            renderH = pageH;
+            renderW = imgWmm * (pageH / imgHmm);
           }
+          const offsetX = (pageW - renderW) / 2;
+          const offsetY = (pageH - renderH) / 2;
 
-          const safeName = ${JSON.stringify(custName || "diet-plan")}
-            .replace(/[^a-z0-9]+/gi,'_')
-            .replace(/^_+|_+$/g,'')
-            || 'diet-plan';
-          doc.save(safeName + '_plan.pdf');
-
-          btn.textContent = 'Saved ✓';
-          setTimeout(()=>{ btn.textContent = oldText; }, 1500);
-        } catch(err){
-          console.error('PDF generation failed:', err);
-          alert('PDF generation failed: ' + (err && err.message ? err.message : err));
-          btn.textContent = oldText;
-        } finally {
-          btn.disabled = false;
-          document.documentElement.classList.remove('pdf-capturing');
+          if (i > 0) doc.addPage('a4', 'p');
+          doc.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH);
         }
-      }
 
-      document.getElementById('downloadPdfFab')?.addEventListener('click', makePdf);
-    })();
+        showToast('Downloading PDF…');
+        doc.save(${JSON.stringify(filename)});
+        showToast('PDF ready!');
+      } catch(err){
+        console.error('PDF generation failed:', err);
+        alert('PDF generation failed: ' + (err && err.message ? err.message : err));
+      } finally {
+        fab.disabled = false;
+      }
+    }
+
+    fab?.addEventListener('click', makePdf, { passive: true });
+  })();
   </script>
 </body>
 </html>`;
