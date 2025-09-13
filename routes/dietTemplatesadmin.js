@@ -160,12 +160,18 @@ router.get("/:id", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const { customer = {}, plan = {} } = req.body;
+    const { customer = {}, plan = {}, createdBy: createdByFromClient } = req.body;
     const {
       planType, templateId, templateLabel, templateType,
       startDate, durationDays, fortnight, weeklyTimes, monthly,
       healthProfile, conditions, healthGoals, notes
     } = plan;
+
+    // prefer explicit createdBy sent by client (full name),
+    // then authenticated user email if present, else "system"
+    const createdBy =
+      (typeof createdByFromClient === "string" && createdByFromClient.trim()) ||
+      (req.user?.email || "system");
 
     const doc = await DietPlan.create({
       customer,
@@ -175,13 +181,12 @@ router.post("/", async (req, res) => {
       templateType,
       startDate,
       durationDays,
-      ...(planType === "Weekly"
-        ? { fortnight, weeklyTimes }    // ⬅️ ensure this is saved
-        : { monthly }),
+      ...(planType === "Weekly" ? { fortnight, weeklyTimes } : { monthly }),
       healthProfile: healthProfile || {},
       conditions: Array.isArray(conditions) ? conditions : [],
       healthGoals: Array.isArray(healthGoals) ? healthGoals : [],
       notes: notes || "",
+      createdBy, // <-- saved on the document
     });
 
     res.json(doc);

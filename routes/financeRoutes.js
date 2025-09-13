@@ -15,9 +15,7 @@ const BluedartSettlement = require("../models/BluedartSettlement");
 
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const SHOPIFY_STORE_NAME = process.env.SHOPIFY_STORE_NAME;
-
-/* -------------------- Helpers -------------------- */
-
+ 
 function monthRangeUTC({ year, month }) {
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
   const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
@@ -37,7 +35,7 @@ function shopifyOrdersBaseUrl({ start, end }) {
 async function fetchShopifyOrdersMinimal(start, end) {
   const out = [];
   let nextUrl = shopifyOrdersBaseUrl({ start, end });
-
+ 
   try {
     while (nextUrl) {
       const res = await axios.get(nextUrl, {
@@ -529,3 +527,4 @@ router.get("/orders", async (req, res) => {
 });
 
 module.exports = router;
+

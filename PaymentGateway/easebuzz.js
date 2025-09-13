@@ -22,7 +22,7 @@ const num = (v) => {
   return isNaN(n) ? 0 : n;
 };
 
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", upload.single("file"), async (req, res) => { 
   const filePath = req.file.path;
   const rows = [];
 

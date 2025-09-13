@@ -5,6 +5,7 @@ const router = express.Router();
 const DietTemplate = require("../models/DietTemplate");
 const DietPlan = require("../models/DietPlan");
 const Lead = require("../models/Lead");
+const Employee = require("../models/Employee"); // <-- added
 
 // ---------- constants ----------
 const BG_COVER =
@@ -114,7 +115,6 @@ function hasAnyTime(wt) {
   return MEALS.some((m) => ((wt?.[m] || "").trim().length > 0));
 }
 function pickFortnight(doc) {
-  // supports old docs with plan.fortnight
   return doc.fortnight || doc.plan?.fortnight || {};
 }
 function pickMonthly(doc) {
@@ -145,7 +145,7 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
       Congratulations on taking the leap!
     </p>
     <div class="cta-pill">
-      <div class="pill-title">Onboarding Consultation</div>
+      <div class="pill-title">Dieteary Consultation</div>
       <div class="pill-sub">${escapeHtml(whenText)}${doctorText ? ` | ${escapeHtml(doctorText)}` : ""}</div>
     </div>
   </div>
@@ -502,7 +502,6 @@ html,body{
 
 // ---------- ROUTE ----------
 router.get("/diet-plan/:id", async (req, res) => {
-  // HTML only
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
   }
@@ -540,13 +539,35 @@ router.get("/diet-plan/:id", async (req, res) => {
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
     const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
-    // 4) Get times robustly
+    // 4) Resolve "created by" (login user name) for cover pill
+    // Priority:
+    //   a) explicit ?by=<name> query override
+    //   b) plan.createdBy is a full name -> use directly
+    //   c) plan.createdBy is an email -> resolve to Employee.fullName
+    //   d) empty -> fallback ""
+    let creatorDisplay = (req.query.by || "").trim();
+
+    if (!creatorDisplay && doc.createdBy) {
+      const raw = String(doc.createdBy).trim();
+      if (raw.includes("@")) {
+        try {
+          const emp = await Employee.findOne({ email: raw }).lean();
+          creatorDisplay = emp?.fullName || raw;
+        } catch {
+          creatorDisplay = raw;
+        }
+      } else {
+        // assume a full name already stored
+        creatorDisplay = raw;
+      }
+    }
+
+    // 5) Get weekly times robustly
     let weeklyTimes =
       doc.weeklyTimes ||
       doc.plan?.weeklyTimes ||
       null;
 
-    // If still missing/empty, fall back to template's times
     if (!hasAnyTime(weeklyTimes) && doc.templateId) {
       try {
         const tpl = await DietTemplate.findById(doc.templateId).lean();
@@ -555,11 +576,16 @@ router.get("/diet-plan/:id", async (req, res) => {
     }
     weeklyTimes = normalizeWeeklyTimes(weeklyTimes || {});
 
-    // 5) Build pages
+    // 6) Build pages
     const pages = [];
 
-    // Slide 1: Cover
-    pages.push(coverPageHtml({ whenText: prettyDDMonthYYYY(start), doctorText: "" }));
+    // Slide 1: Cover — show "date | login user name"
+    pages.push(
+      coverPageHtml({
+        whenText: prettyDDMonthYYYY(start),
+        doctorText: creatorDisplay, // <- appears to the right of date
+      })
+    );
 
     // Slide 2: Basic details
     pages.push(
@@ -589,7 +615,7 @@ router.get("/diet-plan/:id", async (req, res) => {
             dayIndex: i,
             dateIso: d,
             meals,
-            times: weeklyTimes, // <- now reliably populated
+            times: weeklyTimes,
           })
         );
       }
@@ -603,20 +629,22 @@ router.get("/diet-plan/:id", async (req, res) => {
       };
       pages.push(monthlyPageHtml({ slots }));
     }
- 
+
+    // Tailored slide
     pages.push(
       tailoredDietHtml({
         conditions: Array.isArray(doc.conditions) ? doc.conditions : doc.plan?.conditions || [],
         goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : doc.plan?.healthGoals || [],
       })
     );
- 
+
+    // Notes slide
     pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
 
-    // Final image slide (after notes)
+    // Final image slide
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
-    // 6) HTML
+    // 7) HTML
     const html = `<!doctype html>
 <html lang="en">
 <head>
