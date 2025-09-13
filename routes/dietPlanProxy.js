@@ -473,10 +473,10 @@ html,body{
 .subtitle{ margin:0 0 22px; font-size:21px; line-height:1.5; }
 .cta-pill{
   display:inline-block; background:#fff; border-radius:12px; padding:14px 18px;
-  color:var(--green-700); min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18);
+  color: #543087; min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18); 
 }
-.pill-title{ font-weight:800; font-size:25px; text-align:center; }
-.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; }
+.pill-title{ font-weight:800; font-size:25px; text-align:center; color: #543087; }
+.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; color: #543087; }
  
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; min-height: 180mm; } 
 .details-card{
