@@ -8,7 +8,7 @@ const DietTemplateSchema = new mongoose.Schema(
       type: String,
       enum: ["weekly-14", "monthly-options"],
       required: true,
-      index: true,
+      index: true, 
     },
     category: { type: String },
     tags: { type: [String], default: [], index: true },

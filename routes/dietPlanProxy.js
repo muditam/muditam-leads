@@ -174,12 +174,19 @@ function dayPageHtml({ dayIndex, dateIso, meals, times }) {
         return `
       <div class="mealrow">
         <div class="left">
-          <div class="mealname">${m}</div>
-          ${
-            mealTimeRaw
-              ? `<div class="meal-time">${escapeHtml(mealTimeRaw)}</div>`
-              : ""
-          }
+          <div class="mealname">${m}</div> 
+${mealTimeRaw
+  ? `
+    <div class="meal-time">
+      <svg class="icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M12 7v5l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>${escapeHtml(mealTimeRaw)}</span>
+    </div>`
+  : ""
+}
+
         </div>
         <div class="rightcol">
           <div class="meal-main">${escapeHtml(parsed.main || "—")}</div>
@@ -190,7 +197,7 @@ function dayPageHtml({ dayIndex, dateIso, meals, times }) {
       }).join("")}
     </div>
   </div>
-</section>`;
+</section>`; 
 }
 
 // ---- Tailored Diet slide (SECOND-LAST) ----
@@ -328,7 +335,7 @@ html,body{
   box-shadow:0 12px 40px rgba(0,0,0,.18); border:1px solid #e6f0e6;
 }
 .pin{
-  position:absolute; width:62px; height:62px; top:-45px; left:50%;
+  position:absolute; width:55px; height:55px; top:-35px; left:50%;  
   transform:translateX(-50%); border-radius:50%;
   background:radial-gradient(circle at 35% 35%, #ffffff 0 35%, #dcdcdc 70%, #bdbdbd 100%);
   box-shadow:0 6px 12px rgba(0,0,0,.22);
@@ -369,32 +376,41 @@ html,body{
 }
 .cell{ font-size:14px; }
 .mid{ text-align:center; }
-.right{ text-align:right; color:#2d2d2d; }
-.strong{ font-weight:500; color:black; }
+.right{ text-align:right; font-size:14px; } 
+.strong{ font-weight:500; color:black; font-size: 20px; }
 
 /* Meal rows */
 .mealrow{
-  display:grid; grid-template-columns:180px 1fr; gap:12px; align-items:flex-start;
+  display:grid; grid-template-columns:180px 1fr; gap:12px; align-items:flex-start; 
   margin-top:6px;
 }
 .left{ display:flex; flex-direction:column; align-items:flex-start; }
-.mealname{ font-weight:800; line-height:1; }
+.mealname{ font-weight:600; line-height:1; font-size: 18px; }
 
-/* NEW: time shown under the meal name (left column) */
+
 .meal-time{
   margin-top:6px;
   font-size:13px;
   color:#2b2b2b;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.meal-time .icon{
+  width:14px;
+  height:14px;
+  opacity:.85;
+  flex:0 0 auto;
 }
 
 .rightcol{ position:relative; }
-.meal-main{ color:#1e1e1e; font-size:14px; line-height:1.45; }
+.meal-main{ color:#1e1e1e; font-size:20px; line-height:1.45; }
 .meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:6px; }
 
 /* Separator */
 .sep{
   height:2px; background:#543087; width:100%;
-  margin:12px 0 6px;
+  margin:12px 0 6px; 
 }
 
 /* Monthly */
@@ -462,7 +478,7 @@ html,body{
 }
 .n-rule{
   height:2px;                      /* slightly thicker */
-  background:rgba(255,255,255,.55);
+  color:rgba(255,255,255,.7);
   width:100%;                      /* full card width */
   margin:12px 0 16px;
   border-radius:1px;
@@ -473,7 +489,7 @@ html,body{
   list-style:disc;
   font-size:18px;                  /* readable, not huge */
   line-height:1.7;
-  color:rgba(255,255,255,.9);      /* soft white text */
+  color:rgba(255,255,255,.95);       
 }
 
 .notes-list li{

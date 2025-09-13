@@ -21,7 +21,7 @@ function normalizeWeeklyBody(body) {
     // slice/pad strictly to 14
     const fixed = arr.slice(0, FORTNIGHT_DAYS);
     while (fixed.length < FORTNIGHT_DAYS) fixed.push("");
-    normalizedFortnight[meal] = fixed.map((v) => (typeof v === "string" ? v : String(v ?? ""))); 
+    normalizedFortnight[meal] = fixed.map((v) => (typeof v === "string" ? v : String(v ?? "")));
   });
 
   // Ensure weeklyTimes exists with all meals; allow empty strings and trim
@@ -176,7 +176,7 @@ router.post("/", async (req, res) => {
       startDate,
       durationDays,
       ...(planType === "Weekly" ? { fortnight, weeklyTimes } : { monthly }),
-      healthProfile: healthProfile || {},   // ← include this
+      healthProfile: healthProfile || {},
       conditions: Array.isArray(conditions) ? conditions : [],
       healthGoals: Array.isArray(healthGoals) ? healthGoals : [],
       notes: notes || "",
