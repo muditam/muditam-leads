@@ -191,16 +191,15 @@ router.get("/:id", async (req, res) => {
 });
 
 // CREATE diet plan
-router.post("/", async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { customer = {}, plan = {}, createdBy: createdByFromClient } = req.body;
-    const {
-      planType, templateId, templateLabel, templateType,
-      startDate, durationDays, fortnight, weeklyTimes, monthly,
-      healthProfile, conditions, healthGoals, notes
-    } = plan;
 
-    // ALWAYS store a fullName in createdBy (or empty string)
+    // Grab from plan OR top-level as fallback
+    const conditions = Array.isArray(plan.conditions) ? plan.conditions : req.body.conditions;
+    const healthGoals = Array.isArray(plan.healthGoals) ? plan.healthGoals : req.body.healthGoals;
+    const healthProfile = plan.healthProfile ?? req.body.healthProfile;
+
     const createdBy = await resolveEmployeeFullName({
       clientValue: createdByFromClient,
       reqUser: req.user,
@@ -208,23 +207,25 @@ router.post("/", async (req, res) => {
 
     const doc = await DietPlan.create({
       customer,
-      planType,
-      templateId,
-      templateLabel,
-      templateType,
-      startDate,
-      durationDays,
-      ...(planType === "Weekly" ? { fortnight, weeklyTimes } : { monthly }),
+      planType: plan.planType,
+      templateId: plan.templateId,
+      templateLabel: plan.templateLabel,
+      templateType: plan.templateType,
+      startDate: plan.startDate,
+      durationDays: plan.durationDays,
+      ...(plan.planType === 'Weekly'
+        ? { fortnight: plan.fortnight, weeklyTimes: plan.weeklyTimes }
+        : { monthly: plan.monthly }),
       healthProfile: healthProfile || {},
       conditions: Array.isArray(conditions) ? conditions : [],
       healthGoals: Array.isArray(healthGoals) ? healthGoals : [],
-      notes: notes || "",
-      createdBy,  
+      notes: plan.notes || '',
+      createdBy,
     });
 
     res.json(doc);
   } catch (e) {
-    res.status(400).json({ error: e.message || "Failed to create diet plan" });
+    res.status(400).json({ error: e.message || 'Failed to create diet plan' });
   }
 });
 

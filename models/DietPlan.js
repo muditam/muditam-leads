@@ -48,8 +48,11 @@ const DietPlanSchema = new mongoose.Schema(
       "Evening Snack":{ type: MonthlySlotSchema, default: undefined },
       Dinner:         { type: MonthlySlotSchema, default: undefined },
     },
+
+    conditions:    { type: [String], default: [] },
+    healthGoals:   { type: [String], default: [] },
   
-    createdBy: { type: String, default: "system" },
+    createdBy: { type: String, default: "Muditam" },
     version: { type: Number, default: 1 },
     notes: { type: String, default: "" },
   },

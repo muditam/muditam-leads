@@ -91,6 +91,11 @@ function niceList(arr = []) {
 function isPresent(v) {
   return v !== undefined && v !== null && String(v).trim() !== "";
 }
+function cleanStringArray(arr) {
+  return (Array.isArray(arr) ? arr : [])
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+}
 
 // BMI category per requested ranges
 function bmiCategory(n) {
@@ -296,7 +301,7 @@ function nameTitleSlideHtml({ name = "Customer" }) {
     <h2 class="big-title">${safeName}'s 14 Days Diet Plan</h2>
   </div>
 </section>`;
-} 
+}
 
 // ---- PAGE 3+ (DAY) ----
 function dayPageHtml({ dayIndex, dateIso, meals, times }) {
@@ -343,14 +348,16 @@ ${mealTimeRaw
       }).join("")}
     </div>
   </div>
-</section>`; 
+</section>`;
 }
 
 // ---- Tailored Diet slide (SECOND-LAST) ----
 function tailoredDietHtml({ conditions = [], goals = [] }) {
-  const condText = niceList(conditions) || "your condition";
+  const rawCond = niceList(conditions);
+  const condPhrase = rawCond ? `your ${rawCond}` : "your condition";
   const goalText = niceList(goals) || "health goals";
-  const msg = `This plan is designed to help manage your ${condText} by creating a moderate calorie deficit with balanced, low-glycemic meals. It emphasizes high-fiber foods and adjusted meal timings, including an earlier dinner, to align with your routine and improve digestion. This consistent, nutrient-dense approach will support better ${goalText} while also improving your overall wellness.`;
+
+  const msg = `This plan is designed to help manage ${condPhrase} by creating a moderate calorie deficit with balanced, low-glycemic meals. It emphasizes high-fiber foods and adjusted meal timings, including an earlier dinner, to align with your routine and improve digestion. This consistent, nutrient-dense approach will support better ${goalText} while also improving your overall wellness.`;
 
   return `
 <section class="page tailor tall">
@@ -471,7 +478,7 @@ html,body{
 .pill-title{ font-weight:800; font-size:25px; text-align:center; }
 .pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; }
  
-.details{ background:url("${BG_DETAILS}") center/cover no-repeat; }
+.details{ background:url("${BG_DETAILS}") center/cover no-repeat; min-height: 180mm; } 
 .details-card{
   position:relative; width:100%; max-width:430px; background:#fff;
   border-radius:20px; padding:38px 26px 38px;
@@ -502,6 +509,7 @@ html,body{
   width:100%; background:#fff;
   border:8px solid var(--green);
   border-radius:6px;
+  margin: 10px 0;
 }
 .sheet-inner{ padding:10px; }
 
@@ -655,6 +663,9 @@ router.get("/diet-plan/:id", async (req, res) => {
     let custName = doc.customer?.name || "";
     let custPhone = doc.customer?.phone || "";
     let leadDetails = {};
+    let leadConditions = [];
+    let leadGoals = [];
+
     if (doc.customer?.leadId) {
       try {
         const lead = await Lead.findById(doc.customer.leadId).lean();
@@ -662,6 +673,19 @@ router.get("/diet-plan/:id", async (req, res) => {
           leadDetails = lead.details || {};
           custName = lead.name || custName || "Customer";
           custPhone = lead.contactNumber || custPhone || "—";
+
+          // collect possible arrays from lead (top-level or in details)
+          const lc =
+            (Array.isArray(lead.conditions) && lead.conditions) ||
+            (Array.isArray(leadDetails.conditions) && leadDetails.conditions) ||
+            [];
+          const lg =
+            (Array.isArray(lead.healthGoals) && lead.healthGoals) ||
+            (Array.isArray(leadDetails.healthGoals) && leadDetails.healthGoals) ||
+            [];
+
+          leadConditions = cleanStringArray(lc);
+          leadGoals = cleanStringArray(lg);
         }
       } catch {}
     }
@@ -753,11 +777,22 @@ router.get("/diet-plan/:id", async (req, res) => {
       pages.push(monthlyPageHtml({ slots }));
     }
 
+    // Decide final conditions/goals (plan first, then lead)
+    const planConds = cleanStringArray(
+      Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
+    );
+    const planGoals = cleanStringArray(
+      Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
+    );
+
+    const finalConditions = planConds.length ? planConds : leadConditions;
+    const finalGoals = planGoals.length ? planGoals : leadGoals;
+
     // Tailored slide
     pages.push(
       tailoredDietHtml({
-        conditions: Array.isArray(doc.conditions) ? doc.conditions : doc.plan?.conditions || [],
-        goals: Array.isArray(doc.healthGoals) ? doc.healthGoals : doc.plan?.healthGoals || [],
+        conditions: finalConditions,
+        goals: finalGoals,
       })
     );
 
