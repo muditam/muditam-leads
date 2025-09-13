@@ -179,7 +179,6 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 function dayPageHtml({ dayIndex, dateIso, meals, times }) { 
   return `
 <section class="page sheet-plain">
- <div>${name}'s 14 Days Diet Plan</div>
   <div class="sheet">
     <div class="sheet-inner">
       <div class="topbar">
