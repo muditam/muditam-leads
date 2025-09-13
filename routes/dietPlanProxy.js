@@ -695,11 +695,11 @@ html,body{
   #pdfFab{ height: 70px; font-size: 20px; }
   body{ padding-bottom: 96px; }
 }
-  
+
 #pdfToast{
   position: fixed;
   left: 50%;
-  bottom: 22px;
+  bottom: 22px; 
   transform: translateX(-50%);
   background: #111;
   color: #fff;
@@ -941,8 +941,7 @@ router.get("/diet-plan/:id", async (req, res) => {
             useCORS: true,
             allowTaint: false,
             backgroundColor: '#ffffff', 
-            scale: Math.min(2, window.devicePixelRatio || 1.5),
-            foreignObjectRendering: true
+            scale: Math.min(2, window.devicePixelRatio || 1.5) 
           });
  
           const imgData = canvas.toDataURL('image/jpeg', 0.95);
