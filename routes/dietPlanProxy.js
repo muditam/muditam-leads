@@ -159,6 +159,16 @@ const isBogusName = (v) => {
 
 /**
  * Resolve a human-readable fullName for the "created by" field.
+ * Order of precedence:
+ *   1) Query override (?by=Full Name)
+ *   2) If createdBy is an object, prefer .fullName / .name / .email->lookup
+ *   3) If createdBy is a 24-char ObjectId string -> lookup Employee by _id
+ *   4) If createdBy looks like an email -> lookup Employee by email
+ *   5) Otherwise assume it's already a full name
+ *
+ * Notes:
+ * - We NEVER display email; if we can't resolve to a full name, return "".
+ * - We treat placeholders like "system/admin/root/muditam" as empty.
  */
 async function resolveCreatorDisplay(doc, byOverride) {
   const override = (byOverride || "").trim();
@@ -183,14 +193,18 @@ async function resolveCreatorDisplay(doc, byOverride) {
         const emp = await Employee.findOne({ email: String(rawAny.email).trim() }).lean();
         const s = emp?.fullName?.trim() || "";
         return isBogusName(s) ? "" : s;
-      } catch { return ""; }
+      } catch {
+        return "";
+      }
     }
     if (rawAny._id && isObjectIdString(String(rawAny._id))) {
       try {
         const emp = await Employee.findById(String(rawAny._id)).lean();
         const s = emp?.fullName?.trim() || "";
         return isBogusName(s) ? "" : s;
-      } catch { return ""; }
+      } catch {
+        return "";
+      }
     }
     return "";
   }
@@ -205,7 +219,9 @@ async function resolveCreatorDisplay(doc, byOverride) {
       const emp = await Employee.findById(raw).lean();
       const s = emp?.fullName?.trim() || "";
       return isBogusName(s) ? "" : s;
-    } catch { return ""; }
+    } catch {
+      return "";
+    }
   }
 
   // If it looks like an email, resolve to fullName (no email fallback)
@@ -214,7 +230,9 @@ async function resolveCreatorDisplay(doc, byOverride) {
       const emp = await Employee.findOne({ email: raw }).lean();
       const s = emp?.fullName?.trim() || "";
       return isBogusName(s) ? "" : s;
-    } catch { return ""; }
+    } catch {
+      return "";
+    }
   }
 
   // Otherwise treat raw as already a full name
@@ -235,7 +253,7 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
     <br/>create big transformations
     </p>
     <div class="cta-pill">
-      <div class="pill-title">Dietary Consultation</div> 
+      <div class="pill-title">Dieteary Consultation</div> 
       <div class="pill-sub">${escapeHtml(whenText)}${doctorText ? ` | ${escapeHtml(doctorText)}` : ""}</div>
     </div>
   </div>
@@ -429,8 +447,6 @@ const CSS = `
 html,body{
   margin:0; padding:0; background:#f6f7f9; color:var(--ink);
   font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif; 
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
 
 .page{
@@ -448,8 +464,6 @@ html,body{
   background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
   border-radius:28px; padding:92px 18px; text-align:center; color:#fff;
   box-shadow:0 18px 40px rgba(0,0,0,.25);
-  position: relative; 
-  isolation: isolate; /* ensure proper stacking for child text */
 }
 .cover-card h1{
   margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px;
@@ -457,16 +471,12 @@ html,body{
 }
 .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
 .subtitle{ margin:0 0 22px; font-size:21px; line-height:1.5; }
-
-/* CTA pill with explicit stacking */
 .cta-pill{
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  background:#fff; border-radius:12px; padding:14px 18px;
-  color:#543087; min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18);
-  position:relative; z-index: 5;
+  display:inline-block; background:#fff; border-radius:12px; padding:14px 18px;
+  color:var(--green-700); min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18);
 }
-.pill-title{ font-weight:800; font-size:25px; text-align:center; color:#543087; position:relative; z-index:6; }
-.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; position:relative; z-index:6; }
+.pill-title{ font-weight:800; font-size:25px; text-align:center; }
+.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; }
  
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; min-height: 180mm; } 
 .details-card{
@@ -868,12 +878,6 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     function pxToMm(px){ return px * 0.264583; } // 96dpi → mm
 
-    async function waitForAssets(){
-      try{ if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch(e){}
-      const imgs = Array.from(document.images || []);
-      await Promise.all(imgs.map(img => (img.decode ? img.decode().catch(()=>{}) : Promise.resolve())));
-    }
-
     async function makePdf(){
       try{
         fab.disabled = true;
@@ -883,10 +887,7 @@ router.get("/diet-plan/:id", async (req, res) => {
         if (!window.html2canvas) throw new Error('html2canvas not loaded');
         if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('jsPDF not loaded');
 
-        // Ensure fonts & images fully loaded
-        await waitForAssets();
-
-        // Set crossOrigin on images before capture (helps CORS)
+        // Try to set crossOrigin on images before capture (helps CORS)
         document.querySelectorAll('img').forEach(img => {
           try { if (!img.crossOrigin) img.crossOrigin = 'anonymous'; } catch(e){}
         });
@@ -907,9 +908,7 @@ router.get("/diet-plan/:id", async (req, res) => {
             useCORS: true,
             allowTaint: false,
             backgroundColor: '#ffffff',
-            scale: Math.min(2, window.devicePixelRatio || 1.5),
-            letterRendering: true,
-            foreignObjectRendering: i === 0 // cover slide needs FO for complex stacking
+            scale: Math.min(2, window.devicePixelRatio || 1.5)
           });
 
           const imgData = canvas.toDataURL('image/jpeg', 0.95);
@@ -958,3 +957,4 @@ router.get("/diet-plan/:id", async (req, res) => {
 });
 
 module.exports = router;
+
