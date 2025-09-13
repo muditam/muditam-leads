@@ -173,7 +173,6 @@ async function resolveEmployeeFullName({ clientValue, reqUser }) {
 
 /* ---------------- Routes ---------------- */
 
-// GET all templates
 router.get("/", async (req, res) => {
   const { type, status } = req.query;
   const q = {};

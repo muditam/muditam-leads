@@ -9,46 +9,44 @@ const router = express.Router();
 const ajv = new Ajv({ allErrors: true, strict: false, removeAdditional: "failing" });
 addFormats(ajv);
 
-const weeklyBodySchema = {
+const weeklyTimesSchema = {
   type: "object",
-  required: ["fortnight"],
-  properties: {
-    fortnight: {
-      type: "object",
-      required: ["Breakfast", "Lunch", "Snacks", "Dinner"],
-      additionalProperties: false,
-      properties: ["Breakfast", "Lunch", "Snacks", "Dinner"].reduce((acc, m) => {
-        acc[m] = { type: "array", minItems: 14, maxItems: 14, items: { type: "string" } };
-        return acc;
-      }, {}),
-    },
-  },
+  required: ["Breakfast", "Lunch", "Snacks", "Dinner"],
   additionalProperties: false,
+  properties: {
+    Breakfast: { type: "string" },
+    Lunch: { type: "string" },
+    Snacks: { type: "string" },
+    Dinner: { type: "string" },
+  },
 };
 
-const monthlyBodySchema = {
+const fortnightSchema = {
   type: "object",
-  required: ["monthly"],
-  properties: {
-    monthly: {
-      type: "object",
-      required: ["Breakfast", "Lunch", "Evening Snack", "Dinner"],
-      additionalProperties: false,
-      properties: ["Breakfast", "Lunch", "Evening Snack", "Dinner"].reduce((acc, slot) => {
-        acc[slot] = {
-          type: "object",
-          required: ["time", "options"],
-          additionalProperties: false,
-          properties: {
-            time: { type: "string" },
-            options: { type: "array", items: { type: "string" } },
-          },
-        };
-        return acc;
-      }, {}),
-    },
-  },
+  required: ["Breakfast", "Lunch", "Snacks", "Dinner"],
   additionalProperties: false,
+  properties: ["Breakfast", "Lunch", "Snacks", "Dinner"].reduce((acc, m) => {
+    acc[m] = { type: "array", minItems: 14, maxItems: 14, items: { type: "string" } };
+    return acc;
+  }, {}),
+};
+
+const monthlySchema = {
+  type: "object",
+  required: ["Breakfast", "Lunch", "Evening Snack", "Dinner"],
+  additionalProperties: false,
+  properties: ["Breakfast", "Lunch", "Evening Snack", "Dinner"].reduce((acc, slot) => {
+    acc[slot] = {
+      type: "object",
+      required: ["time", "options"],
+      additionalProperties: false,
+      properties: {
+        time: { type: "string" },
+        options: { type: "array", items: { type: "string" } },
+      },
+    };
+    return acc;
+  }, {}),
 };
 
 const createSchema = {
@@ -61,7 +59,7 @@ const createSchema = {
       properties: {
         name: { type: "string", minLength: 1 },
         phone: { type: "string" },
-        leadId: { type: "string" }, // allow string; Mongoose will cast
+        leadId: { type: "string" }, // casted by mongoose
       },
       additionalProperties: false,
     },
@@ -75,8 +73,25 @@ const createSchema = {
         templateType: { type: "string", enum: ["weekly-14", "monthly-options"] },
         startDate: { type: "string", format: "date" },
         durationDays: { type: "integer", minimum: 1 },
-        fortnight: weeklyBodySchema.properties.fortnight,
-        monthly: monthlyBodySchema.properties.monthly,
+
+        // bodies
+        fortnight: fortnightSchema,
+        weeklyTimes: weeklyTimesSchema,
+        monthly: monthlySchema,
+
+        // extras
+        healthProfile: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            age: { type: "number" },
+            heightCm: { type: "number" },
+            weightKg: { type: "number" },
+            bmi: { type: "number" },
+          },
+        },
+        conditions: { type: "array", items: { type: "string" } },
+        healthGoals: { type: "array", items: { type: "string" } },
         createdAt: { type: "string" },
       },
       additionalProperties: false,
@@ -100,12 +115,18 @@ router.post("/", async (req, res) => {
 
     const { customer, plan } = body;
 
-    // Validate plan body type matches payload
-    if (plan.planType === "Weekly" && !plan.fortnight) {
-      return res.status(400).json({ error: "Weekly plan requires 'fortnight'." });
-    }
-    if (plan.planType === "Monthly" && !plan.monthly) {
-      return res.status(400).json({ error: "Monthly plan requires 'monthly'." });
+    // Type-specific presence checks
+    if (plan.planType === "Weekly") {
+      if (!plan.fortnight) {
+        return res.status(400).json({ error: "Weekly plan requires 'fortnight'." });
+      }
+      if (!plan.weeklyTimes) {
+        return res.status(400).json({ error: "Weekly plan requires 'weeklyTimes'." });
+      }
+    } else if (plan.planType === "Monthly") {
+      if (!plan.monthly) {
+        return res.status(400).json({ error: "Monthly plan requires 'monthly'." });
+      }
     }
 
     const doc = await DietPlan.create({
@@ -120,9 +141,18 @@ router.post("/", async (req, res) => {
       templateType: plan.templateType,
       startDate: new Date(plan.startDate),
       durationDays: plan.durationDays,
+
+      // bodies
       fortnight: plan.planType === "Weekly" ? plan.fortnight : undefined,
+      weeklyTimes: plan.planType === "Weekly" ? plan.weeklyTimes : undefined,
       monthly: plan.planType === "Monthly" ? plan.monthly : undefined,
-      createdBy: req.user?.email || "system",
+
+      // ✅ persist these
+      healthProfile: plan.healthProfile || undefined,
+      conditions: Array.isArray(plan.conditions) ? plan.conditions : [],
+      healthGoals: Array.isArray(plan.healthGoals) ? plan.healthGoals : [],
+
+      createdBy: req.user?.fullName || req.user?.email || "system",
       version: 1,
     });
 
@@ -133,18 +163,16 @@ router.post("/", async (req, res) => {
   }
 });
 
-// LIST diet plans by leadId OR phone (most recent first) with simple pagination
+// LIST diet plans by leadId OR phone (unchanged)
 router.get("/", async (req, res) => {
   try {
     const { leadId, phone, page = 1, limit = 20 } = req.query;
     const q = {};
     if (leadId) q["customer.leadId"] = leadId;
     if (phone) q["customer.phone"] = phone;
-
     if (!leadId && !phone) {
       return res.status(400).json({ error: "Provide leadId or phone to list diet plans." });
     }
-
     const pg = Math.max(1, parseInt(page, 10) || 1);
     const lim = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
 
@@ -160,7 +188,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET one diet plan
+// GET one diet plan (unchanged)
 router.get("/:id", async (req, res) => {
   try {
     const doc = await DietPlan.findById(req.params.id).lean();

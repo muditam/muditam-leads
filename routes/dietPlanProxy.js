@@ -562,7 +562,7 @@ html,body{
 .tailor{ background:url("${TAILORED_BG}") center/cover no-repeat; }
 .tailor-card{
   width:100%; max-width:560px;
-  color:#fff; border-radius:28px; padding:8px 26px 150px;
+  color:#fff; border-radius:28px; padding:8px 26px 170px;
   text-align:center; 
 }
 .tailor-card h2{
@@ -601,7 +601,7 @@ html,body{
   font-weight:800;
   letter-spacing:.4px;
   text-transform:uppercase;
-  text-align:left;
+  text-align:center;
 }
 .n-rule{
   height:2px;
@@ -640,9 +640,32 @@ html,body{
   letter-spacing:.2px;
 }
 
+/* ---- Floating PDF button ---- */
+.pdf-fab{
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 9999;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 16px;
+  background: #543087;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(0,0,0,.25);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pdf-fab:hover{ background:#452870; }
+.pdf-fab:disabled{ opacity:.6; cursor:not-allowed; }
+.pdf-fab svg{ display:block; }
+
 @media print{
   body{ background:#fff; }
   .page{ margin:0; page-break-after:always; }
+  .pdf-fab{ display: none !important; }
 }
 `;
 
@@ -802,7 +825,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     // Final image slide
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
-    // 7) HTML
+    // 7) HTML WITH FLOATING PDF BUTTON
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -812,9 +835,68 @@ router.get("/diet-plan/:id", async (req, res) => {
   <meta name="robots" content="noindex, nofollow"/>
   <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/> 
   <style>${CSS}</style>
+  <!-- html2pdf bundle (jsPDF + html2canvas) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" referrerpolicy="no-referrer"></script>
 </head>
 <body>
-  ${pages.join("\n")}
+  <div id="docRoot">
+    ${pages.join("\n")}
+  </div>
+
+  <!-- Floating Download PDF Button -->
+  <button id="pdfFab" class="pdf-fab" aria-label="Download PDF">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Download PDF
+  </button>
+
+  <script>
+    (function(){
+      const btn = document.getElementById('pdfFab');
+      const target = document.getElementById('docRoot');
+
+      function slugify(s){
+        return String(s || '')
+          .normalize('NFKD')
+          .replace(/[\u0300-\u036f]/g,'')
+          .replace(/[^a-zA-Z0-9]+/g,'-')
+          .replace(/^-+|-+$/g,'')
+          .toLowerCase();
+      }
+
+      const fileBase = 'Diet-Plan-${escapeHtml(custName)}-${isoYYYYMMDD(start)}';
+      const fileName = slugify(fileBase) + '.pdf';
+
+      btn.addEventListener('click', async function(){
+        if (!window.html2pdf) { 
+          alert('PDF library failed to load. Please use your browser\\'s Print to PDF.');
+          return; 
+        }
+        btn.disabled = true;
+        const prevDisplay = btn.style.display;
+        btn.style.display = 'none'; // hide from capture
+
+        try{
+          const opt = {
+            margin: [10, 10, 10, 10],
+            filename: fileName,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, scrollY: 0 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] }
+          };
+          await html2pdf().set(opt).from(target).save();
+        }catch(e){
+          console.error(e);
+          alert('Failed to generate PDF. Please try again or use Print to PDF.');
+        }finally{
+          btn.style.display = prevDisplay || '';
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
 </body>
 </html>`;
 
