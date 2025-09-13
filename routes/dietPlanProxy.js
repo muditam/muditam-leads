@@ -398,7 +398,7 @@ function finalImageSlideHtml({ imageUrl }) {
   return `
 <section class="page final-image tall" style="background:#fff;">
   <div style="width:100%; max-width:800px; display:flex; align-items:center; justify-content:center; padding:18px;">
-    <img src="${escapeHtml(imageUrl)}" alt="Final Slide" style="width:100%; height:auto; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.12);"/>
+    <img src="${escapeHtml(imageUrl)}" alt="Final Slide" crossOrigin="anonymous" style="width:100%; height:auto; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.12);"/>
   </div>
 </section>`;
 }
@@ -454,7 +454,6 @@ html,body{
   margin:0 auto; page-break-after:always;
   display:flex; align-items:center; justify-content:center;
   padding:10px;
-  break-after: page;
 }
 .tall{ min-height:297mm; margin: 10px auto; }
 .talls{ min-height:27mm; margin: 10px auto; }
@@ -641,41 +640,33 @@ html,body{
   letter-spacing:.2px;
 }
 
-/* Floating button */
-.fab {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 9999;
-  background: #543087;
-  color: #fff;
-  border: none;
-  outline: none;
-  padding: 12px 16px;
-  font-weight: 700;
-  border-radius: 999px;
-  box-shadow: 0 10px 25px rgba(0,0,0,.25);
-  cursor: pointer;
+/* ---- Floating PDF button ---- */
+.pdf-fab{
+  position:fixed;
+  right:20px;
+  bottom:20px;
+  z-index:99999;
   display:flex;
   align-items:center;
-  gap:10px;
+  gap:8px;
+  border:none;
+  border-radius:999px;
+  padding:12px 16px;
+  background:#543087;
+  color:#fff;
+  font-weight:600;
+  cursor:pointer;
+  box-shadow:0 10px 30px rgba(0,0,0,.18);
+  transition:transform .08s ease, opacity .2s ease, box-shadow .2s ease;
 }
-.fab[disabled]{
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.fab .spinner{
-  width:16px; height:16px; border-radius:50%;
-  border:2px solid rgba(255,255,255,.35);
-  border-top-color:#fff;
-  animation: spin 1s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
+.pdf-fab svg{ flex:0 0 auto; }
+.pdf-fab:hover{ transform:translateY(-1px); box-shadow:0 14px 34px rgba(0,0,0,.22); }
+.pdf-fab:disabled{ opacity:.7; cursor:not-allowed; }
 
 @media print{
   body{ background:#fff; }
   .page{ margin:0; page-break-after:always; }
-  .fab{ display:none !important; }
+  .pdf-fab{ display:none !important; }
 }
 `;
 
@@ -835,11 +826,10 @@ router.get("/diet-plan/:id", async (req, res) => {
     // Final image slide
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
-    // Safe filename
-    const safeName = String(custName || "Diet-Plan").replace(/[^\w\-]+/g, "_");
-    const fileName = `${safeName}_${isoYYYYMMDD(start)}.pdf`;
+    // 7) HTML
+    const safeNameForFile = (custName || "Customer").replace(/[^\w\-]+/g, "_");
+    const fileName = `Diet-Plan_${safeNameForFile}_${isoYYYYMMDD(start)}.pdf`;
 
-    // 7) HTML + Floating PDF button + html2pdf
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -849,74 +839,75 @@ router.get("/diet-plan/:id", async (req, res) => {
   <meta name="robots" content="noindex, nofollow"/>
   <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/> 
   <style>${CSS}</style>
-  <!-- html2pdf bundle (html2canvas + jsPDF) -->
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-YcsIPGoxFq6kqS0T5t3n4w2z+0kHr1Lw3kQv/3eQy0qUSh0mE1Cq6gC2rNb6u8gPz8PZ7Jm8cD6DP8zJrXv+Eg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
+  <!-- PDF root: everything inside this container will be exported -->
   <div id="pdf-root">
     ${pages.join("\n")}
   </div>
 
-  <!-- Floating Download Button -->
-  <button class="fab" id="downloadPdfBtn" title="Download PDF">
-    <span class="label">Download PDF</span>
+  <!-- Floating Download PDF button (kept outside #pdf-root so it won't appear in the PDF) -->
+  <button id="downloadFab" class="pdf-fab" aria-label="Download PDF" title="Download PDF">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path fill="currentColor" d="M5 20h14a1 1 0 0 0 1-1v-4h-2v3H6v-3H4v4a1 1 0 0 0 1 1zm7-3 5-5h-3V4h-4v8H7l5 5z"/>
+    </svg>
+    <span>Download PDF</span>
   </button>
 
-  <script>
-    (function(){
-      const btn = document.getElementById('downloadPdfBtn');
+  <!-- html2pdf bundle (includes html2canvas + jsPDF) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-YcsIPJWd8v1f7tJQ6c+3oTAVXv2P3p4gkzM0j5W8y1bT6wF4pH6v8V7C3bTkC1m2k8r6S8jK7lY7LQ9mY3G0dQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-      function setBusy(b){
-        if(!btn) return;
-        btn.disabled = b;
-        if(b){
-          if(!btn.querySelector('.spinner')){
-            const sp = document.createElement('span');
-            sp.className = 'spinner';
-            btn.prepend(sp);
-          }
-          const label = btn.querySelector('.label');
-          if(label) label.textContent = 'Generating...';
-        } else {
-          const sp = btn.querySelector('.spinner');
-          if(sp) sp.remove();
-          const label = btn.querySelector('.label');
-          if(label) label.textContent = 'Download PDF';
-        }
+  <script>
+    (function() {
+      const fab = document.getElementById('downloadFab');
+      const root = document.getElementById('pdf-root');
+      const FILE_NAME = ${JSON.stringify(fileName)};
+
+      // Ensure inline images are loaded before rendering (background images are best-effort)
+      function waitForImages(container) {
+        const imgs = Array.from(container.querySelectorAll('img'));
+        const promises = imgs.map(img => {
+          if (img.complete && img.naturalWidth) return Promise.resolve();
+          return new Promise(res => {
+            img.addEventListener('load', res, { once: true });
+            img.addEventListener('error', res, { once: true });
+          });
+        });
+        // small delay for background images/fonts to settle
+        promises.push(new Promise(res => setTimeout(res, 300)));
+        return Promise.all(promises);
       }
 
-      async function downloadPDF(){
-        try{
-          setBusy(true);
-          const root = document.getElementById('pdf-root');
-          if(!root){
-            window.print();
-            return;
-          }
+      async function downloadPDF() {
+        if (!root) return;
+        try {
+          fab.disabled = true;
+          const originalText = fab.innerHTML;
+          fab.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20zm0-18a8 8 0 1 0 0 16 8 8 0 0 0 0-16z"></path></svg><span>Generating…</span>';
 
-          // html2pdf options
+          await waitForImages(root);
+
           const opt = {
-            margin:       [0,0,0,0],
-            filename:     ${JSON.stringify(fileName)},
-            image:        { type: 'jpeg', quality: 0.98 },
-            html2canvas:  { scale: 2, useCORS: true, allowTaint: false, letterRendering: true, scrollY: 0 },
+            margin:       [0, 0, 0, 0],
+            filename:     FILE_NAME,
+            image:        { type: 'jpeg', quality: 0.95 },
+            html2canvas:  { scale: 2, useCORS: true, logging: false, letterRendering: true },
             jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak:    { mode: ['css', 'legacy'] } // respect CSS page breaks
+            pagebreak:    { mode: ['css','legacy'] } // obeys our .page page-breaks
           };
 
-          // Trigger generation
           await html2pdf().set(opt).from(root).save();
-        } catch(err){
-          console.error('PDF generation failed, falling back to print...', err);
-          try { window.print(); } catch {}
-        } finally {
-          setBusy(false);
+
+          fab.innerHTML = originalText;
+          fab.disabled = false;
+        } catch (e) {
+          console.error('PDF generation failed:', e);
+          alert('Sorry, failed to generate PDF. Please try again.');
+          fab.disabled = false;
         }
       }
 
-      if(btn){
-        btn.addEventListener('click', downloadPDF);
-      }
+      fab.addEventListener('click', downloadPDF);
     })();
   </script>
 </body>
