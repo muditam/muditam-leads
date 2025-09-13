@@ -179,7 +179,7 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 function dayPageHtml({ dayIndex, dateIso, meals, times }) { 
   return `
 <section class="page sheet-plain">
- <div style="color: #543087; font-size: 20px;">${name}'s 14 Days Diet Plan</div>
+ <div>${name}'s 14 Days Diet Plan</div>
   <div class="sheet">
     <div class="sheet-inner">
       <div class="topbar">
