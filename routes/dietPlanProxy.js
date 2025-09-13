@@ -257,7 +257,7 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
       <div class="pill-sub">${escapeHtml(whenText)}${doctorText ? ` | ${escapeHtml(doctorText)}` : ""}</div>
     </div>
   </div>
-</section>`;
+</section>`; 
 }
 
 function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bmi }) {
@@ -447,6 +447,7 @@ const CSS = `
 html,body{
   margin:0; padding:0; background:#f6f7f9; color:var(--ink);
   font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif; 
+  -webkit-text-size-adjust: 100%; 
 }
 
 .page{
@@ -472,11 +473,35 @@ html,body{
 .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
 .subtitle{ margin:0 0 22px; font-size:21px; line-height:1.5; }
 .cta-pill{
-  display:inline-block; background:#fff; border-radius:12px; padding:14px 18px;
-  color: #543087; min-width:280px; box-shadow:0 4px 14px rgba(0,0,0,.18); 
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 280px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: none;              
+  box-shadow: none;           
+  color: #543087;
 }
-.pill-title{ font-weight:800; font-size:25px; text-align:center; color: #543087; }
-.pill-sub{ color:#543087; font-size:18px; text-align:center; margin-top:6px; color: #543087; }
+.cta-pill::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #fff; 
+  box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  z-index: 0;
+}
+.pill-title,
+.pill-sub{
+  position: relative;
+  z-index: 1;                    
+  color: #543087;
+}
+.pill-title{ font-weight: 800; font-size: 25px; text-align: center; }
+.pill-sub{ font-size: 18px; text-align: center; margin-top: 6px; }
  
 .details{ background:url("${BG_DETAILS}") center/cover no-repeat; min-height: 180mm; } 
 .details-card{
@@ -645,24 +670,32 @@ html,body{
   .page{ margin:0; page-break-after:always; }
 }
 
-/* ---- Floating PDF button & toast ---- */
 #pdfFab{
   position: fixed;
-  right: 22px;
-  bottom: 22px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 64px;                          
   z-index: 9999;
   background: #543087;
   color: #fff;
   border: none;
-  border-radius: 999px;
-  padding: 12px 16px;
-  font-weight: 700;
-  font-size: 14px;
-  box-shadow: 0 10px 24px rgba(0,0,0,.18);
-  cursor: pointer;
+  border-radius: 0;                      
+  margin: 0;
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: .2px;
+  box-shadow: 0 -2px 16px rgba(0,0,0,.18);
+  padding-bottom: env(safe-area-inset-bottom); /* iPhone safe area */
 }
-#pdfFab:disabled{ opacity:.6; cursor:not-allowed; }
+#pdfFab:disabled{ opacity: .6; cursor: not-allowed; }
 
+@media (min-width: 1024px){
+  #pdfFab{ height: 70px; font-size: 20px; }
+  body{ padding-bottom: 96px; }
+}
+  
 #pdfToast{
   position: fixed;
   left: 50%;
@@ -844,8 +877,8 @@ router.get("/diet-plan/:id", async (req, res) => {
     const html = `<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8"/> 
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"/> 
   <title>Diet Plan • ${escapeHtml(custName)}</title>
   <meta name="robots" content="noindex, nofollow"/>
   <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/> 
@@ -907,13 +940,14 @@ router.get("/diet-plan/:id", async (req, res) => {
           const canvas = await html2canvas(el, {
             useCORS: true,
             allowTaint: false,
-            backgroundColor: '#ffffff',
-            scale: Math.min(2, window.devicePixelRatio || 1.5)
+            backgroundColor: '#ffffff', 
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            foreignObjectRendering: true
           });
-
+ 
           const imgData = canvas.toDataURL('image/jpeg', 0.95);
 
-          // Fit to A4 while preserving aspect ratio and centering
+          // Fit to A4 while preserving aspect ratio and centering 
           const imgWmm = pxToMm(canvas.width);
           const imgHmm = pxToMm(canvas.height);
 
