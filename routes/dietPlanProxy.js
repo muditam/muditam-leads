@@ -250,7 +250,7 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
   if (isPresent(weight)) pushRow("Weight", fmtOrDash(weight, "kg"));
   if (isPresent(bmi)) {
     const cat = bmiCategory(bmi);
-    pushRow("BMI", `BMI- ${escapeHtml(String(bmi))}${cat ? ` (${escapeHtml(cat)})` : ""}`);
+    pushRow("BMI", `${escapeHtml(String(bmi))}${cat ? ` (${escapeHtml(cat)})` : ""}`);
   }
 
   return `
@@ -272,7 +272,7 @@ function nameTitleSlideHtml({ name = "Customer" }) {
   const safeName = escapeHtml(firstName);
 
   return `
-<section class="page title tall">
+<section class="page title talls">
   <div class="title-card" style="height:20mm; display:flex; align-items:center; justify-content:center;">
     <h2 class="big-title">${safeName}'s 14 Days Diet Plan</h2>
   </div>
@@ -430,6 +430,7 @@ html,body{
   padding:10px;
 }
 .tall{ min-height:297mm; margin: 10px auto; }
+.talls{ min-height:27mm; margin: 10px auto; }
 
 .cover{ background:url("${BG_COVER}") center/cover no-repeat; }
 .cover-card{
