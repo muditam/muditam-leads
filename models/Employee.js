@@ -6,7 +6,7 @@ const EmployeeSchema = new mongoose.Schema({
   callerId: { type: String, required: true },
   role: { type: String, required: true },
   password: { type: String, required: true }, 
-  agentNumber: { type: String, required: true }, 
+  agentNumber: { type: String, required: true },  
   async: { type: Number, default: 1 },
   status: { type: String, default: "active" }, 
   target: { type: Number, default: 0 },

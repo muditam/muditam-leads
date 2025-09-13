@@ -1,7 +1,9 @@
 // routes/dietTemplates.js
 const express = require("express");
+const mongoose = require("mongoose");
 const DietTemplate = require("../models/DietTemplate");
 const DietPlan = require("../models/DietPlan");
+const Employee = require("../models/Employee"); // <-- added
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
 
@@ -14,18 +16,15 @@ const FORTNIGHT_DAYS = 14;
 function normalizeWeeklyBody(body) {
   if (!body || typeof body !== "object") return body;
 
-  // Ensure fortnight exists and each meal is a 14-length string array
   const fortnight = body.fortnight || {};
   const normalizedFortnight = {};
   MEALS.forEach((meal) => {
     const arr = Array.isArray(fortnight[meal]) ? [...fortnight[meal]] : [];
-    // slice/pad strictly to 14
     const fixed = arr.slice(0, FORTNIGHT_DAYS);
     while (fixed.length < FORTNIGHT_DAYS) fixed.push("");
     normalizedFortnight[meal] = fixed.map((v) => (typeof v === "string" ? v : String(v ?? "")));
   });
 
-  // Ensure weeklyTimes exists with all meals; allow empty strings and trim
   const wt = body.weeklyTimes || {};
   const normalizedWeeklyTimes = {};
   MEALS.forEach((meal) => {
@@ -64,7 +63,6 @@ const weekly14Schema = {
       type: "object",
       required: MEALS,
       properties: {
-        // minLength: 0 means empty string is allowed (UI may keep it blank)
         Breakfast: { type: "string", minLength: 0 },
         Lunch: { type: "string", minLength: 0 },
         Snacks: { type: "string", minLength: 0 },
@@ -103,7 +101,6 @@ const monthlyOptionsSchema = {
       required: ["Breakfast", "Lunch", "Evening Snack", "Dinner"],
       properties: {
         Breakfast: slotSchema(),
-        // You can keep Mid-Morning Snack as optional, or remove this line if unused:
         "Mid-Morning Snack": slotSchema(),
         Lunch: slotSchema(),
         "Evening Snack": slotSchema(),
@@ -139,9 +136,37 @@ function validateBody(type, body) {
   }
 }
 
+/* ---------------- Employee name resolver ---------------- */
+async function resolveEmployeeFullName({ clientValue, reqUser }) {
+  // If client sent a non-empty string that isn't an email, assume it's already a full name
+  if (typeof clientValue === "string" && clientValue.trim()) {
+    const v = clientValue.trim();
+    if (v.includes("@")) {
+      const emp = await Employee.findOne({ email: v }).lean();
+      return emp?.fullName || v; // fallback to what we got
+    }
+    return v; // already a full name
+  }
+
+  // Try req.user if available
+  if (reqUser?.fullName) return reqUser.fullName;
+
+  if (reqUser?.email) {
+    const emp = await Employee.findOne({ email: reqUser.email }).lean();
+    return emp?.fullName || reqUser.email;
+  }
+
+  if (reqUser?.id && mongoose.Types.ObjectId.isValid(reqUser.id)) {
+    const emp = await Employee.findById(reqUser.id).lean();
+    if (emp?.fullName) return emp.fullName;
+  }
+
+  return "MUDITAM";
+}
+
 /* ---------------- Routes ---------------- */
 
-// GET all templates (optionally filter by type/status)
+// GET all templates
 router.get("/", async (req, res) => {
   const { type, status } = req.query;
   const q = {};
@@ -158,6 +183,7 @@ router.get("/:id", async (req, res) => {
   res.json(doc);
 });
 
+// CREATE diet plan (kept here per your existing setup)
 router.post("/", async (req, res) => {
   try {
     const { customer = {}, plan = {}, createdBy: createdByFromClient } = req.body;
@@ -167,11 +193,11 @@ router.post("/", async (req, res) => {
       healthProfile, conditions, healthGoals, notes
     } = plan;
 
-    // prefer explicit createdBy sent by client (full name),
-    // then authenticated user email if present, else "system"
-    const createdBy =
-      (typeof createdByFromClient === "string" && createdByFromClient.trim()) ||
-      (req.user?.email || "system");
+    // ALWAYS store a fullName in createdBy
+    const createdBy = await resolveEmployeeFullName({
+      clientValue: createdByFromClient,
+      reqUser: req.user,
+    });
 
     const doc = await DietPlan.create({
       customer,
@@ -186,7 +212,7 @@ router.post("/", async (req, res) => {
       conditions: Array.isArray(conditions) ? conditions : [],
       healthGoals: Array.isArray(healthGoals) ? healthGoals : [],
       notes: notes || "",
-      createdBy, // <-- saved on the document
+      createdBy, // <-- fullName only
     });
 
     res.json(doc);
@@ -204,12 +230,10 @@ router.put("/:id", async (req, res) => {
     const doc = await DietTemplate.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: "Not found" });
 
-    // Allow type change (rare)
     if (typeof type === "string" && type !== doc.type) {
       doc.type = type;
     }
 
-    // If a new body is provided, normalize & validate it
     if (body) {
       if (doc.type === "weekly-14") {
         body = normalizeWeeklyBody(body);
@@ -223,8 +247,10 @@ router.put("/:id", async (req, res) => {
     if (tags !== undefined) doc.tags = Array.isArray(tags) ? tags : [];
     if (status) doc.status = status;
 
+    // Save updater as fullName when possible
+    const updatedBy = await resolveEmployeeFullName({ clientValue: "", reqUser: req.user });
     doc.version = (doc.version || 1) + 1;
-    doc.updatedBy = req.user?.email || "system";
+    doc.updatedBy = updatedBy;
 
     await doc.save();
     res.json(doc);
@@ -235,17 +261,22 @@ router.put("/:id", async (req, res) => {
 
 // UPDATE status only
 router.patch("/:id/status", async (req, res) => {
-  const { status } = req.body;
-  if (!["draft", "published", "archived"].includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
+  try {
+    const { status } = req.body;
+    if (!["draft", "published", "archived"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    const updatedBy = await resolveEmployeeFullName({ clientValue: "", reqUser: req.user });
+    const doc = await DietTemplate.findByIdAndUpdate(
+      req.params.id,
+      { status, $inc: { version: 1 }, updatedBy },
+      { new: true }
+    );
+    if (!doc) return res.status(404).json({ error: "Not found" });
+    res.json(doc);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Failed to update status" });
   }
-  const doc = await DietTemplate.findByIdAndUpdate(
-    req.params.id,
-    { status, $inc: { version: 1 }, updatedBy: req.user?.email || "system" },
-    { new: true }
-  );
-  if (!doc) return res.status(404).json({ error: "Not found" });
-  res.json(doc);
 });
 
 // DELETE template

@@ -1,11 +1,12 @@
 // routes/dietPlanProxy.js
 const express = require("express");
+const mongoose = require("mongoose");               // <-- added
 const router = express.Router();
 
 const DietTemplate = require("../models/DietTemplate");
 const DietPlan = require("../models/DietPlan");
 const Lead = require("../models/Lead");
-const Employee = require("../models/Employee"); // <-- added
+const Employee = require("../models/Employee");     // <-- already added
 
 // ---------- constants ----------
 const BG_COVER =
@@ -92,7 +93,6 @@ function isPresent(v) {
   return v !== undefined && v !== null && String(v).trim() !== "";
 }
 
-// parse only main + note; time is taken from weeklyTimes
 function parseMeal(raw) {
   const out = { time: "", main: "", note: "" };
   if (!raw) return out;
@@ -103,7 +103,6 @@ function parseMeal(raw) {
   return out;
 }
 
-// ----- extra helpers for robust data -----
 function normalizeWeeklyTimes(wt) {
   const out = {};
   MEALS.forEach((m) => {
@@ -136,13 +135,12 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
 <section class="page cover tall">
   <div class="cover-card">
     <h1>
-      <span>DIETARY ROADMAP TO</span><br/>
-      <span>HEALTHY LIFESTYLE</span>
+      <span>YOUR PERSONALIZED GUIDE</span><br/>  
+      <span>TO WELLNESS</span>
     </h1>
     <div class="rule"></div>
-    <p class="subtitle">
-      Starting is the hardest part<br/>
-      Congratulations on taking the leap!
+    <p class="subtitle"> Because small changes 
+    <br/>create big transformations
     </p>
     <div class="cta-pill">
       <div class="pill-title">Dieteary Consultation</div>
@@ -178,7 +176,6 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 </section>`;
 }
 
-// ---- PAGE 3+ (DAY) ----
 function dayPageHtml({ dayIndex, dateIso, meals, times }) {
   return `
 <section class="page sheet-plain">
@@ -226,7 +223,6 @@ ${mealTimeRaw
 </section>`; 
 }
 
-// ---- Tailored Diet slide (SECOND-LAST) ----
 function tailoredDietHtml({ conditions = [], goals = [] }) {
   const condText = niceList(conditions) || "your condition";
   const goalText = niceList(goals) || "health goals";
@@ -242,7 +238,6 @@ function tailoredDietHtml({ conditions = [], goals = [] }) {
 </section>`;
 }
 
-// ---- Dietitian Notes slide (ALWAYS LAST) ----
 function notesSlideHtml({ name = "You" }) {
   const bullets = [
     `Stay hydrated, ${name}. Aim for 2–3 litres of water throughout the day.`,
@@ -266,7 +261,6 @@ function notesSlideHtml({ name = "You" }) {
 </section>`;
 }
 
-// Final image slide (full-bleed image)
 function finalImageSlideHtml({ imageUrl }) {
   return `
 <section class="page final-image tall" style="background:#fff;">
@@ -276,7 +270,6 @@ function finalImageSlideHtml({ imageUrl }) {
 </section>`;
 }
 
-// Monthly page
 function monthlyPageHtml({ slots }) {
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
@@ -319,7 +312,7 @@ const CSS = `
 *{ box-sizing:border-box; }
 html,body{
   margin:0; padding:0; background:#f6f7f9; color:var(--ink);
-  font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif;
+  font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif; 
 }
 
 .page{
@@ -509,11 +502,10 @@ router.get("/diet-plan/:id", async (req, res) => {
   try {
     const planId = req.params.id;
 
-    // 1) Fetch plan
     const doc = await DietPlan.findById(planId).lean();
     if (!doc) return res.status(404).send("Diet plan not found.");
 
-    // 2) Enrich from Lead if available (fall back to Lead.details)
+    // Lead enrichment
     let custName = doc.customer?.name || "";
     let custPhone = doc.customer?.phone || "";
     let leadDetails = {};
@@ -534,40 +526,30 @@ router.get("/diet-plan/:id", async (req, res) => {
     const hp = pickHealthProfile(doc, leadDetails);
     const bmiValue = hp.bmi || computeBMI(hp.height, hp.weight) || "";
 
-    // 3) Gather plan type & dates
+    // Plan meta
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
     const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
-    // 4) Resolve "created by" (login user name) for cover pill
-    // Priority:
-    //   a) explicit ?by=<name> query override
-    //   b) plan.createdBy is a full name -> use directly
-    //   c) plan.createdBy is an email -> resolve to Employee.fullName
-    //   d) empty -> fallback ""
+    // Resolve "created by" as FULL NAME, with overrides
     let creatorDisplay = (req.query.by || "").trim();
-
     if (!creatorDisplay && doc.createdBy) {
       const raw = String(doc.createdBy).trim();
-      if (raw.includes("@")) {
-        try {
-          const emp = await Employee.findOne({ email: raw }).lean();
-          creatorDisplay = emp?.fullName || raw;
-        } catch {
-          creatorDisplay = raw;
-        }
+      if (!raw) {
+        creatorDisplay = "";
+      } else if (mongoose.Types.ObjectId.isValid(raw)) {
+        const emp = await Employee.findById(raw).lean();
+        creatorDisplay = emp?.fullName || "";
+      } else if (raw.includes("@")) {
+        const emp = await Employee.findOne({ email: raw }).lean();
+        creatorDisplay = emp?.fullName || raw;
       } else {
-        // assume a full name already stored
-        creatorDisplay = raw;
+        creatorDisplay = raw; // already a full name stored
       }
     }
 
-    // 5) Get weekly times robustly
-    let weeklyTimes =
-      doc.weeklyTimes ||
-      doc.plan?.weeklyTimes ||
-      null;
-
+    // Weekly times
+    let weeklyTimes = doc.weeklyTimes || doc.plan?.weeklyTimes || null;
     if (!hasAnyTime(weeklyTimes) && doc.templateId) {
       try {
         const tpl = await DietTemplate.findById(doc.templateId).lean();
@@ -576,18 +558,15 @@ router.get("/diet-plan/:id", async (req, res) => {
     }
     weeklyTimes = normalizeWeeklyTimes(weeklyTimes || {});
 
-    // 6) Build pages
+    // Build pages
     const pages = [];
-
-    // Slide 1: Cover — show "date | login user name"
     pages.push(
       coverPageHtml({
         whenText: prettyDDMonthYYYY(start),
-        doctorText: creatorDisplay, // <- appears to the right of date
+        doctorText: creatorDisplay, // "date | fullName"
       })
     );
 
-    // Slide 2: Basic details
     pages.push(
       basicDetailsHtml({
         name: custName,
@@ -599,7 +578,6 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
-    // Slide 3+ : plan content
     if (planType === "Weekly") {
       const fortnight = pickFortnight(doc);
       for (let i = 0; i < Math.min(duration, 14); i++) {
@@ -630,7 +608,6 @@ router.get("/diet-plan/:id", async (req, res) => {
       pages.push(monthlyPageHtml({ slots }));
     }
 
-    // Tailored slide
     pages.push(
       tailoredDietHtml({
         conditions: Array.isArray(doc.conditions) ? doc.conditions : doc.plan?.conditions || [],
@@ -638,13 +615,9 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
-    // Notes slide
     pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
-
-    // Final image slide
     pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
-    // 7) HTML
     const html = `<!doctype html>
 <html lang="en">
 <head>
