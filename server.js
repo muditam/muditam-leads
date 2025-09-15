@@ -69,7 +69,7 @@ const DTDC = require("./PaymentGateway/DTDC");
 const OrderSummeryOperations = require('./operations/OrderSummeryOperations');
 
 const markRTORoute = require("./operations/markRTO");
-const AbandonedCheckout = require('./models/AbandonedCheckout');
+const AbandonedCheckout = require('./models/AbandonedCheckout'); 
 const abandonedRouter = require('./routes/abandoned');
 
 const financeDashboard = require("./routes/financeDashboard");
@@ -82,7 +82,7 @@ const smartfloRoutes = require("./routes/smartflo");
 const ReturnDeliveredRoutes = require("./routes/ReturnDelivered");
 
 const dietTemplatesRouter = require("./routes/dietTemplatesadmin");
-
+ 
 const dietPlansRouter = require("./routes/dietPlans");
 
 const ordersRouter = require("./routes/ShopifyOrderDB");
@@ -473,7 +473,7 @@ app.use("/api/orders-shopify", ordersRouter);
 
 app.use("/cohart-dataApi", cohartDataApiRouter);
 
-app.use("/api", allProductsFromOrdersRoute);
+app.use("/api", allProductsFromOrdersRoute); 
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

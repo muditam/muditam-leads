@@ -240,7 +240,7 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
     <br/>create big transformations
     </p>
     <div class="cta-pill">
-      <div class="pill-title">Dieteary Consultation</div> 
+      <div class="pill-title">Dietary Consultation</div> 
       <div class="pill-sub">${escapeHtml(whenText)}${doctorText ? ` | ${escapeHtml(doctorText)}` : ""}</div>
     </div>
   </div>
@@ -251,7 +251,7 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
   const rows = [];
   const pushRow = (label, value) =>
     rows.push(
-      `<div class="row"><div class="dt">${escapeHtml(label)}</div><div class="dd">${escapeHtml(value)}</div></div>`
+      `<div class="row"><div class="dt">${escapeHtml(label)}</div><div class="dd">${escapeHtml(value)}</div></div>` 
     );
 
   pushRow("Name", name || "—");
@@ -848,7 +848,7 @@ router.get("/diet-plan/:id", async (req, res) => {
       tailoredDietHtml({
         conditions: finalConditions,
         goals: finalGoals,
-      })
+      }) 
     );
 
     // Notes slide
@@ -859,7 +859,7 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     // 7) HTML
     const safeName = String(custName || "Diet Plan").trim();
-    const filename = `${safeName.replace(/[\\/:*?"<>|]+/g, "_")}_DietPlan.pdf`;
+    const filename = `${safeName.replace(/[\\/:*?"<>|]+/g, "_")}_DietPlan.pdf`; 
 
     const html = `<!doctype html>
 <html lang="en">
@@ -913,45 +913,103 @@ router.get("/diet-plan/:id", async (req, res) => {
         });
 
         const { jsPDF } = window.jspdf;
-        const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
         const pageW = 210, pageH = 297;
+        const margin = 10;     // mm around a PDF page
+        const gap = 6;         // vertical gap between stacked slides on the same PDF page
 
-        const pages = Array.from(document.querySelectorAll('.page'));
-        if (!pages.length) throw new Error('No slides found');
+        // Collect all slide elements
+        const slideEls = Array.from(document.querySelectorAll('.page'));
+        const totalSlides = slideEls.length;
+        if (!totalSlides) throw new Error('No slides found');
 
-        for (let i = 0; i < pages.length; i++){
-          const el = pages[i];
-          showToast(\`Rendering slide \${i+1}/\${pages.length}…\`, 2000);
-
-          // Render at higher scale for crisp output
-          const canvas = await html2canvas(el, {
+        // Render ALL slides to canvases first for consistent sizing & speed
+        const canvases = [];
+        for (let i = 0; i < totalSlides; i++){
+          showToast(\`Rendering slide \${i+1}/\${totalSlides}…\`, 1800);
+          const canvas = await html2canvas(slideEls[i], {
             useCORS: true,
             allowTaint: false,
-            backgroundColor: '#ffffff', 
-            scale: Math.min(2, window.devicePixelRatio || 1.5) 
+            backgroundColor: '#ffffff',
+            scale: Math.min(2, window.devicePixelRatio || 1.5)
           });
- 
-          const imgData = canvas.toDataURL('image/jpeg', 0.95);
-
-          // Fit to A4 while preserving aspect ratio and centering 
-          const imgWmm = pxToMm(canvas.width);
-          const imgHmm = pxToMm(canvas.height);
-
-          let renderW = pageW;
-          let renderH = imgHmm * (pageW / imgWmm);
-          if (renderH > pageH) {
-            renderH = pageH;
-            renderW = imgWmm * (pageH / imgHmm);
-          }
-          const offsetX = (pageW - renderW) / 2;
-          const offsetY = (pageH - renderH) / 2;
-
-          if (i > 0) doc.addPage('a4', 'p');
-          doc.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH);
+          canvases.push(canvas);
         }
 
+        // Build grouping plan as requested:
+        // Page1: [1]
+        // Page2: [2,3]
+        // Page3: [4,5,6]
+        // Page4: [7,8,9]
+        // Page5: [10,11,12]
+        // Page6: [13,14,15]
+        // Page7: [16,17]
+        // Then slides 18+ each on their own page
+        const baseGroups = [[1],[2,3],[4,5,6],[7,8,9],[10,11,12],[13,14,15],[16,17]];
+        const groups = [];
+
+        // Push only indices that exist
+        baseGroups.forEach(g => {
+          const filtered = g.filter(idx => idx >= 1 && idx <= totalSlides);
+          if (filtered.length) groups.push(filtered);
+        });
+
+        // Add remaining singles
+        const covered = new Set(groups.flat());
+        for (let idx = 1; idx <= totalSlides; idx++){
+          if (!covered.has(idx)) groups.push([idx]);
+        }
+
+        // Helper to add one group (2–3 stacked, or single)
+        const addGroupToPdf = (indices, addNewPage) => {
+          if (addNewPage) pdf.addPage('a4', 'p');
+
+          // Convert 1-based indices to 0-based
+          const imgs = indices.map((idx) => {
+            const canvas = canvases[idx - 1];
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+            const wmm = pxToMm(canvas.width);
+            const hmm = pxToMm(canvas.height);
+            return { dataUrl, wmm, hmm, ar: wmm / hmm };
+          });
+
+          // Desired content width and height
+          const contentW = pageW - 2*margin;
+          const contentH = pageH - 2*margin;
+
+          // First, scale each image to fit by width
+          let renderSizes = imgs.map(img => {
+            const w = contentW;
+            const h = w / img.ar; // since ar = wmm/hmm
+            return { w, h };
+          });
+
+          // Sum heights + gaps
+          const totalStackedH = renderSizes.reduce((s, r) => s + r.h, 0) + gap * (renderSizes.length - 1);
+
+          // If overflow, scale down uniformly
+          let scale = 1;
+          if (totalStackedH > contentH) {
+            scale = contentH / totalStackedH;
+            renderSizes = renderSizes.map(r => ({ w: r.w * scale, h: r.h * scale }));
+          }
+
+          // Center horizontally; stack vertically
+          let y = margin + (contentH - (renderSizes.reduce((s, r) => s + r.h, 0) + gap * (renderSizes.length - 1))) / 2;
+          imgs.forEach((img, i) => {
+            const { w, h } = renderSizes[i];
+            const x = (pageW - w) / 2;
+            pdf.addImage(img.dataUrl, 'JPEG', x, y, w, h);
+            y += h + (i < renderSizes.length - 1 ? gap : 0);
+          });
+        };
+
+        // Lay out all groups into PDF
+        showToast('Composing PDF pages…', 1200);
+        groups.forEach((g, i) => addGroupToPdf(g, i > 0));
+
         showToast('Downloading PDF…');
-        doc.save(${JSON.stringify(filename)});
+        pdf.save(${JSON.stringify(filename)});
         showToast('PDF ready!');
       } catch(err){
         console.error('PDF generation failed:', err);
@@ -977,4 +1035,3 @@ router.get("/diet-plan/:id", async (req, res) => {
 });
 
 module.exports = router;
-

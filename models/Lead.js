@@ -58,7 +58,7 @@ const LeadSchema = new mongoose.Schema({
     durationOfDiabetes: String,
     gender: String, 
     dietType: String,
-    weight: Number,
+    weight: Number, 
     sittingTime: String,
     exerciseRoutine: String,
     outsideMeals: String,
