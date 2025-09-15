@@ -437,14 +437,17 @@ html,body{
   -webkit-text-size-adjust: 100%; 
 }
 
+/* Remove inner padding that was creating white borders in captures */
 .page{
   width:210mm;
   margin:0 auto; page-break-after:always;
   display:flex; align-items:center; justify-content:center;
-  padding:10px;
+  padding:0; /* was 10px */
 }
-.tall{ min-height:297mm; margin: 10px auto; }
-.talls{ min-height:27mm; margin: 10px auto; }
+/* Kill extra margins inside slides; margins are outside the element so not captured,
+   but setting to 0 avoids layout shifts and any accidental padding in some browsers */
+.tall{ min-height:297mm; margin: 0; }
+.talls{ min-height:27mm; margin: 0; }
 
 .cover{ background:url("${BG_COVER}") center/cover no-repeat; }
 .cover-card{
@@ -468,8 +471,8 @@ html,body{
   min-width: 280px;
   padding: 14px 18px;
   border-radius: 12px;
-  background: none;              
-  box-shadow: none;           
+  background: none;
+  box-shadow: none;
   color: #543087;
 }
 .cta-pill::before{
@@ -484,7 +487,7 @@ html,body{
 .pill-title,
 .pill-sub{
   position: relative;
-  z-index: 1;                    
+  z-index: 1;
   color: #543087;
 }
 .pill-title{ font-weight: 800; font-size: 25px; text-align: center; }
@@ -674,7 +677,7 @@ html,body{
   font-size: 18px;
   letter-spacing: .2px;
   box-shadow: 0 -2px 16px rgba(0,0,0,.18);
-  padding-bottom: env(safe-area-inset-bottom); /* iPhone safe area */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 #pdfFab:disabled{ opacity: .6; cursor: not-allowed; }
 
@@ -729,7 +732,6 @@ router.get("/diet-plan/:id", async (req, res) => {
           custName = lead.name || custName || "Customer";
           custPhone = lead.contactNumber || custPhone || "—";
 
-          // collect possible arrays from lead (top-level or in details)
           const lc =
             (Array.isArray(lead.conditions) && lead.conditions) ||
             (Array.isArray(leadDetails.conditions) && leadDetails.conditions) ||
@@ -776,11 +778,11 @@ router.get("/diet-plan/:id", async (req, res) => {
     // 6) Build pages
     const pages = [];
 
-    // Slide 1: Cover — show "date | fullName"
+    // Slide 1: Cover
     pages.push(
       coverPageHtml({
         whenText: prettyDDMonthYYYY(start),
-        doctorText: creatorDisplay, // full name resolved (suppresses system/email)
+        doctorText: creatorDisplay,
       })
     );
 
@@ -796,12 +798,12 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
-    // ---- NEW: Slide 3 (Title slide) only for Weekly (14-day) plans
+    // Slide 3: Title (weekly only)
     if (planType === "Weekly") {
       pages.push(nameTitleSlideHtml({ name: custName }));
     }
 
-    // Slide 3+ : plan content (or 4+ if weekly)
+    // Content slides
     if (planType === "Weekly") {
       const fortnight = pickFortnight(doc);
       for (let i = 0; i < Math.min(duration, 14); i++) {
@@ -832,23 +834,21 @@ router.get("/diet-plan/:id", async (req, res) => {
       pages.push(monthlyPageHtml({ slots }));
     }
 
-    // Decide final conditions/goals (plan first, then lead)
+    // Tailored slide
     const planConds = cleanStringArray(
       Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
     );
     const planGoals = cleanStringArray(
       Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
     );
-
     const finalConditions = planConds.length ? planConds : leadConditions;
     const finalGoals = planGoals.length ? planGoals : leadGoals;
 
-    // Tailored slide
     pages.push(
       tailoredDietHtml({
         conditions: finalConditions,
         goals: finalGoals,
-      }) 
+      })
     );
 
     // Notes slide
@@ -903,11 +903,10 @@ router.get("/diet-plan/:id", async (req, res) => {
         fab.disabled = true;
         showToast('Preparing slides…');
 
-        // Ensure libs are available
         if (!window.html2canvas) throw new Error('html2canvas not loaded');
         if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('jsPDF not loaded');
 
-        // Try to set crossOrigin on images before capture (helps CORS)
+        // force crossOrigin for images to reduce tainting
         document.querySelectorAll('img').forEach(img => {
           try { if (!img.crossOrigin) img.crossOrigin = 'anonymous'; } catch(e){}
         });
@@ -915,18 +914,19 @@ router.get("/diet-plan/:id", async (req, res) => {
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
         const pageW = 210, pageH = 297;
-        const margin = 10;     // mm around a PDF page
-        const gap = 6;         // vertical gap between stacked slides on the same PDF page
 
-        // Collect all slide elements
+        // Tighter layout
+        const margin = 0;   // mm — zero margin to avoid white borders
+        const gap = 2;      // mm — small spacing between stacked slides
+
         const slideEls = Array.from(document.querySelectorAll('.page'));
         const totalSlides = slideEls.length;
         if (!totalSlides) throw new Error('No slides found');
 
-        // Render ALL slides to canvases first for consistent sizing & speed
+        // Render to canvases
         const canvases = [];
         for (let i = 0; i < totalSlides; i++){
-          showToast(\`Rendering slide \${i+1}/\${totalSlides}…\`, 1800);
+          showToast(\`Rendering slide \${i+1}/\${totalSlides}…\`, 1600);
           const canvas = await html2canvas(slideEls[i], {
             useCORS: true,
             allowTaint: false,
@@ -936,35 +936,21 @@ router.get("/diet-plan/:id", async (req, res) => {
           canvases.push(canvas);
         }
 
-        // Build grouping plan as requested:
-        // Page1: [1]
-        // Page2: [2,3]
-        // Page3: [4,5,6]
-        // Page4: [7,8,9]
-        // Page5: [10,11,12]
-        // Page6: [13,14,15]
-        // Page7: [16,17]
-        // Then slides 18+ each on their own page
+        // Grouping plan
         const baseGroups = [[1],[2,3],[4,5,6],[7,8,9],[10,11,12],[13,14,15],[16,17]];
         const groups = [];
-
-        // Push only indices that exist
         baseGroups.forEach(g => {
           const filtered = g.filter(idx => idx >= 1 && idx <= totalSlides);
           if (filtered.length) groups.push(filtered);
         });
-
-        // Add remaining singles
         const covered = new Set(groups.flat());
         for (let idx = 1; idx <= totalSlides; idx++){
           if (!covered.has(idx)) groups.push([idx]);
         }
 
-        // Helper to add one group (2–3 stacked, or single)
         const addGroupToPdf = (indices, addNewPage) => {
           if (addNewPage) pdf.addPage('a4', 'p');
 
-          // Convert 1-based indices to 0-based
           const imgs = indices.map((idx) => {
             const canvas = canvases[idx - 1];
             const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
@@ -973,39 +959,35 @@ router.get("/diet-plan/:id", async (req, res) => {
             return { dataUrl, wmm, hmm, ar: wmm / hmm };
           });
 
-          // Desired content width and height
           const contentW = pageW - 2*margin;
           const contentH = pageH - 2*margin;
 
-          // First, scale each image to fit by width
+          // scale each image to full width
           let renderSizes = imgs.map(img => {
             const w = contentW;
-            const h = w / img.ar; // since ar = wmm/hmm
+            const h = w / img.ar;
             return { w, h };
           });
 
-          // Sum heights + gaps
-          const totalStackedH = renderSizes.reduce((s, r) => s + r.h, 0) + gap * (renderSizes.length - 1);
+          // stack height with gaps
+          const sumH = renderSizes.reduce((s, r) => s + r.h, 0) + gap * (renderSizes.length - 1);
 
-          // If overflow, scale down uniformly
-          let scale = 1;
-          if (totalStackedH > contentH) {
-            scale = contentH / totalStackedH;
+          // uniform downscale if needed
+          if (sumH > contentH) {
+            const scale = contentH / sumH;
             renderSizes = renderSizes.map(r => ({ w: r.w * scale, h: r.h * scale }));
           }
 
-          // Center horizontally; stack vertically
-          let y = margin + (contentH - (renderSizes.reduce((s, r) => s + r.h, 0) + gap * (renderSizes.length - 1))) / 2;
+          // pack from top-left (no centering -> no extra margins)
+          let y = margin;
           imgs.forEach((img, i) => {
             const { w, h } = renderSizes[i];
-            const x = (pageW - w) / 2;
+            const x = margin; // left align to page edge
             pdf.addImage(img.dataUrl, 'JPEG', x, y, w, h);
             y += h + (i < renderSizes.length - 1 ? gap : 0);
           });
         };
 
-        // Lay out all groups into PDF
-        showToast('Composing PDF pages…', 1200);
         groups.forEach((g, i) => addGroupToPdf(g, i > 0));
 
         showToast('Downloading PDF…');
