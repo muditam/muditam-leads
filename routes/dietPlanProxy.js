@@ -683,24 +683,6 @@ html,body{
   body{ padding-bottom: 96px; }
 }
 
-/* --- Responsive phone preview (keeps A4 aspect but fits screen) --- */
-@media (max-width: 900px){
-  .page{ width: 100vw; }                     /* fit to phone width */
-  .tall{ min-height: calc(100vw * 297 / 210); } /* preserve A4 aspect ratio */
-  .talls{ min-height: calc(100vw * 27 / 210); } /* your special short title slide (27mm) */
-  .sheet{ border-width: 6px; }                /* slightly slimmer border on small screens */
-}
-
-/* --- Use true A4 size only while rendering to PDF --- */
-body.print-mode .page{ width: 210mm; }
-body.print-mode .tall{ min-height: 297mm; }
-body.print-mode .talls{ min-height: 27mm; }
-
-/* Hide floating UI while capturing pages */ 
-body.print-mode #pdfFab,
-body.print-mode #pdfToast{ display: none !important; }
-
-
 #pdfToast{
   position: fixed;
   left: 50%;
@@ -883,7 +865,7 @@ router.get("/diet-plan/:id", async (req, res) => {
 <html lang="en">
 <head>
   <meta charset="utf-8"/> 
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, shrink-to-fit=no"/>
+  <meta name="viewport" content="width=840, viewport-fit=cover">
   <title>Diet Plan • ${escapeHtml(custName)}</title>
   <meta name="robots" content="noindex, nofollow"/>
   <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/> 
@@ -903,103 +885,85 @@ router.get("/diet-plan/:id", async (req, res) => {
           crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <script>
-  (function () {
-    var toast = document.getElementById('pdfToast');
-    var fab = document.getElementById('pdfFab');
-
-    function showToast(msg, ms) {
+  (function(){
+    const toast = document.getElementById('pdfToast');
+    const fab = document.getElementById('pdfFab');
+    const showToast = (msg, ms=1400) => {
       if (!toast) return;
-      if (typeof ms !== 'number') ms = 1400;
       toast.textContent = msg;
       toast.classList.add('show');
       clearTimeout(showToast._t);
-      showToast._t = setTimeout(function () {
-        toast.classList.remove('show');
-      }, ms);
-    }
+      showToast._t = setTimeout(() => toast.classList.remove('show'), ms);
+    };
 
-    function nextFrame() {
-      return new Promise(function (resolve) {
-        requestAnimationFrame(function () { resolve(); });
-      });
-    }
+    function pxToMm(px){ return px * 0.264583; } // 96dpi → mm
 
-    // 96dpi → mm
-    function pxToMm(px) { return px * 0.264583; }
+    async function makePdf(){
+      try{
+        fab.disabled = true;
+        showToast('Preparing slides…');
 
-    async function makePdf() {
-      try {
-        if (fab) fab.disabled = true;
-        showToast('Preparing slides…', 1400);
-
+        // Ensure libs are available
         if (!window.html2canvas) throw new Error('html2canvas not loaded');
         if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('jsPDF not loaded');
 
-        // Improve CORS capture odds
-        var imgs = document.querySelectorAll('img');
-        for (var k = 0; k < imgs.length; k++) {
-          try { if (!imgs[k].crossOrigin) imgs[k].crossOrigin = 'anonymous'; } catch (e) {}
-        }
+        // Try to set crossOrigin on images before capture (helps CORS)
+        document.querySelectorAll('img').forEach(img => {
+          try { if (!img.crossOrigin) img.crossOrigin = 'anonymous'; } catch(e){}
+        });
 
-        var jsPDF = window.jspdf.jsPDF;
-        var pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-        var pageW = 210, pageH = 297;
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        const pageW = 210, pageH = 297;
 
-        // Force exact A4 layout during capture (your CSS already defines .print-mode rules)
-        document.body.classList.add('print-mode');
-        window.scrollTo(0, 0);
-        await nextFrame(); // let layout settle
-
-        var pages = Array.prototype.slice.call(document.querySelectorAll('.page'));
+        const pages = Array.from(document.querySelectorAll('.page'));
         if (!pages.length) throw new Error('No slides found');
 
-        for (var i = 0; i < pages.length; i++) {
-          var el = pages[i];
-          showToast('Rendering slide ' + (i + 1) + '/' + pages.length + '…', 2000);
+        for (let i = 0; i < pages.length; i++){
+          const el = pages[i];
+          showToast(\`Rendering slide \${i+1}/\${pages.length}…\`, 2000);
 
-          var canvas = await html2canvas(el, {
+          // Render at higher scale for crisp output
+          const canvas = await html2canvas(el, {
             useCORS: true,
             allowTaint: false,
-            backgroundColor: '#ffffff',
-            scale: Math.min(2, (window.devicePixelRatio || 1.5))
+            backgroundColor: '#ffffff', 
+            scale: Math.min(2, window.devicePixelRatio || 1.5) 
           });
+ 
+          const imgData = canvas.toDataURL('image/jpeg', 0.95);
 
-          var imgData = canvas.toDataURL('image/jpeg', 0.95);
+          // Fit to A4 while preserving aspect ratio and centering 
+          const imgWmm = pxToMm(canvas.width);
+          const imgHmm = pxToMm(canvas.height);
 
-          // Fit image to A4, preserve aspect, center it
-          var imgWmm = pxToMm(canvas.width);
-          var imgHmm = pxToMm(canvas.height);
-
-          var renderW = pageW;
-          var renderH = imgHmm * (pageW / imgWmm);
+          let renderW = pageW;
+          let renderH = imgHmm * (pageW / imgWmm);
           if (renderH > pageH) {
             renderH = pageH;
             renderW = imgWmm * (pageH / imgHmm);
           }
-          var offsetX = (pageW - renderW) / 2;
-          var offsetY = (pageH - renderH) / 2;
+          const offsetX = (pageW - renderW) / 2;
+          const offsetY = (pageH - renderH) / 2;
 
-          if (i > 0) pdf.addPage('a4', 'p');
-          pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH);
+          if (i > 0) doc.addPage('a4', 'p');
+          doc.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH);
         }
 
-        showToast('Downloading PDF…', 1200);
-        pdf.save(/** server-injected name */ {{FILENAME_PLACEHOLDER}});
-        showToast('PDF ready!', 1200);
-      } catch (err) {
+        showToast('Downloading PDF…');
+        doc.save(${JSON.stringify(filename)});
+        showToast('PDF ready!');
+      } catch(err){
         console.error('PDF generation failed:', err);
         alert('PDF generation failed: ' + (err && err.message ? err.message : err));
       } finally {
-        document.body.classList.remove('print-mode');
-        if (fab) fab.disabled = false;
+        fab.disabled = false;
       }
     }
 
-    if (fab) fab.addEventListener('click', makePdf, { passive: true });
+    fab?.addEventListener('click', makePdf, { passive: true });
   })();
-</script>
-
-
+  </script>
 </body>
 </html>`;
 
