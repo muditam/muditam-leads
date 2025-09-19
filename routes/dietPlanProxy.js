@@ -391,9 +391,9 @@ function finalImageSlideHtml({ imageUrl }) {
 }
 
 /* ================== MONTHLY PAGE — REDESIGN ONLY (Weekly untouched) ================== */
-// Monthly page – ribbon header + two-column table (Time | Menu) per slot
+// Monthly page – left-top tag and proper "Time | Menu" table; add a distinct class to target for 1-page PDF
 function monthlyPageHtml({ slots }) {
-  // helper to turn "07:00 pm - 09:00 pm" or "7pm-8pm" into stacked lines with "to"
+  // stacked time block like the sample image
   const timeBlock = (t) => {
     const raw = String(t || "").trim();
     if (!raw) return `<div class="timeblock dash">—</div>`;
@@ -429,16 +429,16 @@ function monthlyPageHtml({ slots }) {
 
     return `
       <div class="slot-card">
-        <div class="slot-head">
-          <div class="ribbon">${escapeHtml(slot)}</div>
-        </div>
+        <div class="slot-ribbon" aria-hidden="true"><span>${escapeHtml(slot)}</span></div>
+
         <div class="slot-table">
-          <div class="col time-col">
-            <div class="time-title">Time</div>
+          <div class="th">Time</div>
+          <div class="th">Menu</div>
+
+          <div class="td time-col">
             ${timeBlock(s.time)}
           </div>
-          <div class="col menu-col">
-            <div class="menu-title">Menu</div>
+          <div class="td menu-col">
             ${opts}
           </div>
         </div>
@@ -446,7 +446,7 @@ function monthlyPageHtml({ slots }) {
   }).join("");
 
   return `
-<section class="page sheet-plain">
+<section class="page sheet-plain monthly-only">
   <div class="sheet">
     <div class="sheet-inner">
       <div class="topbar">
@@ -605,11 +605,6 @@ html,body{
   margin:12px 0 6px; 
 }
 
-.slot h3{ margin:0 0 6px; color:#2f7a2f; }
-.time-inline{ color:#666; font-weight:500; }
-.opts{ margin:0; padding-left:18px; }
-.dash{ color:#888; }
-
 .tailor{ background:url("${TAILORED_BG}") center/cover no-repeat; }
 .tailor-card{
   width:100%; max-width:560px;
@@ -740,8 +735,9 @@ html,body{
 }
 #pdfToast.show{ opacity: 1; transform: translateX(-50%) translateY(-6px); }
 
-/* ===== Monthly page: card + ribbon + two-column table (Time | Menu) ===== */
+/* ===== Monthly page: left-top tag + proper two-column (Time | Menu) table ===== */
 .slot-card{
+  position:relative;
   border: 1px solid #d9d9d9;
   border-radius: 8px;
   margin: 14px 0;
@@ -749,71 +745,59 @@ html,body{
   box-shadow: 0 4px 10px rgba(0,0,0,.04);
   overflow: hidden;
 }
-.slot-head{
-  padding: 10px 12px 0 12px;
+.slot-ribbon{
+  position:absolute;
+  top:10px; left:-1px;
+  height:30px;
+  display:flex; align-items:center;
 }
-.ribbon{
-  display: inline-block;
-  background: #F6C34E;
-  color: #111;
-  font-weight: 800;
-  letter-spacing: .2px;
-  padding: 6px 12px;
-  border-radius: 6px 6px 0 0;
-  text-transform: uppercase;
-  font-size: 14px;
+.slot-ribbon span{
+  background:#F6C34E; color:#111;
+  font-weight:800; text-transform:uppercase; font-size:14px; letter-spacing:.2px;
+  padding:6px 14px 6px 16px;
+  border-radius:0 6px 6px 0;
+  position:relative;
 }
+.slot-ribbon span::after{
+  content:"";
+  position:absolute; left:0; bottom:-6px;
+  border-width:6px 6px 0 0; border-style:solid; border-color:#D6A83E transparent transparent transparent;
+}
+
 .slot-table{
   display: grid;
   grid-template-columns: 180px 1fr; /* Time | Menu */
   border-top: 1px solid #d9d9d9;
+  margin-top: 46px; /* room for the tag */
 }
-.slot-table .col{
-  padding: 14px 14px;
+.th{
+  background:#f7f7f7;
+  font-weight:800;
+  padding:10px 12px;
+  border-bottom:1px solid #d9d9d9;
 }
-.slot-table .col + .col{
-  border-left: 1px solid #d9d9d9;
-}
-.time-title, .menu-title{
-  font-weight: 800;
-  font-size: 18px;
-  color: #1b1b1b;
-  margin-bottom: 6px;
-}
+.th + .th{ border-left:1px solid #d9d9d9; }
+.td{ padding:12px; }
+.time-col{ border-right:1px solid #d9d9d9; }
+
 .timeblock{
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 110px;
-  white-space: pre-line;
-  font-size: 14px;
-  color: #2b2b2b;
+  display:inline-flex; flex-direction:column; align-items:center; justify-content:center;
+  min-height:110px; white-space:pre-line; font-size:14px; color:#2b2b2b;
 }
-.timeblock .tline{ line-height: 1.35; }
-.timeblock .tto{
-  font-size: 12px;
-  opacity: .8;
-  margin: 4px 0;
-}
+.timeblock .tline{ line-height:1.35; }
+.timeblock .tto{ font-size:12px; opacity:.8; margin:4px 0; }
+
 .optrow{
-  display: block;
-  margin: 6px 0;
-  line-height: 1.55;
-  font-size: 15px;
-  color: #1e1e1e;
+  display:block; margin:6px 0; line-height:1.55; font-size:15px; color:#1e1e1e;
 }
-.optlbl{
-  font-weight: 700;
-  margin-right: 4px;
-  white-space: nowrap;
-}
-.opttxt{ font-weight: 400; }
+.optlbl{ font-weight:700; margin-right:4px; white-space:nowrap; }
+.opttxt{ font-weight:400; }
 .dash{ color:#9a9a9a; }
+
 @media (max-width: 720px){
   .slot-table{ grid-template-columns: 1fr; }
-  .slot-table .col + .col{ border-left: none; border-top: 1px solid #d9d9d9; }
-  .timeblock{ min-height: 0; align-items: flex-start; }
+  .time-col{ border-right:none; border-bottom:1px solid #d9d9d9; }
+  .timeblock{ min-height:0; align-items:flex-start; }
 }
 `;
 
@@ -845,6 +829,7 @@ router.get("/diet-plan/:id", async (req, res) => {
           custName = lead.name || custName || "Customer";
           custPhone = lead.contactNumber || custPhone || "—";
 
+          // collect possible arrays from lead (top-level or in details)
           const lc =
             (Array.isArray(lead.conditions) && lead.conditions) ||
             (Array.isArray(leadDetails.conditions) && leadDetails.conditions) ||
@@ -869,7 +854,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     // 3) Gather plan type & dates
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
-    theDuration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
+    const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
     // 4) Resolve "created by" as FULL NAME for cover pill
     const creatorDisplay = await resolveCreatorDisplay(doc, req.query.by);
@@ -895,11 +880,12 @@ router.get("/diet-plan/:id", async (req, res) => {
     pages.push(
       coverPageHtml({
         whenText: prettyDDMonthYYYY(start),
-        doctorText: creatorDisplay,
+        doctorText: creatorDisplay, // full name resolved (suppresses system/email)
       })
     );
 
-    // Slide 2: Tailored Diet
+    // Slide 2: Tailored Diet (moved up)
+    // Decide final conditions/goals (plan first, then lead)
     const planConds = cleanStringArray(
       Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
     );
@@ -936,7 +922,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     // Slide 5+ : plan content (or 4+ if monthly)
     if (planType === "Weekly") {
       const fortnight = pickFortnight(doc);
-      for (let i = 0; i < Math.min(theDuration, 14); i++) {
+      for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
         const meals = {
           Breakfast: (fortnight?.Breakfast || [])[i] || "",
@@ -961,6 +947,7 @@ router.get("/diet-plan/:id", async (req, res) => {
         "Evening Snack": monthly?.["Evening Snack"] || { time: "", options: [] },
         Dinner: monthly?.Dinner || { time: "", options: [] },
       };
+      // mark this single monthly page with a class we target for the 1-page PDF
       pages.push(monthlyPageHtml({ slots }));
     }
 
@@ -990,6 +977,9 @@ router.get("/diet-plan/:id", async (req, res) => {
   <!-- Floating Download PDF button -->
   <button id="pdfFab" type="button">Download PDF</button>
   <div id="pdfToast">Generating PDF…</div>
+
+  <!-- Expose plan type to client PDF logic -->
+  <script>window.__PLAN_TYPE__=${JSON.stringify(planType)};</script>
 
   <!-- Load libraries WITHOUT SRI so the browser doesn't block them if hash mismatches -->
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"
@@ -1040,7 +1030,15 @@ router.get("/diet-plan/:id", async (req, res) => {
         const MARGIN_DEFAULT = 10;
         const GAP = 6;
 
-        const slideEls = Array.from(document.querySelectorAll('.page'));
+        // MONTHLY: render only the monthly sheet section (single page PDF)
+        let slideEls;
+        if (window.__PLAN_TYPE__ === 'Monthly') {
+          const only = document.querySelector('.page.monthly-only');
+          slideEls = only ? [only] : Array.from(document.querySelectorAll('.page'));
+        } else {
+          slideEls = Array.from(document.querySelectorAll('.page'));
+        }
+
         const totalSlides = slideEls.length;
         if (!totalSlides) throw new Error('No slides found');
 
@@ -1056,24 +1054,29 @@ router.get("/diet-plan/:id", async (req, res) => {
           canvases.push(canvas);
         }
 
-        // Grouping plan (unchanged)
-        const baseGroups = [[1],[2],[3],[4,5,6,7],[8,9,10],[11,12,13],[14,15,16],[17,18],[19],[20]];
-        const groups = [];
-
-        baseGroups.forEach(g => {
-          const filtered = g.filter(idx => idx >= 1 && idx <= totalSlides);
-          if (filtered.length) groups.push(filtered);
-        });
-
-        const covered = new Set(groups.flat());
-        for (let idx = 1; idx <= totalSlides; idx++){
-          if (!covered.has(idx)) groups.push([idx]);
+        // Grouping:
+        // - Monthly: just one page [1]
+        // - Weekly: keep original multi-page grouping
+        let groups = [];
+        if (window.__PLAN_TYPE__ === 'Monthly') {
+          groups = [[1]];
+        } else {
+          const baseGroups = [[1],[2],[3],[4,5,6,7],[8,9,10],[11,12,13],[14,15,16],[17,18],[19],[20]];
+          baseGroups.forEach(g => {
+            const filtered = g.filter(idx => idx >= 1 && idx <= canvases.length);
+            if (filtered.length) groups.push(filtered);
+          });
+          const covered = new Set(groups.flat());
+          for (let idx = 1; idx <= canvases.length; idx++){
+            if (!covered.has(idx)) groups.push([idx]);
+          }
         }
 
         const addGroupToPdf = (indices, pageIndex) => {
           if (pageIndex > 0) pdf.addPage('a4', 'p');
 
           const isPage4Group =
+            (window.__PLAN_TYPE__ !== 'Monthly') &&
             indices.length === 4 &&
             indices[0] === 4 && indices[1] === 5 && indices[2] === 6 && indices[3] === 7;
 
@@ -1101,9 +1104,8 @@ router.get("/diet-plan/:id", async (req, res) => {
 
           const totalStackedH = render.reduce((s, r) => s + r.h, 0) + GAP * (render.length - 1);
 
-          let scale = 1;
           if (totalStackedH > contentH) {
-            scale = contentH / totalStackedH;
+            const scale = contentH / totalStackedH;
             render = render.map(r => ({ w: r.w * scale, h: r.h * scale }));
           }
 
@@ -1143,7 +1145,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     return res.status(200).send(html);
   } catch (err) {
     console.error("Error in /diet-plan route:", err);
-    return res.status(500).send("Internal server error");
+    return res.status(500).send("Internal server error"); 
   }
 });
 
