@@ -236,7 +236,7 @@ router.post("/:id/assign-expert", async (req, res) => {
       name: ab.customer?.name || "",
       phone: phone,
       age: 0,
-      location: "",
+      location: ab.customer?.state || "", // <-- NEW: save STATE here
       lookingFor,
       assignedTo: postedExpert.fullName,
       followUpDate: new Date(),

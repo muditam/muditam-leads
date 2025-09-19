@@ -18,7 +18,7 @@ const EscalationSchema = new mongoose.Schema({
   trackingId: { type: String, default: '' }, 
 }, { timestamps: true });
 
-// indexes to speed up list pages & filters
+// indexes to speed up list pages & filters 
 EscalationSchema.index({ status: 1, createdAt: -1 });
 EscalationSchema.index({ assignedTo: 1, status: 1, createdAt: -1 });
 EscalationSchema.index({ orderId: 1 });

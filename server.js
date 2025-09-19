@@ -69,7 +69,7 @@ const DTDC = require("./PaymentGateway/DTDC");
 const OrderSummeryOperations = require('./operations/OrderSummeryOperations');
 
 const markRTORoute = require("./operations/markRTO");
-const AbandonedCheckout = require('./models/AbandonedCheckout'); 
+const AbandonedCheckout = require('./models/AbandonedCheckout');
 const abandonedRouter = require('./routes/abandoned');
 
 const financeDashboard = require("./routes/financeDashboard");
@@ -82,7 +82,7 @@ const smartfloRoutes = require("./routes/smartflo");
 const ReturnDeliveredRoutes = require("./routes/ReturnDelivered");
 
 const dietTemplatesRouter = require("./routes/dietTemplatesadmin");
- 
+
 const dietPlansRouter = require("./routes/dietPlans");
 
 const ordersRouter = require("./routes/ShopifyOrderDB");
@@ -90,6 +90,8 @@ const ordersRouter = require("./routes/ShopifyOrderDB");
 const cohartDataApiRouter = require("./routes/cohart-dataApi");
 
 const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders"); 
+
+const shopifyOrdersTable = require("./routes/shopifyOrdersTable")
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -100,7 +102,6 @@ app.use(
       // absolutely never compress SSE
       if (req.path === '/api/sse') return false;
 
-      // also skip if content-type is already set to SSE
       const type = String(res.getHeader('Content-Type') || '');
       if (type.includes('text/event-stream')) return false;
 
@@ -128,7 +129,7 @@ app.use(cors({
 
 // tolerant number parser
 function toNumberLoose(v) {
-  if (v === null || v === undefined) return undefined;
+  if (v === null || v === undefined) return undefined; 
   if (typeof v === "number" && !Number.isNaN(v)) return v;
   if (typeof v === "string") {
     const cleaned = v.replace(/[^\d.\-]/g, "");
@@ -217,7 +218,7 @@ app.post(
         root?.event, root?.event_type, root?.event_name, root?.name
       ].filter(Boolean).join("|");
 
-      // Build a reliable hash source even if raw is empty (e.g., when another JSON parser already ran)
+      // Build a reliable hash source even if raw is empty
       const rawForHash = raw?.length ? raw : Buffer.from(JSON.stringify(event || {}));
 
       // IDs
@@ -225,9 +226,18 @@ app.post(
       const checkoutId = pickFirst(root.token, root.checkout_id, root.cart_id, root.checkout_token);
       const orderId = pickFirst(root.order_id, root.orderId);
 
-      // Customer
+      // Customer (with STATE)
       const cust = root.customer || {};
       const addr = root.address || {};
+      const shipping = root.shipping_address || {};
+      const billing = root.billing_address || {};
+      const stateName = pickFirst(
+        cust.state, cust.province, cust.region,
+        addr.state, addr.province, addr.region,
+        shipping.state, shipping.province, shipping.region,
+        billing.state, billing.province, billing.region
+      );
+
       const customer = {
         name:
           pickFirst(
@@ -236,8 +246,9 @@ app.post(
               ? [addr.firstname, addr.lastname].filter(Boolean).join(" ").trim()
               : undefined
           ) || undefined,
-        email: pickFirst(cust.email, addr.email),
-        phone: pickFirst(cust.phone, addr.phone),
+        email: pickFirst(cust.email, addr.email, shipping.email, billing.email),
+        phone: pickFirst(cust.phone, addr.phone, shipping.phone, billing.phone),
+        state: stateName ? String(stateName) : undefined, // <-- NEW
       };
 
       // Items
@@ -316,6 +327,7 @@ app.post(
     }
   }
 );
+
 
 const sseClients = new Map(); // key -> Set(res)
 
@@ -462,7 +474,7 @@ app.use('/api/orders', UndeliveredordersRoute);
 app.use("/api/zoho", zohoMailRoutes);
 
 app.use("/api/smartflo", smartfloRoutes);
- 
+
 app.use("/api", ReturnDeliveredRoutes);
 
 app.use("/api/diet-templates", dietTemplatesRouter);
@@ -473,7 +485,9 @@ app.use("/api/orders-shopify", ordersRouter);
 
 app.use("/cohart-dataApi", cohartDataApiRouter);
 
-app.use("/api", allProductsFromOrdersRoute); 
+app.use("/api", allProductsFromOrdersRoute);
+
+app.use("/api", shopifyOrdersTable);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -527,14 +541,14 @@ app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
     // Smartflo "Call Received on Server" variables
     const uuid = p.$uuid || p.uuid || p.$UUID || p.UUID;
     const callId = p.$call_id || p.call_id;
-    const didRaw = p.$call_to_number || p.call_to_number;                 // may be 91..., +91..., 0...
+    const didRaw = p.$call_to_number || p.call_to_number;
     const callerRaw =
       p.$caller_id_number || p.caller_id_number ||
       p.$customer_no_with_prefix || p.customer_no_with_prefix || '';
 
     // Normalize keys
-    const didKeyStr = didKey(didRaw);                                        // <- normalized DID used for SSE
-    const ani = String(callerRaw || '').replace(/\D/g, '').slice(-10); // caller last-10
+    const didKeyStr = didKey(didRaw);
+    const ani = String(callerRaw || '').replace(/\D/g, '').slice(-10);
 
     // Optional logging to verify routing
     console.log("[CRM webhook] incoming call", {
@@ -554,7 +568,7 @@ app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
       type: 'incoming_call',
       callId: callId || uuid,
       uuid: uuid || callId,
-      did: didKeyStr,                                                        // expose normalized DID to UI
+      did: didKeyStr,
       ani,
       start_stamp: p.$start_stamp || p.start_stamp || new Date().toISOString(),
       known: !!lead,
@@ -599,11 +613,20 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
 
     const fetchedOrders = response.data.orders.map(order => {
       let phone = '';
-      if (order.customer && order.customer.default_address && order.customer.default_address.phone) { 
+      if (order.customer && order.customer.default_address && order.customer.default_address.phone) {
         phone = order.customer.default_address.phone.replace(/^\+91/, '').trim();
       } else {
         console.warn(`Order ${order.id} is missing customer phone or address.`);
       }
+ 
+      const addr =
+        order.shipping_address ||
+        order.billing_address ||
+        (order.customer && order.customer.default_address) ||
+        null;
+
+      const province = addr?.province || '';
+      const provinceCode = addr?.province_code || '';
 
       return {
         order_id: order.name,
@@ -614,7 +637,9 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
         payment_gateway_names: order.payment_gateway_names,
         line_items: order.line_items,
         channel_name: order.source_name || 'Unknown',
-        delivery_status: order.fulfillment_status || 'Not Specified'
+        delivery_status: order.fulfillment_status || 'Not Specified',
+        state: province,
+        state_code: provinceCode
       };
     });
 
@@ -814,7 +839,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
 const phoneLast10 = (v = "") => String(v).replace(/\D/g, "").slice(-10);
 
 
-app.post('/api/leads/by-phones', async (req, res) => { 
+app.post('/api/leads/by-phones', async (req, res) => {
   const { phoneNumbers } = req.body;
   if (!Array.isArray(phoneNumbers)) {
     return res.status(400).json({ message: 'phoneNumbers should be an array' });
@@ -1908,6 +1933,7 @@ app.get('/api/consultation-history', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+ 
 
 // Start Server
 app.listen(PORT, () => {

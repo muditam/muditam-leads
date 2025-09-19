@@ -48,6 +48,7 @@ router.get('/', async (req, res) => {
       search,            // matches orderId/name/contactNumber
       sortBy = 'createdAt',
       order = 'desc',
+      reason,            // <— NEW: single or comma-separated
     } = req.query;
 
     const filter = {};
@@ -56,6 +57,15 @@ router.get('/', async (req, res) => {
     }
     if (assignedTo) {
       filter.assignedTo = assignedTo;
+    }
+    if (reason) {
+      const reasons = String(reason)
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      if (reasons.length) {
+        filter.reason = { $in: reasons };
+      }
     }
     if (search && String(search).trim()) {
       const s = String(search).trim();
@@ -198,7 +208,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /:id — delete
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', async (req, res) => { 
   try {
     const deleted = await Escalation.findByIdAndDelete(req.params.id);
     if (!deleted) {

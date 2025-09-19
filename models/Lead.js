@@ -11,7 +11,7 @@ const LeadSchema = new mongoose.Schema({
   agentAssigned: String,
   productPitched: [String], 
   leadStatus: String,   
-  salesStatus: String,
+  salesStatus: String, 
   nextFollowup: String,
   calculateReminder: String,
   agentsRemarks: String,
@@ -20,7 +20,7 @@ const LeadSchema = new mongoose.Schema({
   amountPaid: Number,
   partialPayment: Number,
   modeOfPayment: String, 
-  deliveryStatus: String,
+  deliveryStatus: String, 
   healthExpertAssigned: String,
   orderId: String, 
   dosageExpiring: String,
@@ -95,7 +95,7 @@ const LeadSchema = new mongoose.Schema({
   reachoutLogs: [
     {
       timestamp: { type: Date, default: Date.now },
-      method: { type: String, enum: ["WhatsApp", "Call", "Both"] }, 
+      method: { type: String, enum: ["WhatsApp", "Call", "Both"] },  
       status: {
         type: String,
         enum: [
@@ -107,11 +107,14 @@ const LeadSchema = new mongoose.Schema({
           "Busy",
           "Switch Off",
           "Drop On Intro",
-        ],
+        ], 
       }, 
     },
   ],  
 });
+
+
+LeadSchema.index({ contactNumber: 1 });
 
 const Lead = mongoose.model('Lead', LeadSchema);
 

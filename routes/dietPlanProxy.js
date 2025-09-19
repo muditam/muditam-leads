@@ -276,7 +276,7 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 </section>`;
 }
 
-// ---- Title slide after 2nd slide ----
+// ---- Title slide after tailored (now 4th for weekly) ----
 function nameTitleSlideHtml({ name = "Customer" }) {
   const raw = String(name || "").trim();
   const firstName = raw ? raw.split(/\s+/)[0] : "Customer";
@@ -338,7 +338,7 @@ ${mealTimeRaw
 </section>`;
 }
 
-// ---- Tailored Diet slide (SECOND-LAST) ----
+// ---- Tailored Diet slide (NOW ALWAYS 3RD) ----
 function tailoredDietHtml({ conditions = [], goals = [] }) {
   const rawCond = niceList(conditions);
   const condPhrase = rawCond ? `your ${rawCond}` : "your condition";
@@ -356,7 +356,7 @@ function tailoredDietHtml({ conditions = [], goals = [] }) {
 </section>`;
 }
 
-// ---- Dietitian Notes slide (ALWAYS LAST) ----
+// ---- Dietitian Notes slide (ALWAYS LAST BEFORE IMAGE) ----
 function notesSlideHtml({ name = "You" }) {
   const bullets = [
     `Stay hydrated, ${name}. Aim for 2–3 litres of water throughout the day.`,
@@ -729,7 +729,6 @@ router.get("/diet-plan/:id", async (req, res) => {
           custName = lead.name || custName || "Customer";
           custPhone = lead.contactNumber || custPhone || "—";
 
-          // collect possible arrays from lead (top-level or in details)
           const lc =
             (Array.isArray(lead.conditions) && lead.conditions) ||
             (Array.isArray(leadDetails.conditions) && leadDetails.conditions) ||
@@ -773,6 +772,16 @@ router.get("/diet-plan/:id", async (req, res) => {
     }
     weeklyTimes = normalizeWeeklyTimes(weeklyTimes || {});
 
+    // ---- Decide conditions/goals BEFORE building pages (tailored is 3rd) ----
+    const planConds = cleanStringArray(
+      Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
+    );
+    const planGoals = cleanStringArray(
+      Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
+    );
+    const finalConditions = planConds.length ? planConds : leadConditions;
+    const finalGoals = planGoals.length ? planGoals : leadGoals;
+
     // 6) Build pages
     const pages = [];
 
@@ -796,12 +805,20 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
-    // ---- NEW: Slide 3 (Title slide) only for Weekly (14-day) plans
+    // Slide 3: Tailored Diet (NOW FIXED HERE)
+    pages.push(
+      tailoredDietHtml({
+        conditions: finalConditions,
+        goals: finalGoals,
+      })
+    );
+
+    // Slide 4 (Weekly only): Title slide after tailored
     if (planType === "Weekly") {
       pages.push(nameTitleSlideHtml({ name: custName }));
     }
 
-    // Slide 3+ : plan content (or 4+ if weekly)
+    // Slide 5+ : plan content (or 4+ if monthly)
     if (planType === "Weekly") {
       const fortnight = pickFortnight(doc);
       for (let i = 0; i < Math.min(duration, 14); i++) {
@@ -831,25 +848,6 @@ router.get("/diet-plan/:id", async (req, res) => {
       };
       pages.push(monthlyPageHtml({ slots }));
     }
-
-    // Decide final conditions/goals (plan first, then lead)
-    const planConds = cleanStringArray(
-      Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
-    );
-    const planGoals = cleanStringArray(
-      Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
-    );
-
-    const finalConditions = planConds.length ? planConds : leadConditions;
-    const finalGoals = planGoals.length ? planGoals : leadGoals;
-
-    // Tailored slide
-    pages.push(
-      tailoredDietHtml({
-        conditions: finalConditions,
-        goals: finalGoals,
-      }) 
-    );
 
     // Notes slide
     pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
@@ -936,15 +934,8 @@ router.get("/diet-plan/:id", async (req, res) => {
           canvases.push(canvas);
         }
 
-        // Build grouping plan as requested:
-        // Page1: [1]
-        // Page2: [2,3]
-        // Page3: [4,5,6]
-        // Page4: [7,8,9]
-        // Page5: [10,11,12]
-        // Page6: [13,14,15]
-        // Page7: [16,17]
-        // Then slides 18+ each on their own page
+        // Grouping plan stays generic; with tailored moved to #3,
+        // Page2 will now contain [2,3] = (Basic Details + Tailored)
         const baseGroups = [[1],[2,3],[4,5,6],[7,8,9],[10,11,12],[13,14,15],[16,17]];
         const groups = [];
 

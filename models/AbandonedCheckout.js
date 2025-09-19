@@ -25,6 +25,7 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
       name:  String,
       email: String,
       phone: String,
+      state: String, // <-- NEW: store state for display & assignment
     },
 
     items: [ItemSchema],

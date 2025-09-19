@@ -12,6 +12,8 @@ const OrderSchema = new mongoose.Schema({
   last_updated_at: { type: Date, default: Date.now },
   email_count: { type: Number, default: 0 },
   threadId: { type: String },  
+  issue: { type: String, default: "" },
 }, { timestamps: true }); 
 
 module.exports = mongoose.model('Order', OrderSchema); 
+  
