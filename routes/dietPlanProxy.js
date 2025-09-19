@@ -391,7 +391,7 @@ function finalImageSlideHtml({ imageUrl }) {
 }
 
 /* ================== MONTHLY PAGE — REDESIGN ONLY (Weekly untouched) ================== */
-// Monthly page – left-top tag and proper "Time | Menu" table; add a distinct class to target for 1-page PDF
+// Monthly page – left-top tag and proper "Time | Menu" table; add a distinct class to target if needed
 function monthlyPageHtml({ slots }) {
   // stacked time block like the sample image
   const timeBlock = (t) => {
@@ -529,7 +529,7 @@ html,body{
 .pill-title{ font-weight: 800; font-size: 25px; text-align: center; }
 .pill-sub{ font-size: 18px; text-align: center; margin-top: 6px; }
  
-.details{ background:url("${BG_DETAILS}") center/cover no-repeat; min-height: 180mm; } 
+.details{ background:url("${BG_DETAILS}") center/cover no-repeat; } 
 .details-card{
   position:relative; width:100%; max-width:430px; background:#fff;
   border-radius:20px; padding:38px 26px 38px;
@@ -947,7 +947,6 @@ router.get("/diet-plan/:id", async (req, res) => {
         "Evening Snack": monthly?.["Evening Snack"] || { time: "", options: [] },
         Dinner: monthly?.Dinner || { time: "", options: [] },
       };
-      // mark this single monthly page with a class we target for the 1-page PDF
       pages.push(monthlyPageHtml({ slots }));
     }
 
@@ -1030,15 +1029,8 @@ router.get("/diet-plan/:id", async (req, res) => {
         const MARGIN_DEFAULT = 10;
         const GAP = 6;
 
-        // MONTHLY: render only the monthly sheet section (single page PDF)
-        let slideEls;
-        if (window.__PLAN_TYPE__ === 'Monthly') {
-          const only = document.querySelector('.page.monthly-only');
-          slideEls = only ? [only] : Array.from(document.querySelectorAll('.page'));
-        } else {
-          slideEls = Array.from(document.querySelectorAll('.page'));
-        }
-
+        // Always render all slides; don't restrict Monthly to a single slide
+        const slideEls = Array.from(document.querySelectorAll('.page'));
         const totalSlides = slideEls.length;
         if (!totalSlides) throw new Error('No slides found');
 
@@ -1055,39 +1047,38 @@ router.get("/diet-plan/:id", async (req, res) => {
         }
 
         // Grouping:
-        // - Monthly: just one page [1]
-        // - Weekly: keep original multi-page grouping
+        // - Weekly: keep the original multi-page grouping
+        // - Monthly: use the same grouping logic, but render edge-to-edge (no left/right spacing)
         let groups = [];
-        if (window.__PLAN_TYPE__ === 'Monthly') {
-          groups = [[1]];
-        } else {
-          const baseGroups = [[1],[2],[3],[4,5,6,7],[8,9,10],[11,12,13],[14,15,16],[17,18],[19],[20]];
-          baseGroups.forEach(g => {
-            const filtered = g.filter(idx => idx >= 1 && idx <= canvases.length);
-            if (filtered.length) groups.push(filtered);
-          });
-          const covered = new Set(groups.flat());
-          for (let idx = 1; idx <= canvases.length; idx++){
-            if (!covered.has(idx)) groups.push([idx]);
-          }
+        const baseGroups = [[1],[2],[3],[4,5,6,7],[8,9,10],[11,12,13],[14,15,16],[17,18],[19],[20]];
+        baseGroups.forEach(g => {
+          const filtered = g.filter(idx => idx >= 1 && idx <= canvases.length);
+          if (filtered.length) groups.push(filtered);
+        });
+        const covered = new Set(groups.flat());
+        for (let idx = 1; idx <= canvases.length; idx++){
+          if (!covered.has(idx)) groups.push([idx]);
         }
+
+        const isMonthly = window.__PLAN_TYPE__ === 'Monthly';
 
         const addGroupToPdf = (indices, pageIndex) => {
           if (pageIndex > 0) pdf.addPage('a4', 'p');
 
-          const isPage4Group =
-            (window.__PLAN_TYPE__ !== 'Monthly') &&
+          const isWeeklyPg4Group =
+            (!isMonthly) &&
             indices.length === 4 &&
             indices[0] === 4 && indices[1] === 5 && indices[2] === 6 && indices[3] === 7;
 
-          const marginLR = isPage4Group ? 0 : MARGIN_DEFAULT;
+          // Monthly: no left/right spacing. Weekly: original margins (except special page-4 crop rule).
+          const marginLR = isMonthly ? 0 : (isWeeklyPg4Group ? 0 : MARGIN_DEFAULT);
           const marginTB = MARGIN_DEFAULT;
           const contentW = pageW - 2 * marginLR;
           const contentH = pageH - 2 * marginTB;
 
           const imgs = indices.map((idx) => {
             let canvas = canvases[idx - 1];
-            if (isPage4Group && idx === 4) {
+            if (isWeeklyPg4Group && idx === 4) {
               canvas = cropCanvas(canvas, { left: 32, right: 32, top: 24, bottom: 24 });
             }
             const wpx = canvas.width, hpx = canvas.height;
@@ -1150,3 +1141,4 @@ router.get("/diet-plan/:id", async (req, res) => {
 });
 
 module.exports = router;
+
