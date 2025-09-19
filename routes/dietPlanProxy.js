@@ -71,7 +71,7 @@ function round1(n) {
 function computeBMI(heightCm, weightKg) {
   const hVal = heightCm == null ? undefined : Number(heightCm);
   const wVal = weightKg == null ? undefined : Number(weightKg);
-  if (!hVal || !wVal || !isFinite(hVal) || !isFinite(wVal)) return "";
+  if (!hVal || !wVal || !isFinite(hVal)) return "";
   const h = hVal / 100;
   if (!h) return "";
   return String(round1(wVal / (h * h)));
@@ -390,10 +390,9 @@ function finalImageSlideHtml({ imageUrl }) {
 </section>`;
 }
 
-/* ================== MONTHLY PAGE — REDESIGN ONLY (Weekly untouched) ================== */
-// Monthly page – left-top tag and proper "Time | Menu" table; add a distinct class to target if needed
+/* ================== MONTHLY PAGE — Redesigned ================== */
 function monthlyPageHtml({ slots }) {
-  // stacked time block like the sample image
+  // Format "07:00 am - 09:00 am" into stacked lines with a small "to"
   const timeBlock = (t) => {
     const raw = String(t || "").trim();
     if (!raw) return `<div class="timeblock dash">—</div>`;
@@ -413,7 +412,7 @@ function monthlyPageHtml({ slots }) {
 
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
-    const opts =
+    const optionsMarkup =
       (s.options || [])
         .map((o, i) => {
           const text = String(o || "").trim();
@@ -429,7 +428,9 @@ function monthlyPageHtml({ slots }) {
 
     return `
       <div class="slot-card">
-        <div class="slot-ribbon" aria-hidden="true"><span>${escapeHtml(slot)}</span></div>
+        <div class="slot-ribbon" aria-hidden="true">
+          <span>${escapeHtml(slot)}</span>
+        </div>
 
         <div class="slot-table">
           <div class="th">Time</div>
@@ -439,7 +440,7 @@ function monthlyPageHtml({ slots }) {
             ${timeBlock(s.time)}
           </div>
           <div class="td menu-col">
-            ${opts}
+            ${optionsMarkup}
           </div>
         </div>
       </div>`;
@@ -463,339 +464,105 @@ function monthlyPageHtml({ slots }) {
 const CSS = `
 :root{
   --green:#543087;
-  --green-700:#543087;
-  --green-light:#a6caa6;
   --ink:#111;
-  --muted:#666;
 }
 
 *{ box-sizing:border-box; }
-html,body{
-  margin:0; padding:0; background:#f6f7f9; color:var(--ink);
-  font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif; 
-  -webkit-text-size-adjust: 100%; 
-}
+html,body{ margin:0; padding:0; background:#f6f7f9; color:var(--ink);
+  font-family: system-ui,-apple-system,"Poppins",Segoe UI,Roboto,Arial,sans-serif;
+  -webkit-text-size-adjust: 100%; }
 
-.page{
-  width:210mm;
-  margin:0 auto; page-break-after:always;
-  display:flex; align-items:center; justify-content:center;
-  padding:10px;
-}
+.page{ width:210mm; margin:0 auto; page-break-after:always;
+  display:flex; align-items:center; justify-content:center; padding:10px; }
 .tall{ min-height:297mm; margin: 10px auto; }
 .talls{ min-height:27mm; margin: 10px auto; }
 
 .cover{ background:url("${BG_COVER}") center/cover no-repeat; }
-.cover-card{
-  width:100%; max-width:450px;
-  background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
-  border-radius:28px; padding:92px 18px; text-align:center; color:#fff;
-  box-shadow:0 18px 40px rgba(0,0,0,.25);
-}
-.cover-card h1{
-  margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px;
-  text-transform:uppercase; font-size:35px; 
-}
+.cover-card{ width:100%; max-width:450px; background:linear-gradient(180deg,#7E5DAD 0%, #543087 100%);
+  border-radius:28px; padding:92px 18px; text-align:center; color:#fff; box-shadow:0 18px 40px rgba(0,0,0,.25); }
+.cover-card h1{ margin:0 0 10px; line-height:1.2; font-weight:800; letter-spacing:.3px; text-transform:uppercase; font-size:35px; }
 .rule{ height:1px; width:78%; margin:12px auto 14px; background:rgba(255,255,255,.28); }
 .subtitle{ margin:0 0 22px; font-size:21px; line-height:1.5; }
-.cta-pill{
-  position: relative;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-width: 280px;
-  padding: 14px 18px;
-  border-radius: 12px;
-  background: none;              
-  box-shadow: none;           
-  color: #543087;
-}
-.cta-pill::before{
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: #fff; 
-  box-shadow: 0 4px 14px rgba(0,0,0,.18);
-  z-index: 0;
-}
-.pill-title,
-.pill-sub{
-  position: relative;
-  z-index: 1;                    
-  color: #543087;
-}
-.pill-title{ font-weight: 800; font-size: 25px; text-align: center; }
-.pill-sub{ font-size: 18px; text-align: center; margin-top: 6px; }
- 
-.details{ background:url("${BG_DETAILS}") center/cover no-repeat; } 
-.details-card{
-  position:relative; width:100%; max-width:430px; background:#fff;
-  border-radius:20px; padding:38px 26px 38px;
-  box-shadow:0 12px 40px rgba(0,0,0,.18); border:1px solid #e6f0e6;
-}
-.pin{
-  position:absolute; width:55px; height:55px; top:-35px; left:50%;  
-  transform:translateX(-50%); border-radius:50%;
-  background:radial-gradient(circle at 35% 35%, #ffffff 0 35%, #dcdcdc 70%, #bdbdbd 100%);
-  box-shadow:0 6px 12px rgba(0,0,0,.22);
-}
-.details-card h2{
-  margin:4px 0 14px; text-align:center; color:var(--green); letter-spacing:.6px;
-  font-weight:800; font-size:22px;
-}
+.cta-pill{ position:relative; display:inline-flex; flex-direction:column; align-items:center; justify-content:center; min-width:280px; padding:14px 18px; border-radius:12px; background:none; box-shadow:none; color:#543087; }
+.cta-pill::before{ content:""; position:absolute; inset:0; border-radius:inherit; background:#fff; box-shadow:0 4px 14px rgba(0,0,0,.18); z-index:0; }
+.pill-title,.pill-sub{ position:relative; z-index:1; color:#543087; }
+.pill-title{ font-weight:800; font-size:25px; text-align:center; }
+.pill-sub{ font-size:18px; text-align:center; margin-top:6px; }
+
+.details{ background:url("${BG_DETAILS}") center/cover no-repeat; min-height: 180mm; }
+.details-card{ position:relative; width:100%; max-width:430px; background:#fff; border-radius:20px; padding:38px 26px 38px;
+  box-shadow:0 12px 40px rgba(0,0,0,.18); border:1px solid #e6f0e6; }
+.pin{ position:absolute; width:55px; height:55px; top:-35px; left:50%; transform:translateX(-50%); border-radius:50%;
+  background:radial-gradient(circle at 35% 35%, #ffffff 0 35%, #dcdcdc 70%, #bdbdbd 100%); box-shadow:0 6px 12px rgba(0,0,0,.22); }
+.details-card h2{ margin:4px 0 14px; text-align:center; color:var(--green); letter-spacing:.6px; font-weight:800; font-size:22px; }
 .rows{ margin-top:4px; }
-.row{
-  display:grid; grid-template-columns:140px 1fr; align-items:center;
-  padding:12px 6px; border-bottom:1px dashed #e3e9e3;
-} 
+.row{ display:grid; grid-template-columns:140px 1fr; align-items:center; padding:12px 6px; border-bottom:1px dashed #e3e9e3; }
 .row:last-child{ border-bottom:none; }
 .dt{ color:var(--green); font-weight:700; }
-.dd{ color:#222; text-transform: capitalize; }
 
-.sheet-plain{ background:#f7f8f7; } 
-
-.sheet{
-  width:100%; background:#fff;
-  border:8px solid var(--green);
-  border-radius:6px;
-  margin: 10px 0;
-}
+.sheet-plain{ background:#f7f8f7; }
+.sheet{ width:100%; background:#fff; border:8px solid var(--green); border-radius:6px; margin: 10px 0; }
 .sheet-inner{ padding:10px; }
 
-.topbar{
-  display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center; 
-  background:#EEE2FF;
-  border-radius:4px; padding:10px 12px; margin:-10px -10px 10px -10px;
-}
+.topbar{ display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center; background:#EEE2FF;
+  border-radius:4px; padding:10px 12px; margin:-10px -10px 10px -10px;}
 .cell{ font-size:14px; }
 .mid{ text-align:center; }
-.right{ text-align:right; font-size:14px; } 
+.right{ text-align:right; font-size:14px; }
 .strong{ font-weight:500; color:black; font-size: 20px; }
 
-.mealrow{
-  display:grid; grid-template-columns:180px 1fr; gap:12px; align-items:flex-start; 
-  margin-top:6px;
-}
-.left{ display:flex; flex-direction:column; align-items:flex-start; }
+/* WEEKLY (unchanged) */
+.mealrow{ display:grid; grid-template-columns:180px 1fr; gap:12px; align-items:flex-start; margin-top:6px; }
 .mealname{ font-weight:600; line-height:1; font-size: 18px; }
+.meal-time{ margin-top:6px; font-size:13px; color:#2b2b2b; display:flex; align-items:center; gap:6px; }
+.meal-time .icon{ width:14px; height:14px; opacity:.85; }
 
-.meal-time{
-  margin-top:6px;
-  font-size:13px;
-  color:#2b2b2b;
-  display:flex;
-  align-items:center;
-  gap:6px;
-}
-.meal-time .icon{
-  width:14px;
-  height:14px;
-  opacity:.85;
-  flex:0 0 auto;
-}
-
-.rightcol{ position:relative; }
-.meal-main{ color:#1e1e1e; font-size:20px; line-height:1.45; }
-.meal-note{ color:#5a5a5a; font-size:13px; line-height:1.45; font-style:italic; margin-top:6px; }
-
-.sep{
-  height:2px; background:#543087; width:100%;
-  margin:12px 0 6px; 
-}
-
-.tailor{ background:url("${TAILORED_BG}") center/cover no-repeat; }
-.tailor-card{
-  width:100%; max-width:560px;
-  color:#fff; border-radius:28px; padding:8px 26px 170px;
-  text-align:center; 
-}
-.tailor-card h2{
-  margin:0; font-size:38px; line-height:1.2; font-weight:800; letter-spacing:.2px;
-}
-.t-rule{ height:1px; background:rgba(255,255,255,.35); width:80%; margin:12px auto 14px; } 
-.t-msg{ margin:0; font-size:22px; line-height:1.6; color:#f4fff4; }
-
+/* Notes / final (unchanged) */
 .notes{ background:url("${NOTES_BG}") center/cover no-repeat; }
-.notes-card{
-  position: relative;
-  width:100%;
-  max-width:550px;
-  background: linear-gradient(180deg, rgba(126,93,173,.65) 0%, rgba(84,48,135,.65) 100%);
-  color:#fff;
-  border-radius:28px;
-  padding:38px 30px;
-  border:1px solid rgba(255,255,255,.25);
-  backdrop-filter: blur(10px) saturate(120%);
-  -webkit-backdrop-filter: blur(10px) saturate(120%);
-  box-shadow: 0 18px 40px rgba(0,0,0,0.22);
-}
-.notes-card::after{
-  content:"";
-  position:absolute; inset:0;
-  border-radius:inherit;
-  pointer-events:none;
-  background:
-    radial-gradient(40% 35% at 15% 15%, rgba(0,0,0,.18), transparent 60%),
-    radial-gradient(45% 35% at 85% 85%, rgba(0,0,0,.18), transparent 60%);
-}
-.notes-card h2{
-  margin:0 0 8px;
-  font-size:36px;
-  line-height:1.2;
-  font-weight:800;
-  letter-spacing:.4px;
-  text-transform:uppercase;
-  text-align:center;
-}
-.n-rule{
-  height:2px;
-  color:rgba(255,255,255,.7);
-  width:100%;
-  margin:12px 0 16px;
-  border-radius:1px;
-}
-.notes-list{
-  margin:0;
-  padding-left:22px;
-  list-style:disc;
-  font-size:18px;
-  line-height:1.7;
-  color:rgba(255,255,255,.95);
-}
-.notes-list li{ margin:10px 0; }
-.notes-list li::marker{ color:#ffffff; }
+.notes-card{ position:relative; width:100%; max-width:550px; background:linear-gradient(180deg, rgba(126,93,173,.65) 0%, rgba(84,48,135,.65) 100%); color:#fff;
+  border-radius:28px; padding:38px 30px; border:1px solid rgba(255,255,255,.25); backdrop-filter: blur(10px) saturate(120%); -webkit-backdrop-filter: blur(10px) saturate(120%); box-shadow:0 18px 40px rgba(0,0,0,0.22); }
+.notes-card h2{ margin:0 0 8px; font-size:36px; line-height:1.2; font-weight:800; text-transform:uppercase; text-align:center; }
+.n-rule{ height:2px; color:rgba(255,255,255,.7); width:100%; margin:12px 0 16px; border-radius:1px; }
+.notes-list{ margin:0; padding-left:22px; list-style:disc; font-size:18px; line-height:1.7; color:rgba(255,255,255,.95); }
 
 .final-image img{ max-width:100%; height:auto; display:block; }
 
-/* ---- New title slide styles ---- */
-.title-card{
-  width:100%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:40px 16px;
-} 
-.big-title{ 
-  margin:0;
-  text-align:center;
-  font-size:35px;
-  color:#543087;
-  font-weight:800;
-  letter-spacing:.2px;
-  text-transform: capitalize; 
-} 
+.title-card{ width:100%; display:flex; align-items:center; justify-content:center; padding:40px 16px; }
+.big-title{ margin:0; text-align:center; font-size:35px; color:#543087; font-weight:800; text-transform: capitalize; }
 
-@media print{
-  body{ background:#fff; }
-  .page{ margin:0; page-break-after:always; }
-}
+@media print{ body{ background:#fff; } .page{ margin:0; page-break-after:always; } }
 
-#pdfFab{
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100vw;
-  height: 64px;                          
-  z-index: 9999;
-  background: #543087;
-  color: #fff;
-  border: none;
-  border-radius: 0;                      
-  margin: 0;
-  font-weight: 800;
-  font-size: 18px;
-  letter-spacing: .2px;
-  box-shadow: 0 -2px 16px rgba(0,0,0,.18);
-  padding-bottom: env(safe-area-inset-bottom); /* iPhone safe area */
-}
+#pdfFab{ position: fixed; left: 0; right: 0; bottom: 0; width: 100vw; height: 64px; z-index: 9999; background: #543087; color: #fff; border: none;
+  border-radius: 0; margin: 0; font-weight: 800; font-size: 18px; letter-spacing: .2px; box-shadow: 0 -2px 16px rgba(0,0,0,.18); padding-bottom: env(safe-area-inset-bottom); }
 #pdfFab:disabled{ opacity: .6; cursor: not-allowed; }
-
-@media (min-width: 1024px){
-  #pdfFab{ height: 70px; font-size: 20px; }
-  body{ padding-bottom: 96px; }
-}
-
-#pdfToast{
-  position: fixed;
-  left: 50%;
-  bottom: 22px; 
-  transform: translateX(-50%);
-  background: #111;
-  color: #fff;
-  padding: 10px 14px;
-  border-radius: 12px;
-  font-size: 13px;
-  z-index: 9999;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .25s ease, transform .25s ease;
-}
+@media (min-width: 1024px){ #pdfFab{ height: 70px; font-size: 20px; } body{ padding-bottom: 96px; } }
+#pdfToast{ position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: #111; color: #fff; padding: 10px 14px; border-radius: 12px; font-size: 13px; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease; }
 #pdfToast.show{ opacity: 1; transform: translateX(-50%) translateY(-6px); }
 
-/* ===== Monthly page: left-top tag + proper two-column (Time | Menu) table ===== */
-.slot-card{
-  position:relative;
-  border: 1px solid #d9d9d9;
-  border-radius: 8px;
-  margin: 14px 0;
-  background: #fff;
-  box-shadow: 0 4px 10px rgba(0,0,0,.04);
-  overflow: hidden;
-}
-.slot-ribbon{
-  position:absolute;
-  top:10px; left:-1px;
-  height:30px;
-  display:flex; align-items:center;
-}
-.slot-ribbon span{
-  background:#F6C34E; color:#111;
-  font-weight:800; text-transform:uppercase; font-size:14px; letter-spacing:.2px;
-  padding:6px 14px 6px 16px;
-  border-radius:0 6px 6px 0;
-  position:relative;
-}
-.slot-ribbon span::after{
-  content:"";
-  position:absolute; left:0; bottom:-6px;
-  border-width:6px 6px 0 0; border-style:solid; border-color:#D6A83E transparent transparent transparent;
-}
+/* ===== MONTHLY redesigned: left-top tag + proper "Time | Menu" table ===== */
+.slot-card{ position:relative; border:1px solid #d9d9d9; border-radius:8px; margin:14px 0; background:#fff; box-shadow:0 4px 10px rgba(0,0,0,.04); overflow:hidden; }
+.slot-ribbon{ position:absolute; top:10px; left:-1px; height:30px; display:flex; align-items:center; }
+.slot-ribbon span{ background:#F6C34E; color:#111; font-weight:800; text-transform:uppercase; font-size:14px; letter-spacing:.2px; padding:6px 14px 6px 16px; border-radius:0 6px 6px 0; position:relative; }
+.slot-ribbon span::after{ content:""; position:absolute; left:0; bottom:-6px; border-width:6px 6px 0 0; border-style:solid; border-color:#D6A83E transparent transparent transparent; }
 
-.slot-table{
-  display: grid;
-  grid-template-columns: 180px 1fr; /* Time | Menu */
-  border-top: 1px solid #d9d9d9;
-  margin-top: 46px; /* room for the tag */
-}
-.th{
-  background:#f7f7f7;
-  font-weight:800;
-  padding:10px 12px;
-  border-bottom:1px solid #d9d9d9;
-}
+.slot-table{ display:grid; grid-template-columns: 190px 1fr; border-top:1px solid #d9d9d9; margin-top:46px; }
+.th{ background:#f7f7f7; font-weight:800; padding:10px 12px; border-bottom:1px solid #d9d9d9; }
 .th + .th{ border-left:1px solid #d9d9d9; }
 .td{ padding:12px; }
 .time-col{ border-right:1px solid #d9d9d9; }
 
-.timeblock{
-  display:inline-flex; flex-direction:column; align-items:center; justify-content:center;
-  min-height:110px; white-space:pre-line; font-size:14px; color:#2b2b2b;
-}
+.timeblock{ display:inline-flex; flex-direction:column; align-items:center; justify-content:center; min-height:110px; white-space:pre-line; font-size:14px; color:#2b2b2b; }
 .timeblock .tline{ line-height:1.35; }
 .timeblock .tto{ font-size:12px; opacity:.8; margin:4px 0; }
 
-.optrow{
-  display:block; margin:6px 0; line-height:1.55; font-size:15px; color:#1e1e1e;
-}
+.menu-col{ font-size:15px; }
+.optrow{ margin:6px 0; line-height:1.55; }
 .optlbl{ font-weight:700; margin-right:4px; white-space:nowrap; }
 .opttxt{ font-weight:400; }
 .dash{ color:#9a9a9a; }
 
 @media (max-width: 720px){
-  .slot-table{ grid-template-columns: 1fr; }
+  .slot-table{ grid-template-columns:1fr; }
   .time-col{ border-right:none; border-bottom:1px solid #d9d9d9; }
   .timeblock{ min-height:0; align-items:flex-start; }
 }
@@ -814,7 +581,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     const doc = await DietPlan.findById(planId).lean();
     if (!doc) return res.status(404).send("Diet plan not found.");
 
-    // 2) Enrich from Lead if available (fall back to Lead.details)
+    // 2) Enrich from Lead if available
     let custName = doc.customer?.name || "";
     let custPhone = doc.customer?.phone || "";
     let leadDetails = {};
@@ -829,7 +596,6 @@ router.get("/diet-plan/:id", async (req, res) => {
           custName = lead.name || custName || "Customer";
           custPhone = lead.contactNumber || custPhone || "—";
 
-          // collect possible arrays from lead (top-level or in details)
           const lc =
             (Array.isArray(lead.conditions) && lead.conditions) ||
             (Array.isArray(leadDetails.conditions) && leadDetails.conditions) ||
@@ -860,11 +626,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     const creatorDisplay = await resolveCreatorDisplay(doc, req.query.by);
 
     // 5) Get weekly times robustly
-    let weeklyTimes =
-      doc.weeklyTimes ||
-      doc.plan?.weeklyTimes ||
-      null;
-
+    let weeklyTimes = doc.weeklyTimes || doc.plan?.weeklyTimes || null;
     if (!hasAnyTime(weeklyTimes) && doc.templateId) {
       try {
         const tpl = await DietTemplate.findById(doc.templateId).lean();
@@ -873,54 +635,41 @@ router.get("/diet-plan/:id", async (req, res) => {
     }
     weeklyTimes = normalizeWeeklyTimes(weeklyTimes || {});
 
-    // 6) Build pages (Tailored Diet moved to SECOND position)
+    // 6) Build pages — Weekly stays the same; Monthly becomes a single page component but we still render other slides around it
     const pages = [];
 
-    // Slide 1: Cover — show "date | fullName"
-    pages.push(
-      coverPageHtml({
-        whenText: prettyDDMonthYYYY(start),
-        doctorText: creatorDisplay, // full name resolved (suppresses system/email)
-      })
-    );
-
-    // Slide 2: Tailored Diet (moved up)
-    // Decide final conditions/goals (plan first, then lead)
-    const planConds = cleanStringArray(
-      Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
-    );
-    const planGoals = cleanStringArray(
-      Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
-    );
-    const finalConditions = planConds.length ? planConds : leadConditions;
-    const finalGoals = planGoals.length ? planGoals : leadGoals;
-
-    pages.push(
-      tailoredDietHtml({
-        conditions: finalConditions,
-        goals: finalGoals,
-      })
-    );
-
-    // Slide 3: Basic details
-    pages.push(
-      basicDetailsHtml({
-        name: custName,
-        phone: custPhone,
-        age: hp.age,
-        height: hp.height,
-        weight: hp.weight,
-        bmi: bmiValue,
-      })
-    );
-
-    // Slide 4 (optional): Title slide for Weekly (14-day) plans
     if (planType === "Weekly") {
+      pages.push(
+        coverPageHtml({
+          whenText: prettyDDMonthYYYY(start),
+          doctorText: creatorDisplay,
+        })
+      );
+
+      const planConds = cleanStringArray(
+        Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
+      );
+      const planGoals = cleanStringArray(
+        Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
+      );
+      const finalConditions = planConds.length ? planConds : leadConditions;
+      const finalGoals = planGoals.length ? planGoals : leadGoals;
+
+      pages.push(tailoredDietHtml({ conditions: finalConditions, goals: finalGoals }));
+
+      pages.push(
+        basicDetailsHtml({
+          name: custName,
+          phone: custPhone,
+          age: hp.age,
+          height: hp.height,
+          weight: hp.weight,
+          bmi: bmiValue,
+        })
+      );
+
       pages.push(nameTitleSlideHtml({ name: custName }));
-    }
 
-    // Slide 5+ : plan content (or 4+ if monthly)
-    if (planType === "Weekly") {
       const fortnight = pickFortnight(doc);
       for (let i = 0; i < Math.min(duration, 14); i++) {
         const d = addDays(start, i);
@@ -930,16 +679,42 @@ router.get("/diet-plan/:id", async (req, res) => {
           Snacks: (fortnight?.Snacks || [])[i] || "",
           Dinner: (fortnight?.Dinner || [])[i] || "",
         };
-        pages.push(
-          dayPageHtml({
-            dayIndex: i,
-            dateIso: d,
-            meals,
-            times: weeklyTimes,
-          })
-        );
+        pages.push(dayPageHtml({ dayIndex: i, dateIso: d, meals, times: weeklyTimes }));
       }
+
+      pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
+      pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
     } else {
+      // MONTHLY: cover + tailored + details + monthly sheet + notes + final image
+      pages.push(
+        coverPageHtml({
+          whenText: prettyDDMonthYYYY(start),
+          doctorText: creatorDisplay,
+        })
+      );
+
+      const planConds = cleanStringArray(
+        Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
+      );
+      const planGoals = cleanStringArray(
+        Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
+      );
+      const finalConditions = planConds.length ? planConds : leadConditions;
+      const finalGoals = planGoals.length ? planGoals : leadGoals;
+
+      pages.push(tailoredDietHtml({ conditions: finalConditions, goals: finalGoals }));
+
+      pages.push(
+        basicDetailsHtml({
+          name: custName,
+          phone: custPhone,
+          age: hp.age,
+          height: hp.height,
+          weight: hp.weight,
+          bmi: bmiValue,
+        })
+      );
+
       const monthly = pickMonthly(doc);
       const slots = {
         Breakfast: monthly?.Breakfast || { time: "", options: [] },
@@ -948,13 +723,10 @@ router.get("/diet-plan/:id", async (req, res) => {
         Dinner: monthly?.Dinner || { time: "", options: [] },
       };
       pages.push(monthlyPageHtml({ slots }));
+
+      pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
+      pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
     }
-
-    // Notes slide
-    pages.push(notesSlideHtml({ name: custName.split(" ")[0] || "You" }));
-
-    // Final image slide
-    pages.push(finalImageSlideHtml({ imageUrl: FINAL_IMAGE_URL }));
 
     // 7) HTML
     const safeName = String(custName || "Diet Plan").trim();
@@ -963,11 +735,11 @@ router.get("/diet-plan/:id", async (req, res) => {
     const html = `<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/> 
+  <meta charset="utf-8"/>
   <meta name="viewport" content="width=840, viewport-fit=cover">
   <title>Diet Plan • ${escapeHtml(custName)}</title>
   <meta name="robots" content="noindex, nofollow"/>
-  <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/> 
+  <link rel="icon" href="https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Muditam_-_Favicon.png?v=1708245689"/>
   <style>${CSS}</style>
 </head>
 <body>
@@ -977,7 +749,7 @@ router.get("/diet-plan/:id", async (req, res) => {
   <button id="pdfFab" type="button">Download PDF</button>
   <div id="pdfToast">Generating PDF…</div>
 
-  <!-- Expose plan type to client PDF logic -->
+  <!-- Plan type for client PDF logic -->
   <script>window.__PLAN_TYPE__=${JSON.stringify(planType)};</script>
 
   <!-- Load libraries WITHOUT SRI so the browser doesn't block them if hash mismatches -->
@@ -1000,7 +772,7 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     function pxToMm(px){ return px * 0.264583; } // 96dpi → mm
 
-    // ---- helper to crop a canvas (PDF only; web stays unchanged)
+    // ---- helper to crop a canvas
     function cropCanvas(sourceCanvas, {left=0, top=0, right=0, bottom=0} = {}){
       const w = Math.max(1, sourceCanvas.width - left - right);
       const h = Math.max(1, sourceCanvas.height - top - bottom);
@@ -1024,33 +796,58 @@ router.get("/diet-plan/:id", async (req, res) => {
         });
 
         const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-        const pageW = 210, pageH = 297;
+        const pageW = 210;   // A4 width in mm
         const MARGIN_DEFAULT = 10;
         const GAP = 6;
 
-        // Always render all slides; don't restrict Monthly to a single slide
+        // Render all slides to canvases
         const slideEls = Array.from(document.querySelectorAll('.page'));
-        const totalSlides = slideEls.length;
-        if (!totalSlides) throw new Error('No slides found');
+        if (!slideEls.length) throw new Error('No slides found');
 
         const canvases = [];
-        for (let i = 0; i < totalSlides; i++){
-          showToast(\`Rendering slide \${i+1}/\${totalSlides}…\`, 1800);
+        for (let i = 0; i < slideEls.length; i++){
+          showToast(\`Rendering slide \${i+1}/\${slideEls.length}…\`, 1200);
           const canvas = await html2canvas(slideEls[i], {
-            useCORS: true,
-            allowTaint: false,
-            backgroundColor: '#ffffff',
+            useCORS: true, allowTaint: false, backgroundColor: '#ffffff',
             scale: Math.min(2, window.devicePixelRatio || 1.5)
           });
           canvases.push(canvas);
         }
 
-        // Grouping:
-        // - Weekly: keep the original multi-page grouping
-        // - Monthly: use the same grouping logic, but render edge-to-edge (no left/right spacing)
-        let groups = [];
+        // ---------- MONTHLY: one tall page (stitch all canvases) ----------
+        if (window.__PLAN_TYPE__ === 'Monthly') {
+          // stitch vertically
+          const width = Math.max(...canvases.map(c => c.width));
+          const height = canvases.reduce((s,c) => s + c.height, 0);
+          const stitched = document.createElement('canvas');
+          stitched.width = width;
+          stitched.height = height;
+          const sctx = stitched.getContext('2d');
+          let y = 0;
+          canvases.forEach(c => { sctx.drawImage(c, 0, y); y += c.height; });
+
+          // Compute page height to keep aspect ratio for 210mm width (no left/right margin)
+          const stitchedWmm = pxToMm(stitched.width);
+          const stitchedHmm = pxToMm(stitched.height);
+          const pageH = pageW * (stitchedHmm / stitchedWmm);
+
+          const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: [pageW, pageH] });
+
+          // Edge-to-edge
+          pdf.addImage(stitched.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, pageW, pageH);
+
+          showToast('Downloading PDF…');
+          pdf.save(${JSON.stringify(filename)});
+          showToast('PDF ready!');
+          return;
+        }
+
+        // ---------- WEEKLY: unchanged multi-page grouping ----------
+        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        const pageH = 297;
+
         const baseGroups = [[1],[2],[3],[4,5,6,7],[8,9,10],[11,12,13],[14,15,16],[17,18],[19],[20]];
+        const groups = [];
         baseGroups.forEach(g => {
           const filtered = g.filter(idx => idx >= 1 && idx <= canvases.length);
           if (filtered.length) groups.push(filtered);
@@ -1060,59 +857,43 @@ router.get("/diet-plan/:id", async (req, res) => {
           if (!covered.has(idx)) groups.push([idx]);
         }
 
-        const isMonthly = window.__PLAN_TYPE__ === 'Monthly';
+        const addGroup = (indices, idx) => {
+          if (idx > 0) pdf.addPage('a4', 'p');
 
-        const addGroupToPdf = (indices, pageIndex) => {
-          if (pageIndex > 0) pdf.addPage('a4', 'p');
-
-          const isWeeklyPg4Group =
-            (!isMonthly) &&
+          const isPg4Group =
             indices.length === 4 &&
             indices[0] === 4 && indices[1] === 5 && indices[2] === 6 && indices[3] === 7;
 
-          // Monthly: no left/right spacing. Weekly: original margins (except special page-4 crop rule).
-          const marginLR = isMonthly ? 0 : (isWeeklyPg4Group ? 0 : MARGIN_DEFAULT);
+          const marginLR = isPg4Group ? 0 : MARGIN_DEFAULT;
           const marginTB = MARGIN_DEFAULT;
-          const contentW = pageW - 2 * marginLR;
-          const contentH = pageH - 2 * marginTB;
+          const contentW = pageW - 2*marginLR;
+          const contentH = pageH - 2*marginTB;
 
-          const imgs = indices.map((idx) => {
-            let canvas = canvases[idx - 1];
-            if (isWeeklyPg4Group && idx === 4) {
-              canvas = cropCanvas(canvas, { left: 32, right: 32, top: 24, bottom: 24 });
-            }
-            const wpx = canvas.width, hpx = canvas.height;
-            const wmm = pxToMm(wpx);
-            const hmm = pxToMm(hpx);
-            return { canvas, wmm, hmm, ar: wmm / hmm };
+          const imgs = indices.map(i => {
+            let c = canvases[i-1];
+            if (isPg4Group && i === 4) c = cropCanvas(c, { left: 32, right: 32, top: 24, bottom: 24 });
+            const wmm = pxToMm(c.width);
+            const hmm = pxToMm(c.height);
+            return { c, ar: wmm / hmm };
           });
 
-          let render = imgs.map(img => {
-            const w = contentW;
-            const h = w / img.ar;
-            return { w, h };
-          });
-
-          const totalStackedH = render.reduce((s, r) => s + r.h, 0) + GAP * (render.length - 1);
-
-          if (totalStackedH > contentH) {
-            const scale = contentH / totalStackedH;
-            render = render.map(r => ({ w: r.w * scale, h: r.h * scale }));
+          let blocks = imgs.map(img => ({ w: contentW, h: contentW / img.ar }));
+          const totalH = blocks.reduce((s,b)=>s+b.h,0) + GAP*(blocks.length-1);
+          if (totalH > contentH) {
+            const scale = contentH / totalH;
+            blocks = blocks.map(b => ({ w: b.w*scale, h: b.h*scale }));
           }
 
-          let y = marginTB + (contentH - (render.reduce((s, r) => s + r.h, 0) + GAP * (render.length - 1))) / 2;
-
+          let y = marginTB + (contentH - (blocks.reduce((s,b)=>s+b.h,0) + GAP*(blocks.length-1))) / 2;
           imgs.forEach((img, i) => {
-            const { w, h } = render[i];
-            const x = marginLR + (contentW - w) / 2;
-            const dataUrl = img.canvas.toDataURL('image/jpeg', 0.95);
-            pdf.addImage(dataUrl, 'JPEG', x, y, w, h);
-            y += h + (i < render.length - 1 ? GAP : 0);
+            const b = blocks[i];
+            const x = marginLR + (contentW - b.w)/2;
+            pdf.addImage(img.c.toDataURL('image/jpeg', 0.95), 'JPEG', x, y, b.w, b.h);
+            y += b.h + (i < blocks.length - 1 ? GAP : 0);
           });
         };
 
-        showToast('Composing PDF pages…', 1200);
-        groups.forEach((g, i) => addGroupToPdf(g, i));
+        groups.forEach(addGroup);
 
         showToast('Downloading PDF…');
         pdf.save(${JSON.stringify(filename)});
@@ -1136,9 +917,8 @@ router.get("/diet-plan/:id", async (req, res) => {
     return res.status(200).send(html);
   } catch (err) {
     console.error("Error in /diet-plan route:", err);
-    return res.status(500).send("Internal server error"); 
+    return res.status(500).send("Internal server error");
   }
 });
 
 module.exports = router;
-
