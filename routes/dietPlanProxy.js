@@ -244,14 +244,14 @@ function coverPageHtml({ whenText = "", doctorText = "" }) {
       <div class="pill-sub">${escapeHtml(whenText)}${doctorText ? ` | ${escapeHtml(doctorText)}` : ""}</div>
     </div>
   </div>
-</section>`; 
+</section>`;
 }
 
 function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bmi }) {
   const rows = [];
   const pushRow = (label, value) =>
     rows.push(
-      `<div class="row"><div class="dt">${escapeHtml(label)}</div><div class="dd">${escapeHtml(value)}</div></div>` 
+      `<div class="row"><div class="dt">${escapeHtml(label)}</div><div class="dd">${escapeHtml(value)}</div></div>`
     );
 
   pushRow("Name", name || "—");
@@ -290,7 +290,7 @@ function nameTitleSlideHtml({ name = "Customer" }) {
 </section>`;
 }
 
-// ---- PAGE 3+ (DAY) ----
+// ---- PAGE 3+ (DAY) ----  (WEEKLY — DO NOT CHANGE)
 function dayPageHtml({ dayIndex, dateIso, meals, times }) {
   return `
 <section class="page sheet-plain">
@@ -338,7 +338,7 @@ ${mealTimeRaw
 </section>`;
 }
 
-// ---- Tailored Diet slide (NOW SECOND SLIDE) ----
+// ---- Tailored Diet slide (NOW SECOND SLIDE)
 function tailoredDietHtml({ conditions = [], goals = [] }) {
   const rawCond = niceList(conditions);
   const condPhrase = rawCond ? `your ${rawCond}` : "your condition";
@@ -390,19 +390,58 @@ function finalImageSlideHtml({ imageUrl }) {
 </section>`;
 }
 
-// Monthly page
+/* ================== MONTHLY PAGE — REDESIGN ONLY (Weekly untouched) ================== */
+// Monthly page – ribbon header + two-column table (Time | Menu) per slot
 function monthlyPageHtml({ slots }) {
+  // helper to turn "07:00 pm - 09:00 pm" or "7pm-8pm" into stacked lines with "to"
+  const timeBlock = (t) => {
+    const raw = String(t || "").trim();
+    if (!raw) return `<div class="timeblock dash">—</div>`;
+    const parts = raw.split(/\s*[-–]\s*/);
+    if (parts.length >= 2) {
+      const from = parts[0];
+      const to = parts.slice(1).join(" - ");
+      return `
+        <div class="timeblock">
+          <div class="tline">${escapeHtml(from)}</div>
+          <div class="tto">to</div>
+          <div class="tline">${escapeHtml(to)}</div>
+        </div>`;
+    }
+    return `<div class="timeblock"><div class="tline">${escapeHtml(raw)}</div></div>`;
+  };
+
   const blocks = MONTHLY_SLOTS.map((slot) => {
     const s = slots[slot] || { time: "", options: [] };
-    const time = s.time ? ` <span class="time-inline">(${escapeHtml(s.time)})</span>` : "";
-    const opts = (s.options || []).length
-      ? `<ul class="opts">${s.options.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`
-      : `<p class="dash">—</p>`;
+    const opts =
+      (s.options || [])
+        .map((o, i) => {
+          const text = String(o || "").trim();
+          if (!text) return "";
+          return `
+            <div class="optrow">
+              <span class="optlbl">Option ${i + 1} :</span>
+              <span class="opttxt">${escapeHtml(text)}</span>
+            </div>`;
+        })
+        .filter(Boolean)
+        .join("") || `<p class="dash">—</p>`;
+
     return `
-      <div class="slot">
-        <h3>${slot}${time}</h3>
-        ${opts}
-        <div class="sep"></div>
+      <div class="slot-card">
+        <div class="slot-head">
+          <div class="ribbon">${escapeHtml(slot)}</div>
+        </div>
+        <div class="slot-table">
+          <div class="col time-col">
+            <div class="time-title">Time</div>
+            ${timeBlock(s.time)}
+          </div>
+          <div class="col menu-col">
+            <div class="menu-title">Menu</div>
+            ${opts}
+          </div>
+        </div>
       </div>`;
   }).join("");
 
@@ -513,9 +552,9 @@ html,body{
 } 
 .row:last-child{ border-bottom:none; }
 .dt{ color:var(--green); font-weight:700; }
-.dd{ color:#222; }
+.dd{ color:#222; text-transform: capitalize; }
 
-.sheet-plain{ background:#f7f8f7; }
+.sheet-plain{ background:#f7f8f7; } 
 
 .sheet{
   width:100%; background:#fff;
@@ -642,15 +681,16 @@ html,body{
   align-items:center;
   justify-content:center;
   padding:40px 16px;
-}
-.big-title{
+} 
+.big-title{ 
   margin:0;
   text-align:center;
   font-size:35px;
   color:#543087;
   font-weight:800;
   letter-spacing:.2px;
-}
+  text-transform: capitalize; 
+} 
 
 @media print{
   body{ background:#fff; }
@@ -699,6 +739,82 @@ html,body{
   transition: opacity .25s ease, transform .25s ease;
 }
 #pdfToast.show{ opacity: 1; transform: translateX(-50%) translateY(-6px); }
+
+/* ===== Monthly page: card + ribbon + two-column table (Time | Menu) ===== */
+.slot-card{
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  margin: 14px 0;
+  background: #fff;
+  box-shadow: 0 4px 10px rgba(0,0,0,.04);
+  overflow: hidden;
+}
+.slot-head{
+  padding: 10px 12px 0 12px;
+}
+.ribbon{
+  display: inline-block;
+  background: #F6C34E;
+  color: #111;
+  font-weight: 800;
+  letter-spacing: .2px;
+  padding: 6px 12px;
+  border-radius: 6px 6px 0 0;
+  text-transform: uppercase;
+  font-size: 14px;
+}
+.slot-table{
+  display: grid;
+  grid-template-columns: 180px 1fr; /* Time | Menu */
+  border-top: 1px solid #d9d9d9;
+}
+.slot-table .col{
+  padding: 14px 14px;
+}
+.slot-table .col + .col{
+  border-left: 1px solid #d9d9d9;
+}
+.time-title, .menu-title{
+  font-weight: 800;
+  font-size: 18px;
+  color: #1b1b1b;
+  margin-bottom: 6px;
+}
+.timeblock{
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 110px;
+  white-space: pre-line;
+  font-size: 14px;
+  color: #2b2b2b;
+}
+.timeblock .tline{ line-height: 1.35; }
+.timeblock .tto{
+  font-size: 12px;
+  opacity: .8;
+  margin: 4px 0;
+}
+.optrow{
+  display: block;
+  margin: 6px 0;
+  line-height: 1.55;
+  font-size: 15px;
+  color: #1e1e1e;
+}
+.optlbl{
+  font-weight: 700;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.opttxt{ font-weight: 400; }
+.dash{ color:#9a9a9a; }
+@media (max-width: 720px){
+  .slot-table{ grid-template-columns: 1fr; }
+  .slot-table .col + .col{ border-left: none; border-top: 1px solid #d9d9d9; }
+  .timeblock{ min-height: 0; align-items: flex-start; }
+}
 `;
 
 // ---------- ROUTE ----------
@@ -729,7 +845,6 @@ router.get("/diet-plan/:id", async (req, res) => {
           custName = lead.name || custName || "Customer";
           custPhone = lead.contactNumber || custPhone || "—";
 
-          // collect possible arrays from lead (top-level or in details)
           const lc =
             (Array.isArray(lead.conditions) && lead.conditions) ||
             (Array.isArray(leadDetails.conditions) && leadDetails.conditions) ||
@@ -754,7 +869,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     // 3) Gather plan type & dates
     const planType = doc.planType || "Weekly";
     const start = doc.startDate ? new Date(doc.startDate) : new Date();
-    const duration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
+    theDuration = Number(doc.durationDays || (planType === "Weekly" ? 14 : 30));
 
     // 4) Resolve "created by" as FULL NAME for cover pill
     const creatorDisplay = await resolveCreatorDisplay(doc, req.query.by);
@@ -780,12 +895,11 @@ router.get("/diet-plan/:id", async (req, res) => {
     pages.push(
       coverPageHtml({
         whenText: prettyDDMonthYYYY(start),
-        doctorText: creatorDisplay, // full name resolved (suppresses system/email)
+        doctorText: creatorDisplay,
       })
     );
 
-    // Slide 2: Tailored Diet (moved up)
-    // Decide final conditions/goals (plan first, then lead)
+    // Slide 2: Tailored Diet
     const planConds = cleanStringArray(
       Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
     );
@@ -822,7 +936,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     // Slide 5+ : plan content (or 4+ if monthly)
     if (planType === "Weekly") {
       const fortnight = pickFortnight(doc);
-      for (let i = 0; i < Math.min(duration, 14); i++) {
+      for (let i = 0; i < Math.min(theDuration, 14); i++) {
         const d = addDays(start, i);
         const meals = {
           Breakfast: (fortnight?.Breakfast || [])[i] || "",
@@ -858,7 +972,7 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     // 7) HTML
     const safeName = String(custName || "Diet Plan").trim();
-    const filename = `${safeName.replace(/[\\/:*?"<>|]+/g, "_")}_DietPlan.pdf`; 
+    const filename = `${safeName.replace(/[\\/:*?"<>|]+/g, "_")}_DietPlan.pdf`;
 
     const html = `<!doctype html>
 <html lang="en">
@@ -913,11 +1027,9 @@ router.get("/diet-plan/:id", async (req, res) => {
         fab.disabled = true;
         showToast('Preparing slides…');
 
-        // Ensure libs are available
         if (!window.html2canvas) throw new Error('html2canvas not loaded');
         if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('jsPDF not loaded');
 
-        // Try to set crossOrigin on images before capture (helps CORS)
         document.querySelectorAll('img').forEach(img => {
           try { if (!img.crossOrigin) img.crossOrigin = 'anonymous'; } catch(e){}
         });
@@ -925,15 +1037,13 @@ router.get("/diet-plan/:id", async (req, res) => {
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
         const pageW = 210, pageH = 297;
-        const MARGIN_DEFAULT = 10;   // mm for normal pages
-        const GAP = 6;               // vertical gap between stacked slides
+        const MARGIN_DEFAULT = 10;
+        const GAP = 6;
 
-        // Collect all slide elements
         const slideEls = Array.from(document.querySelectorAll('.page'));
         const totalSlides = slideEls.length;
         if (!totalSlides) throw new Error('No slides found');
 
-        // Render ALL slides to canvases first for consistent sizing & speed
         const canvases = [];
         for (let i = 0; i < totalSlides; i++){
           showToast(\`Rendering slide \${i+1}/\${totalSlides}…\`, 1800);
@@ -947,17 +1057,6 @@ router.get("/diet-plan/:id", async (req, res) => {
         }
 
         // Grouping plan (unchanged)
-        // Page1: [1]
-        // Page2: [2]
-        // Page3: [3]
-        // Page4: [4,5,6,7]  <-- special layout
-        // Page5: [8,9,10]
-        // Page6: [11,12,13]
-        // Page7: [14,15,16]
-        // Page8: [17,18]
-        // Page9: [19]
-        // Page10: [20]
-        // Remaining (if any): singles per page
         const baseGroups = [[1],[2],[3],[4,5,6,7],[8,9,10],[11,12,13],[14,15,16],[17,18],[19],[20]];
         const groups = [];
 
@@ -971,63 +1070,48 @@ router.get("/diet-plan/:id", async (req, res) => {
           if (!covered.has(idx)) groups.push([idx]);
         }
 
-        // Helper to add one group (stack into one PDF page)
-        // >>> PDF LAYOUT TWEAKS FOR PAGE 4 <<<
-        // - For the group [4,5,6,7]: remove L/R margins (full width),
-        //   and crop slide 4 padding so it doesn't take extra space.
-        const addGroupToPdf = (indices, pageIndex /*0-based among groups*/) => {
+        const addGroupToPdf = (indices, pageIndex) => {
           if (pageIndex > 0) pdf.addPage('a4', 'p');
 
           const isPage4Group =
             indices.length === 4 &&
             indices[0] === 4 && indices[1] === 5 && indices[2] === 6 && indices[3] === 7;
 
-          const marginLR = isPage4Group ? 0 : MARGIN_DEFAULT;  // no left/right margin on Page 4
-          const marginTB = MARGIN_DEFAULT;                     // keep top/bottom margin
+          const marginLR = isPage4Group ? 0 : MARGIN_DEFAULT;
+          const marginTB = MARGIN_DEFAULT;
           const contentW = pageW - 2 * marginLR;
           const contentH = pageH - 2 * marginTB;
 
-          // Prepare images (with optional cropping for slide 4)
           const imgs = indices.map((idx) => {
             let canvas = canvases[idx - 1];
-
-            // If this is the special Page 4 group and this item is slide #4,
-            // crop away internal padding (PDF-only, leaves web intact).
             if (isPage4Group && idx === 4) {
-              // Heuristic crop: trim a bit on all sides (tighter title card)
-              // Tweak values as needed (in CSS px of the rendered canvas)
               canvas = cropCanvas(canvas, { left: 32, right: 32, top: 24, bottom: 24 });
             }
-
             const wpx = canvas.width, hpx = canvas.height;
             const wmm = pxToMm(wpx);
             const hmm = pxToMm(hpx);
             return { canvas, wmm, hmm, ar: wmm / hmm };
           });
 
-          // First scale each image to fit by width
           let render = imgs.map(img => {
             const w = contentW;
-            const h = w / img.ar; // ar = wmm/hmm
+            const h = w / img.ar;
             return { w, h };
           });
 
-          // Sum heights + gaps
           const totalStackedH = render.reduce((s, r) => s + r.h, 0) + GAP * (render.length - 1);
 
-          // If overflow, scale down uniformly
           let scale = 1;
           if (totalStackedH > contentH) {
             scale = contentH / totalStackedH;
             render = render.map(r => ({ w: r.w * scale, h: r.h * scale }));
           }
 
-          // Center vertically; horizontally depend on marginLR (0 for page 4)
           let y = marginTB + (contentH - (render.reduce((s, r) => s + r.h, 0) + GAP * (render.length - 1))) / 2;
 
           imgs.forEach((img, i) => {
             const { w, h } = render[i];
-            const x = marginLR + (contentW - w) / 2; // for page 4 marginLR=0 ⇒ full-width centering
+            const x = marginLR + (contentW - w) / 2;
             const dataUrl = img.canvas.toDataURL('image/jpeg', 0.95);
             pdf.addImage(dataUrl, 'JPEG', x, y, w, h);
             y += h + (i < render.length - 1 ? GAP : 0);
