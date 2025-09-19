@@ -897,6 +897,17 @@ router.get("/diet-plan/:id", async (req, res) => {
 
     function pxToMm(px){ return px * 0.264583; } // 96dpi → mm
 
+    // ---- helper to crop a canvas (PDF only; web stays unchanged)
+    function cropCanvas(sourceCanvas, {left=0, top=0, right=0, bottom=0} = {}){
+      const w = Math.max(1, sourceCanvas.width - left - right);
+      const h = Math.max(1, sourceCanvas.height - top - bottom);
+      const out = document.createElement('canvas');
+      out.width = w; out.height = h;
+      const ctx = out.getContext('2d');
+      ctx.drawImage(sourceCanvas, left, top, w, h, 0, 0, w, h);
+      return out;
+    }
+
     async function makePdf(){
       try{
         fab.disabled = true;
@@ -914,8 +925,8 @@ router.get("/diet-plan/:id", async (req, res) => {
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
         const pageW = 210, pageH = 297;
-        const margin = 10;     // mm around a PDF page
-        const gap = 6;         // vertical gap between stacked slides on the same PDF page
+        const MARGIN_DEFAULT = 10;   // mm for normal pages
+        const GAP = 6;               // vertical gap between stacked slides
 
         // Collect all slide elements
         const slideEls = Array.from(document.querySelectorAll('.page'));
@@ -935,11 +946,11 @@ router.get("/diet-plan/:id", async (req, res) => {
           canvases.push(canvas);
         }
 
-        // NEW Grouping plan you requested:
+        // Grouping plan (unchanged)
         // Page1: [1]
         // Page2: [2]
         // Page3: [3]
-        // Page4: [4,5,6,7]
+        // Page4: [4,5,6,7]  <-- special layout
         // Page5: [8,9,10]
         // Page6: [11,12,13]
         // Page7: [14,15,16]
@@ -950,65 +961,81 @@ router.get("/diet-plan/:id", async (req, res) => {
         const baseGroups = [[1],[2],[3],[4,5,6,7],[8,9,10],[11,12,13],[14,15,16],[17,18],[19],[20]];
         const groups = [];
 
-        // Push only indices that exist
         baseGroups.forEach(g => {
           const filtered = g.filter(idx => idx >= 1 && idx <= totalSlides);
           if (filtered.length) groups.push(filtered);
         });
 
-        // Add remaining singles after 20 (or any not covered)
         const covered = new Set(groups.flat());
         for (let idx = 1; idx <= totalSlides; idx++){
           if (!covered.has(idx)) groups.push([idx]);
         }
 
         // Helper to add one group (stack into one PDF page)
-        const addGroupToPdf = (indices, addNewPage) => {
-          if (addNewPage) pdf.addPage('a4', 'p');
+        // >>> PDF LAYOUT TWEAKS FOR PAGE 4 <<<
+        // - For the group [4,5,6,7]: remove L/R margins (full width),
+        //   and crop slide 4 padding so it doesn't take extra space.
+        const addGroupToPdf = (indices, pageIndex /*0-based among groups*/) => {
+          if (pageIndex > 0) pdf.addPage('a4', 'p');
 
-          // Convert 1-based indices to 0-based
+          const isPage4Group =
+            indices.length === 4 &&
+            indices[0] === 4 && indices[1] === 5 && indices[2] === 6 && indices[3] === 7;
+
+          const marginLR = isPage4Group ? 0 : MARGIN_DEFAULT;  // no left/right margin on Page 4
+          const marginTB = MARGIN_DEFAULT;                     // keep top/bottom margin
+          const contentW = pageW - 2 * marginLR;
+          const contentH = pageH - 2 * marginTB;
+
+          // Prepare images (with optional cropping for slide 4)
           const imgs = indices.map((idx) => {
-            const canvas = canvases[idx - 1];
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-            const wmm = pxToMm(canvas.width);
-            const hmm = pxToMm(canvas.height);
-            return { dataUrl, wmm, hmm, ar: wmm / hmm };
+            let canvas = canvases[idx - 1];
+
+            // If this is the special Page 4 group and this item is slide #4,
+            // crop away internal padding (PDF-only, leaves web intact).
+            if (isPage4Group && idx === 4) {
+              // Heuristic crop: trim a bit on all sides (tighter title card)
+              // Tweak values as needed (in CSS px of the rendered canvas)
+              canvas = cropCanvas(canvas, { left: 32, right: 32, top: 24, bottom: 24 });
+            }
+
+            const wpx = canvas.width, hpx = canvas.height;
+            const wmm = pxToMm(wpx);
+            const hmm = pxToMm(hpx);
+            return { canvas, wmm, hmm, ar: wmm / hmm };
           });
 
-          // Desired content width and height
-          const contentW = pageW - 2*margin;
-          const contentH = pageH - 2*margin;
-
-          // First, scale each image to fit by width
-          let renderSizes = imgs.map(img => {
+          // First scale each image to fit by width
+          let render = imgs.map(img => {
             const w = contentW;
-            const h = w / img.ar; // since ar = wmm/hmm
+            const h = w / img.ar; // ar = wmm/hmm
             return { w, h };
           });
 
           // Sum heights + gaps
-          const totalStackedH = renderSizes.reduce((s, r) => s + r.h, 0) + gap * (renderSizes.length - 1);
+          const totalStackedH = render.reduce((s, r) => s + r.h, 0) + GAP * (render.length - 1);
 
           // If overflow, scale down uniformly
           let scale = 1;
           if (totalStackedH > contentH) {
             scale = contentH / totalStackedH;
-            renderSizes = renderSizes.map(r => ({ w: r.w * scale, h: r.h * scale }));
+            render = render.map(r => ({ w: r.w * scale, h: r.h * scale }));
           }
 
-          // Center horizontally; stack vertically
-          let y = margin + (contentH - (renderSizes.reduce((s, r) => s + r.h, 0) + gap * (renderSizes.length - 1))) / 2;
+          // Center vertically; horizontally depend on marginLR (0 for page 4)
+          let y = marginTB + (contentH - (render.reduce((s, r) => s + r.h, 0) + GAP * (render.length - 1))) / 2;
+
           imgs.forEach((img, i) => {
-            const { w, h } = renderSizes[i];
-            const x = (pageW - w) / 2;
-            pdf.addImage(img.dataUrl, 'JPEG', x, y, w, h);
-            y += h + (i < renderSizes.length - 1 ? gap : 0);
+            const { w, h } = render[i];
+            const x = marginLR + (contentW - w) / 2; // for page 4 marginLR=0 ⇒ full-width centering
+            const dataUrl = img.canvas.toDataURL('image/jpeg', 0.95);
+            pdf.addImage(dataUrl, 'JPEG', x, y, w, h);
+            y += h + (i < render.length - 1 ? GAP : 0);
           });
         };
 
-        // Lay out all groups into PDF
         showToast('Composing PDF pages…', 1200);
-        groups.forEach((g, i) => addGroupToPdf(g, i > 0));
+        groups.forEach((g, i) => addGroupToPdf(g, i));
 
         showToast('Downloading PDF…');
         pdf.save(${JSON.stringify(filename)});
