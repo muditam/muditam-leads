@@ -276,7 +276,7 @@ function basicDetailsHtml({ name = "—", phone = "—", age, height, weight, bm
 </section>`;
 }
 
-// ---- Title slide after tailored (now 4th for weekly) ----
+// ---- Title slide after 2nd slide ----
 function nameTitleSlideHtml({ name = "Customer" }) {
   const raw = String(name || "").trim();
   const firstName = raw ? raw.split(/\s+/)[0] : "Customer";
@@ -338,7 +338,7 @@ ${mealTimeRaw
 </section>`;
 }
 
-// ---- Tailored Diet slide (NOW ALWAYS 3RD) ----
+// ---- Tailored Diet slide (NOW SECOND SLIDE) ----
 function tailoredDietHtml({ conditions = [], goals = [] }) {
   const rawCond = niceList(conditions);
   const condPhrase = rawCond ? `your ${rawCond}` : "your condition";
@@ -356,7 +356,7 @@ function tailoredDietHtml({ conditions = [], goals = [] }) {
 </section>`;
 }
 
-// ---- Dietitian Notes slide (ALWAYS LAST BEFORE IMAGE) ----
+// ---- Dietitian Notes slide ----
 function notesSlideHtml({ name = "You" }) {
   const bullets = [
     `Stay hydrated, ${name}. Aim for 2–3 litres of water throughout the day.`,
@@ -729,6 +729,7 @@ router.get("/diet-plan/:id", async (req, res) => {
           custName = lead.name || custName || "Customer";
           custPhone = lead.contactNumber || custPhone || "—";
 
+          // collect possible arrays from lead (top-level or in details)
           const lc =
             (Array.isArray(lead.conditions) && lead.conditions) ||
             (Array.isArray(leadDetails.conditions) && leadDetails.conditions) ||
@@ -772,17 +773,7 @@ router.get("/diet-plan/:id", async (req, res) => {
     }
     weeklyTimes = normalizeWeeklyTimes(weeklyTimes || {});
 
-    // ---- Decide conditions/goals BEFORE building pages (tailored is 3rd) ----
-    const planConds = cleanStringArray(
-      Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
-    );
-    const planGoals = cleanStringArray(
-      Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
-    );
-    const finalConditions = planConds.length ? planConds : leadConditions;
-    const finalGoals = planGoals.length ? planGoals : leadGoals;
-
-    // 6) Build pages
+    // 6) Build pages (Tailored Diet moved to SECOND position)
     const pages = [];
 
     // Slide 1: Cover — show "date | fullName"
@@ -793,7 +784,25 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
-    // Slide 2: Basic details
+    // Slide 2: Tailored Diet (moved up)
+    // Decide final conditions/goals (plan first, then lead)
+    const planConds = cleanStringArray(
+      Array.isArray(doc.conditions) ? doc.conditions : (doc.plan?.conditions || [])
+    );
+    const planGoals = cleanStringArray(
+      Array.isArray(doc.healthGoals) ? doc.healthGoals : (doc.plan?.healthGoals || [])
+    );
+    const finalConditions = planConds.length ? planConds : leadConditions;
+    const finalGoals = planGoals.length ? planGoals : leadGoals;
+
+    pages.push(
+      tailoredDietHtml({
+        conditions: finalConditions,
+        goals: finalGoals,
+      })
+    );
+
+    // Slide 3: Basic details
     pages.push(
       basicDetailsHtml({
         name: custName,
@@ -805,15 +814,7 @@ router.get("/diet-plan/:id", async (req, res) => {
       })
     );
 
-    // Slide 3: Tailored Diet (NOW FIXED HERE)
-    pages.push(
-      tailoredDietHtml({
-        conditions: finalConditions,
-        goals: finalGoals,
-      })
-    );
-
-    // Slide 4 (Weekly only): Title slide after tailored
+    // Slide 4 (optional): Title slide for Weekly (14-day) plans
     if (planType === "Weekly") {
       pages.push(nameTitleSlideHtml({ name: custName }));
     }
@@ -934,9 +935,19 @@ router.get("/diet-plan/:id", async (req, res) => {
           canvases.push(canvas);
         }
 
-        // Grouping plan stays generic; with tailored moved to #3,
-        // Page2 will now contain [2,3] = (Basic Details + Tailored)
-        const baseGroups = [[1],[2,3],[4,5,6],[7,8,9],[10,11,12],[13,14,15],[16,17]];
+        // NEW Grouping plan you requested:
+        // Page1: [1]
+        // Page2: [2]
+        // Page3: [3]
+        // Page4: [4,5,6,7]
+        // Page5: [8,9,10]
+        // Page6: [11,12,13]
+        // Page7: [14,15,16]
+        // Page8: [17,18]
+        // Page9: [19]
+        // Page10: [20]
+        // Remaining (if any): singles per page
+        const baseGroups = [[1],[2],[3],[4,5,6,7],[8,9,10],[11,12,13],[14,15,16],[17,18],[19],[20]];
         const groups = [];
 
         // Push only indices that exist
@@ -945,13 +956,13 @@ router.get("/diet-plan/:id", async (req, res) => {
           if (filtered.length) groups.push(filtered);
         });
 
-        // Add remaining singles
+        // Add remaining singles after 20 (or any not covered)
         const covered = new Set(groups.flat());
         for (let idx = 1; idx <= totalSlides; idx++){
           if (!covered.has(idx)) groups.push([idx]);
         }
 
-        // Helper to add one group (2–3 stacked, or single)
+        // Helper to add one group (stack into one PDF page)
         const addGroupToPdf = (indices, addNewPage) => {
           if (addNewPage) pdf.addPage('a4', 'p');
 
