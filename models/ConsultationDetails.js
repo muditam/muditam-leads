@@ -9,7 +9,7 @@ const ConsultationDetailsSchema = new mongoose.Schema(
     presales: { 
       hba1c: { type: String },
       lastTestDone: { type: String }, 
-      fastingSugar: { type: String },
+      fastingSugar: { type: String }, 
       ppSugar: { type: String }, 
       durationOfDiabetes: { type: String }, 
       gender: { type: String },

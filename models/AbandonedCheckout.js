@@ -13,7 +13,7 @@ const ItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
-const AbandonedCheckoutSchema = new mongoose.Schema(
+const AbandonedCheckoutSchema = new mongoose.Schema( 
   {
     eventId:    { type: String, index: true, unique: true, sparse: true },
     checkoutId: { type: String, index: true },
@@ -25,8 +25,20 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
       name:  String,
       email: String,
       phone: String,
-      state: String, // <-- NEW: store state for display & assignment
+      state: String, // store state for display & assignment
     },
+
+    // NEW: structured & text address for quick use
+    customerAddress: {
+      name: String,
+      line1: String,
+      line2: String,
+      city: String,
+      state: String,
+      postalCode: String,
+      country: String,
+    },
+    customerAddressText: String,
 
     items: [ItemSchema],
     itemCount: Number,
@@ -48,7 +60,7 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
     },
     assignedAt: Date,
 
-    raw: mongoose.Schema.Types.Mixed,
+    raw: mongoose.Schema.Types.Mixed, // keep raw for downstream parsing if needed
   },
   { timestamps: true }
 );
@@ -59,7 +71,7 @@ AbandonedCheckoutSchema.index({ "customer.phone": 1 });
 AbandonedCheckoutSchema.index({ "items.title": 1 });
 AbandonedCheckoutSchema.index({ "assignedExpert._id": 1 });
 
-// ✅ Helps the webhook fallback upsert when eventId is absent
+// Helps the webhook fallback upsert when eventId is absent
 AbandonedCheckoutSchema.index({ checkoutId: 1, eventAt: 1 });
 
 module.exports = mongoose.model("AbandonedCheckout", AbandonedCheckoutSchema);

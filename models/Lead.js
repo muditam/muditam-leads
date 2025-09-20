@@ -17,7 +17,7 @@ const LeadSchema = new mongoose.Schema({
   agentsRemarks: String,
   productsOrdered: [String],
   dosageOrdered: String,  
-  amountPaid: Number,
+  amountPaid: Number, 
   partialPayment: Number,
   modeOfPayment: String, 
   deliveryStatus: String, 

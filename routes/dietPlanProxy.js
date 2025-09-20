@@ -11,7 +11,7 @@ const Employee = require("../models/Employee"); // used to resolve fullName
 const BG_COVER =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Untitled_design_3_3.png?v=1757425422";
 const BG_DETAILS =
-  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/Group_1378.png?v=1757484801";
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/image_208.png?v=1758277841";
 const TAILORED_BG =
   "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/A4_-_23.png?v=1757681972";
 const NOTES_BG =
@@ -19,7 +19,7 @@ const NOTES_BG =
 
 // final extra image slide (after notes)
 const FINAL_IMAGE_URL =
-  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/A4_-_17.png?v=1757678833";
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/A4_-_17.png?v=1757678833"; 
 
 const MEALS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
 const MONTHLY_SLOTS = ["Breakfast", "Lunch", "Evening Snack", "Dinner"];
@@ -536,7 +536,7 @@ html,body{
 }
 .pin{
   position:absolute; width:55px; height:55px; top:-35px; left:50%;  
-  transform:translateX(-50%); border-radius:50%;
+  transform:translateX(-50%); border-radius:50%; 
   background:radial-gradient(circle at 35% 35%, #ffffff 0 35%, #dcdcdc 70%, #bdbdbd 100%);
   box-shadow:0 6px 12px rgba(0,0,0,.22);
 }
@@ -759,8 +759,8 @@ html,body{
 .slot-ribbon span::after{
   content:"";
   position:absolute; left:0; bottom:-6px;
-  border-width:6px 6px 0 0; border-style:solid; border-color:#D6A83E transparent transparent transparent;
-}
+  border-width:6px 6px 0 0; border-style:solid; border-color:#EEE2FF transparent transparent transparent;
+} 
 
 .slot-table{
   display: grid;
@@ -778,14 +778,14 @@ html,body{
 }
 .th + .th{ border-left:1px solid #d9d9d9; }
 .td{ padding:12px; }
-.time-col{ border-right:1px solid #d9d9d9; text-align: center; }
+.time-col{ border-right:1px solid #d9d9d9; display: flex; justify-content: center; }
 
 .timeblock{
   display:inline-flex; flex-direction:column; align-items:center; justify-content:center; 
   min-height:110px; white-space:pre-line; font-size:20px; color:#2b2b2b; 
 }
-.timeblock .tline{ line-height:1.35; } 
-.timeblock .tto{ font-size:12px; opacity:.8; margin:4px 0; }
+.timeblock .tline{ line-height:1.35; }  
+.timeblock .tto{ font-size:18px; opacity:.8; margin:4px 0; }
 
 .optrow{
   display:block; margin:6px 0; line-height:1.55; font-size:18px; color:#1e1e1e;
@@ -801,7 +801,7 @@ html,body{
 }
 `;
 
-// ---------- ROUTE ----------
+// ---------- ROUTE ---------- 
 router.get("/diet-plan/:id", async (req, res) => {
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });

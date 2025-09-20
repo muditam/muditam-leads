@@ -5,6 +5,7 @@ const AbandonedCheckout = require("../models/AbandonedCheckout");
 const Employee = require("../models/Employee");
 const Customer = require("../models/Customer");
 const Lead = require("../models/Lead");
+const ConsultationDetails = require("../models/ConsultationDetails"); // NEW
 
 const router = express.Router();
 
@@ -104,6 +105,63 @@ function escapeRegex(s = "") {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/* ---------- Address helpers (NEW) ---------- */
+function buildAddressStringFromAb(ab) {
+  // Prefer the normalized one-liner first
+  if (ab?.customerAddressText) return String(ab.customerAddressText).trim();
+
+  // Or rebuild from structured parts
+  const p = ab?.customerAddress || {};
+  const parts = [p.name, p.line1, p.line2, p.city, p.state, p.postalCode, p.country]
+    .map((x) => (x || "").toString().trim())
+    .filter(Boolean);
+  if (parts.length) return parts.join(", ");
+
+  // Fallback on raw payload (shipping/billing/address)
+  const r = ab?.raw || {};
+  const addr = r.shipping_address || r.billing_address || r.address || {};
+  const alt = [
+    addr.name,
+    addr.address1,
+    addr.address2,
+    addr.city,
+    addr.state || addr.province || ab?.customer?.state,
+    addr.zip || addr.postal_code,
+    addr.country,
+  ]
+    .map((x) => (x || "").toString().trim())
+    .filter(Boolean)
+    .join(", ");
+
+  return alt;
+}
+
+async function appendAddressNote(customerId, addressText) {
+  if (!customerId || !addressText) return;
+
+  // Upsert ConsultationDetails and append a single "Address: ..." line (idempotent)
+  const doc = await ConsultationDetails.findOne({ customerId });
+  const prefix = "Address:";
+  const line = `${prefix} ${addressText}`;
+
+  if (!doc) {
+    await ConsultationDetails.create({
+      customerId,
+      presales: { notes: line },
+    });
+    return;
+  }
+
+  const current = (doc.presales?.notes || "").trim();
+  if (current.includes(addressText)) return; // avoid duplicates
+
+  const newNotes = current ? `${current}\n${line}` : line;
+  await ConsultationDetails.updateOne(
+    { _id: doc._id },
+    { $set: { "presales.notes": newNotes } }
+  );
+}
+
 /* -------- GET /api/abandoned -------- */
 router.get("/", async (req, res) => {
   try {
@@ -113,9 +171,9 @@ router.get("/", async (req, res) => {
       end = "",
       page = 1,
       limit = 50,
-      assigned = "",       // 'assigned' | 'unassigned'
-      expertId = "",       // ObjectId of Employee
-      expertEmail = "",    // fallback: filter by email
+      assigned = "", // 'assigned' | 'unassigned'
+      expertId = "", // ObjectId of Employee
+      expertEmail = "", // fallback: filter by email
     } = req.query;
 
     const q = {};
@@ -214,6 +272,19 @@ router.post("/:id/assign-expert", async (req, res) => {
         }
       );
 
+      // NEW: Append address into ConsultationDetails for the matched customer (by phone)
+      const n10 = normalizePhoneTo10(phone);
+      const foundCustomer = await Customer.findOne({
+        phone: { $regex: `${n10}$` },
+      })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean();
+
+      const addressText = buildAddressStringFromAb(ab);
+      if (foundCustomer && addressText) {
+        await appendAddressNote(foundCustomer._id, addressText);
+      }
+
       return res.json({
         ok: true,
         assignedAt: new Date().toISOString(),
@@ -229,14 +300,15 @@ router.post("/:id/assign-expert", async (req, res) => {
     }
 
     // otherwise, assign to posted expert + create a Customer
-    const firstItemTitle = Array.isArray(ab.items) && ab.items.length ? ab.items[0].title : "";
+    const firstItemTitle =
+      Array.isArray(ab.items) && ab.items.length ? ab.items[0].title : "";
     const lookingFor = mapLookingForFromTitle(firstItemTitle);
 
     const customerDoc = new Customer({
       name: ab.customer?.name || "",
       phone: phone,
       age: 0,
-      location: ab.customer?.state || "", // <-- NEW: save STATE here
+      location: ab.customer?.state || "", // save STATE here
       lookingFor,
       assignedTo: postedExpert.fullName,
       followUpDate: new Date(),
@@ -259,6 +331,12 @@ router.post("/:id/assign-expert", async (req, res) => {
         },
       }
     );
+
+    // NEW: Append address for this new customer
+    const addressText = buildAddressStringFromAb(ab);
+    if (addressText) {
+      await appendAddressNote(customerDoc._id, addressText);
+    }
 
     return res.json({
       ok: true,

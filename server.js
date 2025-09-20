@@ -248,8 +248,30 @@ app.post(
           ) || undefined,
         email: pickFirst(cust.email, addr.email, shipping.email, billing.email),
         phone: pickFirst(cust.phone, addr.phone, shipping.phone, billing.phone),
-        state: stateName ? String(stateName) : undefined, // <-- NEW
+        state: stateName ? String(stateName) : undefined, // NEW
       };
+
+      // --- NEW: build structured address + single-line text
+      const addressParts = {
+        name: pickFirst(shipping.name, billing.name, addr.name, customer.name),
+        line1: pickFirst(shipping.address1, billing.address1, addr.address1),
+        line2: pickFirst(shipping.address2, billing.address2, addr.address2),
+        city: pickFirst(shipping.city, billing.city, addr.city),
+        state: customer.state,
+        postalCode: pickFirst(
+          shipping.zip, billing.zip, addr.zip,
+          shipping.postal_code, billing.postal_code, addr.postal_code
+        ),
+        country: pickFirst(shipping.country, billing.country, addr.country),
+      };
+
+      function compactAddressStr(p) {
+        return [p.name, p.line1, p.line2, p.city, p.state, p.postalCode, p.country]
+          .map(x => (x || "").toString().trim())
+          .filter(Boolean)
+          .join(", ");
+      }
+      const customerAddressText = compactAddressStr(addressParts);
 
       // Items
       const itemsSrc = Array.isArray(root.items) ? root.items : [];
@@ -298,6 +320,8 @@ app.post(
         orderId,
         type: "abandoned_checkout",
         customer,
+        customerAddress: addressParts,        // NEW
+        customerAddressText,                  // NEW
         items,
         itemCount: items.length,
         currency,
@@ -305,6 +329,7 @@ app.post(
         recoveryUrl: root.abc_url ? String(root.abc_url).trim() : undefined,
         eventAt,
         receivedAt: new Date(),
+        raw: root,                            // NEW: persist raw for downstream use
       };
 
       // Persist only abandoned
@@ -1684,7 +1709,7 @@ app.get("/api/leads/retention", async (req, res) => {
   } catch (err) {
     console.error("Retention API error:", err);
     res.status(500).json({ error: "Internal Server Error" });
-  }
+  } 
 });
 
 app.get('/api/leads/retentions', async (req, res) => {
@@ -1933,7 +1958,6 @@ app.get('/api/consultation-history', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
- 
 
 // Start Server
 app.listen(PORT, () => {
