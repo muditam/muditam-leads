@@ -7,7 +7,7 @@ const LeadSchema = new mongoose.Schema({
   contactNumber: String, 
   leadSource: String,    
   enquiryFor: String,  
-  customerType: String, 
+  customerType: String,  
   agentAssigned: String,
   productPitched: [String], 
   leadStatus: String,   
@@ -98,8 +98,7 @@ const LeadSchema = new mongoose.Schema({
       method: { type: String, enum: ["WhatsApp", "Call", "Both"] },  
       status: {
         type: String,
-        enum: [
-          "OC",
+        enum: [ 
           "CNP",
           "Followup Done",
           "Order Placed",

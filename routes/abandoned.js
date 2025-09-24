@@ -1,15 +1,14 @@
-// routes/abandoned.js
 const express = require("express");
 const mongoose = require("mongoose");
 const AbandonedCheckout = require("../models/AbandonedCheckout");
 const Employee = require("../models/Employee");
 const Customer = require("../models/Customer");
 const Lead = require("../models/Lead");
-const ConsultationDetails = require("../models/ConsultationDetails"); // NEW
+const ConsultationDetails = require("../models/ConsultationDetails");  
 
 const router = express.Router();
 
-/* helpers */
+/* -------------------- helpers -------------------- */
 function normalizePhoneTo10(phone) {
   if (!phone) return "";
   const digits = String(phone).replace(/\D/g, "");
@@ -95,29 +94,82 @@ async function autoAssignUnassignedMatching(filter, limit = 100) {
   }
   return updated;
 }
-function mapLookingForFromTitle(title = "") {
-  const t = String(title).toLowerCase();
-  if (/karela\s*jamun\s*fizz/.test(t)) return "Diabetes";
-  if (/liver\s*fix/.test(t)) return "Fatty Liver";
-  return "Others";
-}
 function escapeRegex(s = "") {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/* ---------- Address helpers (NEW) ---------- */
-function buildAddressStringFromAb(ab) {
-  // Prefer the normalized one-liner first
-  if (ab?.customerAddressText) return String(ab.customerAddressText).trim();
+/* ---------- Money & cart helpers (NEW) ---------- */
+function formatMoneyMinor(minor, currency = "INR") {
+  if (typeof minor !== "number") return "";
+  const n = minor / 100;
+  return `${currency} ${n.toFixed(2)}`;
+}
+function productCodeFromTitle(title = "") {
+  const t = String(title).trim();
+  const tl = t.toLowerCase();
 
-  // Or rebuild from structured parts
+  // Preferred explicit mappings
+  if (/karela\s*jamun\s*fizz/i.test(tl)) return "KJF";
+  if (/liver\s*defend\s*pro/i.test(tl)) return "LDP";
+  if (/liver\s*fix/i.test(tl)) return "LF";
+  if (/nerve\s*fix/i.test(tl)) return "NF";
+  if (/omega\s*fuel/i.test(tl)) return "OF";
+  if (/core\s*essentials/i.test(tl)) return "CE";
+  if (/sugar\s*defend\s*pro/i.test(tl)) return "SDP";
+  if (/performance\s*forever/i.test(tl)) return "PF";
+  if (/power\s*gut/i.test(tl)) return "PG";
+  if (/Chandraprabha\s*Vati/i.test(tl)) return "CPV";
+  if (/Vasant\s*Kusmakar\s*Ras/i.test(tl)) return "VKR";
+  if (/Heart\s*Defend\s*Pro/i.test(tl)) return "HDP";
+  if (/Shilajit\s*with\s*Gold/i.test(tl)) return "SWG";
+
+  // Fallback: initials of up to first 3 words
+  const words = t.split(/\s+/).filter(Boolean);
+  const initials = words.slice(0, 3).map(w => w[0].toUpperCase()).join("");
+  return initials || "ITEM";
+}
+function buildCartSummary(ab) {
+  const items = Array.isArray(ab?.items) ? ab.items : [];
+  if (!items.length) return "";
+
+  const parts = items.map(it => {
+    const code = productCodeFromTitle(it.title || "");
+    const qty = it?.quantity ?? 1;
+    const lineMinor = (typeof it?.finalLinePrice === "number")
+      ? it.finalLinePrice
+      : (typeof it?.unitPrice === "number" ? it.unitPrice * qty : 0);
+    const price = formatMoneyMinor(lineMinor, ab?.currency || "INR");
+    return `${code} x${qty} (${price})`;
+  });
+
+  const totalStr = typeof ab?.total === "number"
+    ? formatMoneyMinor(ab.total, ab?.currency || "INR")
+    : "";
+
+  return { itemsStr: parts.join(", "), totalStr };
+}
+
+/* ---------- Address helpers (REWORKED) ---------- */
+function tidyOneLine(str = "") {
+  return String(str)
+    .replace(/\s*,\s*,+/g, ", ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/,\s*$/, "")
+    .trim();
+}
+
+function buildAddressStringFromAb(ab) {
+  // Prefer normalized one-liner if present
+  if (ab?.customerAddressText) return tidyOneLine(String(ab.customerAddressText));
+
+  // Try structured object (from webhook normalization)
   const p = ab?.customerAddress || {};
   const parts = [p.name, p.line1, p.line2, p.city, p.state, p.postalCode, p.country]
     .map((x) => (x || "").toString().trim())
     .filter(Boolean);
-  if (parts.length) return parts.join(", ");
+  if (parts.length) return tidyOneLine(parts.join(", "));
 
-  // Fallback on raw payload (shipping/billing/address)
+  // Fallback from raw payload shapes
   const r = ab?.raw || {};
   const addr = r.shipping_address || r.billing_address || r.address || {};
   const alt = [
@@ -133,17 +185,32 @@ function buildAddressStringFromAb(ab) {
     .filter(Boolean)
     .join(", ");
 
-  return alt;
+  return tidyOneLine(alt);
 }
 
-async function appendAddressNote(customerId, addressText) {
-  if (!customerId || !addressText) return;
+/**
+ * Append a single consolidated line to presales.notes:
+ * "Address: <full> | Cart: <KJF x1 (INR 999.00), LDP x1 (...)> | Total: INR 1998.00"
+ * - Idempotent: won't duplicate if same line already exists.
+ */
+async function appendAddressAndCartNote(customerId, ab) {
+  if (!customerId || !ab) return;
 
-  // Upsert ConsultationDetails and append a single "Address: ..." line (idempotent)
+  const address = buildAddressStringFromAb(ab);
+  const { itemsStr, totalStr } = buildCartSummary(ab);
+
+  // If there's nothing meaningful, skip
+  if (!address && !itemsStr && !totalStr) return;
+
+  // Compose single line
+  const lineParts = [];
+  if (address) lineParts.push(`Address: ${address}`);
+  if (itemsStr) lineParts.push(`Cart: ${itemsStr}`);
+  if (totalStr) lineParts.push(`Total: ${totalStr}`);
+  const line = lineParts.join(" | ");
+
+  // Upsert ConsultationDetails and append idempotently
   const doc = await ConsultationDetails.findOne({ customerId });
-  const prefix = "Address:";
-  const line = `${prefix} ${addressText}`;
-
   if (!doc) {
     await ConsultationDetails.create({
       customerId,
@@ -153,7 +220,8 @@ async function appendAddressNote(customerId, addressText) {
   }
 
   const current = (doc.presales?.notes || "").trim();
-  if (current.includes(addressText)) return; // avoid duplicates
+  // Idempotency check: exact line already present
+  if (current.split("\n").some((l) => tidyOneLine(l) === tidyOneLine(line))) return;
 
   const newNotes = current ? `${current}\n${line}` : line;
   await ConsultationDetails.updateOne(
@@ -162,7 +230,7 @@ async function appendAddressNote(customerId, addressText) {
   );
 }
 
-/* -------- GET /api/abandoned -------- */
+/* -------------------- GET /api/abandoned -------------------- */
 router.get("/", async (req, res) => {
   try {
     const {
@@ -234,7 +302,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-/* -------- POST /api/abandoned/:id/assign-expert -------- */
+/* -------------------- POST /api/abandoned/:id/assign-expert -------------------- */
 router.post("/:id/assign-expert", async (req, res) => {
   try {
     const { id } = req.params;
@@ -272,7 +340,7 @@ router.post("/:id/assign-expert", async (req, res) => {
         }
       );
 
-      // NEW: Append address into ConsultationDetails for the matched customer (by phone)
+      // Append consolidated Address + Cart note to the matched customer
       const n10 = normalizePhoneTo10(phone);
       const foundCustomer = await Customer.findOne({
         phone: { $regex: `${n10}$` },
@@ -280,9 +348,8 @@ router.post("/:id/assign-expert", async (req, res) => {
         .sort({ updatedAt: -1, createdAt: -1 })
         .lean();
 
-      const addressText = buildAddressStringFromAb(ab);
-      if (foundCustomer && addressText) {
-        await appendAddressNote(foundCustomer._id, addressText);
+      if (foundCustomer) {
+        await appendAddressAndCartNote(foundCustomer._id, ab);
       }
 
       return res.json({
@@ -302,7 +369,13 @@ router.post("/:id/assign-expert", async (req, res) => {
     // otherwise, assign to posted expert + create a Customer
     const firstItemTitle =
       Array.isArray(ab.items) && ab.items.length ? ab.items[0].title : "";
-    const lookingFor = mapLookingForFromTitle(firstItemTitle);
+    // You may still use your lookingFor mapper if you like
+    const lookingFor = (() => {
+      const t = String(firstItemTitle).toLowerCase();
+      if (/karela\s*jamun\s*fizz/.test(t)) return "Diabetes";
+      if (/liver\s*fix/.test(t)) return "Fatty Liver";
+      return "Others";
+    })();
 
     const customerDoc = new Customer({
       name: ab.customer?.name || "",
@@ -332,11 +405,8 @@ router.post("/:id/assign-expert", async (req, res) => {
       }
     );
 
-    // NEW: Append address for this new customer
-    const addressText = buildAddressStringFromAb(ab);
-    if (addressText) {
-      await appendAddressNote(customerDoc._id, addressText);
-    }
+    // Append consolidated Address + Cart note for the NEW customer
+    await appendAddressAndCartNote(customerDoc._id, ab);
 
     return res.json({
       ok: true,

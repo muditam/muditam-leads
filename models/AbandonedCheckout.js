@@ -19,12 +19,12 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
     checkoutId: { type: String, index: true },
     orderId:    { type: String, index: true },
 
-    type: { type: String, default: "abandoned_checkout", index: true },
+    type: { type: String, default: "abandoned_checkout", index: true }, 
 
-    customer: {
+    customer: {  
       name:  String,
       email: String,
-      phone: String,
+      phone: String, 
       state: String, // store state for display & assignment
     },
 

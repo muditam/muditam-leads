@@ -266,10 +266,11 @@ router.post('/api/retention-sales/update-matching', async (req, res) => {
 
 router.get('/api/retention-sales/aggregated', async (req, res) => {
   const { startDate, endDate } = req.query;
-  try {
-    
-    const retentionMatch = buildDateMatch(startDate, endDate); 
 
+  try {
+    const retentionMatch = buildDateMatch(startDate, endDate);
+
+    // Build match for MyOrder by orderDate
     let myOrderMatch = {};
     if (startDate || endDate) {
       myOrderMatch.orderDate = {};
@@ -282,14 +283,17 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
         myOrderMatch.orderDate.$lte = endDateObj;
       }
     }
- 
+
     const aggregatedData = await RetentionSales.aggregate([
+      // ----- RetentionSales branch -----
       { $match: retentionMatch },
       {
         $project: {
           orderCreatedBy: 1,
           salesDone: { $literal: 1 },
-          amountPaid: { $toDouble: { $ifNull: ["$amountPaid", 0] } }
+          amountPaid: {
+            $convert: { input: "$amountPaid", to: "double", onError: 0, onNull: 0 }
+          }
         }
       },
       {
@@ -305,27 +309,98 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
           salesDone: "$retentionSalesDone",
           totalSales: "$retentionTotalSales"
         }
-      }, 
-      { 
+      },
+
+      // ----- MyOrder branch via $unionWith -----
+      {
         $unionWith: {
-          coll: "myorders", // The collection name for MyOrder documents (Mongoose pluralizes it)
+          coll: "myorders", // collection for MyOrder
           pipeline: [
             { $match: myOrderMatch },
+
+            // Step 1: compute base amount (upsellAmount if > 0 else totalPrice)
             {
-              $project: {
-                agentName: "$agentName",
-                // Determine the effective "amountPaid":
-                // Use upsellAmount if greater than zero; otherwise use totalPrice.
-                salesDone: { $literal: 1 },
-                amountPaid: {
+              $addFields: {
+                _upsellAmt: {
+                  $convert: { input: "$upsellAmount", to: "double", onError: 0, onNull: 0 }
+                },
+                _totalPrice: {
+                  $convert: { input: "$totalPrice", to: "double", onError: 0, onNull: 0 }
+                }
+              }
+            },
+            {
+              $addFields: {
+                _baseAmount: {
                   $cond: [
-                    { $gt: ["$upsellAmount", 0] },
-                    { $toDouble: "$upsellAmount" },
-                    { $toDouble: "$totalPrice" }
+                    { $gt: ["$_upsellAmt", 0] },
+                    "$_upsellAmt",
+                    "$_totalPrice"
                   ]
                 }
               }
             },
+
+            // Step 2: robust partial payments sum
+            // Supports:
+            //  - partialPayment as array of numbers/strings or objects with amount/value
+            //  - partialPayment as single number/string
+            //  - fallback to partialPayments (plural) if partialPayment missing
+            {
+              $addFields: {
+                _partialRaw: { $ifNull: ["$partialPayment", "$partialPayments"] }
+              }
+            },
+            {
+              $addFields: {
+                _partialPaymentsSum: {
+                  $cond: [
+                    { $isArray: "$_partialRaw" },
+                    {
+                      $sum: {
+                        $map: {
+                          input: "$_partialRaw",
+                          as: "pp",
+                          in: {
+                            $convert: {
+                              input: {
+                                $ifNull: [
+                                  { $ifNull: ["$$pp.amount", "$$pp.value"] },
+                                  "$$pp" // the element itself if already number/string
+                                ]
+                              },
+                              to: "double",
+                              onError: 0,
+                              onNull: 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    // Not an array → treat as single scalar (or 0)
+                    {
+                      $convert: {
+                        input: { $ifNull: ["$_partialRaw", 0] },
+                        to: "double",
+                        onError: 0,
+                        onNull: 0
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+
+            // Step 3: final projection for MyOrder
+            {
+              $project: {
+                agentName: "$agentName",
+                salesDone: { $literal: 1 },
+                amountPaid: { $add: ["$_baseAmount", "$_partialPaymentsSum"] }
+              }
+            },
+
+            // Step 4: group by agentName
             {
               $group: {
                 _id: "$agentName",
@@ -343,7 +418,8 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
           ]
         }
       },
-      // Now merge the two sets of results by grouping again on agentName.
+
+      // ----- Merge RetentionSales + MyOrder -----
       {
         $group: {
           _id: "$agentName",
@@ -366,12 +442,14 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
         }
       }
     ]);
+
     res.status(200).json(aggregatedData);
   } catch (error) {
     console.error("Error aggregating sales:", error);
-    res.status(500).json({ message: "Error aggregating sales", error: error.message }); 
+    res.status(500).json({ message: "Error aggregating sales", error: error.message });
   }
 });
+ 
 
 // Helper to convert Date to YYYY-MM-DD in IST
 function toISODate(d) {

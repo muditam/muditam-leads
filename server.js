@@ -91,13 +91,15 @@ const cohartDataApiRouter = require("./routes/cohart-dataApi");
 
 const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders"); 
 
-const shopifyOrdersTable = require("./routes/shopifyOrdersTable")
+const shopifyOrdersTable = require("./routes/shopifyOrdersTable");
+
+const leadsMigration = require('./routes/leadMigration'); 
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-app.use(
-  compression({
+app.use( 
+  compression({  
     filter: (req, res) => {
       // absolutely never compress SSE
       if (req.path === '/api/sse') return false;
@@ -166,7 +168,7 @@ function hashId(buf) {
   catch { return undefined; }
 }
 
-// --- IMPORTANT: ensure this route is registered BEFORE any global app.use(express.json()) ---
+// ----------------- UPDATED WEBHOOK ROUTE -----------------
 app.post(
   "/api/webhook",
   bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
@@ -226,16 +228,31 @@ app.post(
       const checkoutId = pickFirst(root.token, root.checkout_id, root.cart_id, root.checkout_token);
       const orderId = pickFirst(root.order_id, root.orderId);
 
-      // Customer (with STATE)
-      const cust = root.customer || {};
+      // ---------------- Customer (broadened fallbacks) ----------------
+      const cust = root.customer || root.customer_details || {};
       const addr = root.address || {};
-      const shipping = root.shipping_address || {};
-      const billing = root.billing_address || {};
+      const shipping = root.shipping_address || root.shipping || {};
+      const billing = root.billing_address || root.billing || {};
+
       const stateName = pickFirst(
         cust.state, cust.province, cust.region,
         addr.state, addr.province, addr.region,
         shipping.state, shipping.province, shipping.region,
-        billing.state, billing.province, billing.region
+        billing.state, billing.province, billing.region,
+        root.state, root.province, root.region
+      );
+
+      // Broad email fallbacks
+      const email = pickFirst(
+        cust.email, addr.email, shipping.email, billing.email,
+        root.email, root.customer_email, root.contact_email, root.user_email
+      );
+
+      // Broad phone fallbacks (to capture phone-only payloads)
+      const phone = pickFirst(
+        cust.phone, addr.phone, shipping.phone, billing.phone,
+        root.phone, root.mobile, root.mobile_number, root.contact, root.contact_number,
+        root.whatsapp, root.whatsapp_number, root.customer_phone, root.user_phone
       );
 
       const customer = {
@@ -244,25 +261,27 @@ app.post(
             [cust.firstname, cust.lastname].filter(Boolean).join(" ").trim(),
             (addr.firstname || addr.lastname)
               ? [addr.firstname, addr.lastname].filter(Boolean).join(" ").trim()
-              : undefined
+              : undefined,
+            cust.name, addr.name, shipping.name, billing.name, root.name
           ) || undefined,
-        email: pickFirst(cust.email, addr.email, shipping.email, billing.email),
-        phone: pickFirst(cust.phone, addr.phone, shipping.phone, billing.phone),
-        state: stateName ? String(stateName) : undefined, // NEW
+        email: email || undefined,
+        phone: phone || undefined,
+        state: stateName ? String(stateName) : undefined, // store state for display & assignment
       };
 
-      // --- NEW: build structured address + single-line text
+      // --- Structured address + single-line text (broadened fallbacks) ---
       const addressParts = {
-        name: pickFirst(shipping.name, billing.name, addr.name, customer.name),
-        line1: pickFirst(shipping.address1, billing.address1, addr.address1),
-        line2: pickFirst(shipping.address2, billing.address2, addr.address2),
-        city: pickFirst(shipping.city, billing.city, addr.city),
+        name: pickFirst(shipping.name, billing.name, addr.name, customer.name, root.name),
+        line1: pickFirst(shipping.address1, billing.address1, addr.address1, root.address1, root.addr1),
+        line2: pickFirst(shipping.address2, billing.address2, addr.address2, root.address2, root.addr2),
+        city: pickFirst(shipping.city, billing.city, addr.city, root.city),
         state: customer.state,
         postalCode: pickFirst(
           shipping.zip, billing.zip, addr.zip,
-          shipping.postal_code, billing.postal_code, addr.postal_code
+          shipping.postal_code, billing.postal_code, addr.postal_code,
+          root.zip, root.postal_code, root.pincode, root.pin_code
         ),
-        country: pickFirst(shipping.country, billing.country, addr.country),
+        country: pickFirst(shipping.country, billing.country, addr.country, root.country),
       };
 
       function compactAddressStr(p) {
@@ -273,8 +292,10 @@ app.post(
       }
       const customerAddressText = compactAddressStr(addressParts);
 
-      // Items
-      const itemsSrc = Array.isArray(root.items) ? root.items : [];
+      // ---------------- Items (safe when missing; also support line_items) ----------------
+      const itemsSrc = Array.isArray(root.items)
+        ? root.items
+        : (Array.isArray(root.line_items) ? root.line_items : []);
       const items = itemsSrc.map((it) => {
         const qty = Number(pickFirst(it.quantity, it.qty, 1)) || 1;
         const unitMinor = toNumberLoose(pickFirst(it.final_price, it.price, it.original_price)) ?? 0;
@@ -289,12 +310,12 @@ app.post(
           title: it.title || it.product_title || it.name || "",
           variantTitle,
           quantity: qty,
-          unitPrice: unitMinor,
-          finalLinePrice: lineMinor,
+          unitPrice: unitMinor,      // minor units
+          finalLinePrice: lineMinor, // minor units
         };
       });
 
-      // Currency & totals (prefer minor; convert major when needed)
+      // ---------------- Currency & totals (prefer minor; convert major when needed) ----------------
       const currency = pickFirst(root.currency, "INR");
       const totalMinor =
         toNumberLoose(root.total_price) !== undefined
@@ -306,22 +327,22 @@ app.post(
             0
           );
 
-      // Event time
+      // ---------------- Event time ----------------
       const eventAt =
         (root.created_at && new Date(root.created_at)) ||
         (root.updated_at && new Date(root.updated_at)) ||
         (event.timestamp && new Date(event.timestamp)) ||
         new Date();
 
-      // Normalized doc (only fields the frontend needs)
+      // ---------------- Normalized doc ----------------
       const normalized = {
         eventId,
         checkoutId,
         orderId,
         type: "abandoned_checkout",
         customer,
-        customerAddress: addressParts,        // NEW
-        customerAddressText,                  // NEW
+        customerAddress: addressParts,
+        customerAddressText,
         items,
         itemCount: items.length,
         currency,
@@ -329,15 +350,19 @@ app.post(
         recoveryUrl: root.abc_url ? String(root.abc_url).trim() : undefined,
         eventAt,
         receivedAt: new Date(),
-        raw: root,                            // NEW: persist raw for downstream use
+        raw: root, // persist raw for downstream use
+        // Optional helper for UI/analytics: quickly spot “phone-only” rows
+        meta: {
+          phoneOnly: Boolean(customer.phone) && !customer.name && !customer.email, 
+        },
       };
 
-      // Persist only abandoned
+      // ---------------- Persist only abandoned ----------------
       const abandoned = isAbandoned(root, typeText);
       if (abandoned) {
         const query = normalized.eventId
           ? { eventId: normalized.eventId }
-          : { checkoutId: normalized.checkoutId, eventAt: normalized.eventAt };
+          : { checkoutId: normalized.checkoutId, eventAt: normalized.eventAt }; 
         await AbandonedCheckout.findOneAndUpdate(
           query,
           { $setOnInsert: normalized },
@@ -352,7 +377,6 @@ app.post(
     }
   }
 );
-
 
 const sseClients = new Map(); // key -> Set(res)
 
@@ -512,7 +536,9 @@ app.use("/cohart-dataApi", cohartDataApiRouter);
 
 app.use("/api", allProductsFromOrdersRoute);
 
-app.use("/api", shopifyOrdersTable);
+app.use("/api", shopifyOrdersTable); 
+
+app.use('/api/lead-migration', leadsMigration);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
