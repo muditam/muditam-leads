@@ -109,37 +109,83 @@ router.post("/create-payment-link", async (req, res) => {
 });
 
 // GET /api/order-confirmations/list
-// Query: section=pending|confirmed, financial=pending|paid|any (default any), page, limit, q
-// NOTE: This endpoint now enriches each item with shipping info from `Order` (by order_id).
+// Query:
+//   tab=ALL|CNP|ORDER_CONFIRMED|CALL_BACK_LATER|CANCEL_ORDER   (preferred)
+//   page, limit, q
+// Backward-compat (if tab missing):
+//   section=pending|confirmed   (legacy)
+//
+// NOTE:
+// - Always restricts to financial_status: "pending" (as requested).
+// - Enriches items with shipping info from Order (matched by order_id = orderName without '#').
 router.get("/list", async (req, res) => {
   try {
     const {
-      section = "pending",
-      financial = "any",
+      tab,                    // preferred filtering by Shopify Notes / callStatus
+      section = "pending",    // legacy (used only if tab not provided)
       page = 1,
       limit = 20,
       q = "",
     } = req.query;
 
     const numericPage = Math.max(1, parseInt(page, 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const pageSize    = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
 
-    // Section filter
-    const sectionFilter =
-      section === "confirmed"
-        ? { "orderConfirmOps.callStatus": CallStatusEnum.ORDER_CONFIRMED }
-        : {
-            $or: [
-              { "orderConfirmOps.callStatus": { $exists: false } },
-              { "orderConfirmOps.callStatus": { $ne: CallStatusEnum.ORDER_CONFIRMED } },
-            ],
-          };
+    // --- Build filter ---
+    let baseFilter = {};
 
-    // Financial status filter
-    let financialFilter = {};
-    if (financial && financial !== "any") {
-      financialFilter = { financial_status: new RegExp(`^${financial}$`, "i") };
+    if (typeof tab === "string" && tab.trim()) {
+      const up = tab.trim().toUpperCase().replace(/\s+/g, "_");
+
+      // Map TAB → Shopify Notes label text (primary) and fallback to callStatus enum
+      const TAB_TO_LABEL = {
+        CNP: "CNP",
+        ORDER_CONFIRMED: "Order Confirmed",
+        CALL_BACK_LATER: "Call Back Later",
+        CANCEL_ORDER: "Cancel Order",
+      };
+
+      if (up === "ALL") {
+        // "All" = orders where Shopify Notes are NOT set (null/empty/missing)
+        baseFilter = {
+          $or: [
+            { "orderConfirmOps.shopifyNotes": { $exists: false } },
+            { "orderConfirmOps.shopifyNotes": { $in: [null, ""] } },
+          ],
+        };
+      } else if (TAB_TO_LABEL[up]) {
+        const targetLabel = TAB_TO_LABEL[up];
+        baseFilter = {
+          $or: [
+            { "orderConfirmOps.shopifyNotes": new RegExp(`^${targetLabel}$`, "i") },
+            { "orderConfirmOps.callStatus": up },
+          ],
+        };
+      } else {
+        // Unknown tab → default sensibly to CNP
+        baseFilter = {
+          $or: [
+            { "orderConfirmOps.shopifyNotes": new RegExp("^CNP$", "i") },
+            { "orderConfirmOps.callStatus": "CNP" },
+          ],
+        };
+      }
+    } else {
+      // ---------- Legacy behavior (kept for backward compatibility) ----------
+      const sectionFilter =
+        section === "confirmed"
+          ? { "orderConfirmOps.callStatus": CallStatusEnum.ORDER_CONFIRMED }
+          : {
+              $or: [
+                { "orderConfirmOps.callStatus": { $exists: false } },
+                { "orderConfirmOps.callStatus": { $ne: CallStatusEnum.ORDER_CONFIRMED } },
+              ],
+            };
+      baseFilter = { ...sectionFilter };
     }
+
+    // Always restrict to financial_status: pending (case-insensitive)
+    const financialFilter = { financial_status: /^pending$/i };
 
     // Lightweight keyword search
     const numericQ = q ? q.replace(/\D/g, "") : "";
@@ -158,7 +204,7 @@ router.get("/list", async (req, res) => {
         }
       : {};
 
-    const filter = { ...sectionFilter, ...financialFilter, ...textFilter };
+    const filter = { ...baseFilter, ...financialFilter, ...textFilter };
 
     const projection = {
       orderDate: 1,
@@ -201,11 +247,8 @@ router.get("/list", async (req, res) => {
       ShopifyOrder.countDocuments(filter),
     ]);
 
-    // ---- NEW: Enrich with shipping info from Order (order_id) ----
-    // Build list of order_ids (strip '#')
-    const orderIds = rawItems
-      .map((it) => stripHash(it.orderName))
-      .filter((v) => !!v);
+    // ---- Enrich with shipping info from Order (order_id = orderName without '#') ----
+    const orderIds = rawItems.map((it) => stripHash(it.orderName)).filter(Boolean);
 
     let shippingMap = {};
     if (orderIds.length) {
@@ -227,10 +270,8 @@ router.get("/list", async (req, res) => {
     const items = rawItems.map((it) => {
       const k = stripHash(it.orderName);
       const shipping = shippingMap[k] || null;
-      // attach under "shipping" key to avoid top-level collisions
-      return { ...it, shipping };
+      return { ...it, shipping }; // attach under "shipping" to avoid top-level collisions
     });
-    // -------------------------------------------------------------
 
     res.json({
       page: numericPage,
@@ -243,6 +284,7 @@ router.get("/list", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch orders" });
   }
 });
+
 
 // PATCH /api/order-confirmations/:id
 router.patch("/:id", async (req, res) => {
