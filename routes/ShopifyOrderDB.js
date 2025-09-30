@@ -428,8 +428,8 @@ if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
         console.error("[Cron] Shopify new-orders sync FAILED:", err?.response?.data || err);
       }
     },
-    { timezone: "Asia/Kolkata" }
+    { timezone: "Asia/Kolkata" } 
   );
 }
 
-module.exports = router;
+module.exports = router; 

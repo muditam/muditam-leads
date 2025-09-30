@@ -40,7 +40,7 @@ const DietPlanSchema = new mongoose.Schema(
       Snacks:    { type: String, default: "" },
       Dinner:    { type: String, default: "" },
     }, 
-
+ 
     // Monthly (options) body
     monthly: {
       Breakfast:      { type: MonthlySlotSchema, default: undefined },

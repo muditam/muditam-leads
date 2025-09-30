@@ -10,18 +10,18 @@ router.get("/api/employees", async (req, res) => {
       if (!employee) {
         return res.status(404).json({ message: "Employee not found" });
       }
-      const { async, agentNumber, callerId, target, hasTeam } = employee; 
-      return res.status(200).json([{ async, agentNumber, callerId, target, hasTeam }]);
+      const { async, agentNumber, callerId, target, hasTeam, isDoctor } = employee; 
+      return res.status(200).json([{ async, agentNumber, callerId, target, hasTeam, isDoctor }]);
     }
 
     const query = role ? { role } : {};
     const employees = await Employee.find(query)
-      .select("fullName email callerId agentNumber async role status target hasTeam teamMembers teamLeader joiningDate")
+      .select("fullName email callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate")
       .populate("teamLeader", "fullName");
 
     const formatted = employees.map(emp => ({
       ...emp.toObject(),
-      teamLeader: emp.teamLeader ? {
+      teamLeader: emp.teamLeader ? { 
         _id: emp.teamLeader._id,
         fullName: emp.teamLeader.fullName
       } : null,
@@ -74,6 +74,7 @@ router.post('/api/employees', async (req, res) => {
     password,
     target,
     hasTeam,
+    isDoctor,
     teamLeader,
     joiningDate
   } = req.body;
@@ -99,6 +100,7 @@ router.post('/api/employees', async (req, res) => {
       status: 'active',
       target: target !== undefined ? target : 0,
       hasTeam: !!hasTeam,
+      isDoctor: !!isDoctor,
       teamLeader: teamLeader || null,
       joiningDate: joiningDate || null,
     });
@@ -113,12 +115,13 @@ router.post('/api/employees', async (req, res) => {
 
 router.put('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
-  const { callerId, agentNumber, password, target, hasTeam, teamLeader, joiningDate, ...updateData } = req.body;
+  const { callerId, agentNumber, password, target, hasTeam, isDoctor, teamLeader, joiningDate, ...updateData } = req.body;
 
   try {
     if (password) updateData.password = password;
     if (target !== undefined) updateData.target = target;
     if (typeof hasTeam !== "undefined") updateData.hasTeam = hasTeam;
+    if (typeof isDoctor !== "undefined") updateData.isDoctor = isDoctor;
     if (teamLeader !== undefined) updateData.teamLeader = teamLeader;
     if (joiningDate) updateData.joiningDate = joiningDate;
 
@@ -181,4 +184,4 @@ router.put("/api/employees/:id/team", async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = router; 

@@ -15,7 +15,7 @@ const ProductSchema = new mongoose.Schema(
     sku: String,
     variant_id: Number,
     price: Number,
-    month: { type: String, default: "" },
+    month: { type: String, default: "" }, 
     cohort: { type: String, default: "" },
   },
   { _id: false }
@@ -35,10 +35,37 @@ const AddressSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// === Order Confirmation / Ops subdocument ===
+const OrderConfirmOpsSchema = new mongoose.Schema(
+  {
+    // Dropdown (labeled "Shopify Notes" in UI but stores call status enum)
+    callStatus: {
+      type: String,
+      enum: ["CNP", "ORDER_CONFIRMED", "CALL_BACK_LATER", "CANCEL_ORDER"], 
+      index: true,
+    },
+    callStatusUpdatedAt: { type: Date, default: null, index: true },
+
+    // Real Shopify notes we also push to Shopify order.note
+    shopifyNotes: { type: String, default: "" },
+
+    // Toggles & related fields
+    doctorCallNeeded: { type: Boolean, default: false },
+    dietPlanNeeded: { type: Boolean, default: false },
+    assignedExpert: { type: String, default: "" },
+
+    languageUsed: { type: String, default: "" },  
+
+    codToPrepaid: { type: Boolean, default: false },
+    paymentLink: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const ShopifyOrderSchema = new mongoose.Schema(
   {
-    orderId: { type: Number, unique: true, index: true },
-    orderName: String,
+    orderId: { type: Number, unique: true, index: true },  // Shopify numeric order ID
+    orderName: { type: String, index: true },               // e.g. "#1001"
 
     customerName: String,
 
@@ -58,20 +85,20 @@ const ShopifyOrderSchema = new mongoose.Schema(
     currency: String,
     financial_status: String,
     fulfillment_status: String,
-
-    // watermarks for sync logic 
+ 
     shopifyCreatedAt: Date,
     shopifyUpdatedAt: Date,
 
     cancelled_at: Date,
     cancel_reason: String,
+
+    // === Ops subdoc ===
+    orderConfirmOps: { type: OrderConfirmOpsSchema, default: () => ({}) },
   },
   { timestamps: true }
 );
-
-// Keep normalized fields consistent on any write
-ShopifyOrderSchema.pre("validate", function (next) {
-  // contactNumber & normalizedPhone
+ 
+ShopifyOrderSchema.pre("validate", function (next) { 
   if (this.contactNumber) {
     const ten = normalizePhone(this.contactNumber);
     this.contactNumber = ten;
@@ -82,15 +109,13 @@ ShopifyOrderSchema.pre("validate", function (next) {
   } else {
     this.normalizedPhone = "";
   }
-
-  // ensure nested address phone also normalized
+ 
   if (this.customerAddress && this.customerAddress.phone) {
     this.customerAddress.phone = normalizePhone(this.customerAddress.phone);
   }
   next();
 });
-
-// Helpful indexes
+ 
 ShopifyOrderSchema.index({ orderDate: -1, createdAt: -1 });
 ShopifyOrderSchema.index({ "customerAddress.province": 1 });
 ShopifyOrderSchema.index({ modeOfPayment: 1 });
@@ -98,6 +123,19 @@ ShopifyOrderSchema.index({ paymentGatewayNames: 1 });
 ShopifyOrderSchema.index({ orderName: 1 });
 ShopifyOrderSchema.index({ contactNumber: 1 });
 
-module.exports = mongoose.model("ShopifyOrder", ShopifyOrderSchema);
-// Optional: export normalizer for reuse in routes
+// Ops indexes
+ShopifyOrderSchema.index({ "orderConfirmOps.callStatus": 1, orderDate: -1 });
+ShopifyOrderSchema.index({ "orderConfirmOps.callStatusUpdatedAt": -1 }); 
+ShopifyOrderSchema.index(
+  { "orderConfirmOps.shopifyNotes": "text" },
+  {
+    default_language: "none",
+    language_override: "languageUsed", 
+  }
+);
+
+
+
+module.exports = mongoose.model("ShopifyOrder", ShopifyOrderSchema); 
+
 module.exports.normalizePhone = normalizePhone;

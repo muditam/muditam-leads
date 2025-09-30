@@ -85,21 +85,22 @@ const dietTemplatesRouter = require("./routes/dietTemplatesadmin");
 
 const dietPlansRouter = require("./routes/dietPlans");
 
-const ordersRouter = require("./routes/ShopifyOrderDB");
+const ordersRouter = require("./routes/ShopifyOrderDB"); 
 
 const cohartDataApiRouter = require("./routes/cohart-dataApi");
 
-const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders"); 
+const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders");
 
 const shopifyOrdersTable = require("./routes/shopifyOrdersTable");
 
 const leadsMigration = require('./routes/leadMigration'); 
+const orderConfirmationsRouter = require("./routes/orderConfirmations");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-app.use( 
-  compression({  
+app.use(
+  compression({
     filter: (req, res) => {
       // absolutely never compress SSE
       if (req.path === '/api/sse') return false;
@@ -131,7 +132,7 @@ app.use(cors({
 
 // tolerant number parser
 function toNumberLoose(v) {
-  if (v === null || v === undefined) return undefined; 
+  if (v === null || v === undefined) return undefined;
   if (typeof v === "number" && !Number.isNaN(v)) return v;
   if (typeof v === "string") {
     const cleaned = v.replace(/[^\d.\-]/g, "");
@@ -353,7 +354,7 @@ app.post(
         raw: root, // persist raw for downstream use
         // Optional helper for UI/analytics: quickly spot “phone-only” rows
         meta: {
-          phoneOnly: Boolean(customer.phone) && !customer.name && !customer.email, 
+          phoneOnly: Boolean(customer.phone) && !customer.name && !customer.email,
         },
       };
 
@@ -362,7 +363,7 @@ app.post(
       if (abandoned) {
         const query = normalized.eventId
           ? { eventId: normalized.eventId }
-          : { checkoutId: normalized.checkoutId, eventAt: normalized.eventAt }; 
+          : { checkoutId: normalized.checkoutId, eventAt: normalized.eventAt };
         await AbandonedCheckout.findOneAndUpdate(
           query,
           { $setOnInsert: normalized },
@@ -471,7 +472,7 @@ app.use('/api/escalations', escalationRoutes);
 app.use("/api/orders", orderRoutes);
 
 app.use(getActiveProductsRoute);
-
+ 
 app.use('/api/phonepe', phonepeRoutes);
 
 app.use('/api/myorders/download', downloadRoute);
@@ -536,9 +537,10 @@ app.use("/cohart-dataApi", cohartDataApiRouter);
 
 app.use("/api", allProductsFromOrdersRoute);
 
-app.use("/api", shopifyOrdersTable); 
+app.use("/api", shopifyOrdersTable);
 
-app.use('/api/lead-migration', leadsMigration);
+app.use('/api/lead-migration', leadsMigration); 
+app.use("/api/order-confirmations", orderConfirmationsRouter);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -560,13 +562,11 @@ app.get('/api/sse', (req, res) => {
   // Some runtimes benefit from this:
   req.socket?.setKeepAlive?.(true);
   req.socket?.setNoDelay?.(true);
-
-  // Flush headers immediately
+ 
   res.flushHeaders?.();
 
   addSseClient(String(did), res);
-
-  // heartbeat to prevent 55s idle router timeout
+ 
   const ping = setInterval(() => {
     try { res.write(':\n\n'); } catch { }
   }, 15000);
@@ -576,8 +576,7 @@ app.get('/api/sse', (req, res) => {
     removeSseClient(String(did), res);
     try { res.end(); } catch { }
   });
-
-  // initial message so the client sees it's open
+ 
   res.write(`data: ${JSON.stringify({ type: 'connected', did: String(did) })}\n\n`);
 });
 
@@ -588,33 +587,28 @@ const jsonParser = bodyParser.json();
 app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
   try {
     const p = req.body || {};
-
-    // Smartflo "Call Received on Server" variables
+ 
     const uuid = p.$uuid || p.uuid || p.$UUID || p.UUID;
     const callId = p.$call_id || p.call_id;
     const didRaw = p.$call_to_number || p.call_to_number;
     const callerRaw =
       p.$caller_id_number || p.caller_id_number ||
       p.$customer_no_with_prefix || p.customer_no_with_prefix || '';
-
-    // Normalize keys
+ 
     const didKeyStr = didKey(didRaw);
     const ani = String(callerRaw || '').replace(/\D/g, '').slice(-10);
-
-    // Optional logging to verify routing
+ 
     console.log("[CRM webhook] incoming call", {
       uuid, callId, didRaw, didKey: didKeyStr, ani
     });
-
-    // DB lookup by last-10
+ 
     let lead = null;
     if (ani) {
       lead = await Lead.findOne({
         contactNumber: { $regex: new RegExp(`${ani}$`) }
       }).select('_id name agentAssigned lastOrderDate');
     }
-
-    // Event for frontend
+ 
     const event = {
       type: 'incoming_call',
       callId: callId || uuid,
@@ -669,7 +663,7 @@ async function fetchAllOrders(url, accessToken, allOrders = []) {
       } else {
         console.warn(`Order ${order.id} is missing customer phone or address.`);
       }
- 
+
       const addr =
         order.shipping_address ||
         order.billing_address ||
@@ -1735,30 +1729,291 @@ app.get("/api/leads/retention", async (req, res) => {
   } catch (err) {
     console.error("Retention API error:", err);
     res.status(500).json({ error: "Internal Server Error" });
-  } 
+  }
 });
+
 
 app.get('/api/leads/retentions', async (req, res) => {
   const { fullName, email } = req.query;
-
   if (!fullName || !email) {
     return res.status(400).json({ message: 'Full name and email are required' });
   }
 
+  const IST_TZ = 'Asia/Kolkata';
+
+  // helpers (existing)
+  const startOfISTDay = (d = new Date()) => {
+    const ymd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: IST_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(d);
+    return new Date(`${ymd}T00:00:00+05:30`);
+  };
+  const shiftDaysIST = (date, days) => new Date(date.getTime() + days * 86400000);
+
+  const startTodayIST_UTC    = startOfISTDay();
+  const startTomorrowIST_UTC = shiftDaysIST(startTodayIST_UTC, 1);
+  const startDayAfterIST_UTC = shiftDaysIST(startTodayIST_UTC, 2);
+
+  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // 🔽 add a generic string->date expr builder so we can reuse for multiple fields
+  const strToDateExprFor = (field) => ({
+    $let: {
+      vars: { s: `$${field}` },
+      in: {
+        $switch: {
+          branches: [
+            {
+              case: { $regexMatch: { input: '$$s', regex: '^\\d{4}-\\d{2}-\\d{2}$' } },
+              then: { $dateFromString: { dateString: { $concat: ['$$s', 'T00:00:00+05:30'] } } }
+            },
+            {
+              case: { $regexMatch: { input: '$$s', regex: '^\\d{1,2}/\\d{1,2}/\\d{4}$' } },
+              then: { $dateFromString: { dateString: '$$s', format: '%d/%m/%Y', timezone: IST_TZ } }
+            },
+            {
+              case: { $regexMatch: { input: '$$s', regex: '^\\d{1,2}-\\d{1,2}-\\d{4}$' } },
+              then: { $dateFromString: { dateString: '$$s', format: '%d-%m-%Y', timezone: IST_TZ } }
+            },
+            {
+              case: { $regexMatch: { input: '$$s', regex: 'T\\d{2}:\\d{2}:\\d{2}' } },
+              then: { $dateFromString: { dateString: '$$s' } }
+            },
+          ],
+          default: { $dateFromString: { dateString: '9999-12-31T00:00:00+05:30' } }
+        }
+      }
+    }
+  });
+
+  // field-type helpers (parametrized)
+  const isDateField   = (field) => ({ [field]: { $type: 'date'   } });
+  const isStringField = (field) => ({ [field]: { $type: 'string' } });
+
+  const stringLT      = (field, b) => ({ $and: [ isStringField(field), { $expr: { $lt:  [strToDateExprFor(field), b] } } ] });
+  const stringGTE     = (field, b) => ({ $and: [ isStringField(field), { $expr: { $gte: [strToDateExprFor(field), b] } } ] });
+  const stringInRange = (field, g,l)=> ({ $and: [ isStringField(field), { $expr: { $and: [ { $gte: [strToDateExprFor(field), g] }, { $lt: [strToDateExprFor(field), l] } ] } } ] });
+  const dateLT        = (field, b) => ({ $and: [ isDateField(field),   { [field]: { $lt:  b } } ] });
+  const dateGTE       = (field, b) => ({ $and: [ isDateField(field),   { [field]: { $gte: b } } ] });
+  const dateInRange   = (field, g,l)=> ({ $and: [ isDateField(field),   { [field]: { $gte: g, $lt: l } } ] });
+
   try {
-    const leads = await Lead.find({
+    const {
+      page: pageRaw,
+      limit: limitRaw,
+      retentionStatus = 'All',
+      followupCategory,
+      search: searchRaw,
+      followupDate: followupDateStr,
+      serial: serialRaw,
+      // 🔽 NEW back-end filters
+      rowColor,               // exact match; pass "" for "No Color"
+      acquiredYear,           // YYYY
+      acquiredMonth,          // 1..12
+    } = req.query;
+
+    const page  = Math.max(parseInt(pageRaw ?? '1', 10), 1);
+    const limit = Math.min(Math.max(parseInt(limitRaw ?? '50', 10), 1), 500);
+
+    const serial = serialRaw != null && /^\d+$/.test(String(serialRaw))
+      ? Math.max(parseInt(String(serialRaw), 10) - 1, 0)
+      : null;
+
+    let skip = (page - 1) * limit;
+    if (serial != null) skip = serial;
+
+    // ====== Follow-up day bucket (existing) ======
+    const notsetCond   = { $or: [ { rtNextFollowupDate: { $exists: false } }, { rtNextFollowupDate: null }, { rtNextFollowupDate: '' } ] };
+    const missedCond   = { $or: [ dateLT('rtNextFollowupDate', startTodayIST_UTC), stringLT('rtNextFollowupDate', startTodayIST_UTC) ] };
+    const todayCond    = { $or: [ dateInRange('rtNextFollowupDate', startTodayIST_UTC, startTomorrowIST_UTC), stringInRange('rtNextFollowupDate', startTodayIST_UTC, startTomorrowIST_UTC) ] };
+    const tomorrowCond = { $or: [ dateInRange('rtNextFollowupDate', startTomorrowIST_UTC, startDayAfterIST_UTC), stringInRange('rtNextFollowupDate', startTomorrowIST_UTC, startDayAfterIST_UTC) ] };
+    const laterCond    = { $or: [ dateGTE('rtNextFollowupDate', startDayAfterIST_UTC), stringGTE('rtNextFollowupDate', startDayAfterIST_UTC) ] };
+
+    let followScope = null;
+    if (followupCategory) {
+      const cat = String(followupCategory).toLowerCase();
+      if (cat === 'notset')   followScope = notsetCond;
+      if (cat === 'missed')   followScope = missedCond;
+      if (cat === 'today')    followScope = todayCond;
+      if (cat === 'tomorrow') followScope = tomorrowCond;
+      if (cat === 'later')    followScope = laterCond;
+    }
+
+    // ====== Specific follow-up calendar day (existing) ======
+    let followupOnScope = null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(followupDateStr ?? '')) {
+      const dayStartIST = new Date(`${followupDateStr}T00:00:00+05:30`);
+      const nextDayIST  = new Date(dayStartIST.getTime() + 86400000);
+      followupOnScope = {
+        $or: [ dateInRange('rtNextFollowupDate', dayStartIST, nextDayIST), stringInRange('rtNextFollowupDate', dayStartIST, nextDayIST) ]
+      };
+    }
+
+    // ====== NEW: "Acquired In" month/year scope (by lastOrderDate) ======
+    let acquiredScope = null;
+    const y = acquiredYear && /^\d{4}$/.test(String(acquiredYear)) ? parseInt(acquiredYear, 10) : null;
+    const m = acquiredMonth && /^\d{1,2}$/.test(String(acquiredMonth)) ? Math.min(Math.max(parseInt(acquiredMonth,10),1),12) : null;
+
+    if (y && m) {
+      const monthStartIST = new Date(`${String(y)}-${String(m).padStart(2,'0')}-01T00:00:00+05:30`);
+      const monthEndIST   = new Date(new Date(monthStartIST).setMonth(monthStartIST.getMonth()+1));
+      acquiredScope = {
+        $or: [
+          dateInRange('lastOrderDate', monthStartIST, monthEndIST),
+          stringInRange('lastOrderDate', monthStartIST, monthEndIST),
+        ]
+      };
+    }
+
+    // ====== NEW: Row color filter ======
+    let colorScope = null;
+    if (rowColor !== undefined) {
+      // If you pass empty string "" => fetch docs where rowColor missing/blank
+      if (rowColor === '') {
+        colorScope = { $or: [ { rowColor: { $exists: false } }, { rowColor: '' }, { rowColor: null } ] };
+      } else {
+        colorScope = { rowColor: String(rowColor) };
+      }
+    }
+
+    // ====== Search (existing) ======
+    const search = (searchRaw ?? '').toString().trim();
+    let searchScope = null;
+    if (search) {
+      const safe = escapeRegex(search);
+      const isDigits = /^\d+$/.test(search);
+      if (isDigits && search.length >= 7) {
+        searchScope = { contactNumber: { $regex: safe } };
+      } else {
+        searchScope = {
+          $or: [
+            { name: { $regex: safe, $options: 'i' } },
+            { contactNumber: { $regex: safe } },
+          ],
+        };
+      }
+    }
+
+    // ====== Retention scope (existing) ======
+    const blankOrNullPieces = [
+      { retentionStatus: { $exists: false } },
+      { retentionStatus: null },
+      { retentionStatus: '' },
+    ];
+    const ACTIVE_REGEX = /^\s*active\s*$/i;
+    const LOST_REGEX   = /^\s*lost\s*$/i;
+
+    let retentionScope;
+    const rs = String(retentionStatus || 'All').toLowerCase();
+
+    if (rs === 'active') {
+      retentionScope = {
+        $and: [
+          { $or: [{ retentionStatus: ACTIVE_REGEX }, ...blankOrNullPieces] },
+          { $nor: [{ retentionStatus: LOST_REGEX }] },
+        ],
+      };
+    } else if (rs === 'lost') {
+      retentionScope = { retentionStatus: LOST_REGEX };
+    } else {
+      retentionScope = {
+        $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, ...blankOrNullPieces],
+      };
+    }
+
+    // ====== Common agent scope (existing) ======
+    const common = {
       healthExpertAssigned: { $in: [fullName, `${fullName} (${email})`] },
-      salesStatus: "Sales Done",
+      salesStatus: 'Sales Done',
+    };
+
+    // ====== Base query with NEW scopes added ======
+    const base = {
+      ...common,
+      $and: [
+        retentionScope,
+        ...(followScope     ? [followScope]     : []),
+        ...(followupOnScope ? [followupOnScope] : []),
+        ...(acquiredScope   ? [acquiredScope]   : []), // NEW
+        ...(colorScope      ? [colorScope]      : []), // NEW
+        ...(searchScope     ? [searchScope]     : []),
+      ],
+    };
+
+    const projection = {
+      name:1, contactNumber:1, retentionStatus:1, rtNextFollowupDate:1,
+      rtFollowupReminder:1, rtFollowupStatus:1, lastOrderDate:1, rowColor:1,
+      agentAssigned:1, preferredLanguage:1, communicationMethod:1, rtRemark:1,
+      reachoutLogs:1, rtSubcells:1,
+    };
+
+    const sort = { lastOrderDate: -1, _id: -1 };
+
+    const query = Lead.find(base, projection)
+      .read('secondaryPreferred')
+      .sort(sort).skip(skip).limit(limit)
+      .slice('reachoutLogs', -5)
+      .slice('rtSubcells', -1)
+      .lean();
+
+    // counts remain independent (as before)
+    const countsBase = { ...common };
+    const countsScope =
+      rs === 'active'
+        ? { $and: [{ $or: [{ retentionStatus: ACTIVE_REGEX }, ...blankOrNullPieces] }, { $nor: [{ retentionStatus: LOST_REGEX }] }] }
+        : rs === 'lost'
+          ? { retentionStatus: LOST_REGEX }
+          : { $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, ...blankOrNullPieces] };
+
+    const notsetCountQ   = { ...countsBase, ...countsScope, ...notsetCond };
+    const missedCountQ   = { ...countsBase, ...countsScope, ...missedCond };
+    const todayCountQ    = { ...countsBase, ...countsScope, ...todayCond };
+    const tomorrowCountQ = { ...countsBase, ...countsScope, ...tomorrowCond };
+    const laterCountQ    = { ...countsBase, ...countsScope, ...laterCond };
+
+    const totalAllQ    = { ...common, $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, ...blankOrNullPieces] };
+    const totalActiveQ = { ...common, $and: [{ $or: [{ retentionStatus: ACTIVE_REGEX }, ...blankOrNullPieces] }, { $nor: [{ retentionStatus: LOST_REGEX }] }] };
+    const totalLostQ   = { ...common, retentionStatus: LOST_REGEX };
+
+    const [
+      items, total,
+      cAll, cActive, cLost,
+      cNotset, cMissed,
+      cToday, cTomorrow, cLater
+    ] = await Promise.all([
+      query.exec(),
+      Lead.countDocuments(base),
+      Lead.countDocuments(totalAllQ),
+      Lead.countDocuments(totalActiveQ),
+      Lead.countDocuments(totalLostQ),
+      Lead.countDocuments(notsetCountQ),
+      Lead.countDocuments(missedCountQ),
+      Lead.countDocuments(todayCountQ),
+      Lead.countDocuments(tomorrowCountQ),
+      Lead.countDocuments(laterCountQ),
+    ]);
+
+    const effectiveSkip = skip;
+    const shown = Math.min(limit, Math.max(total - effectiveSkip, 0));
+    const hasMore = effectiveSkip + shown < total;
+
+    res.status(200).json({
+      items, total, page, limit,
+      serialStart: effectiveSkip + 1,
+      hasMore,
+      counts: {
+        all: cAll, active: cActive, lost: cLost,
+        followups: { notset: cNotset, missed: cMissed, today: cToday, tomorrow: cTomorrow, later: cLater },
+      },
     });
-    res.status(200).json(leads);
   } catch (error) {
     console.error('Error fetching retention leads:', error);
     res.status(500).json({ message: 'Error fetching retention leads', error });
   }
-});
+});  
 
 
-app.patch('/api/leads/:id/images', async (req, res) => {
+app.patch('/api/leads/:id/images', async (req, res) => { 
   const leadId = req.params.id;
   const { images } = req.body;
 

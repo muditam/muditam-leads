@@ -11,6 +11,7 @@ const EmployeeSchema = new mongoose.Schema({
   status: { type: String, default: "active" }, 
   target: { type: Number, default: 0 },
   hasTeam: { type: Boolean, default: false },
+  isDoctor: { type: Boolean, default: false },
   joiningDate: { type: Date, default: null },
   monthlyDeliveredSales: { type: mongoose.Schema.Types.Mixed, default: {} },
   totalDeliveredSales: { type: Number, default: 0 },

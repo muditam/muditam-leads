@@ -13,102 +13,165 @@ const normalizePhone = (p) => {
 
 router.get("/", async (req, res) => {
   const { agentAssignedName, page = 1, limit = 50 } = req.query;
-  const skip = (parseInt(page) - 1) * parseInt(limit);
+  const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
 
   try {
-    // 1. Fetch Leads with "Sales Done" and agent
+    // 1) Leads with salesStatus "Sales Done" (optionally agent filter)
     const leadQuery = { salesStatus: "Sales Done" };
     if (agentAssignedName) leadQuery.agentAssigned = agentAssignedName;
-
     const leads = await Lead.find(leadQuery).lean();
-    const totalLeads = leads.length;
 
-    // 2. Fetch Customers (currently unused, kept for potential future use)
+    // (kept: customers in case you need later)
     const customerQuery = {};
     if (agentAssignedName) customerQuery.assignedTo = agentAssignedName;
     const customers = await Customer.find(customerQuery).lean();
 
-    // 3. Fetch MyOrders with agent filter
-    const allMyOrders = await MyOrder.find({
-      agentName: { $regex: new RegExp(agentAssignedName, "i") },
-    }).lean();
+    // 2) MyOrders (apply agent filter only if provided)
+    const orderQuery = {};
+    if (agentAssignedName) {
+      orderQuery.agentName = { $regex: new RegExp(agentAssignedName, "i") };
+    }
+    const allMyOrders = await MyOrder.find(orderQuery).lean();
 
-    const myOrdersMap = {};
+    // 3) Build ordersByPhone => Array of orders (NOT single item)
+    const ordersByPhone = {};
     allMyOrders.forEach((order) => {
       const key = normalizePhone(order.phone);
-      if (key) myOrdersMap[key] = order;
+      if (!key) return;
+      if (!ordersByPhone[key]) ordersByPhone[key] = [];
+      ordersByPhone[key].push(order);
     });
 
-    // 4. Merge data
-    const seenPhones = new Set();
+    // Sort each phone's orders by orderDate DESC (latest first)
+    Object.values(ordersByPhone).forEach((arr) =>
+      arr.sort(
+        (a, b) =>
+          new Date(b.orderDate || 0).getTime() - new Date(a.orderDate || 0).getTime()
+      )
+    );
+
+    // 4) Merge
+    const seenOrderIds = new Set();
     const merged = [];
 
-    // Leads with MyOrders
-    leads.forEach((lead) => {
-      const phone = normalizePhone(lead.contactNumber); 
-      seenPhones.add(phone);
-      const order = myOrdersMap[phone];
+    // For each lead: if multiple orders on that phone, create one row per order.
+    // If no orders, still create a row for the lead (editable lead).
+    const seenPhones = new Set();
 
-      merged.push({
-        ...lead,
-        myOrderData: order
-          ? {
-              orderDate: order.orderDate,
-              productOrdered: order.productOrdered,
-              dosageOrdered: order.dosageOrdered,
-              totalPrice: order.totalPrice,
-              paymentMethod: order.paymentMethod,
-              partialPayment: order.partialPayment,
-              selfRemark: order.selfRemark,
+    leads.forEach((lead) => {
+      const phone = normalizePhone(lead.contactNumber);
+      seenPhones.add(phone);
+
+      const orders = phone && ordersByPhone[phone] ? ordersByPhone[phone] : [];
+
+      if (orders.length > 0) {
+        orders.forEach((order) => {
+          seenOrderIds.add(String(order._id));
+          merged.push({
+            // Keep lead id here so editing lead-fields uses lead id
+            _id: lead._id,
+            // Lead-like fields
+            name: lead.name || order.customerName || "",
+            contactNumber: lead.contactNumber || order.phone || "",
+            productsOrdered: lead.productsOrdered || (order.productOrdered ? [order.productOrdered] : []),
+            dosageOrdered: lead.dosageOrdered || order.dosageOrdered || "",
+            amountPaid: lead.amountPaid ?? order.totalPrice ?? "",
+            partialPayment: lead.partialPayment ?? order.partialPayment ?? 0,
+            modeOfPayment: lead.modeOfPayment || order.paymentMethod || "",
+            lastOrderDate: lead.lastOrderDate || order.orderDate || "",
+            salesStatus: lead.salesStatus || "Sales Done",
+            agentAssigned: lead.agentAssigned || order.agentName || "",
+            agentsRemarks: lead.agentsRemarks || order.selfRemark || "",
+            shipmentStatus: lead.shipmentStatus || "",
+
+            // Order payload, include the Mongo _id so FE can PUT to order directly
+            myOrderData: {
+              _id: order._id,
+              orderDate: order.orderDate || "",
+              productOrdered: order.productOrdered || "",
+              dosageOrdered: order.dosageOrdered || "",
+              totalPrice: order.totalPrice ?? "",
+              paymentMethod: order.paymentMethod || "",
+              partialPayment: order.partialPayment ?? 0,
+              selfRemark: order.selfRemark || "",
               orderId: order.orderId || "",
-              shipmentStatus: "",
-            }
-          : null,
-      });
+              shipmentStatus: order.shipmentStatus || "",
+            },
+          });
+        });
+      } else {
+        // No order yet; keep a pure lead row (editable lead)
+        merged.push({
+          _id: lead._id,
+          name: lead.name || "",
+          contactNumber: lead.contactNumber || "",
+          productsOrdered: lead.productsOrdered || [],
+          dosageOrdered: lead.dosageOrdered || "",
+          amountPaid: lead.amountPaid ?? "",
+          partialPayment: lead.partialPayment ?? 0,
+          modeOfPayment: lead.modeOfPayment || "",
+          lastOrderDate: lead.lastOrderDate || "",
+          salesStatus: lead.salesStatus || "Sales Done",
+          agentAssigned: lead.agentAssigned || "",
+          agentsRemarks: lead.agentsRemarks || "",
+          shipmentStatus: lead.shipmentStatus || "",
+          myOrderData: null,
+        });
+      }
     });
 
-    // MyOrders without matching leads
-    Object.keys(myOrdersMap).forEach((phone) => {
-      if (!seenPhones.has(phone)) {
-        seenPhones.add(phone);
-        const order = myOrdersMap[phone];
+    // 5) Add orders that have no matching lead (one row per order)
+    allMyOrders.forEach((order) => {
+      const phone = normalizePhone(order.phone);
+      const alreadyInLeadTable = phone && seenPhones.has(phone);
+      if (seenOrderIds.has(String(order._id))) return; // handled in loop above
+
+      if (!alreadyInLeadTable) {
         merged.push({
-          _id: order._id, // ✅ Critical fix: make sure we include a valid Mongo ObjectId
+          // IMPORTANT: use the order's id so edits target MyOrder
+          _id: order._id,
           name: order.customerName || "",
           contactNumber: order.phone || "",
-          productsOrdered: [order.productOrdered],
-          dosageOrdered: order.dosageOrdered,
-          amountPaid: order.totalPrice,
-          partialPayment: order.partialPayment || 0,  
-          modeOfPayment: order.paymentMethod,
-          lastOrderDate: order.orderDate,
+          productsOrdered: [order.productOrdered].filter(Boolean),
+          dosageOrdered: order.dosageOrdered || "",
+          amountPaid: order.totalPrice ?? "",
+          partialPayment: order.partialPayment ?? 0,
+          modeOfPayment: order.paymentMethod || "",
+          lastOrderDate: order.orderDate || "",
           salesStatus: "Sales Done",
-          agentAssigned: order.agentName,
+          agentAssigned: order.agentName || "",
           agentsRemarks: order.selfRemark || "",
+          shipmentStatus: order.shipmentStatus || "",
+
           myOrderData: {
-            orderDate: order.orderDate,
-            productOrdered: order.productOrdered,
-            dosageOrdered: order.dosageOrdered,
-            totalPrice: order.totalPrice,
-            paymentMethod: order.paymentMethod,
-            partialPayment: order.partialPayment || 0,
-            selfRemark: order.selfRemark,
+            _id: order._id,
+            orderDate: order.orderDate || "",
+            productOrdered: order.productOrdered || "",
+            dosageOrdered: order.dosageOrdered || "",
+            totalPrice: order.totalPrice ?? "",
+            paymentMethod: order.paymentMethod || "",
+            partialPayment: order.partialPayment ?? 0,
+            selfRemark: order.selfRemark || "",
             orderId: order.orderId || "",
-            shipmentStatus: "",
+            shipmentStatus: order.shipmentStatus || "",
           },
         });
       }
     });
 
-    // 5. Sort merged data by latest order date
+    // 6) Sort by latest relevant date
     merged.sort((a, b) => {
-      const aDate = new Date(a.myOrderData?.orderDate || a.lastOrderDate || 0);
-      const bDate = new Date(b.myOrderData?.orderDate || b.lastOrderDate || 0);
-      return bDate - aDate; // descending order
+      const aDate = new Date(
+        (a.myOrderData && a.myOrderData.orderDate) || a.lastOrderDate || 0
+      ).getTime();
+      const bDate = new Date(
+        (b.myOrderData && b.myOrderData.orderDate) || b.lastOrderDate || 0
+      ).getTime();
+      return bDate - aDate; // DESC
     });
 
-    // 6. Paginate
-    const paginated = merged.slice(skip, skip + parseInt(limit));
+    // 7) Paginate
+    const paginated = merged.slice(skip, skip + parseInt(limit, 10));
     res.json({ sales: paginated, totalSales: merged.length });
   } catch (error) {
     console.error("Error in merged-sales API:", error);
@@ -119,7 +182,7 @@ router.get("/", async (req, res) => {
 // Utility: Validate MongoDB ObjectId
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
-// PUT update for either Lead or MyOrder
+// PUT update for either Lead or MyOrder (auto-detect by id)
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
