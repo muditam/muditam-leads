@@ -45,7 +45,7 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
       index: true,
     },
     callStatusUpdatedAt: { type: Date, default: null, index: true },
-
+ 
     // Real Shopify notes we also push to Shopify order.note
     shopifyNotes: { type: String, default: "" },
 
@@ -54,10 +54,12 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
     dietPlanNeeded: { type: Boolean, default: false },
     assignedExpert: { type: String, default: "" },
 
-    languageUsed: { type: String, default: "" },  
+    languageUsed: { type: String, default: "" },    
 
-    codToPrepaid: { type: Boolean, default: false },
-    paymentLink: { type: String, default: "" },
+    codToPrepaid: { type: Boolean, default: false }, 
+
+    plusCount: { type: Number, default: 0 },
+    plusUpdatedAt: { type: Date, default: null, index: true },
   },
   { _id: false }
 );
@@ -70,7 +72,7 @@ const ShopifyOrderSchema = new mongoose.Schema(
     customerName: String,
 
     // Always store 10-digit number only
-    contactNumber: { type: String, set: normalizePhone },
+    contactNumber: { type: String, set: normalizePhone }, 
     normalizedPhone: { type: String, index: true }, // mirror for fast lookups
 
     orderDate: Date,
@@ -83,7 +85,7 @@ const ShopifyOrderSchema = new mongoose.Schema(
     customerAddress: AddressSchema,
 
     currency: String,
-    financial_status: String,
+    financial_status: String, 
     fulfillment_status: String,
  
     shopifyCreatedAt: Date,
@@ -133,9 +135,10 @@ ShopifyOrderSchema.index(
     language_override: "languageUsed", 
   }
 );
-
+ 
 
 
 module.exports = mongoose.model("ShopifyOrder", ShopifyOrderSchema); 
 
 module.exports.normalizePhone = normalizePhone;
+
