@@ -1777,7 +1777,6 @@ router.get('/api/retention-sales/progress', async (req, res) => {
     ]);
     const myOrderTotal = moData.length ? moData[0].total : 0;
 
-    // 3. Lead schema sales sum
     const leadsData = await Lead.aggregate([
       {
         $match: {
@@ -1795,7 +1794,6 @@ router.get('/api/retention-sales/progress', async (req, res) => {
     ]);
     const leadsTotal = leadsData.length ? leadsData[0].total : 0;
 
-    // 4. Return combined total 
     res.json({
       total: retentionTotal + myOrderTotal + leadsTotal,
       retentionSales: retentionTotal,
@@ -1906,9 +1904,6 @@ router.post('/api/retention-sales/progress-multiple', async (req, res) => {
     res.status(500).json({ message: "Failed to fetch totals" });
   }
 });
-
-
-
 
 module.exports = router;
  

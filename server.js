@@ -7,7 +7,7 @@ const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
 const Lead = require('./models/Lead');
-const Customer = require('./models/Customer');
+const Customer = require('./models/Customer'); 
 const ConsultationDetails = require('./models/ConsultationDetails');
 const XLSX = require("xlsx");
 const axios = require('axios');
@@ -21,7 +21,7 @@ const shopifyProductsRoute = require("./services/shopifyProducts");
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
 const razorpayRoutes = require("./services/razorpay");
-const shopifyRoutes = require("./routes/shopifyRoutes");
+const shopifyRoutes = require("./routes/shopifyRoutes"); 
 const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
@@ -2225,7 +2225,7 @@ app.get('/api/leads/:id', async (req, res) => {
 
 app.get('/api/consultation-history', async (req, res) => {
   try {
-    const { contactNumber } = req.query;
+    const { contactNumber } = req.query; 
     if (!contactNumber) return res.status(400).json({ error: "Missing contactNumber" });
 
     // 1. Find customer by phone 
@@ -2238,7 +2238,7 @@ app.get('/api/consultation-history', async (req, res) => {
     res.json({ consultations });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
+  } 
 });
 
 // Start Server

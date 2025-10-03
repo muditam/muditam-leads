@@ -14,7 +14,8 @@ const EmployeeSchema = new mongoose.Schema({
   isDoctor: { type: Boolean, default: false },
   joiningDate: { type: Date, default: null },
   monthlyDeliveredSales: { type: mongoose.Schema.Types.Mixed, default: {} },
-  totalDeliveredSales: { type: Number, default: 0 },
+  totalDeliveredSales: { type: Number, default: 0 }, 
+  orderConfirmActive: { type: Boolean, default: false, index: true },
   teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: [] }], 
   teamLeader: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null }  
 });

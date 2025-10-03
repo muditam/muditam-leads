@@ -34,7 +34,7 @@ const LeadSchema = new mongoose.Schema({
   preferredLanguage: String,
   rtRemark: String,
   rowColor: String,
-  images: [
+  images: [ 
     {
       url: String, 
       date: Date,
