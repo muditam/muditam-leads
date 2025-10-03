@@ -16,6 +16,11 @@ const CallStatusEnum = {
   CANCEL_ORDER: "CANCEL_ORDER",
 };
 
+const CHANNEL_MAP = {
+  "Online Order": "252664381441",
+  "Team": "205650526209",
+};
+
 // --- Shopify Admin API client ---
 const SHOPIFY_STORE_NAME = process.env.SHOPIFY_STORE_NAME; // e.g. "muditam"
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -51,17 +56,6 @@ function ensureHashOrderName(name) {
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(String(id));
 const stripHash = (n) => (String(n || "").startsWith("#") ? String(n).slice(1) : String(n || ""));
 
-/**
- * ------------------------------
- *   Create Razorpay Payment Link
- * ------------------------------
- * POST /api/order-confirmations/create-payment-link
- * Body: { amount, currency?, customer: { name?, email?, contact } }
- * - amount in rupees (number); server converts to paise
- * - currency default "INR"
- * - contact will be normalized to 10 digits and sent as +91XXXXXXXXXX
- * Returns: { paymentLink, id }
- */
 router.post("/create-payment-link", async (req, res) => {
   try {
     if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
@@ -94,8 +88,6 @@ router.post("/create-payment-link", async (req, res) => {
         sms: true,
         email: Boolean(customer.email),
       },
-      // reference_id: `ORD-${Date.now()}`, // optional
-      // reminder_enable: true, // optional
     };
 
     const link = await razorpay.paymentLink.create(options);
@@ -121,64 +113,83 @@ router.get("/list", async (req, res) => {
     const numericPage = Math.max(1, parseInt(page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
 
-    // --- Build filter ---
-    let baseFilter = {};
+    // --- Build filter pieces (each piece is a clause to AND together) ---
+    const clauses = [];
 
+    // Tab / section -> callStatus filter
     if (typeof tab === "string" && tab.trim()) {
       const up = tab.trim().toUpperCase().replace(/\s+/g, "_");
-
-      if (up === "ALL") {
-        // No call-status filter for ALL
-        baseFilter = {};
-      } else if (Object.values(CallStatusEnum).includes(up)) {
-        // Strictly by enum
-        baseFilter = { "orderConfirmOps.callStatus": up };
+      if (Object.values(CallStatusEnum).includes(up)) {
+        clauses.push({ "orderConfirmOps.callStatus": up });
+      } else if (up === "ALL") {
+        // no clause for ALL
       } else {
-        // Unknown tab → default sensibly to CNP
-        baseFilter = { "orderConfirmOps.callStatus": CallStatusEnum.CNP };
+        // unknown → default CNP
+        clauses.push({ "orderConfirmOps.callStatus": CallStatusEnum.CNP });
       }
     } else {
       // Legacy behavior: section=pending|confirmed
-      const sectionFilter =
-        section === "confirmed"
-          ? { "orderConfirmOps.callStatus": CallStatusEnum.ORDER_CONFIRMED }
-          : {
-            $or: [
-              { "orderConfirmOps.callStatus": { $exists: false } },
-              { "orderConfirmOps.callStatus": { $ne: CallStatusEnum.ORDER_CONFIRMED } },
-            ],
-          };
-      baseFilter = { ...sectionFilter };
+      if (section === "confirmed") {
+        clauses.push({ "orderConfirmOps.callStatus": CallStatusEnum.ORDER_CONFIRMED });
+      } else {
+        clauses.push({
+          $or: [
+            { "orderConfirmOps.callStatus": { $exists: false } },
+            { "orderConfirmOps.callStatus": { $ne: CallStatusEnum.ORDER_CONFIRMED } },
+          ],
+        });
+      }
     }
 
     // Always restrict to financial_status: pending (case-insensitive)
     const financialFilter = { financial_status: /^pending$/i };
+    clauses.push(financialFilter);
 
+    // fulfillment: not fulfilled (or missing)
     const fulfillmentFilter = {
       $or: [
         { fulfillment_status: { $exists: false } },
         { fulfillment_status: { $not: /^fulfilled$/i } },
       ],
     };
+    clauses.push(fulfillmentFilter);
 
     // Lightweight keyword search
     const numericQ = q ? q.replace(/\D/g, "") : "";
-    const textFilter = q
-      ? {
+    if (q) {
+      const textFilter = {
         $or: [
           { orderName: { $regex: q, $options: "i" } },
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-              { contactNumber: { $regex: numericQ } },
-              { normalizedPhone: { $regex: numericQ } },
-            ]
+                { contactNumber: { $regex: numericQ } },
+                { normalizedPhone: { $regex: numericQ } },
+              ]
             : []),
         ],
-      }
-      : {};
+      };
+      clauses.push(textFilter);
+    }
 
-    const filter = { ...baseFilter, ...financialFilter, ...fulfillmentFilter, ...textFilter };
+    // Channel filter (label or mapped id; handle string/number)
+    const ch = String(req.query.channel || "").trim();
+    if (ch && CHANNEL_MAP[ch]) {
+      const id = CHANNEL_MAP[ch];
+      const idNum = Number(id);
+      const channelFilter = {
+        $or: [
+          { channelName: { $in: [id, idNum] } },
+          { sourceId:   { $in: [id, idNum] } },
+          { source_id:  { $in: [id, idNum] } },
+          { channelName: { $regex: `^${ch}$`, $options: "i" } }, // fallback to label match
+        ],
+      };
+      clauses.push(channelFilter);
+    }
+
+    // Final filter: AND all clauses (so multiple $or's won't overwrite each other)
+    const filter = clauses.length ? { $and: clauses } : {};
 
     const projection = {
       orderDate: 1,
@@ -212,9 +223,9 @@ router.get("/list", async (req, res) => {
       "orderConfirmOps.languageUsed": 1,
       "orderConfirmOps.codToPrepaid": 1,
       "orderConfirmOps.paymentLink": 1,
-      "orderConfirmOps.plusCount": 1,    
-      "orderConfirmOps.plusUpdatedAt": 1,   
-    };  
+      "orderConfirmOps.plusCount": 1,
+      "orderConfirmOps.plusUpdatedAt": 1,
+    };
 
     const [rawItems, total] = await Promise.all([
       ShopifyOrder.find(filter, projection)
@@ -226,6 +237,7 @@ router.get("/list", async (req, res) => {
     ]);
 
     // ---- Enrich with shipping info from Order (order_id = orderName without '#') ----
+    const stripHash = (n) => (String(n || "").startsWith("#") ? String(n).slice(1) : String(n || ""));
     const orderIds = rawItems.map((it) => stripHash(it.orderName)).filter(Boolean);
 
     let shippingMap = {};
@@ -248,9 +260,10 @@ router.get("/list", async (req, res) => {
     const items = rawItems.map((it) => {
       const k = stripHash(it.orderName);
       const shipping = shippingMap[k] || null;
-      return { ...it, shipping }; // attach under "shipping" to avoid top-level collisions
+      return { ...it, shipping }; // attach under "shipping"
     });
 
+    // Count previous orders per phone (only for phones present in the page)
     const phonesOnPage = Array.from(new Set(items.map((it) => it.normalizedPhone).filter(Boolean)));
     let phoneCountsMap = {};
     if (phonesOnPage.length) {
@@ -263,13 +276,9 @@ router.get("/list", async (req, res) => {
         return acc;
       }, {});
     }
-    // attach per-item
+
     for (const it of items) {
-      if (it.normalizedPhone) {
-        it.totalOrdersForPhone = phoneCountsMap[it.normalizedPhone] || 0;
-      } else {
-        it.totalOrdersForPhone = 0;
-      }
+      it.totalOrdersForPhone = it.normalizedPhone ? (phoneCountsMap[it.normalizedPhone] || 0) : 0;
     }
 
     res.json({
@@ -296,12 +305,12 @@ router.patch("/:id", async (req, res) => {
 
     // ---- Atomic increment branch for plusCount ----
     if (req.body && req.body.incPlusCount === true) {
-      try { 
+      try {
         const updated = await ShopifyOrder.findByIdAndUpdate(
           id,
           {
             $inc: { "orderConfirmOps.plusCount": 1 },
-            $set: { "orderConfirmOps.plusUpdatedAt": new Date() }, 
+            $set: { "orderConfirmOps.plusUpdatedAt": new Date() },
           },
           { new: true, projection: { orderConfirmOps: 1 } }
         ).lean();
@@ -424,11 +433,10 @@ router.get("/history-by-phone", async (req, res) => {
   }
 });
 
-// POST /api/order-confirmations/shopify-notes
-// Body: { orderName: "1001" | "#1001", note: "text to set as Shopify order.note" }
+
 router.post("/shopify-notes", async (req, res) => {
   try {
-    const { orderName, note } = req.body || {};
+    const { orderName, note, userFullName: fromBody } = req.body || {};
     if (!orderName || typeof note !== "string") {
       return res.status(400).json({ error: "orderName and note are required" });
     }
@@ -437,31 +445,60 @@ router.post("/shopify-notes", async (req, res) => {
       return res.status(500).json({ error: "Shopify credentials are missing in environment" });
     }
 
+    // ✅ Prefer body value if provided; else use req.user
+    const userFullName =
+      (typeof fromBody === "string" && fromBody.trim()) ||
+      (req.user && (req.user.fullName || req.user.name)) ||
+      "";
+
+    const STATUS_LABELS = {
+      CNP: "CNP",
+      ORDER_CONFIRMED: "Order Confirmed",
+      CALL_BACK_LATER: "Call Back Later",
+      CANCEL_ORDER: "Cancel Order",
+    };
+
+    const raw = String(note).trim();
+    const up = raw.toUpperCase().replace(/\s+/g, "_");
+
+    // Resolve enum → friendly label (or keep raw);
+    let label;
+    if (STATUS_LABELS[up]) {
+      label = STATUS_LABELS[up];
+    } else {
+      const match = Object.values(STATUS_LABELS).find(
+        (l) => l.toLowerCase() === raw.toLowerCase()
+      );
+      label = match || raw;
+    }
+
+    // Final note → "Label - FullName" (if we have a name)
+    const finalNote = userFullName ? `${label} - ${userFullName}` : label;
+
     const nameWithHash = ensureHashOrderName(orderName);
 
-    // 1) Find order in Shopify by name (must include '#')
+    // Find Shopify order by name
     const encName = encodeURIComponent(nameWithHash);
-    theFind = await shopifyApi.get(`/orders.json?name=${encName}&status=any&limit=1`);
+    const theFind = await shopifyApi.get(`/orders.json?name=${encName}&status=any&limit=1`);
     const shopifyOrder = Array.isArray(theFind.data?.orders) ? theFind.data.orders[0] : null;
-
     if (!shopifyOrder?.id) {
       return res.status(404).json({ error: `Shopify order not found for name ${nameWithHash}` });
     }
 
     const shopifyId = shopifyOrder.id;
 
-    // 2) Update Shopify order note
+    // Update Shopify note
     await shopifyApi.put(`/orders/${shopifyId}.json`, {
-      order: { id: shopifyId, note },
+      order: { id: shopifyId, note: finalNote },
     });
 
-    // 3) Mirror in Mongo: try by exact orderName with/without '#', otherwise by numeric ID
+    // Mirror to Mongo
     const possibleNames = [nameWithHash];
     if (nameWithHash.startsWith("#")) possibleNames.push(nameWithHash.slice(1));
 
     const mongoUpdate = await ShopifyOrder.findOneAndUpdate(
       { $or: [{ orderName: { $in: possibleNames } }, { orderId: shopifyId }] },
-      { $set: { "orderConfirmOps.shopifyNotes": note } },
+      { $set: { "orderConfirmOps.shopifyNotes": finalNote } },
       { new: true, projection: { orderName: 1, orderId: 1, "orderConfirmOps.shopifyNotes": 1 } }
     ).lean();
 
@@ -469,7 +506,7 @@ router.post("/shopify-notes", async (req, res) => {
       ok: true,
       shopify: { id: shopifyId, name: shopifyOrder?.name || nameWithHash },
       mongo: mongoUpdate || null,
-      note,
+      note: finalNote,
     });
   } catch (err) {
     console.error("POST /shopify-notes error:", err?.response?.data || err.message);
@@ -510,5 +547,83 @@ router.post("/bulk-call-status", async (req, res) => {
     res.status(500).json({ error: "Bulk update failed" });
   }
 });
+
+
+router.get("/counts", async (req, res) => {
+  try {
+    const { q = "" } = req.query;
+ 
+    const clauses = [];
+ 
+    clauses.push({ financial_status: /^pending$/i });
+ 
+    clauses.push({
+      $or: [
+        { fulfillment_status: { $exists: false } },
+        { fulfillment_status: { $not: /^fulfilled$/i } },
+      ],
+    });
+ 
+    if (q) {
+      const numericQ = q.replace(/\D/g, "");
+      clauses.push({
+        $or: [
+          { orderName:     { $regex: q,          $options: "i" } },
+          { customerName:  { $regex: q,          $options: "i" } },
+          ...(numericQ
+            ? [
+                { contactNumber:   { $regex: numericQ } },
+                { normalizedPhone: { $regex: numericQ } },
+              ]
+            : []),
+        ],
+      });
+    }
+ 
+    const ch = String(req.query.channel || "").trim();
+    if (ch && CHANNEL_MAP[ch]) {
+      const id = CHANNEL_MAP[ch];
+      const idNum = Number(id);
+      clauses.push({
+        $or: [
+          { channelName: { $in: [id, idNum] } },
+          { sourceId:    { $in: [id, idNum] } },
+          { source_id:   { $in: [id, idNum] } },
+          { channelName: { $regex: `^${ch}$`, $options: "i" } },  
+        ],
+      });
+    }
+ 
+    const baseMatch = clauses.length ? { $and: clauses } : {};
+
+    const [allCount, grouped] = await Promise.all([
+      ShopifyOrder.countDocuments(baseMatch),
+      ShopifyOrder.aggregate([
+        { $match: baseMatch },
+        { $group: { _id: "$orderConfirmOps.callStatus", c: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const by = grouped.reduce((acc, r) => {
+      const key = String(r._id || "").toUpperCase();
+      acc[key] = r.c;
+      return acc;
+    }, {});
+
+    res.json({
+      counts: {
+        ALL: allCount,
+        CNP: by.CNP || 0,
+        ORDER_CONFIRMED: by.ORDER_CONFIRMED || 0,
+        CALL_BACK_LATER: by.CALL_BACK_LATER || 0,
+        CANCEL_ORDER: by.CANCEL_ORDER || 0,
+      },
+    });
+  } catch (err) {
+    console.error("GET /order-confirmations/counts error:", err);
+    res.status(500).json({ error: "Failed to fetch counts" });
+  }
+});
+
 
 module.exports = router;

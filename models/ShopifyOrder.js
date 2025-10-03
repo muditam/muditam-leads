@@ -1,11 +1,9 @@
-// models/ShopifyOrder.js
 const mongoose = require("mongoose");
-
-// Normalize Indian numbers → keep ONLY last 10 digits
+ 
 function normalizePhone(phone) {
   if (!phone) return "";
   const d = String(phone).replace(/\D/g, "");
-  return d.length >= 10 ? d.slice(-10) : d; // handles +91 / 91 / 0 prefixes
+  return d.length >= 10 ? d.slice(-10) : d; 
 }
 
 const ProductSchema = new mongoose.Schema(
@@ -24,7 +22,7 @@ const ProductSchema = new mongoose.Schema(
 const AddressSchema = new mongoose.Schema(
   {
     name: String,
-    phone: { type: String, set: normalizePhone }, // normalize on write
+    phone: { type: String, set: normalizePhone },  
     address1: String,
     address2: String,
     city: String,
@@ -34,29 +32,25 @@ const AddressSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
-// === Order Confirmation / Ops subdocument ===
+ 
 const OrderConfirmOpsSchema = new mongoose.Schema(
-  {
-    // Dropdown (labeled "Shopify Notes" in UI but stores call status enum)
+  { 
     callStatus: {
       type: String,
       enum: ["CNP", "ORDER_CONFIRMED", "CALL_BACK_LATER", "CANCEL_ORDER"], 
       index: true,
     },
-    callStatusUpdatedAt: { type: Date, default: null, index: true },
- 
-    // Real Shopify notes we also push to Shopify order.note
+    callStatusUpdatedAt: { type: Date, default: null, index: true },  
+  
     shopifyNotes: { type: String, default: "" },
-
-    // Toggles & related fields
-    doctorCallNeeded: { type: Boolean, default: false },
-    dietPlanNeeded: { type: Boolean, default: false },
+ 
+    doctorCallNeeded: { type: Boolean },
+    dietPlanNeeded: { type: Boolean },
     assignedExpert: { type: String, default: "" },
 
     languageUsed: { type: String, default: "" },    
 
-    codToPrepaid: { type: Boolean, default: false }, 
+    codToPrepaid: { type: Boolean }, 
 
     plusCount: { type: Number, default: 0 },
     plusUpdatedAt: { type: Date, default: null, index: true },
@@ -66,25 +60,23 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
 
 const ShopifyOrderSchema = new mongoose.Schema(
   {
-    orderId: { type: Number, unique: true, index: true },  // Shopify numeric order ID
-    orderName: { type: String, index: true },               // e.g. "#1001"
+    orderId: { type: Number, unique: true, index: true },   
+    orderName: { type: String, index: true },         
 
-    customerName: String,
-
-    // Always store 10-digit number only
+    customerName: String, 
     contactNumber: { type: String, set: normalizePhone }, 
-    normalizedPhone: { type: String, index: true }, // mirror for fast lookups
+    normalizedPhone: { type: String, index: true },  
 
     orderDate: Date,
-    amount: Number,                 // total_price
-    paymentGatewayNames: [String],  // payment_gateway_names
-    modeOfPayment: String,          // first gateway or joined
+    amount: Number,               
+    paymentGatewayNames: [String],  
+    modeOfPayment: String,          
     productsOrdered: [ProductSchema],
 
-    channelName: String,            // source_name
+    channelName: String,          
     customerAddress: AddressSchema,
 
-    currency: String,
+    currency: String, 
     financial_status: String, 
     fulfillment_status: String,
  
@@ -93,8 +85,7 @@ const ShopifyOrderSchema = new mongoose.Schema(
 
     cancelled_at: Date,
     cancel_reason: String,
-
-    // === Ops subdoc ===
+ 
     orderConfirmOps: { type: OrderConfirmOpsSchema, default: () => ({}) },
   },
   { timestamps: true }
@@ -124,8 +115,7 @@ ShopifyOrderSchema.index({ modeOfPayment: 1 });
 ShopifyOrderSchema.index({ paymentGatewayNames: 1 });
 ShopifyOrderSchema.index({ orderName: 1 });
 ShopifyOrderSchema.index({ contactNumber: 1 });
-
-// Ops indexes
+ 
 ShopifyOrderSchema.index({ "orderConfirmOps.callStatus": 1, orderDate: -1 });
 ShopifyOrderSchema.index({ "orderConfirmOps.callStatusUpdatedAt": -1 }); 
 ShopifyOrderSchema.index(
@@ -136,9 +126,6 @@ ShopifyOrderSchema.index(
   }
 );
  
-
-
 module.exports = mongoose.model("ShopifyOrder", ShopifyOrderSchema); 
 
 module.exports.normalizePhone = normalizePhone;
-

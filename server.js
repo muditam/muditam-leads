@@ -95,6 +95,7 @@ const shopifyOrdersTable = require("./routes/shopifyOrdersTable");
 
 const leadsMigration = require('./routes/leadMigration'); 
 const orderConfirmationsRouter = require("./routes/orderConfirmations");
+const scheduleCallsRouter = require("./routes/scheduleCalls");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -541,6 +542,7 @@ app.use("/api", shopifyOrdersTable);
 
 app.use('/api/lead-migration', leadsMigration); 
 app.use("/api/order-confirmations", orderConfirmationsRouter);
+app.use("/api/schedule-calls", scheduleCallsRouter);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -642,7 +644,7 @@ const httpsAgent = new https.Agent({
 });
 
 async function fetchAllOrders(url, accessToken, allOrders = []) {
-  try {
+  try { 
     const response = await axios.get(url, {
       headers: {
         'X-Shopify-Access-Token': accessToken,
@@ -1952,8 +1954,7 @@ app.get('/api/leads/retentions', async (req, res) => {
     const query = Lead.find(base, projection)
       .read('secondaryPreferred')
       .sort(sort).skip(skip).limit(limit)
-      .slice('reachoutLogs', -5)
-      .slice('rtSubcells', -1)
+      .slice('reachoutLogs', -5) 
       .lean();
 
     // counts remain independent (as before)

@@ -130,7 +130,9 @@ async function fetchPageWithRetry(url, headers, attempt = 0) {
  * Returns stats and last cursor info.
  */
 async function pageAndUpsertAll(url, headers) {
-  let fetched = 0, created = 0, updated = 0;
+  let fetched = 0,
+    created = 0,
+    updated = 0;
 
   while (url) {
     const resp = await fetchPageWithRetry(url, headers);
@@ -288,7 +290,13 @@ router.get("/sync-range", async (req, res) => {
       `&updated_at_max=${encodeURIComponent(to.toISOString())}`;
 
     const stats = await pageAndUpsertAll(url, authHeaders());
-    res.json({ ok: true, mode: "range-updated", from: from.toISOString(), to: to.toISOString(), ...stats });
+    res.json({
+      ok: true,
+      mode: "range-updated",
+      from: from.toISOString(),
+      to: to.toISOString(),
+      ...stats,
+    });
   } catch (err) {
     console.error("sync-range error:", err?.response?.data || err);
     res.status(500).json({ error: "Failed to sync range", details: err?.message || err });
@@ -347,54 +355,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-/**
- * POST /api/orders/normalize-phones
- * One-time (or repeatable) cleanup for historical rows
- */
-router.post("/normalize-phones", async (req, res) => {
-  try {
-    const cursor = ShopifyOrder.find({}, { contactNumber: 1, customerAddress: 1, normalizedPhone: 1 }).cursor();
-    let scanned = 0, changed = 0, bulk = [];
 
-    for await (const doc of cursor) {
-      scanned++;
-      const currentCN = doc.contactNumber || "";
-      const currentAddrPhone = doc.customerAddress?.phone || "";
-      const newCN = normalizePhone(currentCN);
-      const newAddrPhone = normalizePhone(currentAddrPhone);
-      const bestNorm = newCN || newAddrPhone || "";
-
-      const needsUpdate =
-        newCN !== currentCN ||
-        newAddrPhone !== currentAddrPhone ||
-        (bestNorm !== (doc.normalizedPhone || ""));
-
-      if (needsUpdate) {
-        changed++;
-        const $set = {};
-        if (newCN !== currentCN) $set.contactNumber = newCN;
-        if (newAddrPhone !== currentAddrPhone) $set["customerAddress.phone"] = newAddrPhone;
-        if (bestNorm !== (doc.normalizedPhone || "")) $set.normalizedPhone = bestNorm;
-
-        bulk.push({ updateOne: { filter: { _id: doc._id }, update: { $set } } });
-        if (bulk.length >= 1000) {
-          await ShopifyOrder.bulkWrite(bulk, { ordered: false });
-          bulk = [];
-        }
-      }
-    }
-
-    if (bulk.length) await ShopifyOrder.bulkWrite(bulk, { ordered: false });
-
-    res.json({ ok: true, scanned, changed });
-  } catch (err) {
-    console.error("normalize-phones error:", err);
-    res.status(500).json({ ok: false, error: "Failed to normalize phones", details: err?.message || err });
-  }
-});
-
-// -------------------- NIGHTLY CRON (11:00 PM IST) --------------------
-// To avoid double scheduling in hot-reload environments:
 if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
   global.__SHOPIFY_SYNC_NEW_CRON__ = true;
   cron.schedule(
@@ -420,7 +381,9 @@ if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
 
         const base = shopifyBase(process.env.SHOPIFY_STORE_NAME);
         const limit = 250;
-        let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(sinceISO)}`;
+        let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
+          sinceISO
+        )}`;
 
         const stats = await pageAndUpsertAll(url, authHeaders());
         console.log("[Cron] Shopify new-orders sync done:", { sinceCreated: sinceISO, ...stats });
@@ -428,9 +391,113 @@ if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
         console.error("[Cron] Shopify new-orders sync FAILED:", err?.response?.data || err);
       }
     },
-    { timezone: "Asia/Kolkata" } 
+    { timezone: "Asia/Kolkata" }
   );
 }
 
-module.exports = router; 
 
+async function pageAndUpsertUnfulfilledFromCutoff(url, headers, cutoffDateUtc) {
+  let fetched = 0,
+    considered = 0,
+    created = 0,
+    updated = 0;
+
+  while (url) {
+    const resp = await fetchPageWithRetry(url, headers);
+    const orders = resp.data?.orders || [];
+    fetched += orders.length;
+
+    for (const raw of orders) {
+      const createdAt = raw.created_at ? new Date(raw.created_at) : null;
+      const isAfterCutoff = createdAt && createdAt >= cutoffDateUtc;
+      const isUnfulfilled =
+        (raw.fulfillment_status || "").toString().toLowerCase() === "unfulfilled";
+
+      if (isAfterCutoff && isUnfulfilled) {
+        considered++;
+        const doc = mapOrder(raw);
+        const resUp = await ShopifyOrder.updateOne(
+          { orderId: doc.orderId },
+          { $set: doc },
+          { upsert: true }
+        );
+        if (resUp.upsertedCount) created += 1;
+        else if (resUp.matchedCount) updated += 1;
+      }
+    }
+
+    const links = parseLinkHeader(resp.headers.link);
+    url = links.next || null;
+  }
+
+  return { fetched, considered, created, updated };
+}
+
+
+router.get("/sync-unfulfilled-from-cutoff", async (req, res) => {
+  try {
+    const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
+    if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
+      return res.status(400).json({ error: "Missing Shopify env vars" });
+    }
+
+    const cutoffIsoUtc = "2025-09-29T18:30:00.000Z";
+    const cutoffDateUtc = new Date(cutoffIsoUtc);
+
+    const base = shopifyBase(SHOPIFY_STORE_NAME);
+    const limit = 250;
+
+    let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
+      cutoffIsoUtc
+    )}`;
+
+    const stats = await pageAndUpsertUnfulfilledFromCutoff(url, authHeaders(), cutoffDateUtc);
+    res.json({ ok: true, mode: "unfulfilled-from-cutoff", cutoffIsoUtc, ...stats });
+  } catch (err) {
+    console.error("sync-unfulfilled-from-cutoff error:", err?.response?.data || err);
+    res.status(500).json({
+      error: "Failed to sync unfulfilled orders from cutoff",
+      details: err?.message || err,
+    });
+  }
+});
+
+if (!global.__SHOPIFY_SYNC_UNFULFILLED_CRON__) {
+  global.__SHOPIFY_SYNC_UNFULFILLED_CRON__ = true;
+
+  cron.schedule(
+    "0 11,14,16 * * *",
+    async () => {
+      try {
+        const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
+        if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
+          console.warn("[Cron-Unfulfilled] Skipping — missing Shopify env vars");
+          return;
+        }
+ 
+        const cutoffIsoUtc = "2025-09-29T18:30:00.000Z";
+        const cutoffDateUtc = new Date(cutoffIsoUtc);
+
+        console.log(
+          "[Cron-Unfulfilled] Syncing unfulfilled orders from cutoff at 11/14/16 IST",
+          { cutoffIsoUtc }
+        );
+
+        const base = shopifyBase(SHOPIFY_STORE_NAME);
+        const limit = 250;
+
+        let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
+          cutoffIsoUtc
+        )}`;
+
+        const stats = await pageAndUpsertUnfulfilledFromCutoff(url, authHeaders(), cutoffDateUtc);
+        console.log("[Cron-Unfulfilled] Done:", { cutoffIsoUtc, ...stats });
+      } catch (err) {
+        console.error("[Cron-Unfulfilled] FAILED:", err?.response?.data || err);
+      }
+    },
+    { timezone: "Asia/Kolkata" }
+  );
+}
+
+module.exports = router;
