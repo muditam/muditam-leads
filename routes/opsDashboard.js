@@ -155,6 +155,6 @@ router.get("/metrics", async (req, res) => {
     console.error("GET /ops-dashboard/metrics error:", err);
     res.status(500).json({ error: "Failed to compute metrics" });
   }
-});
+}); 
 
 module.exports = router;

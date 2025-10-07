@@ -947,4 +947,100 @@ router.get("/today-confirmed-count", async (req, res) => {
   }
 });
 
+router.post("/cancel", async (req, res) => {
+  try {
+    const { orderName, orderId, reason = "customer", email = true, restock = true, note = "Cancelled via Order Confirmations UI" } = req.body || {};
+
+    if (!orderName && !orderId) {
+      return res.status(400).json({ error: "Provide orderName or orderId" });
+    }
+
+    if (!SHOPIFY_STORE_NAME || !SHOPIFY_ACCESS_TOKEN) {
+      return res.status(500).json({ error: "Shopify credentials are missing in environment" });
+    }
+
+    // 1) Resolve Shopify order id
+    let shopifyId = null;
+    let shopifyName = null;
+
+    if (orderId) {
+      shopifyId = String(orderId).replace(/\D/g, "");
+      // try to fetch order to validate it exists
+      const { data } = await shopifyApi.get(`/orders/${shopifyId}.json`);
+      if (!data?.order?.id) {
+        return res.status(404).json({ error: `Shopify order not found for id ${orderId}` });
+      }
+      shopifyName = data.order.name;
+      // if already cancelled, short-circuit
+      if (String(data.order.cancelled_at || "")) {
+        return res.json({ ok: true, alreadyCancelled: true, shopify: { id: shopifyId, name: shopifyName } });
+      }
+    } else {
+      const nameWithHash = ensureHashOrderName(orderName);
+      const encName = encodeURIComponent(nameWithHash);
+      const findResp = await shopifyApi.get(`/orders.json?name=${encName}&status=any&limit=1`);
+      const order = Array.isArray(findResp.data?.orders) ? findResp.data.orders[0] : null;
+      if (!order?.id) {
+        return res.status(404).json({ error: `Shopify order not found for name ${nameWithHash}` });
+      }
+      // if already cancelled, short-circuit
+      if (String(order.cancelled_at || "")) {
+        return res.json({ ok: true, alreadyCancelled: true, shopify: { id: order.id, name: order.name } });
+      }
+      shopifyId = order.id;
+      shopifyName = order.name;
+    }
+
+    // 2) Cancel on Shopify
+    // Options: reason (customer, inventory, fraud, other), email (notify), restock (return items to stock)
+    const cancelResp = await shopifyApi.post(`/orders/${shopifyId}/cancel.json`, {
+      reason,
+      email,
+      restock,
+      note,
+    });
+
+    const cancelled = cancelResp?.data?.order;
+    if (!cancelled?.id || !cancelled?.cancelled_at) {
+      return res.status(500).json({ error: "Shopify cancel failed (unexpected response)" });
+    }
+
+    // 3) Mirror note to Mongo (and set callStatus)
+    const possibleNames = [shopifyName || "", stripHash(shopifyName || ""), ensureHashOrderName(shopifyName || "")].filter(Boolean);
+
+    await ShopifyOrder.findOneAndUpdate(
+      { $or: [{ orderId: shopifyId }, { orderName: { $in: possibleNames } }] },
+      {
+        $set: {
+          "orderConfirmOps.shopifyNotes": note,
+          "orderConfirmOps.callStatus": CallStatusEnum.CANCEL_ORDER,
+          "orderConfirmOps.callStatusUpdatedAt": new Date(),
+        },
+      },
+      { new: true }
+    ).lean();
+
+    // 4) (Optional) also push note field to Shopify Order object (so staff sees it in admin)
+    try {
+      await shopifyApi.put(`/orders/${shopifyId}.json`, {
+        order: { id: shopifyId, note },
+      });
+    } catch (_) {
+      // non-fatal
+    }
+
+    return res.json({
+      ok: true,
+      shopify: { id: shopifyId, name: shopifyName },
+      note,
+    });
+  } catch (err) {
+    const code = err?.response?.status || 500;
+    const details = err?.response?.data || err.message;
+    console.error("POST /order-confirmations/cancel error:", details);
+    return res.status(code).json({ error: "Cancel operation failed", details });
+  }
+});
+
 module.exports = router;
+

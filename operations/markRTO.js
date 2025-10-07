@@ -325,14 +325,14 @@ router.post('/orders/upload-orders', upload.single('file'), async (req, res) => 
       } catch (e) {
         results.push({ orderName: job.orderName, status: 'error', message: e.message });
       }
-    }
+    } 
     res.json({ success: true, message: 'Processed', results });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: err.message || 'Server error' });
   }
 });
-
+ 
 /** JSON helper for a single manual order */
 router.post('/orders/update-order', express.json(), async (req, res) => {
   try {
