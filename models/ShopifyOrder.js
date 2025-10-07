@@ -10,17 +10,17 @@ function normalizePhone(phone) {
 const ProductSchema = new mongoose.Schema(
   {
     title: String,
-    quantity: Number,
+    quantity: Number,  
     sku: String,
     variant_id: Number,
     price: Number,
     month: { type: String, default: "" }, 
-    cohort: { type: String, default: "" }, 
+    cohort: { type: String, default: "" },  
   },
   { _id: false }
 );
 
-const AddressSchema = new mongoose.Schema(
+const AddressSchema = new mongoose.Schema( 
   {
     name: String,
     phone: { type: String, set: normalizePhone },

@@ -885,7 +885,7 @@ router.get("/counts", async (req, res) => {
     res.json({
       counts: {
         ALL: allCount,
-        PENDING: pendingNotesCount,                // <-- new bucket
+        PENDING: pendingNotesCount,          
         CNP: by.CNP || 0,
         ORDER_CONFIRMED: by.ORDER_CONFIRMED || 0,
         CALL_BACK_LATER: by.CALL_BACK_LATER || 0,
@@ -898,5 +898,53 @@ router.get("/counts", async (req, res) => {
   }
 });
 
+router.get("/today-confirmed-count", async (req, res) => {
+  try {
+    const maybeAgentId = String(req.query.agentId || "");
+    const userId = getUserIdFromReq(req);
+
+    // Determine agent filter
+    const agentId = isValidObjectId(maybeAgentId)
+      ? new mongoose.Types.ObjectId(maybeAgentId)
+      : (isValidObjectId(userId) ? new mongoose.Types.ObjectId(userId) : null);
+
+    // Build IST "today" boundaries -> as UTC instants
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+
+    const y = Number(parts.find(p => p.type === "year")?.value);
+    const m = Number(parts.find(p => p.type === "month")?.value);
+    const d = Number(parts.find(p => p.type === "day")?.value);
+ 
+    const startUtcMs = Date.UTC(y, m - 1, d, 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000) * 0;  
+    const endUtcMs   = Date.UTC(y, m - 1, d, 23, 59, 59, 999) - (5.5 * 60 * 60 * 1000) * 0;
+
+    const start = new Date(startUtcMs);
+    const end = new Date(endUtcMs);
+
+    const clauses = [ 
+      { financial_status: /^pending$/i },
+      { $or: [{ fulfillment_status: { $exists: false } }, { fulfillment_status: { $not: /^fulfilled$/i } }] },
+ 
+      { "orderConfirmOps.callStatus": CallStatusEnum.ORDER_CONFIRMED },
+      { "orderConfirmOps.callStatusUpdatedAt": { $gte: start, $lte: end } },
+    ];
+
+    if (agentId) {
+      clauses.push({ "orderConfirmOps.assignedAgentId": agentId });
+    }
+
+    const count = await ShopifyOrder.countDocuments({ $and: clauses });
+    res.json({ count });
+  } catch (err) {
+    console.error("GET /today-confirmed-count error:", err);
+    res.status(500).json({ error: "Failed to compute today's confirmed count" });
+  }
+});
 
 module.exports = router;

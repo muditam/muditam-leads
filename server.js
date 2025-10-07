@@ -75,7 +75,7 @@ const abandonedRouter = require('./routes/abandoned');
 const financeDashboard = require("./routes/financeDashboard");
 const UndeliveredordersRoute = require('./operations/undelivered-orders');
 
-const zohoMailRoutes = require("./routes/zohoMail");
+const zohoMailRoutes = require("./routes/zohoMail"); 
 
 const smartfloRoutes = require("./routes/smartflo");
 
@@ -95,9 +95,11 @@ const shopifyOrdersTable = require("./routes/shopifyOrdersTable");
 
 const leadsMigration = require('./routes/leadMigration'); 
 const orderConfirmationsRouter = require("./routes/orderConfirmations");
-const scheduleCallsRouter = require("./routes/scheduleCalls");
-
-const app = express();
+const scheduleCallsRouter = require("./routes/scheduleCalls"); 
+const opsDashboardRoutes = require("./routes/opsDashboard");
+const orderConfirmAnalytics = require("./routes/orderConfirmAnalytics"); 
+ 
+const app = express(); 
 const PORT = process.env.PORT || 5001;
 
 app.use(
@@ -149,10 +151,10 @@ function toNumberLoose(v) {
 const pickFirst = (...vals) => vals.find(v => v !== undefined && v !== null && v !== "");
 
 // convert a **major-unit** string/number to **minor units** integer (INR → paise)
-function majorToMinor(v) {
+function majorToMinor(v) { 
   const n = toNumberLoose(v);
   if (n === undefined) return undefined;
-  return Math.round(n * 100);
+  return Math.round(n * 100); 
 }
 
 // from your payload, decides if it's abandoned
@@ -169,7 +171,7 @@ function hashId(buf) {
   try { return crypto.createHash("sha256").update(buf).digest("hex"); }
   catch { return undefined; }
 }
-
+ 
 // ----------------- UPDATED WEBHOOK ROUTE -----------------
 app.post(
   "/api/webhook",
@@ -543,6 +545,9 @@ app.use("/api", shopifyOrdersTable);
 app.use('/api/lead-migration', leadsMigration); 
 app.use("/api/order-confirmations", orderConfirmationsRouter);
 app.use("/api/schedule-calls", scheduleCallsRouter);
+
+app.use("/api/ops-dashboard", opsDashboardRoutes);
+app.use("/api/order-analytics", orderConfirmAnalytics); 
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
