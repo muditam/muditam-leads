@@ -51,14 +51,13 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
 
     languageUsed: { type: String, default: "" },
 
-    codToPrepaid: { type: Boolean },
+    codToPrepaid: { type: Boolean }, 
 
     paymentLink: { type: String, default: "" },
 
     plusCount: { type: Number, default: 0 },
     plusUpdatedAt: { type: Date, default: null, index: true },
 
-    // ===== NEW: Agent assignment fields =====
     assignedAgentId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", index: true, default: null },
     assignedAgentName: { type: String, default: "" },
     assignedAt: { type: Date, default: null, index: true },
@@ -139,3 +138,4 @@ ShopifyOrderSchema.index(
 
 module.exports = mongoose.model("ShopifyOrder", ShopifyOrderSchema);
 module.exports.normalizePhone = normalizePhone;
+

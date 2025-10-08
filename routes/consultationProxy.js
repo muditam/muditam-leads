@@ -96,6 +96,12 @@ const priceMap = {
     "3 months": 1195,
     "4 months": 2200, 
   },
+  "Thyroid Defend Pro": {
+    "1 month": 495,   
+    "2 months": 895,
+    "3 months": 1350, 
+    "4 months": 2500, 
+  },
   "HbA1c - Blood Test": {
     "1 month": 300,
     "2 months": 300,
@@ -192,8 +198,14 @@ const variantMap = {
   "Omega Fuel": {
     "1 month": "52874150838582",
     "2 months": "52874150871350",
-    "3 months": "52874150904118",
+    "3 months": "52874150904118", 
     "4 months": "52874150936886",
+  },
+  "Thyroid Defend Pro": {
+    "1 month": "52907218043190",   
+    "2 months": "52907218075958",
+    "3 months": "52907218108726", 
+    "4 months": "52907218141494",  
   },
   "HbA1c - Blood Test": { 
     "1 month": "51848104247606",
@@ -392,6 +404,7 @@ router.get("/proxy/consultation/:id", async (req, res) => {
       "Nerve Fix": "Nerve",
       "Core Essentials": "Multivitamin", 
       "Omega Fuel": "Heart",  
+      "Thyroid Defend Pro": "Thyroid",
     };
 
 

@@ -2,94 +2,159 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 
-const { SHOPIFY_STORE_NAME, SHOPIFY_ACCESS_TOKEN } = process.env; 
+const { SHOPIFY_STORE_NAME, SHOPIFY_ACCESS_TOKEN } = process.env;
 
-const normalizePhone = (phoneStr) => phoneStr.replace(/\D/g, '');
+const normalizePhone = (phoneStr = "") => phoneStr.replace(/\D/g, "");
 
-router.get('/customerDetails', async (req, res) => {
-  try {
-    const { phone } = req.query;
-    if (!phone) {
-      return res.status(400).json({ error: 'Phone query parameter is required.' });
-    }
-    const normalizedPhone = normalizePhone(phone);
+// Accepts: "#ma119", "ma119", "MA119", " #MA119  "
+const normalizeOrderName = (raw = "") =>
+  raw.trim().replace(/^#/, "").toUpperCase();
 
-    const customerUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2023-04/customers/search.json?query=phone:${normalizedPhone}`;
-    const headers = {
-      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-      'Content-Type': 'application/json',
-    };
-    const customerResponse = await axios.get(customerUrl, { headers });
-    const customers = customerResponse.data.customers || [];
-    if (customers.length === 0) {
-      return res.json({ customer: null });
-    }
-    // Assume the first customer is the one we're interested in.
-    const customer = customers[0];
+const shopifyHeaders = {
+  "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+  "Content-Type": "application/json",
+};
 
-    // 2. Fetch orders for this customer.
-    // Shopify supports filtering orders by customer_id.
-    const ordersUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2023-04/orders.json?customer_id=${customer.id}&status=any`;
-    const ordersResponse = await axios.get(ordersUrl, { headers });
-    const orders = ordersResponse.data.orders || [];
+// Try both REST filters that commonly work across stores:
+async function fetchOrderByName(nameNoHash) {
+  const base = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json`;
 
-    // Sort orders by creation date (most recent first)
-    orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  // 1) Try exact name with '#'
+  const byNameUrl = `${base}?status=any&name=${encodeURIComponent("#" + nameNoHash)}`;
+  let resp = await axios.get(byNameUrl, { headers: shopifyHeaders });
+  if (resp?.data?.orders?.length) return resp.data.orders[0];
 
-    // 3. Aggregate customer data.
-    const totalOrders = orders.length;
-    const totalSpent = customer.total_spent; // from the customer object
-    const lastOrder = orders[0] || null;
-    const lastOrderDate = lastOrder ? lastOrder.created_at : null;
-    const lastOrderPaymentStatus = lastOrder ? lastOrder.financial_status : null;
-
-    // 4. Map order details.
-    const orderDetails = orders.map(order => ({
-      id: order.id,
-      created_at: order.created_at,
-      totalAmount: order.total_price,
-      itemCount: order.line_items.reduce((acc, item) => acc + Number(item.quantity || 0), 0),
-      deliveryStatus: order.fulfillment_status || "Not fulfilled",
-      shippingAddress: order.shipping_address
-        ? `${order.shipping_address.address1 || ""}${order.shipping_address.address2 ? ", " + order.shipping_address.address2 : ""}, ${order.shipping_address.city || ""}, ${order.shipping_address.province || ""}, ${order.shipping_address.country || ""}, ${order.shipping_address.zip || ""}`
-        : "Not available",
-      lineItems: order.line_items.map(item => ({
-        title: item.title,
-        variant: item.variant_title,
-        amountPaid: `${item.price}`,  
-      })),
-    }));
-
-    return res.json({
-      customer: {
-        id: customer.id,
-        name: `${customer.first_name || ""} ${customer.last_name || ""}`.trim(), 
-        totalOrders,
-        totalSpent,
-        lastOrderDate,
-        lastOrderPaymentStatus,
-        orders: orderDetails,
-      },
-    });
-  } catch (error) {
-    console.error(
-      'Error fetching Shopify customer details:',
-      error?.response?.data || error.message
+  // 2) Fallback: use a query search by name (works on many stores)
+  const queryUrl = `${base}?status=any&query=${encodeURIComponent(`name:${nameNoHash}`)}`;
+  resp = await axios.get(queryUrl, { headers: shopifyHeaders });
+  if (resp?.data?.orders?.length) {
+    // Prefer an exact case-insensitive match on name if present
+    const exact = resp.data.orders.find(
+      (o) => o.name && o.name.replace(/^#/, "").toUpperCase() === nameNoHash
     );
-    return res.status(500).json({ error: 'Failed to fetch customer details from Shopify.' });
+    return exact || resp.data.orders[0];
   }
-});
+
+  return null;
+}
+ 
+router.get("/customerDetails", async (req, res) => {
+  try {
+    const { phone, q } = req.query;
+    const raw = (q || phone || "").trim();
+    if (!raw) return res.status(400).json({ error: "Phone or query is required." });
+
+    const digitsOnly = normalizePhone(raw);
+    const hasLetters = /[A-Za-z]/.test(raw);
+    const startsWithHash = raw.startsWith("#");
+
+    // helpers
+    const buildCustomerPayloadFromOrders = async (orders, customerId) => {
+      // sort newest first
+      orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      // fetch full customer to get total_spent
+      const customerUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/customers/${customerId}.json`;
+      const customerResp = await axios.get(customerUrl, { headers: shopifyHeaders });
+      const c = customerResp.data.customer;
+
+      const lastOrder = orders[0] || null;
+      const orderDetails = orders.map((o) => ({
+        id: o.id,
+        name: o.name, // show order name to frontend
+        created_at: o.created_at,
+        totalAmount: o.total_price,
+        itemCount: o.line_items.reduce((acc, it) => acc + Number(it.quantity || 0), 0),
+        deliveryStatus: o.fulfillment_status || "Not fulfilled",
+        shippingAddress: o.shipping_address
+          ? `${o.shipping_address.address1 || ""}${o.shipping_address.address2 ? ", " + o.shipping_address.address2 : ""}, ${o.shipping_address.city || ""}, ${o.shipping_address.province || ""}, ${o.shipping_address.country || ""}, ${o.shipping_address.zip || ""}`
+          : "Not available",
+        lineItems: o.line_items.map((it) => ({
+          title: it.title,
+          variant: it.variant_title,
+          amountPaid: `${it.price}`,
+        })),
+      }));
+
+      return {
+        customer: {
+          id: c.id,
+          name: `${c.first_name || ""} ${c.last_name || ""}`.trim(),
+          totalOrders: orders.length,
+          totalSpent: c.total_spent,
+          lastOrderDate: lastOrder ? lastOrder.created_at : null,
+          lastOrderPaymentStatus: lastOrder ? lastOrder.financial_status : null,
+          orders: orderDetails,
+        },
+      };
+    };
+
+    const tryPhone = async () => {
+      if (!digitsOnly) return null;
+      // treat as phone if it looks like a real phone length (tune threshold as you like)
+      if (digitsOnly.length < 8) return null;
+
+      const customerUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/customers/search.json?query=phone:${digitsOnly}`;
+      const customerResponse = await axios.get(customerUrl, { headers: shopifyHeaders });
+      const customers = customerResponse.data.customers || [];
+      if (!customers.length) return null;
+
+      const c = customers[0];
+      const ordersUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?customer_id=${c.id}&status=any`;
+      const ordersResp = await axios.get(ordersUrl, { headers: shopifyHeaders });
+      const orders = ordersResp.data.orders || [];
+
+      return buildCustomerPayloadFromOrders(orders, c.id);
+    };
+
+    const tryOrder = async () => {
+      // order names you care about are like #MA119 / MA119; we only try order path
+      // if there is a hash or at least one letter to avoid clashing with pure phone numbers.
+      if (!(hasLetters || startsWithHash)) return null;
+
+      const nameNoHash = normalizeOrderName(raw);
+      const order = await fetchOrderByName(nameNoHash);
+      if (!order || !order.customer?.id) return null;
+
+      const customerId = order.customer.id;
+      const ordersUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json?customer_id=${customerId}&status=any`;
+      const ordersResp = await axios.get(ordersUrl, { headers: shopifyHeaders });
+      const orders = ordersResp.data.orders || [];
+
+      return buildCustomerPayloadFromOrders(orders, customerId);
+    };
+
+    let payload = null;
+
+    // Strategy:
+    // - If string has letters or starts with '#', try ORDER first, then PHONE.
+    // - Otherwise (mostly digits), try PHONE first, then ORDER.
+    if (hasLetters || startsWithHash) {
+      payload = await tryOrder();
+      if (!payload) payload = await tryPhone();
+    } else {
+      payload = await tryPhone();
+      if (!payload) payload = await tryOrder();
+    }
+
+    return res.json(payload || { customer: null });
+  } catch (error) {
+    console.error("Error fetching Shopify customer details:", error?.response?.data || error.message);
+    return res.status(500).json({ error: "Failed to fetch customer details from Shopify." });
+  }
+}); 
+
 
 router.get("/order-details", async (req, res) => {
   const { orderId } = req.query;
   if (!orderId) {
     return res.status(400).json({ error: "orderId query parameter is required" });
   }
-  
+
   try {
     const shopifyStore = process.env.SHOPIFY_STORE_NAME;
-    const accessToken = process.env.SHOPIFY_API_SECRET;
-    // Use Shopify’s API to fetch a single order by its ID.
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN; // <-- FIXED
+
     const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${orderId}.json`;
     const response = await axios.get(url, {
       headers: {
@@ -97,11 +162,12 @@ router.get("/order-details", async (req, res) => {
         "Content-Type": "application/json",
       },
     });
+
     const order = response.data.order;
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
-    // Extract and format the fields expected by the frontend:
+
     const orderDetails = {
       customerName: order.customer
         ? `${order.customer.first_name} ${order.customer.last_name}`.trim()
@@ -110,15 +176,16 @@ router.get("/order-details", async (req, res) => {
         order.customer && order.customer.default_address
           ? order.customer.default_address.phone
           : "N/A",
-          shippingAddress: order.shipping_address
-          ? `${order.shipping_address.address1}${order.shipping_address.address2 ? ", " + order.shipping_address.address2 : ""}, ${order.shipping_address.city}, ${order.shipping_address.province}, ${order.shipping_address.country}, ${order.shipping_address.zip}`
-          : "N/A",        
-      paymentStatus: order.financial_status,
-      productOrdered: order.line_items && order.line_items.length > 0
-        ? order.line_items.map(item => item.title).join(", ")
+      shippingAddress: order.shipping_address
+        ? `${order.shipping_address.address1}${order.shipping_address.address2 ? ", " + order.shipping_address.address2 : ""}, ${order.shipping_address.city}, ${order.shipping_address.province}, ${order.shipping_address.country}, ${order.shipping_address.zip}`
         : "N/A",
+      paymentStatus: order.financial_status,
+      productOrdered:
+        order.line_items && order.line_items.length > 0
+          ? order.line_items.map((item) => item.title).join(", ")
+          : "N/A",
       orderDate: order.created_at,
-      orderId: order.name,
+      orderId: order.name, // show human-readable order name
       totalPrice: order.total_price,
     };
 
@@ -131,3 +198,4 @@ router.get("/order-details", async (req, res) => {
 
 
 module.exports = router;
+

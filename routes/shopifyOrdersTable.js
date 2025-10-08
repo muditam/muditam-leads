@@ -16,13 +16,11 @@ function ymd(dateLike) {
 function stripHashOrderName(orderName) {
   if (!orderName) return "";
   return orderName.startsWith("#") ? orderName.slice(1) : orderName;
-}
-// keep the helper but we won't use it for lookups anymore
+} 
 function normalizePhone10(s) {
   const d = String(s || "").replace(/\D/g, "");
   return d.length > 10 ? d.slice(-10) : d;
-}
-// Always return a STRING for mode of payment
+} 
 function mopString(order) {
   if (!order) return "";
   if (typeof order.modeOfPayment === "string" && order.modeOfPayment.trim()) {
@@ -33,8 +31,7 @@ function mopString(order) {
   if (typeof g === "string" && g.trim()) return g.trim();
   return "";
 }
-
-// (abbrev map)
+ 
 const RAW_PRODUCT_ABBREV = {
   "Karela Jamun Fizz": "KJF",
   "Sugar Defend Pro": "SDP",
@@ -50,6 +47,7 @@ const RAW_PRODUCT_ABBREV = {
   "Core Essentials": "CE",
   "Omega Fuel": "OF",
   "Nerve FIx": "NF",
+  "Thyroid Defend Pro": "TDP", 
 };
 const PRODUCT_ABBREV = Object.fromEntries(
   Object.entries(RAW_PRODUCT_ABBREV).map(([k, v]) => [
@@ -66,8 +64,7 @@ function titleToCode(title) {
   const letters = key.split(" ").filter(Boolean).map(w => w[0]).join("").toUpperCase();
   return letters || key.toUpperCase();
 }
-
-// ========== TABLE API ==========
+ 
 router.get("/shopify/orders-table", async (req, res) => {
   try {
     const page  = Math.max(parseInt(req.query.page || "1", 10), 1);
@@ -77,14 +74,13 @@ router.get("/shopify/orders-table", async (req, res) => {
     const selectedStatus = (req.query.status || "").trim();
     const stateFilter    = (req.query.state || "").trim();
     const modeFilter     = (req.query.mode || "").trim();
-    const assigned       = (req.query.assigned || "").trim().toLowerCase(); // "", "assigned", "unassigned"
+    const assigned       = (req.query.assigned || "").trim().toLowerCase();  
     const onlyMeta       = String(req.query.onlyMeta || "") === "1";
     const withMeta       = String(req.query.withMeta || "") === "1";
 
     const startDate = (req.query.startDate || "").trim();
     const endDate   = (req.query.endDate || "").trim();
-
-    // ---------- 1) Base match ----------
+ 
     const baseMatch = {};
     if (stateFilter) baseMatch["customerAddress.province"] = stateFilter;
     if (modeFilter) {
@@ -105,8 +101,7 @@ router.get("/shopify/orders-table", async (req, res) => {
       ];
       baseMatch.$or = baseMatch.$or ? baseMatch.$or.concat(orDate) : orDate;
     }
-
-    // ---------- 2) onlyMeta (fast) ----------
+ 
     if (onlyMeta) {
       const metaPipeline = [
         { $match: baseMatch },
@@ -167,8 +162,7 @@ router.get("/shopify/orders-table", async (req, res) => {
         data: []
       });
     }
-
-    // ---------- 3) Main listing pipeline ----------
+ 
     const early = [{ $match: baseMatch }];
 
     if (selectedStatus) {
@@ -207,12 +201,9 @@ router.get("/shopify/orders-table", async (req, res) => {
         { $project: { oMatch: 0 } }
       );
     }
-
-    // Sort by indexed fields
+ 
     early.push({ $sort: { orderDate: -1, createdAt: -1 } });
-
-    // ---------- assigned/unassigned presence BEFORE pagination ----------
-    // Compare EXACT (raw) numbers: (A) contactNumber, (B) customerAddress.phone  ↔ Lead.contactNumber
+ 
     const assignedPresence = [];
     if (assigned === "assigned" || assigned === "unassigned") {
       assignedPresence.push(
@@ -249,14 +240,12 @@ router.get("/shopify/orders-table", async (req, res) => {
         { $project: { leadExist: 0 } }
       );
     }
-
-    // ---------- Facet rows & total ----------
+ 
     const facet = {
       rows: [
         { $skip: skip },
         { $limit: limit },
-
-        // Only the fields we render + both phone candidates
+ 
         {
           $project: {
             orderName: 1,

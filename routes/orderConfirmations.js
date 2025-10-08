@@ -4,6 +4,7 @@ const router = express.Router();
 const mongoose = require("mongoose");
 const axios = require("axios");
 const Razorpay = require("razorpay");
+const cron = require("node-cron");
 
 const ShopifyOrder = require("../models/ShopifyOrder");
 const Order = require("../models/Order");
@@ -63,75 +64,10 @@ const getRoleFromReq = (req) =>
 const getUserIdFromReq = (req) =>
   (req.user?._id || req.user?.id || req.query.userId || "").toString();
 
-/* =========================
-   Agent Active/Inactive APIs
-   ========================= */
-
-// GET active agents for order-confirmation
-router.get("/agents/active", async (_req, res) => {
-  try {
-    const agents = await Employee.find(
-      {
-        orderConfirmActive: true,
-        $or: [{ status: "active" }, { status: "Active" }],
-      },
-      { _id: 1, fullName: 1, email: 1, role: 1 }
-    )
-      .sort({ fullName: 1 })
-      .lean();
-
-    res.json({ agents });
-  } catch (err) {
-    console.error("GET /agents/active error:", err);
-    res.status(500).json({ error: "Failed to fetch active agents" });
-  }
-});
-
-// Toggle a specific agent's active flag for Order Confirmation
-router.post("/agents/toggle", async (req, res) => {
-  try {
-    const { agentId, active } = req.body || {};
-    if (!isValidObjectId(agentId)) {
-      return res.status(400).json({ error: "Invalid agentId" });
-    }
-    const updated = await Employee.findByIdAndUpdate(
-      agentId,
-      { $set: { orderConfirmActive: !!active } },
-      { new: true, projection: { _id: 1, fullName: 1, orderConfirmActive: 1 } }
-    ).lean();
-
-    if (!updated) return res.status(404).json({ error: "Agent not found" });
-    res.json({ ok: true, agent: updated });
-  } catch (err) {
-    console.error("POST /agents/toggle error:", err);
-    res.status(500).json({ error: "Failed to toggle agent activity" });
-  }
-});
-
-// Helper to query one agent's OC-active flag (useful so UI doesn't "flip off" on refresh)
-router.get("/agents/:id/status", async (req, res) => {
-  try { 
-    const { id } = req.params;
-    if (!isValidObjectId(id)) {
-      return res.status(400).json({ error: "Invalid agent id" });
-    }
-    const emp = await Employee.findById(
-      id,
-      { _id: 1, fullName: 1, status: 1, role: 1, orderConfirmActive: 1 }
-    ).lean();
-    if (!emp) return res.status(404).json({ error: "Agent not found" });
-    res.json({ ok: true, agent: emp });
-  } catch (err) {
-    console.error("GET /agents/:id/status error:", err);
-    res.status(500).json({ error: "Failed to fetch agent status" });
-  }
-});
-
-router.post("/assign/round-robin", async (req, res) => {
+async function assignRoundRobin({ batchSize = 5000 } = {}) {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    // 1) load eligible agents (Active for OC + Operations)
     const agents = await Employee.find(
       {
         orderConfirmActive: true,
@@ -140,16 +76,28 @@ router.post("/assign/round-robin", async (req, res) => {
       },
       { _id: 1, fullName: 1 }
     )
+      .session(session)
       .sort({ fullName: 1 })
-      .lean({ session });
+      .lean();
 
     if (!agents.length) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
+      return {
+        ok: false,
         error: "No eligible agents found (need Operations + Active for OC)",
-      });
+        assigned: 0,
+        agents: 0,
+        details: [],
+      };
     }
+
+    const CallStatusEnumLocal = {
+      CNP: "CNP",
+      ORDER_CONFIRMED: "ORDER_CONFIRMED",
+      CALL_BACK_LATER: "CALL_BACK_LATER",
+      CANCEL_ORDER: "CANCEL_ORDER",
+    };
 
     const baseMatch = {
       $and: [
@@ -163,7 +111,7 @@ router.post("/assign/round-robin", async (req, res) => {
         {
           $or: [
             { "orderConfirmOps.callStatus": { $exists: false } },
-            { "orderConfirmOps.callStatus": { $ne: CallStatusEnum.ORDER_CONFIRMED } },
+            { "orderConfirmOps.callStatus": { $ne: CallStatusEnumLocal.ORDER_CONFIRMED } },
           ],
         },
         {
@@ -175,8 +123,7 @@ router.post("/assign/round-robin", async (req, res) => {
       ],
     };
 
-    // Batch assign in a round-robin
-    const BATCH_SIZE = Math.max(1000, Math.min(20000, Number(req.body?.batchSize) || 5000));
+    const BATCH_SIZE = Math.max(1000, Math.min(20000, Number(batchSize) || 5000));
     let totalAssigned = 0;
     const details = agents.map((a) => ({
       agentId: String(a._id),
@@ -186,13 +133,13 @@ router.post("/assign/round-robin", async (req, res) => {
 
     const now = new Date();
 
-    // Use a cursor on just the _id to keep memory low; stable sort by date desc
     const cursor = ShopifyOrder.find(baseMatch, { _id: 1 }, { session })
       .sort({ orderDate: -1, createdAt: -1 })
       .cursor();
 
     let buffer = [];
-    let i = 0; // rotates across agents
+    let i = 0;
+
     for await (const doc of cursor) {
       buffer.push(doc._id);
       if (buffer.length >= BATCH_SIZE) {
@@ -215,13 +162,11 @@ router.post("/assign/round-robin", async (req, res) => {
           totalAssigned += 1;
           i++;
         }
-        if (bulk.length) {
-          await ShopifyOrder.bulkWrite(bulk, { session });
-        }
+        if (bulk.length) await ShopifyOrder.bulkWrite(bulk, { session });
         buffer = [];
       }
     }
- 
+
     if (buffer.length) {
       const bulk = [];
       for (const id of buffer) {
@@ -242,28 +187,90 @@ router.post("/assign/round-robin", async (req, res) => {
         totalAssigned += 1;
         i++;
       }
-      if (bulk.length) {
-        await ShopifyOrder.bulkWrite(bulk, { session });
-      }
+      if (bulk.length) await ShopifyOrder.bulkWrite(bulk, { session });
     }
 
     await session.commitTransaction();
     session.endSession();
-    return res.json({
-      ok: true,
-      assigned: totalAssigned,
-      agents: agents.length,
-      details,
-    });
+    return { ok: true, assigned: totalAssigned, agents: agents.length, details };
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
+    throw err;
+  }
+}
+
+router.get("/agents/active", async (_req, res) => {
+  try {
+    const agents = await Employee.find(
+      {
+        orderConfirmActive: true,
+        $or: [{ status: "active" }, { status: "Active" }],
+      },
+      { _id: 1, fullName: 1, email: 1, role: 1 }
+    )
+      .sort({ fullName: 1 })
+      .lean();
+
+    res.json({ agents });
+  } catch (err) {
+    console.error("GET /agents/active error:", err);
+    res.status(500).json({ error: "Failed to fetch active agents" });
+  }
+});
+ 
+router.post("/agents/toggle", async (req, res) => {
+  try {
+    const { agentId, active } = req.body || {};
+    if (!isValidObjectId(agentId)) {
+      return res.status(400).json({ error: "Invalid agentId" });
+    }
+    const updated = await Employee.findByIdAndUpdate(
+      agentId,
+      { $set: { orderConfirmActive: !!active } },
+      { new: true, projection: { _id: 1, fullName: 1, orderConfirmActive: 1 } }
+    ).lean();
+
+    if (!updated) return res.status(404).json({ error: "Agent not found" });
+    res.json({ ok: true, agent: updated });
+  } catch (err) {
+    console.error("POST /agents/toggle error:", err);
+    res.status(500).json({ error: "Failed to toggle agent activity" });
+  }
+});
+ 
+router.get("/agents/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ error: "Invalid agent id" });
+    }
+    const emp = await Employee.findById(
+      id,
+      { _id: 1, fullName: 1, status: 1, role: 1, orderConfirmActive: 1 }
+    ).lean();
+    if (!emp) return res.status(404).json({ error: "Agent not found" });
+    res.json({ ok: true, agent: emp });
+  } catch (err) {
+    console.error("GET /agents/:id/status error:", err);
+    res.status(500).json({ error: "Failed to fetch agent status" });
+  }
+});
+
+router.post("/assign/round-robin", async (req, res) => {
+  try {
+    const result = await assignRoundRobin({ batchSize: req.body?.batchSize });
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error || "Round-robin assignment failed" });
+    }
+    return res.json(result);
+  } catch (err) {
     console.error("POST /assign/round-robin error:", err);
     res.status(500).json({ error: "Round-robin assignment failed" });
   }
 });
 
- 
+
 router.get("/list", async (req, res) => {
   try {
     const {
@@ -283,23 +290,19 @@ router.get("/list", async (req, res) => {
     const pageSize = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
 
     const clauses = [];
-
-    // Tab / section -> callStatus or "no note" filter
+ 
     if (typeof tab === "string" && tab.trim()) {
       const up = tab.trim().toUpperCase().replace(/\s+/g, "_");
-      if (Object.values(CallStatusEnum).includes(up)) {
-        // Match exact status (CNP, ORDER_CONFIRMED, CALL_BACK_LATER, CANCEL_ORDER)
+      if (Object.values(CallStatusEnum).includes(up)) { 
         clauses.push({ "orderConfirmOps.callStatus": up });
-      } else if (up === "PENDING") {
-        // "Pending" = no Shopify note present
+      } else if (up === "PENDING") { 
         clauses.push({
           $or: [
             { "orderConfirmOps.shopifyNotes": { $exists: false } },
             { "orderConfirmOps.shopifyNotes": "" },
           ],
         });
-      } else if (up !== "ALL") {
-        // Fallback to CNP if some unknown tab is passed (kept from original behavior)
+      } else if (up !== "ALL") { 
         clauses.push({ "orderConfirmOps.callStatus": CallStatusEnum.CNP });
       }
     } else {
@@ -314,19 +317,16 @@ router.get("/list", async (req, res) => {
         });
       }
     }
-
-    // Always restrict to financial_status: pending
+ 
     clauses.push({ financial_status: /^pending$/i });
-
-    // fulfillment: not fulfilled (or missing)
+ 
     clauses.push({
       $or: [
         { fulfillment_status: { $exists: false } },
         { fulfillment_status: { $not: /^fulfilled$/i } },
       ],
     });
-
-    // Keyword search
+ 
     if (q) {
       const numericQ = q.replace(/\D/g, "");
       clauses.push({
@@ -335,15 +335,14 @@ router.get("/list", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-                { contactNumber: { $regex: numericQ } },
-                { normalizedPhone: { $regex: numericQ } },
-              ]
+              { contactNumber: { $regex: numericQ } },
+              { normalizedPhone: { $regex: numericQ } },
+            ]
             : []),
         ],
       });
     }
-
-    // Channel filter
+ 
     if (channel && CHANNEL_MAP[channel]) {
       const id = CHANNEL_MAP[channel];
       const idNum = Number(id);
@@ -356,8 +355,7 @@ router.get("/list", async (req, res) => {
         ],
       });
     }
-
-    // Assignment filter (explicit)
+ 
     if (assigned === "unassigned") {
       clauses.push({
         $or: [
@@ -369,10 +367,7 @@ router.get("/list", async (req, res) => {
       clauses.push({
         "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(String(assigned)),
       });
-    } else {
-      // Role default scoping when no explicit 'assigned' is passed.
-      // - Manager: see all (no extra clause)
-      // - Operations: see only their assigned orders by default
+    } else { 
       if (/^operations$/i.test(role) && isValidObjectId(authedUserId)) {
         clauses.push({
           "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(String(authedUserId)),
@@ -403,8 +398,7 @@ router.get("/list", async (req, res) => {
       fulfillment_status: 1,
       currency: 1,
       channelName: 1,
-
-      // ops fields
+ 
       "orderConfirmOps.callStatus": 1,
       "orderConfirmOps.callStatusUpdatedAt": 1,
       "orderConfirmOps.shopifyNotes": 1,
@@ -415,14 +409,12 @@ router.get("/list", async (req, res) => {
       "orderConfirmOps.codToPrepaid": 1,
       "orderConfirmOps.paymentLink": 1,
       "orderConfirmOps.plusCount": 1,
-      "orderConfirmOps.plusUpdatedAt": 1,
-
-      // assignment surface
+      "orderConfirmOps.plusUpdatedAt": 1, 
       "orderConfirmOps.assignedAgentId": 1,
       "orderConfirmOps.assignedAgentName": 1,
       "orderConfirmOps.assignedAt": 1,
     };
-
+ 
     const [rawItems, total] = await Promise.all([
       ShopifyOrder.find(filter, projection)
         .sort({ orderDate: -1, createdAt: -1 })
@@ -481,6 +473,45 @@ router.get("/list", async (req, res) => {
   }
 });
 
+router.post("/create-payment-link", async (req, res) => {
+  try {
+    const { amount, currency = "INR", customer = {} } = req.body || {};
+    const amt = Number(amount);
+    if (!amt || amt <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+    const amountPaise = Math.round(amt * 100);
+
+    const payload = {
+      amount: amountPaise,
+      currency,
+      customer: {
+        name: customer?.name || "Customer",
+        email: customer?.email || undefined,
+        contact: customer?.contact || undefined,
+      },
+      notify: {
+        sms: !!customer?.contact,
+        email: !!customer?.email,
+      },
+      reminder_enable: true,
+    };
+
+    const link = await razorpay.paymentLink.create(payload);
+    const shortUrl = link?.short_url || link?.url;
+    if (!shortUrl) {
+      return res.status(502).json({ error: "Failed to create payment link" });
+    }
+    return res.json({ paymentLink: shortUrl, id: link.id });
+  } catch (err) {
+    console.error("POST /create-payment-link error:", err?.response?.data || err.message);
+    const status = err?.response?.status || 500;
+    res.status(status).json({
+      error: "Payment link creation failed",
+      details: err?.response?.data || err.message,
+    });
+  }
+});
 
 /* ============================================
    PATCH update (+ allow manual assignment)
@@ -741,10 +772,7 @@ router.post("/shopify-notes", async (req, res) => {
     });
   }
 });
-
-/* ============================================
-   Bulk call status (unchanged)
-   ============================================ */
+ 
 router.post("/bulk-call-status", async (req, res) => {
   try {
     const { ids = [], callStatus } = req.body || {};
@@ -756,12 +784,12 @@ router.post("/bulk-call-status", async (req, res) => {
       .toUpperCase()
       .replace(/\s+/g, "_");
     if (!Object.values(CallStatusEnum).includes(up)) {
-      return res.status(400).json({ error: "Invalid callStatus value" });
+      return res.status(400).json({ error: "Invalid callStatus value" }); 
     }
 
     const result = await ShopifyOrder.updateMany(
       {
-        _id: { $in: ids.map((x) => new mongoose.Types.ObjectId(String(x))) },
+        _id: { $in: ids.map((x) => new mongoose.Types.ObjectId(String(x))) }, 
       },
       {
         $set: {
@@ -809,9 +837,9 @@ router.get("/counts", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-                { contactNumber: { $regex: numericQ } },
-                { normalizedPhone: { $regex: numericQ } },
-              ]
+              { contactNumber: { $regex: numericQ } },
+              { normalizedPhone: { $regex: numericQ } },
+            ]
             : []),
         ],
       });
@@ -885,7 +913,7 @@ router.get("/counts", async (req, res) => {
     res.json({
       counts: {
         ALL: allCount,
-        PENDING: pendingNotesCount,          
+        PENDING: pendingNotesCount,
         CNP: by.CNP || 0,
         ORDER_CONFIRMED: by.ORDER_CONFIRMED || 0,
         CALL_BACK_LATER: by.CALL_BACK_LATER || 0,
@@ -920,17 +948,19 @@ router.get("/today-confirmed-count", async (req, res) => {
     const y = Number(parts.find(p => p.type === "year")?.value);
     const m = Number(parts.find(p => p.type === "month")?.value);
     const d = Number(parts.find(p => p.type === "day")?.value);
- 
-    const startUtcMs = Date.UTC(y, m - 1, d, 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000) * 0;  
-    const endUtcMs   = Date.UTC(y, m - 1, d, 23, 59, 59, 999) - (5.5 * 60 * 60 * 1000) * 0;
+
+    const istOffsetMs = 5.5 * 60 * 60 * 1000; 
+    const startUtcMs = Date.UTC(y, m - 1, d, 0, 0, 0, 0) - istOffsetMs;
+    const endUtcMs = Date.UTC(y, m - 1, d, 23, 59, 59, 999) - istOffsetMs;
+
 
     const start = new Date(startUtcMs);
-    const end = new Date(endUtcMs);
+    const end = new Date(endUtcMs);   
 
-    const clauses = [ 
-      { financial_status: /^pending$/i },
+    const clauses = [
+      { financial_status: /^pending$/i }, 
       { $or: [{ fulfillment_status: { $exists: false } }, { fulfillment_status: { $not: /^fulfilled$/i } }] },
- 
+
       { "orderConfirmOps.callStatus": CallStatusEnum.ORDER_CONFIRMED },
       { "orderConfirmOps.callStatusUpdatedAt": { $gte: start, $lte: end } },
     ];
@@ -939,7 +969,7 @@ router.get("/today-confirmed-count", async (req, res) => {
       clauses.push({ "orderConfirmOps.assignedAgentId": agentId });
     }
 
-    const count = await ShopifyOrder.countDocuments({ $and: clauses });
+    const count = await ShopifyOrder.countDocuments({ $and: clauses }); 
     res.json({ count });
   } catch (err) {
     console.error("GET /today-confirmed-count error:", err);
@@ -958,20 +988,17 @@ router.post("/cancel", async (req, res) => {
     if (!SHOPIFY_STORE_NAME || !SHOPIFY_ACCESS_TOKEN) {
       return res.status(500).json({ error: "Shopify credentials are missing in environment" });
     }
-
-    // 1) Resolve Shopify order id
-    let shopifyId = null;
-    let shopifyName = null;
+ 
+    let shopifyId = null; 
+    let shopifyName = null; 
 
     if (orderId) {
-      shopifyId = String(orderId).replace(/\D/g, "");
-      // try to fetch order to validate it exists
-      const { data } = await shopifyApi.get(`/orders/${shopifyId}.json`);
+      shopifyId = String(orderId).replace(/\D/g, ""); 
+      const { data } = await shopifyApi.get(`/orders/${shopifyId}.json`); 
       if (!data?.order?.id) {
         return res.status(404).json({ error: `Shopify order not found for id ${orderId}` });
       }
-      shopifyName = data.order.name;
-      // if already cancelled, short-circuit
+      shopifyName = data.order.name; 
       if (String(data.order.cancelled_at || "")) {
         return res.json({ ok: true, alreadyCancelled: true, shopify: { id: shopifyId, name: shopifyName } });
       }
@@ -1020,13 +1047,11 @@ router.post("/cancel", async (req, res) => {
       { new: true }
     ).lean();
 
-    // 4) (Optional) also push note field to Shopify Order object (so staff sees it in admin)
     try {
       await shopifyApi.put(`/orders/${shopifyId}.json`, {
         order: { id: shopifyId, note },
       });
     } catch (_) {
-      // non-fatal
     }
 
     return res.json({
@@ -1042,5 +1067,27 @@ router.post("/cancel", async (req, res) => {
   }
 });
 
-module.exports = router;
+let __ocBusy = false;
 
+cron.schedule("*/15 * * * *", async () => {
+  if (__ocBusy) return;
+  __ocBusy = true;
+  const started = Date.now();
+  try {
+    // 1) Round-robin assignment
+    const rr = await assignRoundRobin({});
+    console.log(`[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${rr.agents || 0})`);
+
+    await axios.get("https://muditamleads-14f32a10d7f7.herokuapp.com/api/orders-shopify/sync-new", {
+      timeout: 120000,
+    });
+
+    console.log(`[OC CRON] done in ${(Date.now() - started) / 1000}s`); 
+  } catch (e) {
+    console.error("[OC CRON] error:", e?.response?.data || e.message || e);   
+  } finally {
+    __ocBusy = false;
+  }
+});
+
+module.exports = router;

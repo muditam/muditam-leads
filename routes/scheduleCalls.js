@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 const ScheduleCall = require("../models/ScheduleCall");
+const ShopifyOrder = require("../models/ShopifyOrder"); // ⬅️ ADDED
 
 // ---- Helpers ----
 function parseTimeHM(hm = "10:30") {
@@ -10,7 +11,7 @@ function parseTimeHM(hm = "10:30") {
   return { h: isNaN(h) ? 0 : h, m: isNaN(m) ? 0 : m };
 }
 
-function startOfDayLocal(dateStr) { 
+function startOfDayLocal(dateStr) {
   return new Date(`${dateStr}T00:00:00`);
 }
 
@@ -21,18 +22,18 @@ function endOfDayLocal(dateStr) {
 function addMinutes(date, min) {
   return new Date(date.getTime() + min * 60 * 1000);
 }
- 
+
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
- 
+
 router.post("/", async (req, res) => {
   try {
     const {
       doctorCallNeeded = true,
       assignedExpert,
-      scheduleCallAt,        
-      scheduleDurationMin,   
+      scheduleCallAt,
+      scheduleDurationMin,
       scheduleCallNotes = "",
       orderId,
       customerId,
@@ -80,7 +81,7 @@ router.post("/", async (req, res) => {
 
     return res.json({ ok: true, schedule: doc });
   } catch (err) {
-    if (err?.code === 11000) { 
+    if (err?.code === 11000) {
       return res.status(409).json({ error: "Expert already has a booking starting at this minute." });
     }
     console.error("POST /api/schedule-calls error:", err);
@@ -88,7 +89,6 @@ router.post("/", async (req, res) => {
   }
 });
 
- 
 router.get("/slots", async (req, res) => {
   try {
     const { date, expertId, businessStart = "10:30", businessEnd = "18:30" } = req.query || {};
@@ -128,7 +128,7 @@ router.get("/slots", async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 });
- 
+
 router.get("/", async (req, res) => {
   try {
     const { from, to, expertId, status, limit = 100, page = 1 } = req.query || {};
@@ -149,13 +149,42 @@ router.get("/", async (req, res) => {
       ScheduleCall.countDocuments(q),
     ]);
 
-    return res.json({ items, total, page: Number(page || 1), limit: lim });
+    // 🔹 Enrich with order details so frontend can render Order/Customer cells
+    const orderIds = items
+      .map((it) => it.orderId)
+      .filter((id) => id && mongoose.isValidObjectId(id));
+
+    let orderMap = {};
+    if (orderIds.length) {
+      const orders = await ShopifyOrder.find(
+        { _id: { $in: orderIds } },
+        {
+          orderName: 1,
+          productsOrdered: 1,
+          customerName: 1,
+          contactNumber: 1,
+          normalizedPhone: 1,
+        }
+      ).lean();
+
+      orderMap = orders.reduce((acc, o) => {
+        acc[String(o._id)] = o;
+        return acc;
+      }, {});
+    }
+
+    const enrichedItems = items.map((it) => ({
+      ...it,
+      order: it.orderId ? orderMap[String(it.orderId)] || null : null,
+    }));
+
+    return res.json({ items: enrichedItems, total, page: Number(page || 1), limit: lim });
   } catch (err) {
     console.error("GET /api/schedule-calls error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
- 
+
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -175,16 +204,18 @@ router.put("/:id", async (req, res) => {
     if (typeof scheduleDurationMin === "number") update.scheduleDurationMin = scheduleDurationMin;
     if (typeof scheduleCallAt === "string" || scheduleCallAt instanceof Date) update.scheduleCallAt = new Date(scheduleCallAt);
     if (updatedBy) update.updatedBy = updatedBy;
- 
-    if ((update.assignedExpert || update.scheduleCallAt || update.scheduleDurationMin) &&
-        (!update.status || ["SCHEDULED","RESCHEDULED"].includes(update.status))) {
 
+    if (
+      (update.assignedExpert || update.scheduleCallAt || update.scheduleDurationMin) &&
+      (!update.status || ["SCHEDULED", "RESCHEDULED"].includes(update.status))
+    ) {
       const doc = await ScheduleCall.findById(id).lean();
       if (!doc) return res.status(404).json({ error: "Schedule not found" });
 
       const assigned = update.assignedExpert || doc.assignedExpert;
       const start = update.scheduleCallAt ? new Date(update.scheduleCallAt) : new Date(doc.scheduleCallAt);
-      const duration = typeof update.scheduleDurationMin === "number" ? update.scheduleDurationMin : (doc.scheduleDurationMin || 0);
+      const duration =
+        typeof update.scheduleDurationMin === "number" ? update.scheduleDurationMin : doc.scheduleDurationMin || 0;
       const end = new Date(start.getTime() + duration * 60000);
 
       const conflicts = await ScheduleCall.find({
@@ -192,7 +223,9 @@ router.put("/:id", async (req, res) => {
         assignedExpert: assigned,
         status: { $in: ["SCHEDULED", "RESCHEDULED"] },
         scheduleCallAt: { $lt: end },
-      }).limit(50).lean();
+      })
+        .limit(50)
+        .lean();
 
       const overlaps = conflicts.some((c) => {
         const cStart = new Date(c.scheduleCallAt);
@@ -215,6 +248,4 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-
 module.exports = router;
-

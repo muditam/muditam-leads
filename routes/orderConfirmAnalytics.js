@@ -1,4 +1,3 @@
-// routes/orderAnalytics.js
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
@@ -14,16 +13,14 @@ const CallStatusEnum = {
 };
 
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(String(id));
-
-/** Build UTC Date for a given YYYY-MM-DD at IST midnight / 23:59:59.999 */
+ 
 function istBoundsForDate(yyyyMmDd) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(yyyyMmDd || ""))) return null;
   const start = new Date(`${yyyyMmDd}T00:00:00.000+05:30`);
   const end   = new Date(`${yyyyMmDd}T23:59:59.999+05:30`);
   return { start, end };
 }
-
-/** If range is invalid, default to IST today */
+ 
 function getWindowFromQuery(req) {
   const range = String(req.query.range || "").trim();
   const startStr = String(req.query.start || "").trim();
@@ -46,17 +43,6 @@ function getWindowFromQuery(req) {
   return { start: t.start, end: t.end, meta: { range: "Today", start: todayStr, end: todayStr } };
 }
 
-/**
- * GET /api/order-analytics/agents
- * Query:
- *   range=<preset|custom>&start=YYYY-MM-DD&end=YYYY-MM-DD
- *
- * Returns per-active-agent counts for:
- *   - all: orders created in window (by orderDate or createdAt)
- *   - pending: same as all, but no Shopify note
- *   - confirmed/cnp/callBack/cancel: based on callStatusUpdatedAt in window
- *   - addLog: based on plusUpdatedAt in window
- */
 router.get("/agents", async (req, res) => {
   try {
     const { start, end, meta } = getWindowFromQuery(req);
@@ -82,8 +68,7 @@ router.get("/agents", async (req, res) => {
         { "orderConfirmOps.assignedAgentId": { $in: agentIdList } },
       ],
     };
-
-    // Helper date match for "created in window" -> use orderDate OR createdAt
+ 
     const createdInWindow = {
       $or: [
         { orderDate: { $gte: start, $lte: end } },
@@ -128,8 +113,7 @@ router.get("/agents", async (req, res) => {
     ];
 
     const [agg] = await ShopifyOrder.aggregate(pipeline);
-
-    // Convert facet arrays to {agentIdString: count}
+ 
     const toMap = (arr = []) =>
       arr.reduce((m, r) => {
         m[String(r._id)] = r.c;
@@ -143,8 +127,7 @@ router.get("/agents", async (req, res) => {
     const mapCallBack = toMap(agg?.callBack);
     const mapCancel = toMap(agg?.cancel);
     const mapAddLog = toMap(agg?.addLog);
-
-    // Build rows for all active agents (even if 0)
+ 
     const items = activeAgents.map((a) => {
       const id = String(a._id);
       return {

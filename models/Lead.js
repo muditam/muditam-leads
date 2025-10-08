@@ -46,11 +46,11 @@ const LeadSchema = new mongoose.Schema({
       date: String,
       value: String,
       by: String,
-    }
+    } 
   ],
   details: { 
     age: Number,
-    height: Number,
+    height: Number, 
     weight: Number, 
     hba1c: Number,               
     fastingSugar: Number,       

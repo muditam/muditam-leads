@@ -4,12 +4,10 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 
-// helpers (same as before)
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const cleanLabel = (s) => (s || '').trim().replace(/\s+/g, ' ');
 const normKey = (s) => cleanLabel(s).toLocaleLowerCase();
 
-// 1) Distinct experts (deduped)
 router.get('/experts', async (req, res) => {
   try {
     const raw = await Lead.distinct('healthExpertAssigned', {
@@ -30,18 +28,45 @@ router.get('/experts', async (req, res) => {
   }
 });
 
-// 2) Leads for a selected expert — now **no default limit**
 router.get('/experts/:expert/leads', async (req, res) => {
   try {
     const { expert } = req.params;
-    const { q = '', limit } = req.query; 
+    const { q = '', limit, onlyActive } = req.query;
     const label = cleanLabel(expert);
     const rx = new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, 'i');
 
     const find = { healthExpertAssigned: rx };
+
     if (q) {
       const qrx = new RegExp(q, 'i');
       find.$or = [{ name: qrx }, { contactNumber: qrx }];
+    }
+
+    // ⬇️ Active OR unset (null/empty/missing)
+    if (String(onlyActive) === '1' || String(onlyActive).toLowerCase() === 'true') {
+      // If a search "q" was set above, it created find.$or; so we must AND this status filter.
+      // Move the prior OR into an $and with the status conditions.
+      const prevOr = find.$or;
+      delete find.$or;
+
+      const statusOr = [
+        { retentionStatus: { $regex: /^\s*active\s*$/i } },
+        { retentionStatus: null },
+        { retentionStatus: '' },
+        { retentionStatus: { $exists: false } },
+      ];
+
+      if (prevOr) {
+        // both search OR and status OR should be true → use $and
+        Object.assign(find, {
+          $and: [
+            { $or: prevOr },
+            { $or: statusOr }
+          ]
+        });
+      } else {
+        Object.assign(find, { $or: statusOr });
+      }
     }
 
     const projection = {
@@ -49,15 +74,15 @@ router.get('/experts/:expert/leads', async (req, res) => {
       name: 1,
       contactNumber: 1,
       healthExpertAssigned: 1,
+      retentionStatus: 1,
     };
 
     let queryM = Lead.find(find, projection).sort({ name: 1, _id: 1 });
 
-    // Apply limit ONLY if provided and > 0. If not provided or invalid → no limit.
     const lim = Number(limit);
     if (Number.isFinite(lim) && lim > 0) {
       queryM = queryM.limit(lim);
-    } // else leave unlimited
+    }
 
     const items = await queryM.exec();
     res.json({ total: items.length, items });
@@ -66,7 +91,6 @@ router.get('/experts/:expert/leads', async (req, res) => {
   }
 });
 
-// 3) Migrate selected
 router.post('/migrate', async (req, res) => {
   try {
     const { leadIds = [], toExpert } = req.body;
