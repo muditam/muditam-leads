@@ -1,5 +1,5 @@
 const express = require('express');
-const router = express.Router(); 
+const router = express.Router();
 const Employee = require('../models/Employee');
 
 router.get("/api/employees", async (req, res) => {
@@ -10,18 +10,18 @@ router.get("/api/employees", async (req, res) => {
       if (!employee) {
         return res.status(404).json({ message: "Employee not found" });
       }
-      const { async, agentNumber, callerId, target, hasTeam, isDoctor } = employee; 
+      const { async, agentNumber, callerId, target, hasTeam, isDoctor } = employee;
       return res.status(200).json([{ async, agentNumber, callerId, target, hasTeam, isDoctor }]);
     }
 
     const query = role ? { role } : {};
     const employees = await Employee.find(query)
-      .select("fullName email callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate")
+      .select("fullName email callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate languages")
       .populate("teamLeader", "fullName");
 
     const formatted = employees.map(emp => ({
       ...emp.toObject(),
-      teamLeader: emp.teamLeader ? { 
+      teamLeader: emp.teamLeader ? {
         _id: emp.teamLeader._id,
         fullName: emp.teamLeader.fullName
       } : null,
@@ -69,14 +69,15 @@ router.post('/api/employees', async (req, res) => {
     fullName,
     email,
     callerId,
-    agentNumber, 
+    agentNumber,
     role,
     password,
     target,
     hasTeam,
     isDoctor,
     teamLeader,
-    joiningDate
+    joiningDate,
+    languages
   } = req.body;
 
   if (!fullName || !email || !callerId || !agentNumber || !role || !password) {
@@ -103,6 +104,7 @@ router.post('/api/employees', async (req, res) => {
       isDoctor: !!isDoctor,
       teamLeader: teamLeader || null,
       joiningDate: joiningDate || null,
+      languages: Array.isArray(languages) ? languages : [],
     });
 
     await newEmployee.save();
@@ -115,7 +117,18 @@ router.post('/api/employees', async (req, res) => {
 
 router.put('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
-  const { callerId, agentNumber, password, target, hasTeam, isDoctor, teamLeader, joiningDate, ...updateData } = req.body;
+  const {
+    callerId,
+    agentNumber,
+    password,
+    target,
+    hasTeam,
+    isDoctor, 
+    teamLeader, 
+    joiningDate, 
+    languages,         
+    ...updateData 
+  } = req.body;
 
   try {
     if (password) updateData.password = password;
@@ -124,6 +137,13 @@ router.put('/api/employees/:id', async (req, res) => {
     if (typeof isDoctor !== "undefined") updateData.isDoctor = isDoctor;
     if (teamLeader !== undefined) updateData.teamLeader = teamLeader;
     if (joiningDate) updateData.joiningDate = joiningDate;
+
+    // languages: allow optional, sanitize if provided
+    if (Array.isArray(languages)) {
+      updateData.languages = [...new Set(
+        languages.map((s) => String(s).trim())
+      )].filter(Boolean);
+    }
 
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
@@ -144,6 +164,7 @@ router.put('/api/employees/:id', async (req, res) => {
     res.status(500).json({ message: 'Error updating employee', error });
   }
 });
+
 
 // DELETE employee
 router.delete('/api/employees/:id', async (req, res) => {
@@ -184,4 +205,4 @@ router.put("/api/employees/:id/team", async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;  

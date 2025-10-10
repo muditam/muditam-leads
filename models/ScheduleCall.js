@@ -32,7 +32,7 @@ const ScheduleCallSchema = new mongoose.Schema(
     // Audit
     createdBy: { type: String }, // agent/user id if you want
     updatedBy: { type: String }, 
-  },
+  }, 
   { timestamps: true }
 );
 

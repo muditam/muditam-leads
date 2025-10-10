@@ -82,7 +82,7 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
 
     if (!agents.length) {
       await session.abortTransaction();
-      session.endSession();
+      session.endSession(); 
       return {
         ok: false,
         error: "No eligible agents found (need Operations + Active for OC)",
@@ -977,9 +977,17 @@ router.get("/today-confirmed-count", async (req, res) => {
   }
 });
 
-router.post("/cancel", async (req, res) => {
-  try {
-    const { orderName, orderId, reason = "customer", email = true, restock = true, note = "Cancelled via Order Confirmations UI" } = req.body || {};
+router.post("/cancel", async (req, res) => { 
+  try { 
+    const {
+      orderName,
+      orderId, 
+      reason = "customer",
+      email = true,
+      restock = true,
+       note = "Cancelled via Order Confirmations UI",
+       ocCancelReason = ""   // <-- local-only reason from UI
+    } = req.body || {};
 
     if (!orderName && !orderId) {
       return res.status(400).json({ error: "Provide orderName or orderId" });
@@ -1041,11 +1049,12 @@ router.post("/cancel", async (req, res) => {
         $set: {
           "orderConfirmOps.shopifyNotes": note,
           "orderConfirmOps.callStatus": CallStatusEnum.CANCEL_ORDER,
-          "orderConfirmOps.callStatusUpdatedAt": new Date(),
+          "orderConfirmOps.callStatusUpdatedAt": new Date(), 
+          "orderConfirmOps.ocCancelReason": ocCancelReason,
         },
       },
-      { new: true }
-    ).lean();
+      { new: true } 
+    ).lean(); 
 
     try {
       await shopifyApi.put(`/orders/${shopifyId}.json`, {

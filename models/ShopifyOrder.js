@@ -47,7 +47,7 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
 
     doctorCallNeeded: { type: Boolean },
     dietPlanNeeded: { type: Boolean },
-    assignedExpert: { type: String, default: "" },
+    assignedExpert: { type: String, default: "" }, 
 
     languageUsed: { type: String, default: "" },
 
@@ -56,7 +56,8 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
     paymentLink: { type: String, default: "" },
 
     plusCount: { type: Number, default: 0 },
-    plusUpdatedAt: { type: Date, default: null, index: true },
+    plusUpdatedAt: { type: Date, default: null, index: true }, 
+    ocCancelReason: { type: String, default: "" },
 
     assignedAgentId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", index: true, default: null },
     assignedAgentName: { type: String, default: "" },

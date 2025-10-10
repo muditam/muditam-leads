@@ -1,6 +1,11 @@
+// routes/shopifyCustomer.js (example filename)
+
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
+
+// ⬇️ Adjust this path if needed
+const Order = require('../models/Order');
 
 const { SHOPIFY_STORE_NAME, SHOPIFY_ACCESS_TOKEN } = process.env;
 
@@ -13,6 +18,14 @@ const normalizeOrderName = (raw = "") =>
 const shopifyHeaders = {
   "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
   "Content-Type": "application/json",
+};
+
+// Utilities to handle both "#MA119" and "MA119"
+const nameVariants = (shopifyName = "") => {
+  const trimmed = (shopifyName || "").trim();
+  const withHash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  const noHash = trimmed.replace(/^#/, "");
+  return [withHash, noHash];
 };
 
 // Try both REST filters that commonly work across stores:
@@ -35,9 +48,9 @@ async function fetchOrderByName(nameNoHash) {
     return exact || resp.data.orders[0];
   }
 
-  return null;
+  return null; 
 }
- 
+
 router.get("/customerDetails", async (req, res) => {
   try {
     const { phone, q } = req.query;
@@ -48,7 +61,7 @@ router.get("/customerDetails", async (req, res) => {
     const hasLetters = /[A-Za-z]/.test(raw);
     const startsWithHash = raw.startsWith("#");
 
-    // helpers
+    // ====== helpers ======
     const buildCustomerPayloadFromOrders = async (orders, customerId) => {
       // sort newest first
       orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -58,23 +71,65 @@ router.get("/customerDetails", async (req, res) => {
       const customerResp = await axios.get(customerUrl, { headers: shopifyHeaders });
       const c = customerResp.data.customer;
 
+      // ---- Gather all variants of order names to lookup internal shipment_status ----
+      const allIds = new Set();
+      orders.forEach((o) => {
+        const orderName = (o.name || "").trim();
+        if (orderName) {
+          const [withHash, noHash] = nameVariants(orderName);
+          allIds.add(withHash);
+          allIds.add(noHash);
+        }
+      });
+
+      // ---- Bulk fetch internal orders once ----
+      let internalOrders = [];
+      if (allIds.size > 0) {
+        internalOrders = await Order.find({ order_id: { $in: Array.from(allIds) } })
+          .select("order_id shipment_status")
+          .lean();
+      }
+
+      // Build a quick lookup map
+      const shipmentMap = new Map();
+      internalOrders.forEach((doc) => {
+        const id = (doc.order_id || "").trim();
+        if (!id) return;
+        const withHash = id.startsWith("#") ? id : `#${id}`;
+        const noHash = id.replace(/^#/, "");
+        shipmentMap.set(withHash, doc.shipment_status);
+        shipmentMap.set(noHash,   doc.shipment_status);
+      });
+
       const lastOrder = orders[0] || null;
-      const orderDetails = orders.map((o) => ({
-        id: o.id,
-        name: o.name, // show order name to frontend
-        created_at: o.created_at,
-        totalAmount: o.total_price,
-        itemCount: o.line_items.reduce((acc, it) => acc + Number(it.quantity || 0), 0),
-        deliveryStatus: o.fulfillment_status || "Not fulfilled",
-        shippingAddress: o.shipping_address
-          ? `${o.shipping_address.address1 || ""}${o.shipping_address.address2 ? ", " + o.shipping_address.address2 : ""}, ${o.shipping_address.city || ""}, ${o.shipping_address.province || ""}, ${o.shipping_address.country || ""}, ${o.shipping_address.zip || ""}`
-          : "Not available",
-        lineItems: o.line_items.map((it) => ({
-          title: it.title,
-          variant: it.variant_title,
-          amountPaid: `${it.price}`,
-        })),
-      }));
+
+      const orderDetails = orders.map((o) => {
+        const orderName = (o.name || "").trim();
+        const shipmentStatus =
+          shipmentMap.get(orderName) ||
+          shipmentMap.get(orderName.replace(/^#/, "")) ||
+          null;
+
+        return {
+          id: o.id,
+          name: orderName, // show order name to frontend (e.g., "#MA119")
+          created_at: o.created_at,
+          totalAmount: o.total_price,
+          itemCount: o.line_items.reduce((acc, it) => acc + Number(it.quantity || 0), 0),
+          // Shopify fulfillment status:
+          deliveryStatus: o.fulfillment_status || "Not fulfilled",
+          // Your internal shipment status from Mongo:
+          shipmentStatus, 
+          shippingAddress: o.shipping_address
+            ? `${o.shipping_address.address1 || ""}${o.shipping_address.address2 ? ", " + o.shipping_address.address2 : ""}, ${o.shipping_address.city || ""}, ${o.shipping_address.province || ""}, ${o.shipping_address.country || ""}, ${o.shipping_address.zip || ""}`
+            : "Not available",
+          lineItems: o.line_items.map((it) => ({
+            title: it.title,
+            variant: it.variant_title,
+            amountPaid: `${it.price}`,
+          })),
+        };
+      });
 
       return {
         customer: {
@@ -144,7 +199,6 @@ router.get("/customerDetails", async (req, res) => {
   }
 }); 
 
-
 router.get("/order-details", async (req, res) => {
   const { orderId } = req.query;
   if (!orderId) {
@@ -196,6 +250,4 @@ router.get("/order-details", async (req, res) => {
   }
 });
 
-
 module.exports = router;
-

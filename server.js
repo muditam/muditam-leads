@@ -98,14 +98,16 @@ const orderConfirmationsRouter = require("./routes/orderConfirmations");
 const scheduleCallsRouter = require("./routes/scheduleCalls"); 
 const opsDashboardRoutes = require("./routes/opsDashboard");
 const orderConfirmAnalytics = require("./routes/orderConfirmAnalytics"); 
- 
+const assetsRoutes = require("./routes/add-assets");
+const assetAllotmentsRoutes = require("./routes/assetAllotments"); 
+const UnAssignedDelivered = require("./routes/UnAssignedDelivered");
+  
 const app = express(); 
 const PORT = process.env.PORT || 5001;
 
 app.use(
   compression({
-    filter: (req, res) => {
-      // absolutely never compress SSE
+    filter: (req, res) => { 
       if (req.path === '/api/sse') return false;
 
       const type = String(res.getHeader('Content-Type') || '');
@@ -132,8 +134,7 @@ app.use(cors({
     return callback(null, true);
   }
 }));
-
-// tolerant number parser
+ 
 function toNumberLoose(v) {
   if (v === null || v === undefined) return undefined;
   if (typeof v === "number" && !Number.isNaN(v)) return v;
@@ -149,15 +150,13 @@ function toNumberLoose(v) {
   return undefined;
 }
 const pickFirst = (...vals) => vals.find(v => v !== undefined && v !== null && v !== "");
-
-// convert a **major-unit** string/number to **minor units** integer (INR → paise)
+ 
 function majorToMinor(v) { 
   const n = toNumberLoose(v);
   if (n === undefined) return undefined;
   return Math.round(n * 100); 
 }
-
-// from your payload, decides if it's abandoned
+ 
 function isAbandoned(root, mergedTypeText = "") {
   if (root?.is_abandoned === true) return true;
   const txt = String(mergedTypeText || "").toLowerCase();
@@ -166,13 +165,11 @@ function isAbandoned(root, mergedTypeText = "") {
   return false;
 }
 
-// if provider doesn't give an id, hash the raw body for idempotency
 function hashId(buf) {
   try { return crypto.createHash("sha256").update(buf).digest("hex"); }
   catch { return undefined; }
 }
  
-// ----------------- UPDATED WEBHOOK ROUTE -----------------
 app.post(
   "/api/webhook",
   bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
@@ -182,8 +179,7 @@ app.post(
     try {
       const ctype = (req.headers["content-type"] || "").split(";")[0];
       const raw = req.rawBody || Buffer.from("");
-
-      // Optional HMAC
+ 
       const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET;
       const sig = req.get("X-GK-Signature") || req.get("x-gk-signature");
       if (sharedSecret && sig) {
@@ -191,8 +187,7 @@ app.post(
         const ok = sig.replace(/^sha256=/, "") === digest;
         if (!ok) return res.status(401).send("Invalid signature");
       }
-
-      // Parse body into event
+ 
       let event;
       if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
         event = req.body;
@@ -214,25 +209,20 @@ app.post(
           return res.status(400).send("Unsupported body format");
         }
       }
-
-      // Unwrap if needed
+ 
       const root = event?.data || event?.payload || event;
-
-      // Merge type-ish fields for detection/logging
+ 
       const typeText = [
         event?.type, event?.event, event?.topic, event?.event_type,
         root?.event, root?.event_type, root?.event_name, root?.name
       ].filter(Boolean).join("|");
-
-      // Build a reliable hash source even if raw is empty
+ 
       const rawForHash = raw?.length ? raw : Buffer.from(JSON.stringify(event || {}));
-
-      // IDs
+ 
       const eventId = pickFirst(root.request_id, event.id, event.event_id) || hashId(rawForHash);
       const checkoutId = pickFirst(root.token, root.checkout_id, root.cart_id, root.checkout_token);
       const orderId = pickFirst(root.order_id, root.orderId);
-
-      // ---------------- Customer (broadened fallbacks) ----------------
+ 
       const cust = root.customer || root.customer_details || {};
       const addr = root.address || {};
       const shipping = root.shipping_address || root.shipping || {};
@@ -245,14 +235,12 @@ app.post(
         billing.state, billing.province, billing.region,
         root.state, root.province, root.region
       );
-
-      // Broad email fallbacks
+ 
       const email = pickFirst(
         cust.email, addr.email, shipping.email, billing.email,
         root.email, root.customer_email, root.contact_email, root.user_email
       );
-
-      // Broad phone fallbacks (to capture phone-only payloads)
+ 
       const phone = pickFirst(
         cust.phone, addr.phone, shipping.phone, billing.phone,
         root.phone, root.mobile, root.mobile_number, root.contact, root.contact_number,
@@ -270,10 +258,9 @@ app.post(
           ) || undefined,
         email: email || undefined,
         phone: phone || undefined,
-        state: stateName ? String(stateName) : undefined, // store state for display & assignment
+        state: stateName ? String(stateName) : undefined,  
       };
-
-      // --- Structured address + single-line text (broadened fallbacks) ---
+ 
       const addressParts = {
         name: pickFirst(shipping.name, billing.name, addr.name, customer.name, root.name),
         line1: pickFirst(shipping.address1, billing.address1, addr.address1, root.address1, root.addr1),
@@ -295,8 +282,7 @@ app.post(
           .join(", ");
       }
       const customerAddressText = compactAddressStr(addressParts);
-
-      // ---------------- Items (safe when missing; also support line_items) ----------------
+ 
       const itemsSrc = Array.isArray(root.items)
         ? root.items
         : (Array.isArray(root.line_items) ? root.line_items : []);
@@ -314,12 +300,11 @@ app.post(
           title: it.title || it.product_title || it.name || "",
           variantTitle,
           quantity: qty,
-          unitPrice: unitMinor,      // minor units
-          finalLinePrice: lineMinor, // minor units
+          unitPrice: unitMinor,     
+          finalLinePrice: lineMinor,  
         };
       });
-
-      // ---------------- Currency & totals (prefer minor; convert major when needed) ----------------
+ 
       const currency = pickFirst(root.currency, "INR");
       const totalMinor =
         toNumberLoose(root.total_price) !== undefined
@@ -330,15 +315,13 @@ app.post(
             majorToMinor(root.original_total_price) ||
             0
           );
-
-      // ---------------- Event time ----------------
+ 
       const eventAt =
         (root.created_at && new Date(root.created_at)) ||
         (root.updated_at && new Date(root.updated_at)) ||
         (event.timestamp && new Date(event.timestamp)) ||
         new Date();
-
-      // ---------------- Normalized doc ----------------
+ 
       const normalized = {
         eventId,
         checkoutId,
@@ -354,14 +337,12 @@ app.post(
         recoveryUrl: root.abc_url ? String(root.abc_url).trim() : undefined,
         eventAt,
         receivedAt: new Date(),
-        raw: root, // persist raw for downstream use
-        // Optional helper for UI/analytics: quickly spot “phone-only” rows
+        raw: root,  
         meta: {
           phoneOnly: Boolean(customer.phone) && !customer.name && !customer.email,
         },
       };
-
-      // ---------------- Persist only abandoned ----------------
+ 
       const abandoned = isAbandoned(root, typeText);
       if (abandoned) {
         const query = normalized.eventId
@@ -382,7 +363,7 @@ app.post(
   }
 );
 
-const sseClients = new Map(); // key -> Set(res)
+const sseClients = new Map();  
 
 function didKey(v) {
   return String(v || "").replace(/\D/g, "").slice(-10);
@@ -549,24 +530,26 @@ app.use("/api/schedule-calls", scheduleCallsRouter);
 app.use("/api/ops-dashboard", opsDashboardRoutes);
 app.use("/api/order-analytics", orderConfirmAnalytics); 
 
+app.use("/api/assets", assetsRoutes); 
+app.use("/api/asset-allotments", assetAllotmentsRoutes);
+app.use("/api/orders-un", UnAssignedDelivered);
+
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
-
+ 
 
 app.get('/api/sse', (req, res) => {
   const { did } = req.query;
   if (!did) return res.status(400).send('Missing did');
-
-  // Tell proxies NOT to buffer/compress this
+ 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
-
-  // Some runtimes benefit from this:
+ 
   req.socket?.setKeepAlive?.(true);
   req.socket?.setNoDelay?.(true);
  
@@ -631,8 +614,7 @@ app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
         lastOrderDate: lead.lastOrderDate || ''
       } : null,
     };
-
-    // Push realtime to all listeners of this DID (use normalized key)
+ 
     if (didKeyStr) sseSend(didKeyStr, event);
 
     return res.status(200).json({ success: true });
@@ -896,10 +878,8 @@ app.post('/api/leads/by-phones', async (req, res) => {
   if (!Array.isArray(phoneNumbers)) {
     return res.status(400).json({ message: 'phoneNumbers should be an array' });
   }
-
-  // Create unique list of last-10 digits
-  const last10List = [...new Set(phoneNumbers.map((p) => phoneLast10(p)).filter(Boolean))];
-  // Build regex array that matches numbers ending with those 10 digits
+ 
+  const last10List = [...new Set(phoneNumbers.map((p) => phoneLast10(p)).filter(Boolean))]; 
   const regexes = last10List.map((p) => new RegExp(`${p}$`));
 
   try {
@@ -986,7 +966,7 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
     }
 
     const pipeline = [
-      { $sort: { order_date: -1 } }, // newest first
+      { $sort: { order_date: -1 } }, 
       {
         $group: {
           _id: "$contact_number",
@@ -994,7 +974,7 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
         }
       },
       { $replaceRoot: { newRoot: "$mostRecentOrder" } },
-      { $match: { shipment_status } } // exact match for the provided status
+      { $match: { shipment_status } }  
     ];
 
     const recentOrders = await Order.aggregate(pipeline);
@@ -1006,16 +986,14 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
   }
 });
 
-
-// Cron job to update shipment status every hour
+ 
 cron.schedule('0 8 * * *', async () => {
   try {
     const orders = await Order.find({});
     for (const order of orders) {
       try {
         if (!order.order_date) continue;
-
-        // Skip update if status is final
+ 
         if (order.shipment_status === "Delivered" || order.shipment_status === "RTO Delivered") {
           console.log(`Skipping cron update for order ${order.order_id} with final status: ${order.shipment_status}`);
           continue;
@@ -1037,16 +1015,14 @@ cron.schedule('0 8 * * *', async () => {
     console.error("Cron job error:", error);
   }
 });
-
-// Utility: Normalize phone (strip +91, spaces etc)
+ 
 function normalizePhone(phone) {
   if (!phone) return "";
   const cleaned = phone.replace(/\D/g, '').replace(/^91/, '');
   return cleaned.length === 10 ? cleaned : "";
 }
 
-
-// Function: fetch Shopify customers by phone (phone numbers normalized for matching)
+ 
 async function fetchShopifyFirstOrderDateByPhone(phone) {
   if (!phone) return null;
 
@@ -1079,8 +1055,7 @@ async function fetchShopifyFirstOrderDateByPhone(phone) {
     }
 
     console.log(`Fetching orders for customer ID: ${customer.id}`);
-
-    // Fetch orders for this customer sorted by created_at ascending
+ 
     const ordersRes = await axios.get(`${shopifyBase}/orders.json`, {
       params: {
         customer_id: customer.id,
@@ -1113,8 +1088,7 @@ async function fetchShopifyFirstOrderDateByPhone(phone) {
 app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
   try {
     console.log("Starting update of lastOrderDate from Shopify...");
-
-    // Step 1: Get leads with missing lastOrderDate and salesStatus = "Sales Done"
+ 
     const leadsToUpdate = await Lead.find({
       $and: [
         {
@@ -1133,8 +1107,7 @@ app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
     if (!leadsToUpdate.length) {
       return res.json({ message: "No leads require lastOrderDate update" });
     }
-
-    // Step 2: Normalize phone numbers and map to lead IDs
+ 
     const phoneToLeadsMap = {};
 
     leadsToUpdate.forEach((lead) => {
@@ -1143,16 +1116,14 @@ app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
       if (!phoneToLeadsMap[phone]) phoneToLeadsMap[phone] = [];
       phoneToLeadsMap[phone].push(lead._id);
     });
-
-    // Step 3: Process each unique phone only once
+ 
     let updatedCount = 0;
 
     for (const phone of Object.keys(phoneToLeadsMap)) {
       console.log(`Fetching Shopify data for phone: ${phone}`);
       const firstOrderDate = await fetchShopifyFirstOrderDateByPhone(phone);
 
-      if (firstOrderDate) {
-        // Update all leads with this phone
+      if (firstOrderDate) { 
         await Lead.updateMany(
           { _id: { $in: phoneToLeadsMap[phone] } },
           { lastOrderDate: firstOrderDate }
@@ -1193,14 +1164,12 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
     const requiredFields = ["Date", "Name", "Contact No"];
     const errors = [];
     const validLeads = [];
-
-    // Collect all numbers from uploaded file
+ 
     const contactNumbers = rows
       .map(row => row["Contact No"])
       .filter(Boolean)
       .map(num => String(num).trim());
-
-    // Find which already exist in DB
+ 
     const existing = await Lead.find({
       contactNumber: { $in: contactNumbers }
     }).select("contactNumber");
@@ -1213,8 +1182,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
         errors.push(`Row ${index + 2} is missing mandatory fields: ${missingFields.join(", ")}`);
         return;
       }
-
-      // Skip if contact already exists
+ 
       if (existingSet.has(String(row["Contact No"]).trim())) {
         errors.push(`Row ${index + 2} skipped - contact number already exists`);
         return;
@@ -1272,8 +1240,7 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
   const { contactNumber } = req.query;
 
   try {
-    const last10 = phoneLast10(contactNumber);
-    // Match any stored number that ENDS with these 10 digits (works with +91/0/91 stored values)
+    const last10 = phoneLast10(contactNumber); 
     const lead = await Lead.findOne({ contactNumber: { $regex: new RegExp(`${last10}$`) } });
 
     if (lead) {
@@ -1321,8 +1288,8 @@ app.get('/api/leads', async (req, res) => {
       const parsedlastOrderDate = parseDate(filterCriteria.lastOrderDate);
       if (parsedlastOrderDate) {
         query.lastOrderDate = parsedlastOrderDate;
-      }
-    }
+      } 
+    } 
 
     if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
     if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
@@ -1425,18 +1392,13 @@ app.put('/api/leads/:id', async (req, res) => {
 });
 
 
-
 app.delete('/api/leads/:id', async (req, res) => {
-  try {
-    // Delete the lead document by ID
+  try { 
     const deletedLead = await Lead.findByIdAndDelete(req.params.id);
     if (!deletedLead) {
       return res.status(404).json({ message: 'Lead not found' });
     }
-
-    // Also delete the corresponding MyOrder document based on the contact number
     await MyOrder.deleteOne({ phone: deletedLead.contactNumber });
-
     res.status(200).json({ message: 'Lead and corresponding MyOrder deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Error deleting lead', error });
@@ -1471,16 +1433,13 @@ app.get("/api/leads/retention", async (req, res) => {
 
     page = parseInt(page);
     limit = parseInt(limit);
-
-    // Build MongoDB match object
-    let match = { salesStatus: "Sales Done" };
-
-    // Top filter: Active/Lost
+ 
+    let match = { salesStatus: "Sales Done" }; 
+ 
     if (retentionStatus && retentionStatus !== "All") {
-      match.retentionStatus = retentionStatus;
+      match.retentionStatus = retentionStatus; 
     }
-
-    // Search filter: Name, Contact, Order ID (case-insensitive)
+ 
     if (search && search.trim() !== "") {
       const s = search.trim();
       match.$or = [
@@ -1489,16 +1448,14 @@ app.get("/api/leads/retention", async (req, res) => {
         { orderId: { $regex: s, $options: "i" } },
       ];
     }
-
-    // Filter by agentAssigned (multi)
+ 
     if (agentAssigned) {
       let arr = Array.isArray(agentAssigned)
         ? agentAssigned
         : agentAssigned.split(",");
       match.agentAssigned = { $in: arr };
     }
-
-    // Filter by healthExpertAssigned (multi)
+ 
     if (healthExpertAssigned) {
       let arr = Array.isArray(healthExpertAssigned)
         ? healthExpertAssigned
@@ -1511,8 +1468,7 @@ app.get("/api/leads/retention", async (req, res) => {
         calculatedReminder: {
           $switch: {
             branches: [
-              {
-                // Not set at all
+              { 
                 case: {
                   $or: [
                     { $eq: ["$rtNextFollowupDate", null] },
@@ -1525,8 +1481,7 @@ app.get("/api/leads/retention", async (req, res) => {
             ],
             default: {
               $let: {
-                vars: {
-                  // Try strict YYYY-MM-DD first
+                vars: { 
                   dYmd: {
                     $dateFromString: {
                       dateString: "$rtNextFollowupDate",
@@ -1534,16 +1489,14 @@ app.get("/api/leads/retention", async (req, res) => {
                       onError: null,
                       onNull: null,
                     },
-                  },
-                  // Then a general parse (ISO etc.)
+                  }, 
                   dGeneral: {
                     $dateFromString: {
                       dateString: "$rtNextFollowupDate",
                       onError: null,
                       onNull: null,
                     },
-                  },
-                  // Detect an Excel serial day (either number or a 4-6 digit numeric string)
+                  }, 
                   excelDays: {
                     $cond: [
                       {
@@ -1560,8 +1513,7 @@ app.get("/api/leads/retention", async (req, res) => {
                       { $toInt: "$rtNextFollowupDate" },
                       null
                     ]
-                  },
-                  // Today at midnight IST
+                  }, 
                   todayIST: {
                     $dateTrunc: {
                       date: "$$NOW",
@@ -1572,8 +1524,7 @@ app.get("/api/leads/retention", async (req, res) => {
                 },
                 in: {
                   $let: {
-                    vars: {
-                      // Coalesce followupDate: dYmd -> dGeneral -> excel conversion -> null
+                    vars: { 
                       followupDate: {
                         $cond: [
                           { $ne: ["$$dYmd", null] }, "$$dYmd",
@@ -1599,11 +1550,9 @@ app.get("/api/leads/retention", async (req, res) => {
                       }
                     },
                     in: {
-                      $cond: [
-                        // If still null -> NotSet
+                      $cond: [ 
                         { $eq: ["$$followupDate", null] },
-                        "NotSet",
-                        // Else compute D = followup - today in days (IST)
+                        "NotSet", 
                         {
                           $let: {
                             vars: {
@@ -1638,8 +1587,7 @@ app.get("/api/leads/retention", async (req, res) => {
         }
       }
     };
-
-    // 1. For pill counts (all, not just current page)
+ 
     const countPipeline = [
       { $match: match },
       addFieldsStage,
@@ -1650,8 +1598,7 @@ app.get("/api/leads/retention", async (req, res) => {
         }
       }
     ];
-
-    // 2. For top filter counts (All/Active/Lost)
+ 
     const statusCountsPromise = Lead.aggregate([
       { $match: { salesStatus: "Sales Done" } },
       {
@@ -1661,14 +1608,12 @@ app.get("/api/leads/retention", async (req, res) => {
         }
       }
     ]);
-
-    // 3. Main data query
+ 
     let mainPipeline = [
       { $match: match },
       addFieldsStage
     ];
-
-    // Filter on selected followup (if set)
+ 
     if (followup) {
       mainPipeline.push({ $match: { calculatedReminder: followup } });
     }
@@ -1678,15 +1623,13 @@ app.get("/api/leads/retention", async (req, res) => {
       { $skip: (page - 1) * limit },
       { $limit: limit }
     );
-
-    // Run all queries in parallel
+ 
     let [leads, followupCountsArr, statusCountsArr] = await Promise.all([
       Lead.aggregate(mainPipeline),
       Lead.aggregate(countPipeline),
       statusCountsPromise,
     ]);
-
-    // Calculate profile completion % for each lead
+ 
     const profileFields = [
       "name", "contactNumber", "agentAssigned", "leadSource", "enquiryFor",
       "orderId", "productsOrdered", "amountPaid", "modeOfPayment", "deliveryStatus",
@@ -1706,14 +1649,12 @@ app.get("/api/leads/retention", async (req, res) => {
       }
       lead.profilePercent = Math.round((filled / profileFields.length) * 100);
     }
-
-    // Format pill counts
+ 
     const counts = { Today: 0, Tomorrow: 0, Missed: 0, Later: 0, NotSet: 0 };
     for (const f of followupCountsArr) {
       counts[f._id] = f.count;
     }
-
-    // Format top status counts
+ 
     let topCounts = { All: 0, Active: 0, Lost: 0 };
     let total = 0;
     for (const s of statusCountsArr) {
@@ -1723,8 +1664,7 @@ app.get("/api/leads/retention", async (req, res) => {
       total += s.count;
     }
     topCounts.All = total;
-
-    // Response
+ 
     res.json({
       leads,
       counts,
@@ -1739,7 +1679,6 @@ app.get("/api/leads/retention", async (req, res) => {
   }
 });
 
-
 app.get('/api/leads/retentions', async (req, res) => {
   const { fullName, email } = req.query;
   if (!fullName || !email) {
@@ -1747,8 +1686,7 @@ app.get('/api/leads/retentions', async (req, res) => {
   }
 
   const IST_TZ = 'Asia/Kolkata';
-
-  // helpers (existing)
+ 
   const startOfISTDay = (d = new Date()) => {
     const ymd = new Intl.DateTimeFormat('en-CA', {
       timeZone: IST_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -1762,8 +1700,7 @@ app.get('/api/leads/retentions', async (req, res) => {
   const startDayAfterIST_UTC = shiftDaysIST(startTodayIST_UTC, 2);
 
   const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-  // 🔽 add a generic string->date expr builder so we can reuse for multiple fields
+ 
   const strToDateExprFor = (field) => ({
     $let: {
       vars: { s: `$${field}` },
@@ -1792,8 +1729,7 @@ app.get('/api/leads/retentions', async (req, res) => {
       }
     }
   });
-
-  // field-type helpers (parametrized)
+ 
   const isDateField   = (field) => ({ [field]: { $type: 'date'   } });
   const isStringField = (field) => ({ [field]: { $type: 'string' } });
 
@@ -1812,11 +1748,10 @@ app.get('/api/leads/retentions', async (req, res) => {
       followupCategory,
       search: searchRaw,
       followupDate: followupDateStr,
-      serial: serialRaw,
-      // 🔽 NEW back-end filters
-      rowColor,               // exact match; pass "" for "No Color"
-      acquiredYear,           // YYYY
-      acquiredMonth,          // 1..12
+      serial: serialRaw, 
+      rowColor,               
+      acquiredYear,          
+      acquiredMonth,        
     } = req.query;
 
     const page  = Math.max(parseInt(pageRaw ?? '1', 10), 1);
@@ -1828,8 +1763,7 @@ app.get('/api/leads/retentions', async (req, res) => {
 
     let skip = (page - 1) * limit;
     if (serial != null) skip = serial;
-
-    // ====== Follow-up day bucket (existing) ======
+ 
     const notsetCond   = { $or: [ { rtNextFollowupDate: { $exists: false } }, { rtNextFollowupDate: null }, { rtNextFollowupDate: '' } ] };
     const missedCond   = { $or: [ dateLT('rtNextFollowupDate', startTodayIST_UTC), stringLT('rtNextFollowupDate', startTodayIST_UTC) ] };
     const todayCond    = { $or: [ dateInRange('rtNextFollowupDate', startTodayIST_UTC, startTomorrowIST_UTC), stringInRange('rtNextFollowupDate', startTodayIST_UTC, startTomorrowIST_UTC) ] };
@@ -1845,8 +1779,7 @@ app.get('/api/leads/retentions', async (req, res) => {
       if (cat === 'tomorrow') followScope = tomorrowCond;
       if (cat === 'later')    followScope = laterCond;
     }
-
-    // ====== Specific follow-up calendar day (existing) ======
+ 
     let followupOnScope = null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(followupDateStr ?? '')) {
       const dayStartIST = new Date(`${followupDateStr}T00:00:00+05:30`);
@@ -1855,8 +1788,7 @@ app.get('/api/leads/retentions', async (req, res) => {
         $or: [ dateInRange('rtNextFollowupDate', dayStartIST, nextDayIST), stringInRange('rtNextFollowupDate', dayStartIST, nextDayIST) ]
       };
     }
-
-    // ====== NEW: "Acquired In" month/year scope (by lastOrderDate) ======
+ 
     let acquiredScope = null;
     const y = acquiredYear && /^\d{4}$/.test(String(acquiredYear)) ? parseInt(acquiredYear, 10) : null;
     const m = acquiredMonth && /^\d{1,2}$/.test(String(acquiredMonth)) ? Math.min(Math.max(parseInt(acquiredMonth,10),1),12) : null;
@@ -1871,19 +1803,16 @@ app.get('/api/leads/retentions', async (req, res) => {
         ]
       };
     }
-
-    // ====== NEW: Row color filter ======
+ 
     let colorScope = null;
-    if (rowColor !== undefined) {
-      // If you pass empty string "" => fetch docs where rowColor missing/blank
+    if (rowColor !== undefined) { 
       if (rowColor === '') {
         colorScope = { $or: [ { rowColor: { $exists: false } }, { rowColor: '' }, { rowColor: null } ] };
       } else {
         colorScope = { rowColor: String(rowColor) };
       }
     }
-
-    // ====== Search (existing) ======
+ 
     const search = (searchRaw ?? '').toString().trim();
     let searchScope = null;
     if (search) {
@@ -1900,8 +1829,7 @@ app.get('/api/leads/retentions', async (req, res) => {
         };
       }
     }
-
-    // ====== Retention scope (existing) ======
+ 
     const blankOrNullPieces = [
       { retentionStatus: { $exists: false } },
       { retentionStatus: null },
@@ -1927,22 +1855,20 @@ app.get('/api/leads/retentions', async (req, res) => {
         $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, ...blankOrNullPieces],
       };
     }
-
-    // ====== Common agent scope (existing) ======
+ 
     const common = {
       healthExpertAssigned: { $in: [fullName, `${fullName} (${email})`] },
       salesStatus: 'Sales Done',
     };
-
-    // ====== Base query with NEW scopes added ======
+ 
     const base = {
       ...common,
       $and: [
         retentionScope,
         ...(followScope     ? [followScope]     : []),
         ...(followupOnScope ? [followupOnScope] : []),
-        ...(acquiredScope   ? [acquiredScope]   : []), // NEW
-        ...(colorScope      ? [colorScope]      : []), // NEW
+        ...(acquiredScope   ? [acquiredScope]   : []),  
+        ...(colorScope      ? [colorScope]      : []), 
         ...(searchScope     ? [searchScope]     : []),
       ],
     };
@@ -1961,8 +1887,7 @@ app.get('/api/leads/retentions', async (req, res) => {
       .sort(sort).skip(skip).limit(limit)
       .slice('reachoutLogs', -5) 
       .lean();
-
-    // counts remain independent (as before)
+ 
     const countsBase = { ...common };
     const countsScope =
       rs === 'active'
@@ -2027,7 +1952,7 @@ app.patch('/api/leads/:id/images', async (req, res) => {
     const lead = await Lead.findById(leadId);
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-    lead.images = images; // replace images array
+    lead.images = images;  
     await lead.save();
 
     res.json({ message: 'Images updated', lead });
@@ -2048,8 +1973,7 @@ app.post('/api/leads/:id/reachout-log', async (req, res) => {
     if (!lead) return res.status(404).json({ message: "Lead not found" });
 
     lead.reachoutLogs = lead.reachoutLogs || [];
-
-    // Update if existing timestamp match
+ 
     const existing = lead.reachoutLogs.find(log => log.timestamp?.toISOString() === new Date(timestamp).toISOString());
     if (existing) {
       if (method) existing.method = method;
@@ -2078,8 +2002,7 @@ app.get("/api/leads/:id/reachout-logs", async (req, res) => {
 });
 
 app.get('/api/leads/new-orders', async (req, res) => {
-  try {
-    // Extract page, limit, and other filter parameters from query
+  try { 
     const { page = 1, limit = 30, ...filters } = req.query;
 
     const query = {
@@ -2132,8 +2055,7 @@ app.get('/api/leads/new-orders', async (req, res) => {
       }
       query.productsOrdered = { $in: productsArr };
     }
-
-    // Date filtering on lastOrderDate
+ 
     if (filters.startDate) {
       query.lastOrderDate = query.lastOrderDate || {};
       query.lastOrderDate.$gte = new Date(filters.startDate);
@@ -2148,16 +2070,13 @@ app.get('/api/leads/new-orders', async (req, res) => {
       orderDateEnd.setDate(orderDateEnd.getDate() + 1);
       query.lastOrderDate = { $gte: orderDateStart, $lt: orderDateEnd };
     }
-
-    // Convert page and limit to numbers and calculate skip
+ 
     const pageNumber = parseInt(page, 10);
     const limitNumber = parseInt(limit, 10);
     const skip = (pageNumber - 1) * limitNumber;
-
-    // Get total count for pagination (with filters applied)
+ 
     const total = await Lead.countDocuments(query);
-
-    // Find leads using the query, applying sorting, skip, and limit
+ 
     const leads = await Lead.find(query, {
       lastOrderDate: 1,
       name: 1,
@@ -2232,12 +2151,10 @@ app.get('/api/consultation-history', async (req, res) => {
   try {
     const { contactNumber } = req.query; 
     if (!contactNumber) return res.status(400).json({ error: "Missing contactNumber" });
-
-    // 1. Find customer by phone 
+ 
     const customer = await Customer.findOne({ phone: contactNumber });
     if (!customer) return res.status(404).json({ error: "Customer not found" });
-
-    // 2. Find consultation details by customerId
+ 
     const consultations = await ConsultationDetails.find({ customerId: customer._id }).sort({ createdAt: -1 });
 
     res.json({ consultations });
