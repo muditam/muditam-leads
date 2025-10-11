@@ -228,7 +228,7 @@ router.get("/order-details", async (req, res) => {
         : "N/A",
       phone:
         order.customer && order.customer.default_address
-          ? order.customer.default_address.phone
+          ? order.customer.default_address.phone 
           : "N/A",
       shippingAddress: order.shipping_address
         ? `${order.shipping_address.address1}${order.shipping_address.address2 ? ", " + order.shipping_address.address2 : ""}, ${order.shipping_address.city}, ${order.shipping_address.province}, ${order.shipping_address.country}, ${order.shipping_address.zip}`
@@ -239,8 +239,8 @@ router.get("/order-details", async (req, res) => {
           ? order.line_items.map((item) => item.title).join(", ")
           : "N/A",
       orderDate: order.created_at,
-      orderId: order.name, // show human-readable order name
-      totalPrice: order.total_price,
+      orderId: order.name,  
+      totalPrice: order.total_price, 
     };
 
     return res.json(orderDetails);

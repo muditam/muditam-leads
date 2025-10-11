@@ -189,42 +189,41 @@ router.get("/:id", async (req, res) => {
   res.json(doc);
 });
 
-// CREATE diet plan
-router.post('/', async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    const { customer = {}, plan = {}, createdBy: createdByFromClient } = req.body;
+    const { name, type, category, tags, status = "draft" } = req.body;
+    let { body } = req.body;
 
-    // Grab from plan OR top-level as fallback
-    const conditions = Array.isArray(plan.conditions) ? plan.conditions : req.body.conditions;
-    const healthGoals = Array.isArray(plan.healthGoals) ? plan.healthGoals : req.body.healthGoals;
-    const healthProfile = plan.healthProfile ?? req.body.healthProfile;
+    if (!name || !type || !body) {
+      return res.status(400).json({ error: "name, type and body are required" });
+    }
+
+    // normalize + validate
+    if (type === "weekly-14") {
+      body = normalizeWeeklyBody(body);
+    }
+    validateBody(type, body);
 
     const createdBy = await resolveEmployeeFullName({
-      clientValue: createdByFromClient,
+      clientValue: req.body.createdBy,
       reqUser: req.user,
     });
 
-    const doc = await DietPlan.create({
-      customer,
-      planType: plan.planType,
-      templateId: plan.templateId,
-      templateLabel: plan.templateLabel,
-      templateType: plan.templateType,
-      startDate: plan.startDate,
-      durationDays: plan.durationDays,
-      ...(plan.planType === 'Weekly'
-        ? { fortnight: plan.fortnight, weeklyTimes: plan.weeklyTimes }
-        : { monthly: plan.monthly }),
-      healthProfile: healthProfile || {},
-      conditions: Array.isArray(conditions) ? conditions : [],
-      healthGoals: Array.isArray(healthGoals) ? healthGoals : [],
-      notes: plan.notes || '',
+    const doc = await DietTemplate.create({
+      name: name.trim(),
+      type,
+      category: category || null,
+      tags: Array.isArray(tags) ? tags : [],
+      status,
+      body,
       createdBy,
+      updatedBy: createdBy,
+      version: 1,
     });
 
     res.json(doc);
   } catch (e) {
-    res.status(400).json({ error: e.message || 'Failed to create diet plan' });
+    res.status(400).json({ error: e.message || "Failed to create template" });
   }
 });
 
@@ -292,7 +291,7 @@ router.delete("/:id", async (req, res) => {
     const doc = await DietTemplate.findByIdAndDelete(req.params.id);
     if (!doc) return res.status(404).json({ error: "Not found" });
     res.json({ ok: true, deletedId: doc._id });
-  } catch (e) {
+  } catch (e) { 
     res.status(500).json({ error: e.message || "Failed to delete template" });
   }
 });
