@@ -99,23 +99,12 @@ const LeadSchema = new mongoose.Schema({
       drop: String,
       note: String,
     }
-  ],
+  ], 
   reachoutLogs: [
     {
-      timestamp: { type: Date, default: Date.now },
-      method: { type: String, enum: ["WhatsApp", "Call", "Both"] },
-      status: {
-        type: String,
-        enum: [
-          "CNP",
-          "Followup Done",
-          "Order Placed",
-          "Call Back Later",
-          "Busy",
-          "Switch Off",
-          "Drop On Intro",
-        ],
-      },
+      timestamp: { type: Date, default: Date.now }, 
+      method: { type: String },
+      status: { type: String }, 
     },
   ],
 });
@@ -130,4 +119,4 @@ LeadSchema.index({ rtFollowupReminder: 1 });
 
 const Lead = mongoose.model('Lead', LeadSchema);
 
-module.exports = Lead;
+module.exports = Lead; 

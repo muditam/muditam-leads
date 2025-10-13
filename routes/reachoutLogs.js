@@ -171,7 +171,7 @@ router.get('/disposition-count', async (req, res) => {
 
     const result = await Lead.aggregate(pipeline);
 
-    const formattedResult = result.reduce((acc, item) => {
+    const formattedResult = result.reduce((acc, item) => { 
       acc[item._id] = item.count;
       return acc;
     }, {});
