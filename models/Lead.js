@@ -23,7 +23,7 @@ const LeadSchema = new mongoose.Schema({
   deliveryStatus: String,
   healthExpertAssigned: String,
   orderId: String,
-  dosageExpiring: String,
+  dosageExpiring: String,  
   rtNextFollowupDate: String,
   rtFollowupReminder: String,
   rtFollowupStatus: String,
@@ -86,24 +86,24 @@ const LeadSchema = new mongoose.Schema({
     symptoms: [String],
   },
   followUps: [
-    {
+    { 
       date: String,
       takingSupplements: String,
       sendingGlucometerPhotos: String,
       currentSugar: {
         fasting: String,
-        pp: String,
+        pp: String, 
       },
       hba1cTestDone: String,
       hba1cValue: String,
       drop: String,
       note: String,
     }
-  ], 
+  ],   
   reachoutLogs: [
     {
       timestamp: { type: Date, default: Date.now }, 
-      method: { type: String },
+      method: { type: String }, 
       status: { type: String }, 
     },
   ],

@@ -14,7 +14,7 @@ const Employee = require("../models/Employee");
 const CallStatusEnum = {
   CNP: "CNP",
   ORDER_CONFIRMED: "ORDER_CONFIRMED",
-  CALL_BACK_LATER: "CALL_BACK_LATER",
+  CALL_BACK_LATER: "CALL_BACK_LATER", 
   CANCEL_ORDER: "CANCEL_ORDER",
 };
 
@@ -280,7 +280,8 @@ router.get("/list", async (req, res) => {
       limit = 20,
       q = "",
       channel = "",
-      assigned = "",
+      assigned = "", 
+      startDate = "", 
     } = req.query;
 
     const role = getRoleFromReq(req);
@@ -374,6 +375,18 @@ router.get("/list", async (req, res) => {
         });
       }
     }
+
+    if (startDate) {
+       const sd = new Date(startDate);
+       if (!isNaN(sd.getTime())) {
+         clauses.push({
+           $or: [
+             { orderDate: { $gte: sd } },
+             { createdAt: { $gte: sd } },
+           ],
+         });
+       }
+     }
 
     const filter = clauses.length ? { $and: clauses } : {};
 
@@ -815,12 +828,13 @@ router.post("/bulk-call-status", async (req, res) => {
    ============================================ */
 router.get("/counts", async (req, res) => {
   try {
-    const { q = "", channel = "", assigned = "" } = req.query;
+    const { q = "", channel = "", assigned = "", startDate = "" } = req.query;
 
     const role = getRoleFromReq(req);
     const authedUserId = getUserIdFromReq(req);
 
     const clauses = [];
+    // scope to pending + not-fulfilled (same as /list)
     clauses.push({ financial_status: /^pending$/i });
     clauses.push({
       $or: [
@@ -829,6 +843,7 @@ router.get("/counts", async (req, res) => {
       ],
     });
 
+    // text / phone search (same as /list)
     if (q) {
       const numericQ = q.replace(/\D/g, "");
       clauses.push({
@@ -837,14 +852,15 @@ router.get("/counts", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-              { contactNumber: { $regex: numericQ } },
-              { normalizedPhone: { $regex: numericQ } },
-            ]
+                { contactNumber: { $regex: numericQ } },
+                { normalizedPhone: { $regex: numericQ } },
+              ]
             : []),
         ],
       });
     }
 
+    // channel filter (same as /list)
     if (channel && CHANNEL_MAP[channel]) {
       const id = CHANNEL_MAP[channel];
       const idNum = Number(id);
@@ -858,7 +874,7 @@ router.get("/counts", async (req, res) => {
       });
     }
 
-    // Assignment filter (explicit)
+    // assignment scoping (same as /list)
     if (assigned === "unassigned") {
       clauses.push({
         $or: [
@@ -871,18 +887,29 @@ router.get("/counts", async (req, res) => {
         "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(String(assigned)),
       });
     } else {
-      // Role default scoping matches /list
       if (/^operations$/i.test(role) && isValidObjectId(authedUserId)) {
         clauses.push({
           "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(String(authedUserId)),
         });
       }
-      // Manager sees all
+    }
+
+    // ✅ NEW: startDate filter (mirror of /list)
+    if (startDate) {
+      const sd = new Date(startDate);
+      if (!isNaN(sd.getTime())) {
+        clauses.push({
+          $or: [
+            { orderDate: { $gte: sd } },
+            { createdAt: { $gte: sd } },
+          ],
+        });
+      }
     }
 
     const baseMatch = clauses.length ? { $and: clauses } : {};
 
-    // Build "no note" match on top of the same base
+    // "Pending" = no shopifyNotes (same as /list’s pending logic)
     const pendingNotesMatch = {
       $and: [
         ...(Array.isArray(baseMatch.$and) ? baseMatch.$and : [baseMatch]),
@@ -924,7 +951,7 @@ router.get("/counts", async (req, res) => {
     console.error("GET /order-confirmations/counts error:", err);
     res.status(500).json({ error: "Failed to fetch counts" });
   }
-});
+}); 
 
 router.get("/today-confirmed-count", async (req, res) => {
   try {
@@ -1057,10 +1084,10 @@ router.post("/cancel", async (req, res) => {
     ).lean(); 
 
     try {
-      await shopifyApi.put(`/orders/${shopifyId}.json`, {
-        order: { id: shopifyId, note },
-      });
-    } catch (_) {
+      await shopifyApi.put(`/orders/${shopifyId}.json`, { 
+        order: { id: shopifyId, note }, 
+      }); 
+    } catch (_) { 
     }
 
     return res.json({

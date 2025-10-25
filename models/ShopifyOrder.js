@@ -49,7 +49,7 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
     dietPlanNeeded: { type: Boolean },
     assignedExpert: { type: String, default: "" }, 
 
-    languageUsed: { type: String, default: "" },
+    languageUsed: { type: String, default: "" },  
 
     codToPrepaid: { type: Boolean }, 
 
@@ -64,7 +64,7 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
     assignedAt: { type: Date, default: null, index: true },
   },
   { _id: false }
-);
+);  
 
 const ShopifyOrderSchema = new mongoose.Schema(
   {
@@ -81,12 +81,14 @@ const ShopifyOrderSchema = new mongoose.Schema(
     modeOfPayment: String,
     productsOrdered: [ProductSchema],
 
-    channelName: String,
+    channelName: String, 
     customerAddress: AddressSchema,
 
     currency: String,
     financial_status: String,
-    fulfillment_status: String,
+    fulfillment_status: String, 
+
+    shipment_status: { type: String, default: "" }, 
 
     shopifyCreatedAt: Date,
     shopifyUpdatedAt: Date,

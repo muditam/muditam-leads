@@ -167,7 +167,7 @@ router.get('/disposition-count', async (req, res) => {
         _id: "$reachoutLogs.status",
         count: { $sum: 1 },
       },
-    });
+    }); 
 
     const result = await Lead.aggregate(pipeline);
 

@@ -1,77 +1,131 @@
-// routes/orders.js
+// routes/orders-un.js
 const express = require("express");
 const router = express.Router();
-const mongoose = require("mongoose");
-const Order = require("../models/Order");     // adjust path as needed
-const Lead = require("../models/Lead");       // adjust path as needed
-const Customer = require("../models/Customer"); // adjust path as needed
+const Order = require("../models/Order");
+const Lead = require("../models/Lead");
+const Customer = require("../models/Customer");
 
-// Helper: normalize to last 10 digits (strip non-digits and country codes)
-const normalizeTo10 = (str = "") => {
-  const onlyDigits = String(str).replace(/\D/g, "");
-  // Keep last 10 digits (handles +91 / leading 0 / longer inputs)
-  return onlyDigits.length > 10
-    ? onlyDigits.slice(-10)
-    : onlyDigits;
-};
+// -------------------- helpers --------------------
+const TTL_MS = 5 * 60 * 1000; // cache phones for 5 minutes
+let phoneCache = { leadSet: new Set(), custSet: new Set(), builtAt: 0, building: null };
 
-/**
- * GET /api/orders/unassigned-delivered-count
- * Returns: { count, sample (optional) }
- */
+function normalizeTo10(str = "") {
+  const s = String(str).replace(/\D/g, "");
+  return s.length > 10 ? s.slice(-10) : s;
+}
+
+async function buildPhoneSetsFresh() {
+  const leadSet = new Set();
+  const custSet = new Set();
+
+  // stream minimal fields
+  const leadCur = Lead.find(
+    { contactNumber: { $exists: true, $ne: null, $ne: "" } },
+    { contactNumber: 1, _id: 0 } 
+  ).lean().cursor();
+  for await (const d of leadCur) {
+    const n = normalizeTo10(d.contactNumber); 
+    if (n) leadSet.add(n);  
+  } 
+
+  const custCur = Customer.find(
+    { phone: { $exists: true, $ne: null, $ne: "" } },
+    { phone: 1, _id: 0 }
+  ).lean().cursor(); 
+  for await (const d of custCur) {
+    const n = normalizeTo10(d.phone); 
+    if (n) custSet.add(n);
+  }
+
+  phoneCache = { leadSet, custSet, builtAt: Date.now(), building: null };
+  return phoneCache;
+}
+
+// returns cached or building promise to avoid stampede
+async function getPhoneSets({ force = false } = {}) {
+  const fresh = Date.now() - phoneCache.builtAt < TTL_MS;
+  if (!force && fresh) return phoneCache;
+  if (phoneCache.building) return phoneCache.building; // reuse in-flight build
+  phoneCache.building = buildPhoneSetsFresh();
+  return phoneCache.building;
+}
+
+// -------------------- COUNT: fast path --------------------
+// GET /api/orders-un/unassigned-delivered-count?refresh=1
 router.get("/unassigned-delivered-count", async (req, res) => {
   try {
-    // 1) Pull delivered orders with a contact number
-    const deliveredOrders = await Order.find(
-      { shipment_status: "Delivered", contact_number: { $exists: true, $ne: null } },
-      { contact_number: 1, _id: 0 }
-    ).lean();
+    const { leadSet, custSet } = await getPhoneSets({ force: req.query.refresh === "1" });
 
-    // 2) Gather unique normalized delivered contacts
-    const deliveredSet = new Set(
-      deliveredOrders
-        .map(o => normalizeTo10(o.contact_number))
-        .filter(Boolean)
-    );
+    // Avoid heavy aggregation: just distinct delivered contact numbers
+    const rawPhones = await Order.distinct("contact_number", {
+      shipment_status: "Delivered",
+      contact_number: { $exists: true, $ne: "" } 
+    });
 
-    if (deliveredSet.size === 0) {
-      return res.json({ count: 0 });
+    let count = 0;
+    for (const p of rawPhones) {
+      const n = normalizeTo10(p);
+      if (n && !leadSet.has(n) && !custSet.has(n)) count++;
     }
 
-    // 3) Pull Lead.contactNumber and Customer.phone, normalize, and put in sets
-    const leadContacts = await Lead.find(
-      { contactNumber: { $exists: true, $ne: null } },
-      { contactNumber: 1, _id: 0 }
-    ).lean();
+    res.json({ count, cacheAgeMs: Date.now() - phoneCache.builtAt });
+  } catch (err) {
+    console.error("unassigned-delivered-count error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
-    const customerPhones = await Customer.find(
-      { phone: { $exists: true, $ne: null } },
-      { phone: 1, _id: 0 }
-    ).lean();
+// -------------------- LIST: paginated -------------------- 
+// Shows order_id, shipment_status, contact_number, order_date (normalized compare)
+router.get("/unassigned-delivered", async (req, res) => { 
+  try {
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 200); 
+    const skip = (page - 1) * limit;
 
-    const leadSet = new Set(
-      leadContacts.map(l => normalizeTo10(l.contactNumber)).filter(Boolean)
-    );
-    const customerSet = new Set(
-      customerPhones.map(c => normalizeTo10(c.phone)).filter(Boolean)
-    );
+    const sortBy = req.query.sortBy || "last_updated_at";
+    const sortOrder = (req.query.sortOrder || "desc").toLowerCase() === "asc" ? 1 : -1;
 
-    // 4) Count those delivered numbers not present in leads or customers
-    let unassignedCount = 0;
-    for (const num of deliveredSet) {
-      if (!leadSet.has(num) && !customerSet.has(num)) {
-        unassignedCount += 1;
+    const { leadSet, custSet } = await getPhoneSets({ force: req.query.refresh === "1" });
+
+    // Stream delivered orders; filter by normalized phone against cached sets
+    const cur = Order.find(
+      { shipment_status: "Delivered", contact_number: { $exists: true, $ne: "" } },
+      { order_id: 1, shipment_status: 1, contact_number: 1, order_date: 1, last_updated_at: 1, _id: 0 }
+    )
+      .sort({ [sortBy]: sortOrder, _id: 1 })
+      .lean()
+      .cursor();
+
+    const data = [];  
+    let total = 0; 
+    let accepted = 0;
+
+    for await (const o of cur) {
+      const n = normalizeTo10(o.contact_number);
+      if (!n) continue;
+      if (!leadSet.has(n) && !custSet.has(n)) {
+        if (accepted >= skip && data.length < limit) {
+          data.push(o);
+        }
+        accepted++;
+        total++;
       }
     }
 
-    // Optional: include a tiny sample for spot-checking in logs/UI if you want
-    // const sample = Array.from(deliveredSet).filter(n => !leadSet.has(n) && !customerSet.has(n)).slice(0, 5);
-
-    res.json({ count: unassignedCount /*, sample*/ });
+    res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      data,
+      cacheAgeMs: Date.now() - phoneCache.builtAt
+    });
   } catch (err) {
-    console.error("Error computing unassigned delivered count:", err);
+    console.error("unassigned-delivered error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
 module.exports = router;
+

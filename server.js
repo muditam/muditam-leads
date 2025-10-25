@@ -100,7 +100,13 @@ const opsDashboardRoutes = require("./routes/opsDashboard");
 const orderConfirmAnalytics = require("./routes/orderConfirmAnalytics"); 
 const assetsRoutes = require("./routes/add-assets");
 const assetAllotmentsRoutes = require("./routes/assetAllotments"); 
-const UnAssignedDelivered = require("./routes/UnAssignedDelivered");
+const UnAssignedDelivered = require("./routes/UnAssignedDelivered"); 
+
+const bobotSyncRoutes = require('./routes/bobotSync');
+
+const shipmentSyncRouter = require("./routes/shipmentSync");
+
+const bankTxnRouter = require("./PaymentGateway/bankEntries"); 
   
 const app = express(); 
 const PORT = process.env.PORT || 5001;
@@ -532,7 +538,13 @@ app.use("/api/order-analytics", orderConfirmAnalytics);
 
 app.use("/api/assets", assetsRoutes); 
 app.use("/api/asset-allotments", assetAllotmentsRoutes);
-app.use("/api/orders-un", UnAssignedDelivered);
+app.use("/api/orders-un", UnAssignedDelivered); 
+
+app.use('/api/bobot', bobotSyncRoutes);  
+
+app.use("/", shipmentSyncRouter);
+ 
+app.use(bankTxnRouter);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -2135,8 +2147,8 @@ app.get('/api/retention-orders', async (req, res) => {
 });
 
 app.get('/api/leads/:id', async (req, res) => {
-  try {
-    const lead = await Lead.findById(req.params.id);
+  try { 
+    const lead = await Lead.findById(req.params.id); 
     if (!lead) {
       return res.status(404).json({ message: 'Lead not found' });
     }
