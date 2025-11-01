@@ -4,37 +4,36 @@ const axios = require("axios");
 const router = express.Router();
 
 /**
- * ENV you need (e.g. in .env):
+ * ENV needed:
  * SMARTFLO_BASE_URL=https://api-smartflo.tatateleservices.com
- * SMARTFLO_TOKEN=YOUR_BEARER_OR_PERMANENT_TOKEN
- *   - If you don't have a permanent token, generate/refresh short-lived as per docs:
- *     POST /v1/auth/login -> access_token, then set SMARTFLO_TOKEN at runtime.
+ * SMARTFLO_TOKEN=...     // put EXACT token here (e.g. "Bearer=xxxx" or "Bearer xxxx")
  */
 
+// NOTE: no timeout here (0 = no timeout)
 const api = axios.create({
   baseURL: process.env.SMARTFLO_BASE_URL || "https://api-smartflo.tatateleservices.com",
-  timeout: 20000,
+  timeout: 0,
 });
 
-// Helper to map incoming query -> Smartflo query params
+// helper: build CDR query from request
 function buildCdrQuery(q) {
   const {
     from_date,
     to_date,
     page = 1,
     limit = 20,
-    direction,         // 'inbound' | 'outbound'
-    call_type,         // 'c' (answered) | 'm' (missed)
-    callerid,          // customer number
-    destination,       // where incoming is directed
-    did_number,        // DID
-    agents,            // comma-separated: "agent|<id>"
-    department,        // comma-separated IDs
-    ivr,               // comma-separated IDs
-    duration,          // number in seconds
-    operator,          // >,<,>=,<=,!=
-    services,          // comma-separated
-    broadcast          // "true"/"false"
+    direction,
+    call_type,
+    callerid,
+    destination,
+    did_number,
+    agents,
+    department,
+    ivr,
+    duration,
+    operator,
+    services,
+    broadcast,
   } = q;
 
   const params = {
@@ -49,7 +48,7 @@ function buildCdrQuery(q) {
   if (callerid) params.callerid = callerid;
   if (destination) params.destination = destination;
   if (did_number) params.did_number = did_number;
-  if (agents) params.agents = agents.split(",");          // API expects array
+  if (agents) params.agents = agents.split(",");
   if (department) params.department = department.split(",");
   if (ivr) params.ivr = ivr.split(",");
   if (duration) params.duration = duration;
@@ -61,9 +60,8 @@ function buildCdrQuery(q) {
 }
 
 /**
- * GET /api/smartflo/call-records
- * Required: from_date, to_date (format: 'YYYY-MM-DD HH:mm:ss')
- * Optional: direction, call_type, callerid, destination, did_number, page, limit, etc.
+ * NORMAL passthrough: /api/smartflo/call-records
+ * (kept as-is for your logs page)
  */
 router.get("/call-records", async (req, res) => {
   try {
@@ -83,163 +81,207 @@ router.get("/call-records", async (req, res) => {
     const resp = await api.get("/v1/call/records", {
       headers: {
         Accept: "application/json",
-        Authorization: token, // e.g. "Bearer <token>" OR the permanent token as given by TTBS
+        Authorization: token,
       },
       params,
     });
 
-    res.json(resp.data);
+    return res.json(resp.data);
   } catch (err) {
     const status = err.response?.status || 500;
-    res.status(status).json({
+    return res.status(status).json({
       error: err.response?.data || err.message || "Unknown error",
     });
   }
 });
 
-router.get("/analytics", async (req, res) => {
-   try {
-     const token = process.env.SMARTFLO_TOKEN;
-     if (!token) return res.status(500).json({ error: "SMARTFLO_TOKEN not configured" });
- 
-     const {
-       from_date,
-       to_date,
-       direction,
-       call_type,
-       per_page = 200,
-       max_pages = 25,
-     } = req.query; 
- 
-     if (!from_date || !to_date) {
-      return res.status(400).json({
-        error: "from_date and to_date are required in format 'YYYY-MM-DD HH:mm:ss'",
-      });
+/**
+ * /api/smartflo/overview
+ * - ALWAYS uses **today** (IST) 00:00:00 → 23:59:59
+ * - NO artificial limit / max_pages in code
+ * - will page until Smartflo stops sending data
+ * - SHAPE:
+ *    {
+ *      summary: { totalCalls, incomingCalls, dialledCalls, dialledConnected, answeredOutbound, missed, avgDuration },
+ *      agents: [...],
+ *      totalFetched
+ *    }
+ */
+router.get("/overview", async (req, res) => {
+  try {
+    const token = process.envSMARTFLO_TOKEN || process.env.SMARTFLO_TOKEN;
+    if (!token) {
+      return res.status(500).json({ error: "SMARTFLO_TOKEN not configured on server." });
     }
 
-    const paramsBase = {
-      from_date,
-      to_date,
-      limit: Number(per_page) || 200,
-    };
-    if (direction) paramsBase.direction = direction;
-    if (call_type) paramsBase.call_type = call_type;
+    // 1) build TODAY (IST)
+    // server is probably UTC, so we just hard-format to IST clock manually
+    // today: 2025-10-31 as per your environment, but we compute dynamically
+    const now = new Date();
+    // get YYYY-MM-DD in IST
+    const toIST = (d) =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(d);
 
-    // Fetch multiple pages to cover the requested window
+    const istYmd = toIST(now); // "2025-10-31"
+    const from_date = `${istYmd} 00:00:00`;
+    const to_date = `${istYmd} 23:59:59`;
+
+    // 2) we will NOT cap limit/max_pages here
+    // but Smartflo still needs a page + limit
+    // we’ll request 200 per page and keep paging until Smartflo sends < 200
+    const limitPerPage = 200;
+
     const all = [];
-    for (let page = 1; page <= Number(max_pages); page++) {
+    let page = 1;
+
+    for (;;) {
       const resp = await api.get("/v1/call/records", {
-        headers: { Accept: "application/json", Authorization: token },
-        params: { ...paramsBase, page },
+        headers: {
+          Accept: "application/json",
+          Authorization: token,
+        },
+        params: {
+          from_date,
+          to_date,
+          page,
+          limit: limitPerPage,
+        },
       });
+
       const chunk = resp.data?.results || [];
       all.push(...chunk);
-      if (chunk.length < paramsBase.limit) break; // last page
+
+      if (chunk.length < limitPerPage) {
+        // last page
+        break;
+      }
+
+      page += 1;
     }
 
-    // ---- Aggregate ----
-    const dailyMap = new Map();   // date -> obj
-    const hourMap = new Map();    // hour(0-23) -> count
-    const agentMap = new Map();   // agent -> { answered, total, duration }
+    // ---- aggregate ----
+    let totalCalls = 0;
+    let incomingCalls = 0;
+    let dialledCalls = 0;
+    let dialledConnected = 0;
+    let answeredOutbound = 0;
+    let missed = 0;
+    let totalDuration = 0;
 
-    const toLower = (s) => (s || "").toString().toLowerCase();
-    const num = (x) => Number(x || 0);
+    const agents = new Map();
+
+    const toLower = (v) => (v || "").toString().toLowerCase();
+    const num = (v) => Number(v || 0);
 
     for (const r of all) {
-      const date = r.date || (r.start_time && String(r.start_time).slice(0, 10)) || "";
-      const time = r.time || (r.start_time && String(r.start_time).slice(11, 19)) || "00:00:00";
-      const hour = Math.max(0, Math.min(23, parseInt(String(time).slice(0, 2), 10) || 0));
-      const dir = toLower(r.direction); // inbound | outbound
-      const status = toLower(r.status); // answered|completed|missed...
-      const answeredSec = num(r.answered_seconds);
+      totalCalls += 1;
+
+      const direction = toLower(r.direction); // inbound/outbound
+      const status = toLower(r.status);
       const duration = num(r.call_duration);
-      const agent =
+      const answeredSeconds = num(r.answered_seconds);
+
+      const isAnswered =
+        answeredSeconds > 0 || ["answered", "completed", "connected"].includes(status);
+      const isMissed = !isAnswered;
+
+      if (direction === "inbound") {
+        incomingCalls += 1;
+      } else if (direction === "outbound") {
+        dialledCalls += 1;
+        if (isAnswered) {
+          dialledConnected += 1;
+          answeredOutbound += 1;
+        }
+      }
+
+      if (isMissed) {
+        missed += 1;
+      }
+
+      totalDuration += duration;
+
+      const agentName =
         r.agent_name ||
         r.agent_number ||
         (r.agent && (r.agent.name || r.agent.number)) ||
         "Unknown";
 
-      const isAnswered =
-        answeredSec > 0 || ["answered", "completed", "connected"].includes(status);
-      const isMissed = !isAnswered;
-
-      // daily
-      if (!dailyMap.has(date)) {
-        dailyMap.set(date, {
-          date,
-          total: 0,
-          inbound: 0,
-          outbound: 0,
-          answered: 0,
-          missed: 0,
+      if (!agents.has(agentName)) {
+        agents.set(agentName, {
+          agent: agentName,
+          totalDialled: 0,
+          _dialledSet: new Set(),
+          callsConnected: 0,
+          incomingCalls: 0,
+          missedCalls: 0,
           duration: 0,
+          count: 0,
         });
       }
-      const d = dailyMap.get(date);
-      d.total += 1;
-      if (dir === "inbound") d.inbound += 1;
-      if (dir === "outbound") d.outbound += 1;
-      if (isAnswered) d.answered += 1;
-      if (isMissed) d.missed += 1;
-      d.duration += duration;
 
-      // byHour
-      hourMap.set(hour, (hourMap.get(hour) || 0) + 1);
-
-      // agents
-      if (!agentMap.has(agent)) {
-        agentMap.set(agent, { agent, answered: 0, total: 0, duration: 0 });
-      }
-      const a = agentMap.get(agent);
-      a.total += 1;
-      if (isAnswered) a.answered += 1;
+      const a = agents.get(agentName);
+      a.count += 1;
       a.duration += duration;
+
+      const clientNumber = (r.client_number || r.callerid || "").toString();
+
+      if (direction === "outbound") {
+        a.totalDialled += 1;
+        if (clientNumber) {
+          a._dialledSet.add(clientNumber);
+        }
+        if (isAnswered) {
+          a.callsConnected += 1;
+        }
+      } else if (direction === "inbound") {
+        a.incomingCalls += 1;
+        if (isMissed) {
+          a.missedCalls += 1;
+        }
+      } else {
+        if (isMissed) {
+          a.missedCalls += 1;
+        }
+      }
     }
 
-    const daily = Array.from(dailyMap.values())
-      .sort((a, b) => (a.date < b.date ? -1 : 1))
-      .map((x) => ({
-        ...x,
-       avgDuration: x.total ? Math.round(x.duration / x.total) : 0,
-      }));
+    const avgDuration = totalCalls ? Math.round(totalDuration / totalCalls) : 0;
 
-    const byHour = Array.from({ length: 24 }, (_, h) => ({
-      hour: h,
-      count: hourMap.get(h) || 0,
+    const agentsArr = Array.from(agents.values()).map((a) => ({
+      agent: a.agent,
+      totalDialled: a.totalDialled,
+      uniqueDialled: a._dialledSet.size,
+      callsConnected: a.callsConnected,
+      incomingCalls: a.incomingCalls,
+      missedCalls: a.missedCalls,
+      avgDuration: a.count ? Math.round(a.duration / a.count) : 0,
     }));
 
-    const topAgents = Array.from(agentMap.values())
-      .map((x) => ({
-        ...x,
-        avgDuration: x.total ? Math.round(x.duration / x.total) : 0,
-      }))
-      .sort((a, b) => b.answered - a.answered)
-      .slice(0, 10);
-
-    const summary = daily.reduce(
-      (acc, d) => {
-        acc.total += d.total;
-        acc.inbound += d.inbound;
-        acc.outbound += d.outbound;
-        acc.answered += d.answered;
-        acc.missed += d.missed;
-        acc.duration += d.duration;
-        return acc;
+    return res.json({
+      summary: {
+        totalCalls,
+        incomingCalls,
+        dialledCalls,
+        dialledConnected,
+        answeredOutbound,
+        missed,
+        avgDuration,
       },
-      { total: 0, inbound: 0, outbound: 0, answered: 0, missed: 0, duration: 0 }
-    );
-    const avgDuration = summary.total ? Math.round(summary.duration / summary.total) : 0;
-
-    res.json({
-      summary: { ...summary, avgDuration },
-      daily,
-      byHour,
-      topAgents,
+      agents: agentsArr,
       totalFetched: all.length,
+      date: istYmd,
     });
   } catch (err) {
     const status = err.response?.status || 500;
-    res.status(status).json({ error: err.response?.data || err.message || "Unknown error" });
+    return res.status(status).json({
+      error: err.response?.data || err.message || "Unknown error",
+    });
   }
 });
 

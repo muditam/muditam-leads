@@ -1105,8 +1105,8 @@ router.post("/cancel", async (req, res) => {
 
 let __ocBusy = false;
 
-cron.schedule("*/15 * * * *", async () => {
-  if (__ocBusy) return;
+cron.schedule("*/59 * * * *", async () => {
+  if (__ocBusy) return; 
   __ocBusy = true;
   const started = Date.now();
   try {

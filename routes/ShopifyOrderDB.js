@@ -331,29 +331,29 @@ router.get("/refresh/:orderId", async (req, res) => {
  * GET /api/orders
  * List orders with pagination & filters
  */
-router.get("/", async (req, res) => {
-  try {
-    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 200);
+// router.get("/", async (req, res) => {
+//   try {
+//     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+//     const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 200);
 
-    const q = {};
-    if (req.query.phone) {
-      const digits = String(req.query.phone).replace(/\D/g, "");
-      q.normalizedPhone = digits.length >= 10 ? digits.slice(-10) : digits;
-    }
-    if (req.query.source) q.channelName = String(req.query.source);
+//     const q = {};
+//     if (req.query.phone) {
+//       const digits = String(req.query.phone).replace(/\D/g, "");
+//       q.normalizedPhone = digits.length >= 10 ? digits.slice(-10) : digits;
+//     }
+//     if (req.query.source) q.channelName = String(req.query.source);
 
-    const [data, total] = await Promise.all([
-      ShopifyOrder.find(q).sort({ orderDate: -1, _id: -1 }).skip((page - 1) * limit).limit(limit),
-      ShopifyOrder.countDocuments(q),
-    ]);
+//     const [data, total] = await Promise.all([
+//       ShopifyOrder.find(q).sort({ orderDate: -1, _id: -1 }).skip((page - 1) * limit).limit(limit),
+//       ShopifyOrder.countDocuments(q),
+//     ]);
 
-    res.json({ page, limit, total, data });
-  } catch (err) {
-    console.error("list orders error:", err);
-    res.status(500).json({ error: "Failed to list orders" });
-  }
-});
+//     res.json({ page, limit, total, data });
+//   } catch (err) {
+//     console.error("list orders error:", err);
+//     res.status(500).json({ error: "Failed to list orders" });
+//   }
+// });
 
 
 if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
