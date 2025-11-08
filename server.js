@@ -114,9 +114,6 @@ const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
 const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
 const taskReportingRoutes = require("./routes/taskReportingRoutes"); 
-const purchaseRecordRoutes = require("./PaymentGateway/purchaseRecordRoutes");  
-const paymentRecordsRouter = require("./PaymentGateway/paymentRecordRoutes");
-const vendorRoutes = require("./PaymentGateway/vendorsRoutes");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001;
@@ -192,7 +189,7 @@ app.post(
   bodyParser.urlencoded({ verify: rawSaver, extended: false, limit: "2mb", type: ["application/x-www-form-urlencoded"] }),
   bodyParser.text({ verify: rawSaver, type: ["text/plain"], limit: "2mb" }),
   async (req, res) => {
-    try {
+    try { 
       const ctype = (req.headers["content-type"] || "").split(";")[0];
       const raw = req.rawBody || Buffer.from("");
  
@@ -562,9 +559,6 @@ app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
 app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
 app.use("/api/tasks", taskBoardRoutes); 
 app.use("/api/tasks/reporting", taskReportingRoutes); 
-app.use("/api", purchaseRecordRoutes); 
-app.use('/api/payment-records', paymentRecordsRouter);
-app.use('/api/vendors', vendorRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
