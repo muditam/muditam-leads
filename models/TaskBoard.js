@@ -1,6 +1,12 @@
+// models/TaskBoard.js
 const mongoose = require("mongoose");
 
-const COLUMN_IDS = { NEW: "NEW", OPEN: "OPEN", PAUSED: "PAUSED", CLOSED: "CLOSED" };
+const COLUMN_IDS = {
+  NEW: "NEW",
+  OPEN: "OPEN",
+  PAUSED: "PAUSED",
+  CLOSED: "CLOSED",
+};
 
 const TaskSchema = new mongoose.Schema(
   {
@@ -26,11 +32,11 @@ const TaskSchema = new mongoose.Schema(
     // Attachments (image URLs)
     attachments: [String],
 
-    // Optional time-tracking fields
-    startedAt: Date,
-    activeSince: Date,
-    totalActiveSeconds: { type: Number, default: 0 },
-    closedAt: Date,
+    // Time-tracking fields
+    startedAt: Date,              // first time it became OPEN
+    activeSince: Date,            // when it was last moved into OPEN
+    totalActiveSeconds: { type: Number, default: 0 }, // accumulated seconds
+    closedAt: Date,               // when moved to CLOSED
   },
   { _id: true, timestamps: true }
 );

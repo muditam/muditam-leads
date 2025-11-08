@@ -97,24 +97,19 @@ async function getOrCreateBoardByOwnerKey(ownerKey) {
   }
   await seedDefaultColumnsIfEmpty(board);
   await migrateMissingColumnIds(board);
-  board.columns.sort(
-    (a, b) => (a.order ?? 0) - (b.order ?? 0)
-  );
+  board.columns.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   return board;
 }
 
 function nextOrderIndex(board, status) {
   const inCol = board.tasks.filter((t) => t.status === status);
   if (inCol.length === 0) return 0;
-  return (
-    Math.max(...inCol.map((t) => t.orderIndex || 0)) + 1
-  );
+  return Math.max(...inCol.map((t) => t.orderIndex || 0)) + 1;
 }
 
 function addActiveSeconds(task, seconds) {
   const s = Math.max(0, Number(seconds) || 0);
-  task.totalActiveSeconds =
-    Number(task.totalActiveSeconds || 0) + s;
+  task.totalActiveSeconds = Number(task.totalActiveSeconds || 0) + s;
 }
 
 function sortColumns(columns) {
@@ -126,8 +121,7 @@ function sortColumns(columns) {
 function sortTasksForBoard(tasks) {
   return [...(tasks || [])].sort((a, b) => {
     if (a.status === b.status) {
-      const oi =
-        (a.orderIndex ?? 0) - (b.orderIndex ?? 0);
+      const oi = (a.orderIndex ?? 0) - (b.orderIndex ?? 0);
       if (oi !== 0) return oi;
       return (
         new Date(a.createdAt).getTime() -
@@ -145,6 +139,45 @@ async function findBoardWithTask(taskId, ownerKey) {
   });
   if (scoped) return scoped;
   return TaskBoard.findOne({ "tasks._id": taskId });
+}
+
+/**
+ * Centralised status/timer transition
+ * fromStatus -> toStatus
+ */
+function handleStatusTransition(task, fromStatus, toStatus, now = new Date()) {
+  if (!toStatus || fromStatus === toStatus) return;
+
+  const wasOpen = fromStatus === COLUMN_IDS.OPEN;
+  const willBeOpen = toStatus === COLUMN_IDS.OPEN;
+
+  // Leaving OPEN: accumulate active time
+  if (wasOpen && !willBeOpen && task.activeSince) {
+    const deltaSec = Math.floor(
+      (now.getTime() - task.activeSince.getTime()) / 1000
+    );
+    addActiveSeconds(task, deltaSec);
+    task.activeSince = null;
+  }
+
+  // Entering OPEN: start/resume timer
+  if (!wasOpen && willBeOpen) {
+    if (!task.startedAt) task.startedAt = now;
+    task.activeSince = now;
+  }
+
+  // CLOSED timestamp
+  if (toStatus === COLUMN_IDS.CLOSED) {
+    task.closedAt = now;
+  } else if (
+    fromStatus === COLUMN_IDS.CLOSED &&
+    toStatus !== COLUMN_IDS.CLOSED
+  ) {
+    // reopening from CLOSED
+    task.closedAt = null;
+  }
+
+  task.status = toStatus;
 }
 
 // -------- Routes --------
@@ -189,17 +222,13 @@ router.post("/columns", async (req, res) => {
 
     const { title, order } = req.body;
     if (!title || !String(title).trim()) {
-      return res
-        .status(400)
-        .json({ message: "title is required" });
+      return res.status(400).json({ message: "title is required" });
     }
 
     const board = await getOrCreateBoardByOwnerKey(ownerKey);
 
     let proposedId = slugifyColumnId(title);
-    const existingIds = new Set(
-      board.columns.map((c) => c.id)
-    );
+    const existingIds = new Set(board.columns.map((c) => c.id));
     let uniqueId = proposedId;
     let n = 1;
     while (existingIds.has(uniqueId)) {
@@ -210,9 +239,7 @@ router.post("/columns", async (req, res) => {
       id: uniqueId,
       title: title.trim(),
       order:
-        typeof order === "number"
-          ? order
-          : board.columns.length,
+        typeof order === "number" ? order : board.columns.length,
     });
     await board.save();
 
@@ -278,10 +305,7 @@ router.delete("/columns/:id", async (req, res) => {
         .json({ message: "Column not found" });
     }
 
-    const fallbackId =
-      COLUMN_IDS.NEW ||
-      board.columns[0]?.id ||
-      colId;
+    const fallbackId = COLUMN_IDS.NEW || board.columns[0]?.id || colId;
 
     board.tasks.forEach((t) => {
       if (t.status === colId) {
@@ -290,9 +314,7 @@ router.delete("/columns/:id", async (req, res) => {
       }
     });
 
-    board.columns = board.columns.filter(
-      (c) => c.id !== colId
-    );
+    board.columns = board.columns.filter((c) => c.id !== colId);
 
     await board.save();
     res.json({ success: true });
@@ -331,9 +353,10 @@ router.post("/", async (req, res) => {
     const validIds = new Set(board.columns.map((c) => c.id));
     const defaultId =
       board.columns[0]?.id || COLUMN_IDS.NEW;
-    const safeStatus = status && validIds.has(status)
-      ? status
-      : defaultId;
+    const safeStatus =
+      status && validIds.has(status) ? status : defaultId;
+
+    const now = new Date();
 
     const task = {
       title: String(title).trim(),
@@ -343,19 +366,23 @@ router.post("/", async (req, res) => {
       assigneeName: assigneeName || "",
       assignedById: assignedById || null,
       assignedByName: assignedByName || "",
-      assignedDate: assignedDate
-        ? new Date(assignedDate)
-        : new Date(),
+      assignedDate: assignedDate ? new Date(assignedDate) : now,
       dueDate: dueDate ? new Date(dueDate) : undefined,
-      attachments: Array.isArray(attachments)
-        ? attachments
-        : [],
+      attachments: Array.isArray(attachments) ? attachments : [],
       orderIndex: nextOrderIndex(board, safeStatus),
       totalActiveSeconds: 0,
       activeSince: null,
       startedAt: null,
       closedAt: null,
     };
+
+    // Initialise timers based on initial status
+    if (safeStatus === COLUMN_IDS.OPEN) {
+      task.startedAt = now;
+      task.activeSince = now;
+    } else if (safeStatus === COLUMN_IDS.CLOSED) {
+      task.closedAt = now;
+    }
 
     board.tasks.push(task);
     await board.save();
@@ -390,9 +417,11 @@ router.patch("/reorder", async (req, res) => {
     const idToIndex = new Map(
       orderedIds.map((id, idx) => [String(id), idx])
     );
+
     board.tasks.forEach((t) => {
       if (t.status === status) {
-        const idx = idToIndex.get(String(t._id));
+        const idStr = String(t._id || t.id);
+        const idx = idToIndex.get(idStr);
         if (idx !== undefined) t.orderIndex = idx;
       }
     });
@@ -464,44 +493,10 @@ router.patch("/:id/status", async (req, res) => {
       }
     }
 
-    if (
-      (currentStatus === COLUMN_IDS.NEW ||
-        currentStatus === COLUMN_IDS.PAUSED) &&
-      to === COLUMN_IDS.OPEN
-    ) {
-      if (!task.startedAt) task.startedAt = now;
-      task.activeSince = now;
-    }
+    // apply timer/status transition
+    handleStatusTransition(task, currentStatus, to, now);
 
-    if (
-      currentStatus === COLUMN_IDS.OPEN &&
-      to === COLUMN_IDS.PAUSED
-    ) {
-      if (task.activeSince) {
-        const deltaSec = Math.floor(
-          (now.getTime() -
-            task.activeSince.getTime()) /
-            1000
-        );
-        addActiveSeconds(task, deltaSec);
-        task.activeSince = null;
-      }
-    }
-
-    if (to === COLUMN_IDS.CLOSED) {
-      if (currentStatus === COLUMN_IDS.OPEN && task.activeSince) {
-        const deltaSec = Math.floor(
-          (now.getTime() -
-            task.activeSince.getTime()) /
-            1000
-        );
-        addActiveSeconds(task, deltaSec);
-        task.activeSince = null;
-      }
-      task.closedAt = now;
-    }
-
-    task.status = to;
+    // move to end of new column
     task.orderIndex = nextOrderIndex(board, to);
 
     await board.save();
@@ -544,28 +539,29 @@ router.put("/:id", async (req, res) => {
         .status(404)
         .json({ message: "Task not found" });
 
-    if (title !== undefined)
-      task.title = String(title).trim();
-    if (description !== undefined)
-      task.description = description;
+    if (title !== undefined) task.title = String(title).trim();
+    if (description !== undefined) task.description = description;
+
+    const now = new Date();
 
     if (status !== undefined) {
-      const validIds = new Set(
-        board.columns.map((c) => c.id)
-      );
-      task.status = validIds.has(status)
+      const validIds = new Set(board.columns.map((c) => c.id));
+      const fromStatus = task.status;
+      const toStatus = validIds.has(status)
         ? status
         : board.columns[0]?.id || COLUMN_IDS.NEW;
+
+      handleStatusTransition(task, fromStatus, toStatus, now);
+
+      if (toStatus !== fromStatus) {
+        task.orderIndex = nextOrderIndex(board, toStatus);
+      }
     }
 
-    if (assigneeId !== undefined)
-      task.assigneeId = assigneeId;
-    if (assigneeName !== undefined)
-      task.assigneeName = assigneeName;
-    if (assignedById !== undefined)
-      task.assignedById = assignedById;
-    if (assignedByName !== undefined)
-      task.assignedByName = assignedByName;
+    if (assigneeId !== undefined) task.assigneeId = assigneeId;
+    if (assigneeName !== undefined) task.assigneeName = assigneeName;
+    if (assignedById !== undefined) task.assignedById = assignedById;
+    if (assignedByName !== undefined) task.assignedByName = assignedByName;
     if (assignedDate !== undefined)
       task.assignedDate = assignedDate
         ? new Date(assignedDate)
@@ -619,28 +615,29 @@ router.patch("/:id", async (req, res) => {
         .status(404)
         .json({ message: "Task not found" });
 
-    if (title !== undefined)
-      task.title = String(title).trim();
-    if (description !== undefined)
-      task.description = description;
+    if (title !== undefined) task.title = String(title).trim();
+    if (description !== undefined) task.description = description;
+
+    const now = new Date();
 
     if (status !== undefined) {
-      const validIds = new Set(
-        board.columns.map((c) => c.id)
-      );
-      task.status = validIds.has(status)
+      const validIds = new Set(board.columns.map((c) => c.id));
+      const fromStatus = task.status;
+      const toStatus = validIds.has(status)
         ? status
         : board.columns[0]?.id || COLUMN_IDS.NEW;
+
+      handleStatusTransition(task, fromStatus, toStatus, now);
+
+      if (toStatus !== fromStatus) {
+        task.orderIndex = nextOrderIndex(board, toStatus);
+      }
     }
 
-    if (assigneeId !== undefined)
-      task.assigneeId = assigneeId;
-    if (assigneeName !== undefined)
-      task.assigneeName = assigneeName;
-    if (assignedById !== undefined)
-      task.assignedById = assignedById;
-    if (assignedByName !== undefined)
-      task.assignedByName = assignedByName;
+    if (assigneeId !== undefined) task.assigneeId = assigneeId;
+    if (assigneeName !== undefined) task.assigneeName = assigneeName;
+    if (assignedById !== undefined) task.assignedById = assignedById;
+    if (assignedByName !== undefined) task.assignedByName = assignedByName;
     if (assignedDate !== undefined)
       task.assignedDate = assignedDate
         ? new Date(assignedDate)
@@ -661,7 +658,7 @@ router.patch("/:id", async (req, res) => {
   }
 });
 
-// DELETE task
+// DELETE task (also delete counterpart on other board if assigned)
 router.delete("/:id", async (req, res) => {
   try {
     const ownerKey = requireOwnerKey(req, res);
@@ -681,9 +678,64 @@ router.delete("/:id", async (req, res) => {
         .status(404)
         .json({ message: "Task not found" });
 
-    // Mongoose 7/8: use deleteOne() on subdocument
-    await task.deleteOne(); // mark subdocument for removal
+    // capture info BEFORE deleting from this board
+    const assignmentInfo = {
+      title: task.title,
+      assigneeId: task.assigneeId,
+      assignedById: task.assignedById,
+      assignedDate: task.assignedDate,
+    };
+
+    const isDeletingAsAssignee =
+      assignmentInfo.assigneeId &&
+      ownerKey === assignmentInfo.assigneeId;
+    const isDeletingAsAssigner =
+      assignmentInfo.assignedById &&
+      ownerKey === assignmentInfo.assignedById;
+
+    // delete from current board
+    await task.deleteOne();
     await board.save();
+
+    // if this is an assigned task, also delete counterpart copy
+    const counterpartOwnerKeys = new Set();
+    if (isDeletingAsAssignee && assignmentInfo.assignedById) {
+      counterpartOwnerKeys.add(assignmentInfo.assignedById);
+    }
+    if (isDeletingAsAssigner && assignmentInfo.assigneeId) {
+      counterpartOwnerKeys.add(assignmentInfo.assigneeId);
+    }
+
+    const assignedDateMs = assignmentInfo.assignedDate
+      ? new Date(assignmentInfo.assignedDate).getTime()
+      : null;
+
+    for (const otherOwnerKey of counterpartOwnerKeys) {
+      const otherBoard = await TaskBoard.findOne({
+        ownerKey: otherOwnerKey,
+      });
+      if (!otherBoard) continue;
+
+      // delete tasks that look like the mirrored assignment
+      otherBoard.tasks = otherBoard.tasks.filter((t) => {
+        const sameTitle = t.title === assignmentInfo.title;
+        const sameAssignee =
+          t.assigneeId === assignmentInfo.assigneeId;
+        const sameAssigner =
+          t.assignedById === assignmentInfo.assignedById;
+        const sameAssignedDate =
+          !assignedDateMs ||
+          (t.assignedDate &&
+            new Date(t.assignedDate).getTime() === assignedDateMs);
+
+        const isMatch =
+          sameTitle && sameAssignee && sameAssigner && sameAssignedDate;
+
+        return !isMatch; // keep everything except the mirrored tasks 
+      });
+
+      await otherBoard.save();
+    }
 
     res.json({ success: true });
   } catch (err) {
