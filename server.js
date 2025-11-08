@@ -106,8 +106,18 @@ const bobotSyncRoutes = require('./routes/bobotSync');
 
 const shipmentSyncRouter = require("./routes/shipmentSync");
 
-const bankTxnRouter = require("./PaymentGateway/bankEntries"); 
-  
+const bankTxnRouter = require("./PaymentGateway/bankEntries");
+const bankCapital6389Routes = require("./PaymentGateway/bankCapital6389");
+const bankAxis3361Routes = require("./PaymentGateway/bankAxis3361");
+const bankCc1101Routes = require("./PaymentGateway/bankCc1101");
+const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
+const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
+const taskBoardRoutes = require("./routes/taskBoardRoutes");
+const taskReportingRoutes = require("./routes/taskReportingRoutes"); 
+const purchaseRecordRoutes = require("./PaymentGateway/purchaseRecordRoutes");  
+const paymentRecordsRouter = require("./PaymentGateway/paymentRecordRoutes");
+const vendorRoutes = require("./PaymentGateway/vendorsRoutes");
+
 const app = express(); 
 const PORT = process.env.PORT || 5001;
 
@@ -544,14 +554,24 @@ app.use('/api/bobot', bobotSyncRoutes);
 
 app.use("/", shipmentSyncRouter);
  
-app.use(bankTxnRouter);
+app.use(bankTxnRouter); 
+app.use("/api/bank-reconciliation", bankCapital6389Routes);
+app.use("/api/bank-reconciliation", bankAxis3361Routes);
+app.use("/api/bank-reconciliation", bankCc1101Routes);
+app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
+app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
+app.use("/api/tasks", taskBoardRoutes); 
+app.use("/api/tasks/reporting", taskReportingRoutes); 
+app.use("/api", purchaseRecordRoutes); 
+app.use('/api/payment-records', paymentRecordsRouter);
+app.use('/api/vendors', vendorRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected')) 
   .catch((err) => console.error('MongoDB connection error:', err));
- 
+   
 
 app.get('/api/sse', (req, res) => {
   const { did } = req.query;

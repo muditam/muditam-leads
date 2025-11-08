@@ -15,6 +15,10 @@ const CallStatusEnum = {
 
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(String(id));
 
+// HARD CUTOFF: only show data on/after 1 Oct 2025 (IST)
+const START_FROM_ISO = "2025-10-01T00:00:00.000+05:30";
+const START_FROM_DATE = new Date(START_FROM_ISO);
+
 function istBoundsForDate(yyyyMmDd) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(yyyyMmDd || ""))) return null;
   const start = new Date(`${yyyyMmDd}T00:00:00.000+05:30`);
@@ -29,8 +33,22 @@ function getWindowFromQuery(req) {
 
   const s = istBoundsForDate(startStr);
   const e = istBoundsForDate(endStr);
+
+  // Helper to clamp a Date to NOT go earlier than START_FROM_DATE
+  const clampStart = (d) => (d < START_FROM_DATE ? START_FROM_DATE : d);
+
   if (s && e) {
-    return { start: s.start, end: e.end, meta: { range: range || "custom", start: startStr, end: endStr } };
+    let start = clampStart(s.start);
+    const end = e.end;
+    return {
+      start,
+      end,
+      meta: {
+        range: range || "custom",
+        start: startStr,
+        end: endStr,
+      },
+    };
   }
 
   // Fallback: Today in IST
@@ -41,7 +59,15 @@ function getWindowFromQuery(req) {
     day: "2-digit",
   }).format(new Date());
   const t = istBoundsForDate(todayStr);
-  return { start: t.start, end: t.end, meta: { range: "Today", start: todayStr, end: todayStr } };
+
+  let start = clampStart(t.start);
+  const end = t.end;
+
+  return {
+    start,
+    end,
+    meta: { range: "Today", start: todayStr, end: todayStr },
+  };
 }
 
 router.get("/agents", async (req, res) => {
@@ -58,18 +84,31 @@ router.get("/agents", async (req, res) => {
 
     const agentIdList = activeAgents.map((a) => a._id);
     if (!agentIdList.length) {
-      return res.json({ window: meta, items: [], totals: {
-        totalOrders: 0, totalWorkedOrders: 0, totalAmountOfOrders: 0, totalAmountOfWorkedOrders: 0
-      } });
+      return res.json({
+        window: meta,
+        items: [],
+        totals: {
+          totalOrders: 0,
+          totalWorkedOrders: 0,
+          totalAmountOfOrders: 0,
+          totalAmountOfWorkedOrders: 0,
+        },
+      });
     }
 
     // Common base
     const baseMatch = {
       $and: [
         { financial_status: /^pending$/i },
-        { $or: [{ fulfillment_status: { $exists: false } }, { fulfillment_status: { $not: /^fulfilled$/i } }] },
+        {
+          $or: [
+            { fulfillment_status: { $exists: false } },
+            { fulfillment_status: { $not: /^fulfilled$/i } },
+          ],
+        },
         { "orderConfirmOps.assignedAgentId": { $in: agentIdList } },
-    ]};
+      ],
+    };
 
     const createdInWindow = {
       $or: [
@@ -84,7 +123,12 @@ router.get("/agents", async (req, res) => {
         $facet: {
           all: [
             { $match: createdInWindow },
-            { $group: { _id: "$orderConfirmOps.assignedAgentId", c: { $sum: 1 } } },
+            {
+              $group: {
+                _id: "$orderConfirmOps.assignedAgentId",
+                c: { $sum: 1 },
+              },
+            },
           ],
           pending: [
             {
@@ -96,7 +140,12 @@ router.get("/agents", async (req, res) => {
                 ],
               },
             },
-            { $group: { _id: "$orderConfirmOps.assignedAgentId", c: { $sum: 1 } } },
+            {
+              $group: {
+                _id: "$orderConfirmOps.assignedAgentId",
+                c: { $sum: 1 },
+              },
+            },
           ],
           confirmed: [
             {
@@ -105,7 +154,12 @@ router.get("/agents", async (req, res) => {
                 "orderConfirmOps.callStatusUpdatedAt": { $gte: start, $lte: end },
               },
             },
-            { $group: { _id: "$orderConfirmOps.assignedAgentId", c: { $sum: 1 } } },
+            {
+              $group: {
+                _id: "$orderConfirmOps.assignedAgentId",
+                c: { $sum: 1 },
+              },
+            },
           ],
           cnp: [
             {
@@ -114,7 +168,12 @@ router.get("/agents", async (req, res) => {
                 "orderConfirmOps.callStatusUpdatedAt": { $gte: start, $lte: end },
               },
             },
-            { $group: { _id: "$orderConfirmOps.assignedAgentId", c: { $sum: 1 } } },
+            {
+              $group: {
+                _id: "$orderConfirmOps.assignedAgentId",
+                c: { $sum: 1 },
+              },
+            },
           ],
           callBack: [
             {
@@ -123,7 +182,12 @@ router.get("/agents", async (req, res) => {
                 "orderConfirmOps.callStatusUpdatedAt": { $gte: start, $lte: end },
               },
             },
-            { $group: { _id: "$orderConfirmOps.assignedAgentId", c: { $sum: 1 } } },
+            {
+              $group: {
+                _id: "$orderConfirmOps.assignedAgentId",
+                c: { $sum: 1 },
+              },
+            },
           ],
           cancel: [
             {
@@ -132,14 +196,28 @@ router.get("/agents", async (req, res) => {
                 "orderConfirmOps.callStatusUpdatedAt": { $gte: start, $lte: end },
               },
             },
-            { $group: { _id: "$orderConfirmOps.assignedAgentId", c: { $sum: 1 } } },
+            {
+              $group: {
+                _id: "$orderConfirmOps.assignedAgentId",
+                c: { $sum: 1 },
+              },
+            },
           ],
           addLog: [
-            { $match: { "orderConfirmOps.plusUpdatedAt": { $gte: start, $lte: end } } },
-            { $group: { _id: "$orderConfirmOps.assignedAgentId", c: { $sum: 1 } } },
+            {
+              $match: {
+                "orderConfirmOps.plusUpdatedAt": { $gte: start, $lte: end },
+              },
+            },
+            {
+              $group: {
+                _id: "$orderConfirmOps.assignedAgentId",
+                c: { $sum: 1 },
+              },
+            },
           ],
 
-          // NEW: window totals (not grouped by agent)
+          // window totals (not grouped by agent)
           totalsOrders: [
             { $match: createdInWindow },
             {
@@ -151,7 +229,11 @@ router.get("/agents", async (req, res) => {
             },
           ],
           totalsWorked: [
-            { $match: { "orderConfirmOps.plusUpdatedAt": { $gte: start, $lte: end } } },
+            {
+              $match: {
+                "orderConfirmOps.plusUpdatedAt": { $gte: start, $lte: end },
+              },
+            },
             {
               $group: {
                 _id: null,

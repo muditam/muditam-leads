@@ -6,14 +6,28 @@ const router = express.Router();
 /**
  * ENV needed:
  * SMARTFLO_BASE_URL=https://api-smartflo.tatateleservices.com
- * SMARTFLO_TOKEN=...     // put EXACT token here (e.g. "Bearer=xxxx" or "Bearer xxxx")
+ * SMARTFLO_TOKEN=...      // raw JWT for account 1
+ * SMARTFLO_TOKEN_2=...    // raw JWT for account 2 (optional)
  */
 
-// NOTE: no timeout here (0 = no timeout)
+const SMARTFLO_BASE = (
+  process.env.SMARTFLO_BASE_URL || "https://api-smartflo.tatateleservices.com"
+).replace(/\/+$/g, "");
+
 const api = axios.create({
-  baseURL: process.env.SMARTFLO_BASE_URL || "https://api-smartflo.tatateleservices.com",
+  baseURL: SMARTFLO_BASE,
   timeout: 0,
 });
+
+// normalize env token -> Authorization header value
+function normalizeAuthToken(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  // if already "Bearer xxx"
+  if (/^Bearer\s+/i.test(trimmed)) return trimmed;
+  // Smartflo bearer auth: "Bearer <token>"
+  return `Bearer ${trimmed}`;
+}
 
 // helper: build CDR query from request
 function buildCdrQuery(q) {
@@ -60,14 +74,16 @@ function buildCdrQuery(q) {
 }
 
 /**
- * NORMAL passthrough: /api/smartflo/call-records
- * (kept as-is for your logs page)
+ * Pass-through: GET /api/smartflo/call-records
+ * Useful for debugging one token directly.
  */
 router.get("/call-records", async (req, res) => {
   try {
-    const token = process.env.SMARTFLO_TOKEN;
-    if (!token) {
-      return res.status(500).json({ error: "SMARTFLO_TOKEN not configured on server." });
+    const auth = normalizeAuthToken(process.env.SMARTFLO_TOKEN);
+    if (!auth) {
+      return res
+        .status(500)
+        .json({ error: "SMARTFLO_TOKEN not configured on server." });
     }
 
     const params = buildCdrQuery(req.query);
@@ -81,7 +97,7 @@ router.get("/call-records", async (req, res) => {
     const resp = await api.get("/v1/call/records", {
       headers: {
         Accept: "application/json",
-        Authorization: token,
+        Authorization: auth,
       },
       params,
     });
@@ -95,74 +111,109 @@ router.get("/call-records", async (req, res) => {
   }
 });
 
+// fetch all pages for ONE token for given day-range
+async function fetchAllForToken(auth, from_date, to_date) {
+  const all = [];
+  const limitPerPage = 200;
+  let page = 1;
+
+  for (;;) {
+    const resp = await api.get("/v1/call/records", {
+      headers: {
+        Accept: "application/json",
+        Authorization: auth,
+      },
+      params: {
+        from_date,
+        to_date,
+        page,
+        limit: limitPerPage,
+      },
+    });
+
+    const chunk = resp.data?.results || [];
+    all.push(...chunk);
+
+    if (chunk.length < limitPerPage) {
+      break; // last page for this token
+    }
+
+    page += 1;
+  }
+
+  return all;
+}
+
 /**
- * /api/smartflo/overview
- * - ALWAYS uses **today** (IST) 00:00:00 → 23:59:59
- * - NO artificial limit / max_pages in code
- * - will page until Smartflo stops sending data
- * - SHAPE:
- *    {
- *      summary: { totalCalls, incomingCalls, dialledCalls, dialledConnected, answeredOutbound, missed, avgDuration },
- *      agents: [...],
- *      totalFetched
- *    }
+ * Aggregated overview:
+ * GET /api/smartflo/overview
+ * - default: today's IST window
+ * - override: ?from_date=YYYY-MM-DD HH:mm:ss&to_date=...
+ * - combines SMARTFLO_TOKEN + SMARTFLO_TOKEN_2
  */
 router.get("/overview", async (req, res) => {
   try {
-    const token = process.envSMARTFLO_TOKEN || process.env.SMARTFLO_TOKEN;
-    if (!token) {
-      return res.status(500).json({ error: "SMARTFLO_TOKEN not configured on server." });
-    }
+    const tokensRaw = [
+      process.env.SMARTFLO_TOKEN,
+      process.env.SMARTFLO_TOKEN_2,
+    ].filter(Boolean);
 
-    // 1) build TODAY (IST)
-    // server is probably UTC, so we just hard-format to IST clock manually
-    // today: 2025-10-31 as per your environment, but we compute dynamically
-    const now = new Date();
-    // get YYYY-MM-DD in IST
-    const toIST = (d) =>
-      new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Asia/Kolkata",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(d);
+    const tokens = tokensRaw.map(normalizeAuthToken).filter(Boolean);
 
-    const istYmd = toIST(now); // "2025-10-31"
-    const from_date = `${istYmd} 00:00:00`;
-    const to_date = `${istYmd} 23:59:59`;
-
-    // 2) we will NOT cap limit/max_pages here
-    // but Smartflo still needs a page + limit
-    // we’ll request 200 per page and keep paging until Smartflo sends < 200
-    const limitPerPage = 200;
-
-    const all = [];
-    let page = 1;
-
-    for (;;) {
-      const resp = await api.get("/v1/call/records", {
-        headers: {
-          Accept: "application/json",
-          Authorization: token,
-        },
-        params: {
-          from_date,
-          to_date,
-          page,
-          limit: limitPerPage,
-        },
+    if (!tokens.length) {
+      return res.status(500).json({
+        error:
+          "At least one of SMARTFLO_TOKEN or SMARTFLO_TOKEN_2 must be configured.",
       });
-
-      const chunk = resp.data?.results || [];
-      all.push(...chunk);
-
-      if (chunk.length < limitPerPage) {
-        // last page
-        break;
-      }
-
-      page += 1;
     }
+
+    // Date window
+    let { from_date, to_date } = req.query;
+    let istYmd;
+
+    if (!from_date || !to_date) {
+      const now = new Date();
+      const toISTDate = (d) =>
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Kolkata",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(d);
+
+      istYmd = toISTDate(now); // e.g. "2025-11-03"
+      from_date = `${istYmd} 00:00:00`;
+      to_date = `${istYmd} 23:59:59`;
+    } else {
+      istYmd = from_date.slice(0, 10);
+    }
+
+    console.log("[Smartflo overview] Fetching CDRs", {
+      from_date,
+      to_date,
+      tokens: tokens.length,
+    });
+
+    let all = [];
+    const tokenErrors = [];
+
+    // Fetch from ALL tokens and merge
+    for (const auth of tokens) {
+      try {
+        const chunk = await fetchAllForToken(auth, from_date, to_date);
+        console.log(
+          "[Smartflo overview] token fetched records:",
+          chunk.length
+        );
+        all.push(...chunk);
+      } catch (e) {
+        const msg = e.response?.data || e.message || "Unknown error";
+        console.error("[Smartflo overview] token error:", msg);
+        tokenErrors.push(msg);
+      }
+    }
+
+    console.log("[Smartflo overview] total merged records:", all.length);
 
     // ---- aggregate ----
     let totalCalls = 0;
@@ -187,7 +238,8 @@ router.get("/overview", async (req, res) => {
       const answeredSeconds = num(r.answered_seconds);
 
       const isAnswered =
-        answeredSeconds > 0 || ["answered", "completed", "connected"].includes(status);
+        answeredSeconds > 0 ||
+        ["answered", "completed", "connected"].includes(status);
       const isMissed = !isAnswered;
 
       if (direction === "inbound") {
@@ -200,10 +252,7 @@ router.get("/overview", async (req, res) => {
         }
       }
 
-      if (isMissed) {
-        missed += 1;
-      }
-
+      if (isMissed) missed += 1;
       totalDuration += duration;
 
       const agentName =
@@ -233,21 +282,13 @@ router.get("/overview", async (req, res) => {
 
       if (direction === "outbound") {
         a.totalDialled += 1;
-        if (clientNumber) {
-          a._dialledSet.add(clientNumber);
-        }
-        if (isAnswered) {
-          a.callsConnected += 1;
-        }
+        if (clientNumber) a._dialledSet.add(clientNumber);
+        if (isAnswered) a.callsConnected += 1;
       } else if (direction === "inbound") {
         a.incomingCalls += 1;
-        if (isMissed) {
-          a.missedCalls += 1;
-        }
-      } else {
-        if (isMissed) {
-          a.missedCalls += 1;
-        }
+        if (isMissed) a.missedCalls += 1;
+      } else if (isMissed) {
+        a.missedCalls += 1;
       }
     }
 
@@ -275,10 +316,17 @@ router.get("/overview", async (req, res) => {
       },
       agents: agentsArr,
       totalFetched: all.length,
+      tokensUsed: tokens.length,
       date: istYmd,
+      debug: {
+        from_date,
+        to_date,
+        tokenErrors,
+      },
     });
   } catch (err) {
-    const status = err.response?.status || 500;
+    const status = err.response?.status || 500; 
+    console.error("[Smartflo overview] ERROR:", err.response?.data || err);
     return res.status(status).json({
       error: err.response?.data || err.message || "Unknown error",
     });
@@ -286,3 +334,5 @@ router.get("/overview", async (req, res) => {
 });
 
 module.exports = router;
+
+
