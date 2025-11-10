@@ -113,10 +113,7 @@ const bankCc1101Routes = require("./PaymentGateway/bankCc1101");
 const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
 const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
-const taskReportingRoutes = require("./routes/taskReportingRoutes");
-// const paymentRecord = require("./PaymentGateway/paymentRecordRoutes");
-// const purchaseRecord = require("./PaymentGateway/purchaseRecordRoutes"); 
-// const Vendors = require("./PaymentGateway/vendorsRoutes"); 
+const taskReportingRoutes = require("./routes/taskReportingRoutes"); 
 
 const app = express(); 
 const PORT = process.env.PORT || 5001;
@@ -561,10 +558,7 @@ app.use("/api/bank-reconciliation", bankCc1101Routes);
 app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
 app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
 app.use("/api/tasks", taskBoardRoutes); 
-app.use("/api/tasks/reporting", taskReportingRoutes); 
-// app.use("/api/payments", paymentRecord);
-// app.use("/api/purchases", purchaseRecord);
-// app.use("/api/vendors", Vendors);
+app.use("/api/tasks/reporting", taskReportingRoutes);  
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
