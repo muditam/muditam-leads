@@ -80,7 +80,15 @@ router.post('/api/employees', async (req, res) => {
     languages
   } = req.body;
 
-  if (!fullName || !email || !callerId || !agentNumber || !role || !password) {
+  const isAgentRole = role === "Sales Agent" || role === "Retention Agent";
+
+  if (
+    !fullName ||
+    !email ||
+    !role ||
+    !password ||
+    (isAgentRole && (!callerId || !agentNumber))
+  ) {
     return res.status(400).json({ message: 'All fields are required.' });
   }
 
@@ -165,7 +173,6 @@ router.put('/api/employees/:id', async (req, res) => {
   }
 });
 
-
 // DELETE employee
 router.delete('/api/employees/:id', async (req, res) => {
   const { id } = req.params;
@@ -205,4 +212,4 @@ router.put("/api/employees/:id/team", async (req, res) => {
   }
 });
 
-module.exports = router;  
+module.exports = router;

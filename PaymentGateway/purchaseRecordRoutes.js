@@ -1,8 +1,6 @@
-
-
 const express = require('express');
 const router = express.Router();
-const PurchaseRecord = require('../models/PurchaseRecord');
+const PurchaseRecord = require('../models/purchaseRecord');
 const multer = require('multer');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const path = require('path');
