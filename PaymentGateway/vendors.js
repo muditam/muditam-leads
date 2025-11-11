@@ -1,4 +1,4 @@
-// routes/vendors.js
+// PaymentGateway/vendors.js
 const express = require('express');
 const router = express.Router();
 const Vendor = require('../models/Vendor');
@@ -346,7 +346,7 @@ router.patch('/:id', async (req, res) => {
 
     return res.json(updatedVendor);
   } catch (error) {
-    console.error('❌ Error updating vendor:', error);
+    console.error('Error updating vendor:', error);
     res
       .status(500)
       .json({ error: 'Failed to update vendor', details: error.message });
@@ -388,7 +388,7 @@ router.delete('/:id', async (req, res) => {
 
     res.json({ message: 'Vendor deleted', vendor });
   } catch (error) {
-    console.error('❌ Error deleting vendor:', error);
+    console.error('Error deleting vendor:', error);
     res.status(500).json({ error: 'Failed to delete vendor' });
   }
 });
@@ -456,7 +456,7 @@ router.post('/sync-from-purchases', async (req, res) => {
         }
       } catch (error) {
         console.error(
-          `   ❌ Error syncing vendor "${partyName}":`,
+          `Error syncing vendor "${partyName}":`,
           error.message
         );
         errors.push({ vendor: partyName, error: error.message });
