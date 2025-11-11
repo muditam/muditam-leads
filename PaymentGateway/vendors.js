@@ -1,9 +1,7 @@
-
-
 // routes/vendors.js
 const express = require('express');
 const router = express.Router();
-const Vendor = require('../models/Vendors');
+const Vendor = require('../models/Vendor');
 const PurchaseRecord = require('../models/PurchaseRecord');
 const mongoose = require('mongoose');
 
@@ -12,6 +10,8 @@ const mongoose = require('mongoose');
 router.post('/fix-vendor-ids', async (req, res) => {
   try {
    
+
+
     const db = mongoose.connection.db;
     const vendorsCollection = db.collection('vendors');
 
@@ -248,7 +248,8 @@ router.patch('/:id', async (req, res) => {
     }
 
 
-    // ---- GST VALIDATION + UNIQUENESS ----
+
+
     if (
       typeof updates.hasGST !== 'undefined' ||
       typeof updates.gstNumber !== 'undefined'
@@ -295,7 +296,7 @@ router.patch('/:id', async (req, res) => {
         updates.gstNumber = gst;
         updates.hasGST = true;
       } else if (hasGSTFlag === false) {
-        // Turn off GST → clear gstNumber
+     
         updates.hasGST = false;
         updates.gstNumber = '';
       }
@@ -311,7 +312,8 @@ router.patch('/:id', async (req, res) => {
     const collection = db.collection('vendors');
 
 
-    // ✅ Case 1: proper ObjectId _id
+
+
     if (isValidObjectId) {
       const vendor = await Vendor.findByIdAndUpdate(
         id,
@@ -329,7 +331,8 @@ router.patch('/:id', async (req, res) => {
     }
 
 
-    // ✅ Case 2: legacy string _id (like "BHARTI AIRTEL LTD")
+
+
     const updateResult = await collection.updateOne({ _id: id }, { $set: updates });
 
 
@@ -351,7 +354,8 @@ router.patch('/:id', async (req, res) => {
 });
 
 
-// DELETE - Soft delete vendor
+
+
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;

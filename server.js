@@ -113,7 +113,11 @@ const bankCc1101Routes = require("./PaymentGateway/bankCc1101");
 const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
 const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
-const taskReportingRoutes = require("./routes/taskReportingRoutes"); 
+const taskReportingRoutes = require("./routes/taskReportingRoutes");
+const purchaseRecord = require('./PaymentGateway/purchaseRecordRoutes');   
+const paymentRecord = require('./PaymentGateway/paymentRecords');          
+const Vendors = require('./PaymentGateway/vendors'); 
+const SwitchEmployee = require("./routes/SwitchEmployee");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001;
@@ -558,7 +562,11 @@ app.use("/api/bank-reconciliation", bankCc1101Routes);
 app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
 app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
 app.use("/api/tasks", taskBoardRoutes); 
-app.use("/api/tasks/reporting", taskReportingRoutes);  
+app.use("/api/tasks/reporting", taskReportingRoutes); 
+app.use("/api", purchaseRecord);
+app.use("/api/payment-records", paymentRecord);
+app.use("/api/vendors", Vendors);
+app.use("/api/employees", SwitchEmployee);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -568,7 +576,7 @@ mongoose.connect(process.env.MONGO_URI, {
    
 
 app.get('/api/sse', (req, res) => {
-  const { did } = req.query;
+  const { did } = req.query; 
   if (!did) return res.status(400).send('Missing did');
  
   res.setHeader('Content-Type', 'text/event-stream');

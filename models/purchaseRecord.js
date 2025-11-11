@@ -56,6 +56,15 @@ const purchaseRecordSchema = new mongoose.Schema({
     enum: ['Yes', 'No', ''],
     default: 'No'
   },
+  // paymentStatus: {
+  //   type: String,
+  //   enum: ['Pending', 'Paid', ''],
+  //   default: 'Pending'
+  // },
+  // pendingPayment: {
+  //   type: Number,
+  //   default: 0
+  // },
   vendorEmail: { type: String },
   vendorPhone: { type: String },
   paymentDate: {
@@ -94,7 +103,9 @@ purchaseRecordSchema.virtual('serialNumber').get(function() {
 purchaseRecordSchema.set('toJSON', { virtuals: true });
 purchaseRecordSchema.set('toObject', { virtuals: true });
 
-module.exports =
-  mongoose.models.PurchaseRecord ||
-  mongoose.model('PurchaseRecord', purchaseRecordSchema);
+
+const PurchaseRecord = mongoose.model('PurchaseRecord', purchaseRecordSchema);
+
+
+module.exports = PurchaseRecord;
 

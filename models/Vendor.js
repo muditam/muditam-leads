@@ -62,6 +62,8 @@ const vendorSchema = new mongoose.Schema(
 vendorSchema.index({ name: 1 });
 vendorSchema.index({ isDeleted: 1 });
 
+
+// ✅ Unique GST index for non-empty GST numbers
 vendorSchema.index(
   { gstNumber: 1 },
   {
