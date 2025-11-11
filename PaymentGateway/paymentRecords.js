@@ -1,49 +1,74 @@
+// routes/paymentRecords.js
 const express = require('express');
 const router = express.Router();
-const PaymentRecord = require('../models/PaymentRecord');
-const PurchaseRecord = require('../models/PurchaseRecord');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+const PaymentRecord = require('../models/PaymentRecord');
+const PurchaseRecord = require('../models/PurchaseRecord');
 
-// Ensure directory exists
+// ---------- Utils ----------
+const isObjectId = (v) =>
+  typeof v === 'string' && mongoose.Types.ObjectId.isValid(v);
+
+const toNumber = (v, def = 0) => {
+  if (v === null || v === undefined || v === '') return def;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
+
+const toDateOrNull = (v) => {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const nonEmpty = (s) => typeof s === 'string' && s.trim() !== '';
+
+// ---------- Upload setup (local, ephemeral on Heroku) ----------
 const uploadDir = path.join(__dirname, '..', 'uploads', 'payment-screenshots');
 fs.mkdirSync(uploadDir, { recursive: true });
 
+const safeBaseName = (original) => {
+  const parsed = path.parse(original);
+  const base = (parsed.base || 'file').replace(/\s+/g, '_').replace(/[^\w.\-]/g, '');
+  return base || `upload-${Date.now()}.bin`;
+};
+
+// Restrict to common image/PDF types (you can relax this if needed)
+const fileFilter = (_req, file, cb) => {
+  const okMime = /^(image\/jpeg|image\/png|image\/webp|application\/pdf)$/i.test(file.mimetype);
+  const okExt = /\.(jpe?g|png|webp|pdf)$/i.test(file.originalname || '');
+  if (okMime && okExt) return cb(null, true);
+  cb(new Error('Only JPG/PNG/WEBP/PDF files are allowed'));
+};
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ts = Date.now();
-    const safe = file.originalname.replace(/\s+/g, '_');
-    cb(null, `${ts}_${safe}`);
-  }
+  filename: (_req, file, cb) => cb(null, `${Date.now()}_${safeBaseName(file.originalname || 'upload')}`),
 });
+
 const upload = multer({
   storage,
+  fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
-
-/**
- * Calculate total due for a vendor as of a date.
- * Mirrors utils/dueCalculator.js functionality.
- */
+// ---------- Due calculator (EOD) ----------
 async function calculateDueAtDate(targetDate, vendorName = null, excludePaymentId = null) {
   try {
     const date = new Date(targetDate);
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
 
-
-    const invoiceMatch = {
-      date: { $lte: endOfDay },
+    const softNotDeleted = {
       $or: [{ isDeleted: false }, { isDeleted: null }, { isDeleted: { $exists: false } }],
     };
-    if (vendorName) invoiceMatch.partyName = vendorName;
 
+    const invoiceMatch = { date: { $lte: endOfDay }, ...softNotDeleted };
+    if (vendorName) invoiceMatch.partyName = vendorName;
 
     const totalInvoicesResult = await PurchaseRecord.aggregate([
       { $match: invoiceMatch },
@@ -51,21 +76,17 @@ async function calculateDueAtDate(targetDate, vendorName = null, excludePaymentI
     ]);
     const totalInvoices = totalInvoicesResult[0]?.total || 0;
 
-
-    const paymentMatch = {
-      date: { $lte: endOfDay },
-      $or: [{ isDeleted: false }, { isDeleted: null }, { isDeleted: { $exists: false } }],
-    };
+    const paymentMatch = { date: { $lte: endOfDay }, ...softNotDeleted };
     if (vendorName) paymentMatch.vendorName = vendorName;
-    if (excludePaymentId) paymentMatch._id = { $ne: new mongoose.Types.ObjectId(excludePaymentId) };
-
+    if (excludePaymentId && isObjectId(excludePaymentId)) {
+      paymentMatch._id = { $ne: new mongoose.Types.ObjectId(excludePaymentId) };
+    }
 
     const totalPaymentsResult = await PaymentRecord.aggregate([
       { $match: paymentMatch },
       { $group: { _id: null, total: { $sum: { $ifNull: ['$amountPaid', 0] } } } },
     ]);
     const totalPayments = totalPaymentsResult[0]?.total || 0;
-
 
     return totalInvoices - totalPayments;
   } catch (err) {
@@ -74,166 +95,106 @@ async function calculateDueAtDate(targetDate, vendorName = null, excludePaymentI
   }
 }
 
-
-// GET all payment records
+// ---------- GET all active (not deleted) ----------
 router.get('/', async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 25;
+    const pageRaw = parseInt(req.query.page, 10);
+    const limitRaw = parseInt(req.query.limit, 10);
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 25;
     const skip = (page - 1) * limit;
 
-
     const query = {
-      $or: [
-        { isDeleted: false },
-        { isDeleted: null },
-        { isDeleted: { $exists: false } }
-      ]
+      $or: [{ isDeleted: false }, { isDeleted: null }, { isDeleted: { $exists: false } }],
     };
 
-
     const [records, total] = await Promise.all([
-      PaymentRecord.find(query)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean()
-        .exec(),
-      PaymentRecord.countDocuments(query)
+      PaymentRecord.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean().exec(),
+      PaymentRecord.countDocuments(query),
     ]);
 
-
-    res.json({
-      records,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit)
-    });
+    res.json({ records, total, page, limit, totalPages: Math.ceil(total / limit) });
   } catch (error) {
     console.error('Error fetching payment records:', error);
     res.status(500).json({ error: 'Failed to fetch payment records' });
   }
 });
 
-
-// POST create new payment record (with optional screenshot file)
+// ---------- POST create (optional screenshot) ----------
 router.post('/', upload.single('screenshot'), async (req, res) => {
   try {
     const screenshotUrl = req.file
-      ? `/uploads/payment-screenshots/${req.file.filename}`
+      ? `/uploads/payment-screenshots/${path.basename(req.file.filename)}`
       : (req.body.screenshot || '');
 
-
-    const newRecord = new PaymentRecord({
-      date: req.body.date || null,
-      vendorName: req.body.vendorName || '',
-      amountPaid: req.body.amountPaid || 0,
+    const doc = {
+      date: toDateOrNull(req.body.date),
+      vendorName: (req.body.vendorName || '').trim(),
+      amountPaid: toNumber(req.body.amountPaid, 0),
       amountDue: 0,
       dueAtThisDate: 0,
       screenshot: screenshotUrl,
-      isDeleted: false
-    });
+      isDeleted: false,
+    };
 
-
-    const saved = await newRecord.save();
-    res.status(201).json(saved);
+    const created = await PaymentRecord.create(doc);
+    res.status(201).json(created);
   } catch (error) {
     console.error('Create error:', error);
-    res.status(500).json({ error: 'Failed to create payment record' });
+    const code = /allowed/i.test(String(error?.message || '')) ? 400 : 500;
+    res.status(code).json({ error: 'Failed to create payment record', details: error.message });
   }
 });
 
-
-// PATCH update record (allow replacing screenshot)
+// ---------- PATCH update (replace screenshot if present) ----------
 router.patch('/:id', upload.single('screenshot'), async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = { ...req.body };
+    if (!isObjectId(id)) return res.status(400).json({ error: 'Invalid record id' });
 
-
-    if (req.file) {
-      updates.screenshot = `/uploads/payment-screenshots/${req.file.filename}`;
-    }
-
-
-    // Get existing record
     const existingRecord = await PaymentRecord.findById(id);
-    if (!existingRecord) {
-      return res.status(404).json({ error: 'Payment record not found' });
-    }
+    if (!existingRecord) return res.status(404).json({ error: 'Payment record not found' });
 
+    const updates = {};
+    if (req.body.vendorName !== undefined) updates.vendorName = String(req.body.vendorName || '').trim();
+    if (req.body.date !== undefined) updates.date = toDateOrNull(req.body.date);
+    if (req.body.amountPaid !== undefined) updates.amountPaid = toNumber(req.body.amountPaid, 0);
+    if (req.file) updates.screenshot = `/uploads/payment-screenshots/${path.basename(req.file.filename)}`;
 
-    // Build complete record state after updates
-    const updatedState = {
-      vendorName: updates.vendorName !== undefined ? updates.vendorName : existingRecord.vendorName,
-      date: updates.date !== undefined ? updates.date : existingRecord.date,
-      amountPaid: updates.amountPaid !== undefined ? updates.amountPaid : existingRecord.amountPaid
-    };
-
-
-    // Check if due is already locked permanently
-    const isLocked = existingRecord.dueAtThisDate !== 0;
-   
-   
-
+    // Keep immutable lock semantics
+    const isLocked = Number(existingRecord.dueAtThisDate || 0) !== 0;
 
     if (isLocked) {
-      // Due is already locked, don't touch it
+      // never modify locked due fields
       delete updates.dueAtThisDate;
       delete updates.amountDue;
-     
     } else {
-      // Not locked yet - check if this is the FINAL update (amountPaid being filled)
-      const isFillingAmountPaid =
-        updates.amountPaid !== undefined &&
+      const willSetAmountPaid =
+        Object.prototype.hasOwnProperty.call(updates, 'amountPaid') &&
         updates.amountPaid !== null &&
-        updates.amountPaid !== '';
+        updates.amountPaid !== undefined;
 
+      // Prepare aggregate state after this update
+      const nextVendor = updates.vendorName ?? existingRecord.vendorName;
+      const nextDate = updates.date ?? existingRecord.date;
 
-      if (isFillingAmountPaid) {
-        // This is the FINAL step - user filled amountPaid
-        // Check if we have all required fields
-        const hasAllRequiredFields =
-          updatedState.vendorName &&
-          updatedState.vendorName.trim() !== '' &&
-          updatedState.date;
+      if (willSetAmountPaid && nonEmpty(nextVendor) && nextDate instanceof Date) {
+        // Step 1: persist amountPaid first
+        const amountPaidValue = updates.amountPaid;
+        await PaymentRecord.findByIdAndUpdate(id, { $set: { amountPaid: amountPaidValue } });
 
+        // Step 2: compute due including the just-saved payment
+        const calculatedDue = await calculateDueAtDate(nextDate, nextVendor);
 
-        if (hasAllRequiredFields) {
-          // STEP 1: Save the amountPaid FIRST
-          const amountPaidValue = parseFloat(updates.amountPaid) || 0;
-          await PaymentRecord.findByIdAndUpdate(
-            id,
-            { $set: { amountPaid: amountPaidValue } }
-          );
-       
-         
-          // STEP 2: NOW calculate due (will include the just-saved payment)
-          const recordDate = new Date(updatedState.date);
-          const calculatedDue = await calculateDueAtDate(recordDate, updatedState.vendorName);
-         
-          // STEP 3: LOCK the due permanently
-          updates.dueAtThisDate = calculatedDue;
-          updates.amountDue = calculatedDue;
-          updates.amountPaid = amountPaidValue;
-         
-         
-        } else {
-
-
-         
-          delete updates.amountDue;
-          delete updates.dueAtThisDate;
-        }
+        // Step 3: lock fields
+        updates.dueAtThisDate = calculatedDue;
+        updates.amountDue = calculatedDue;
+        updates.amountPaid = amountPaidValue; // keep in updates payload too
       } else {
-        // User is just filling vendor/date - DON'T show amountDue yet
- 
-        delete updates.amountDue;
         delete updates.dueAtThisDate;
+        delete updates.amountDue;
       }
     }
-
 
     const updated = await PaymentRecord.findByIdAndUpdate(
       id,
@@ -241,37 +202,27 @@ router.patch('/:id', upload.single('screenshot'), async (req, res) => {
       { new: true, runValidators: true }
     );
 
-
     res.json(updated);
   } catch (error) {
     console.error('❌ Error updating payment record:', error);
-    res.status(500).json({ error: 'Failed to update payment record' });
+    const code = /allowed/i.test(String(error?.message || '')) ? 400 : 500;
+    res.status(code).json({ error: 'Failed to update payment record', details: error.message });
   }
 });
 
-
-// DELETE payment record (soft delete)
+// ---------- DELETE (soft) ----------
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-
+    if (!isObjectId(id)) return res.status(400).json({ error: 'Invalid record id' });
 
     const record = await PaymentRecord.findByIdAndUpdate(
       id,
-      {
-        isDeleted: true,
-        deletedAt: new Date()
-      },
+      { isDeleted: true, deletedAt: new Date() },
       { new: true }
     );
 
-
-    if (!record) {
-      return res.status(404).json({ error: 'Payment record not found' });
-    }
-
-
-   
+    if (!record) return res.status(404).json({ error: 'Payment record not found' });
     res.json({ message: 'Payment record deleted', record });
   } catch (error) {
     console.error('Error deleting payment record:', error);
@@ -279,63 +230,42 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-
-// GET deleted payment records
+// ---------- GET deleted ----------
 router.get('/deleted', async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 25;
+    const pageRaw = parseInt(req.query.page, 10);
+    const limitRaw = parseInt(req.query.limit, 10);
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 25;
     const skip = (page - 1) * limit;
-
 
     const query = { isDeleted: true };
 
-
     const [records, total] = await Promise.all([
-      PaymentRecord.find(query)
-        .sort({ deletedAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean()
-        .exec(),
-      PaymentRecord.countDocuments(query)
+      PaymentRecord.find(query).sort({ deletedAt: -1 }).skip(skip).limit(limit).lean().exec(),
+      PaymentRecord.countDocuments(query),
     ]);
 
-
-    res.json({
-      records,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit)
-    });
+    res.json({ records, total, page, limit, totalPages: Math.ceil(total / limit) });
   } catch (error) {
     console.error('Error fetching deleted payment records:', error);
     res.status(500).json({ error: 'Failed to fetch deleted payment records' });
   }
 });
 
-
-// PATCH restore deleted payment record
+// ---------- PATCH restore ----------
 router.patch('/deleted/:id/restore', async (req, res) => {
   try {
+    const { id } = req.params;
+    if (!isObjectId(id)) return res.status(400).json({ error: 'Invalid record id' });
+
     const record = await PaymentRecord.findByIdAndUpdate(
-      req.params.id,
-      {
-        isDeleted: false,
-        deletedAt: null
-      },
+      id,
+      { isDeleted: false, deletedAt: null },
       { new: true }
     );
 
-
-    if (!record) {
-      return res.status(404).json({ error: 'Payment record not found' });
-    }
-
-
-
-
+    if (!record) return res.status(404).json({ error: 'Payment record not found' });
     res.json({ message: 'Payment record restored successfully', record });
   } catch (error) {
     console.error('Error restoring payment record:', error);
@@ -343,6 +273,4 @@ router.patch('/deleted/:id/restore', async (req, res) => {
   }
 });
 
-
 module.exports = router;
-

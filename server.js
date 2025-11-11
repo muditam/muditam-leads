@@ -114,9 +114,9 @@ const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
 const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
 const taskReportingRoutes = require("./routes/taskReportingRoutes");
-// const purchaseRecord = require('./PaymentGateway/purchaseRecordRoutes');   
-// const paymentRecord = require('./PaymentGateway/paymentRecords');          
-// const Vendors = require('./PaymentGateway/vendors'); 
+const purchaseRecord = require('./PaymentGateway/purchaseRecordRoutes');   
+const paymentRecord = require('./PaymentGateway/paymentRecords');          
+const Vendors = require('./PaymentGateway/vendors'); 
 const SwitchEmployee = require("./routes/SwitchEmployee");
 
 const app = express(); 
@@ -563,9 +563,9 @@ app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
 app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
 app.use("/api/tasks", taskBoardRoutes); 
 app.use("/api/tasks/reporting", taskReportingRoutes); 
-// app.use("/api", purchaseRecord);
-// app.use("/api/payment-records", paymentRecord);
-// app.use("/api/vendors", Vendors);
+app.use("/api", purchaseRecord);
+app.use("/api/payment-records", paymentRecord);
+app.use("/api/vendors", Vendors);
 app.use("/api/employees", SwitchEmployee);
 
 mongoose.connect(process.env.MONGO_URI, {
