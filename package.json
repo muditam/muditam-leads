@@ -23,6 +23,7 @@
     "bottleneck": "^2.19.5",
     "bwip-js": "^4.7.0",
     "compression": "^1.8.1",
+    "connect-mongo": "^5.1.0",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
     "csv-parser": "^3.2.0",

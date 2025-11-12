@@ -6,19 +6,15 @@ const path = require("path");
 const csv = require("csv-parser");
 const Capital6389Txn = require("../models/Capital6389Txn");
 
-// -------- Multer setup --------
 const upload = multer({
   dest: path.join(__dirname, "..", "uploads", "bank-capital-6389"),
 });
 
-// -------- Helper: parse date safely (supports DD/MM/YYYY, etc.) --------
 function parseDate(value) {
   if (!value) return null;
-  // try native
   const d1 = new Date(value);
   if (!isNaN(d1.getTime())) return d1;
 
-  // try DD/MM/YYYY
   const parts = String(value).split("/");
   if (parts.length === 3) {
     const [dd, mm, yyyy] = parts.map((v) => parseInt(v, 10));
@@ -29,22 +25,67 @@ function parseDate(value) {
   return null;
 }
 
-// -------- Helper: safe number parsing --------
+// more tolerant number parsing (handles commas, DR/CR, spaces, etc.)
 function toNumberSafe(value) {
-  if (value === undefined || value === null) return 0;
+  if (value === undefined || value === null) return null;
 
-  const cleaned = String(value).replace(/,/g, "").trim();
+  let cleaned = String(value)
+    .replace(/,/g, "")
+    .replace(/\s*(CR|DR)$/i, "") // remove trailing CR / DR if present
+    .trim();
 
-  // treat blanks, dashes etc as zero
   if (!cleaned || cleaned === "-" || cleaned.toUpperCase() === "NA") {
-    return 0;
+    return null;
   }
 
+  // keep only digits, minus and dot
+  cleaned = cleaned.replace(/[^0-9.-]/g, "");
+  if (!cleaned) return null;
+
   const n = Number(cleaned);
-  return Number.isNaN(n) ? 0 : n;
+  return Number.isNaN(n) ? null : n;
 }
 
-// -------- GET: list transactions with pagination --------
+function detectSeparator(filePath) {
+  return new Promise((resolve, reject) => {
+    const rs = fs.createReadStream(filePath, { encoding: "utf8" });
+    rs.on("data", (chunk) => {
+      rs.destroy();
+      const firstLine = chunk.split(/\r?\n/)[0] || "";
+      if (firstLine.includes("\t")) return resolve("\t");
+      if (firstLine.includes(";")) return resolve(";");
+      return resolve(",");
+    });
+    rs.on("error", reject);
+  });
+}
+
+async function parseCsvFile(filePath) {
+  const separator = await detectSeparator(filePath);
+  const rows = [];
+
+  await new Promise((resolve, reject) => {
+    fs.createReadStream(filePath)
+      .pipe(
+        csv({
+          separator,
+          mapHeaders: ({ header }) =>
+            header.replace(/^\uFEFF/, "").trim(),
+        })
+      )
+      .on("data", (row) => {
+        if (rows.length === 0) {
+           
+        }
+        rows.push(row);
+      })
+      .on("end", resolve)
+      .on("error", reject);
+  });
+
+  return rows;
+}
+
 router.get("/capital-6389", async (req, res) => {
   try {
     let { page = 1, limit = 50 } = req.query;
@@ -76,7 +117,6 @@ router.get("/capital-6389", async (req, res) => {
   }
 });
 
-// -------- POST: upload CSV --------
 router.post(
   "/capital-6389/upload",
   upload.single("file"),
@@ -88,41 +128,29 @@ router.post(
     }
 
     const filePath = req.file.path;
-    const rows = [];
 
     try {
-      await new Promise((resolve, reject) => {
-        fs.createReadStream(filePath)
-          .pipe(csv())
-          .on("data", (row) => {
-            rows.push(row);
-          })
-          .on("end", resolve)
-          .on("error", reject);
-      });
+      const rows = await parseCsvFile(filePath);
 
-      // optional: clear existing txns before re-upload
       await Capital6389Txn.deleteMany({});
 
-      const docs = rows.map((row) => {
-        return {
-          txnDate: parseDate(row["Txn Date"]),
-          valueDate: parseDate(row["Value Date"]),
-          description: row["Description"] || "",
-          refNo: row["Ref No./Cheque No."] || "",
-          branchCode: row["Branch Code"] || "",
-          debit: toNumberSafe(row["Debit"]),
-          credit: toNumberSafe(row["Credit"]),
-          balance: toNumberSafe(row["Balance"]),
-          remarks: row["Remarks"] || "",
-        };
-      });
+      const docs = rows.map((row) => ({
+        txnDate: parseDate(row["Txn Date"]),
+        valueDate: parseDate(row["Value Date"]),
+        description: row["Description"] || "",
+        refNo: row["Ref No./Cheque No."] || "",
+        branchCode: row["Branch Code"] || "",
+        debit: toNumberSafe(row["Debit"]),
+        credit: toNumberSafe(row["Credit"]),
+        balance: toNumberSafe(row["Balance"]),
+        remarks: row["Remarks"] || "",
+      }));
 
       if (docs.length) {
         await Capital6389Txn.insertMany(docs);
       }
 
-      fs.unlink(filePath, () => {}); // clean temp file (ignore errors)
+      fs.unlink(filePath, () => {});
 
       res.json({
         success: true,

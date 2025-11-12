@@ -6,6 +6,8 @@ const dns = require('dns');
 const cors = require('cors');
 const multer = require("multer");
 const path = require('path');
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
 const Lead = require('./models/Lead');
 const Customer = require('./models/Customer'); 
 const ConsultationDetails = require('./models/ConsultationDetails');
@@ -114,10 +116,12 @@ const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
 const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
 const taskReportingRoutes = require("./routes/taskReportingRoutes");
-// const purchaseRecord = require('./PaymentGateway/purchaseRecordRoutes');   
+// const purchaseRecordRoutes = require('./PaymentGateway/purchaseRecordRoutes'); 
 // const paymentRecord = require('./PaymentGateway/paymentRecords');          
 // const Vendors = require('./PaymentGateway/vendors'); 
 const SwitchEmployee = require("./routes/SwitchEmployee");
+const ConfirmedOrders = require("./routes/confirmedOrders");
+const invoiceRoutes = require('./routes/invoiceRoutes');
 
 const app = express(); 
 const PORT = process.env.PORT || 5001;
@@ -142,15 +146,39 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const rawSaver = (req, res, buf) => { req.rawBody = buf; };
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
       return callback(new Error('Not allowed by CORS'));
-    }
-    return callback(null, true);
-  }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  })
+);
+
+app.options('*', cors({
+  origin: allowedOrigins,
+  credentials: true,
 }));
+
+app.use(
+  session({
+    name: 'sid',
+    secret: process.env.SESSION_SECRET || 'dev-secret',
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: false, // true only when serving over HTTPS
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    },
+  })
+);
  
 function toNumberLoose(v) {
   if (v === null || v === undefined) return undefined;
@@ -563,10 +591,12 @@ app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
 app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
 app.use("/api/tasks", taskBoardRoutes); 
 app.use("/api/tasks/reporting", taskReportingRoutes); 
-// app.use("/api", purchaseRecord);
+// app.use('/api', purchaseRecordRoutes);
 // app.use("/api/payment-records", paymentRecord);
 // app.use("/api/vendors", Vendors);
 app.use("/api/employees", SwitchEmployee);
+app.use("/api/order-confirmations", ConfirmedOrders);
+app.use('/api/invoices', invoiceRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
