@@ -47,7 +47,7 @@ function buildRangeClause(rangeKey) {
   if (end) clause.$lte = end;
   return clause;
 }
-// GET /api/order-confirmations/confirmed-order
+// GET /api/order-confirmation/confirmed-order
 router.get("/confirmed-order", async (req, res) => {
   try {
     const {

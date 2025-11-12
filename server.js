@@ -595,7 +595,7 @@ app.use("/api/tasks/reporting", taskReportingRoutes);
 // app.use("/api/payment-records", paymentRecord);
 // app.use("/api/vendors", Vendors);
 app.use("/api/employees", SwitchEmployee);
-app.use("/api/order-confirmations", ConfirmedOrders);
+app.use("/api/order-confirmation", ConfirmedOrders);
 app.use('/api/invoices', invoiceRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
