@@ -716,22 +716,26 @@ router.delete("/:id", async (req, res) => {
       });
       if (!otherBoard) continue;
 
-      // delete tasks that look like the mirrored assignment
+      // delete only tasks that look like the *exact* mirrored assignment
       otherBoard.tasks = otherBoard.tasks.filter((t) => {
         const sameTitle = t.title === assignmentInfo.title;
         const sameAssignee =
           t.assigneeId === assignmentInfo.assigneeId;
         const sameAssigner =
           t.assignedById === assignmentInfo.assignedById;
+
         const sameAssignedDate =
-          !assignedDateMs ||
-          (t.assignedDate &&
-            new Date(t.assignedDate).getTime() === assignedDateMs);
+          !!assignedDateMs &&
+          t.assignedDate &&
+          new Date(t.assignedDate).getTime() === assignedDateMs;
 
         const isMatch =
-          sameTitle && sameAssignee && sameAssigner && sameAssignedDate;
+          sameTitle &&
+          sameAssignee &&
+          sameAssigner &&
+          sameAssignedDate;
 
-        return !isMatch; // keep everything except the mirrored tasks 
+        return !isMatch; // keep everything except the exact mirrored task
       });
 
       await otherBoard.save();
