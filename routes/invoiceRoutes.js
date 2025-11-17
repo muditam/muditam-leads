@@ -60,9 +60,27 @@ router.post('/', async (req, res) => {
     if (!user) return res.status(401).json({ message: 'Unauthorized' });
 
 
-    const { companyName, amount, fileUrl, originalFilename } = req.body || {};
-    if (!companyName || amount == null || !fileUrl)
-      return res.status(400).json({ message: 'companyName, amount, fileUrl required' });
+    const {
+      companyName,
+      amount,
+      fileUrl,
+      originalFilename,
+      status: rawStatus,        // 🔹 take status from body
+    } = req.body || {};
+
+
+    if (!companyName || amount == null || !fileUrl) {
+      return res
+        .status(400)
+        .json({ message: 'companyName, amount, fileUrl required' });
+    }
+
+
+    // 🔹 normalize status → only 'pending' / 'clear' allowed
+    const allowedStatuses = ['pending', 'clear'];
+    const status = allowedStatuses.includes(String(rawStatus).toLowerCase())
+      ? String(rawStatus).toLowerCase()
+      : 'pending';
 
 
     const uid = user._id || user.id || user.userId || null;
@@ -82,6 +100,7 @@ router.post('/', async (req, res) => {
       amount: Number(amount),
       fileUrl,
       originalFilename: originalFilename || undefined,
+      status,
     });
 
 
@@ -93,7 +112,8 @@ router.post('/', async (req, res) => {
 });
 
 
-// List (finance sees all, others own)
+
+
 router.get('/', async (req, res) => {
   try {
     const user = getUser(req);
@@ -130,7 +150,6 @@ router.get('/', async (req, res) => {
 });
 
 
-// Update status (finance only)
 router.patch('/:id/status', async (req, res) => {
   try {
     const user = getUser(req);

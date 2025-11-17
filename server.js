@@ -102,6 +102,7 @@ const opsDashboardRoutes = require("./routes/opsDashboard");
 const orderConfirmAnalytics = require("./routes/orderConfirmAnalytics"); 
 const assetsRoutes = require("./routes/add-assets");
 const assetAllotmentsRoutes = require("./routes/assetAllotments"); 
+const assetJourneyRouter = require("./routes/assetJourney");
 const UnAssignedDelivered = require("./routes/UnAssignedDelivered"); 
 
 const bobotSyncRoutes = require('./routes/bobotSync');
@@ -123,8 +124,14 @@ const SwitchEmployee = require("./routes/SwitchEmployee");
 const ConfirmedOrders = require("./routes/confirmedOrders");
 const invoiceRoutes = require('./routes/invoiceRoutes');
 
+const globalShopifyOrders = require("./International/globalShopifyOrders"); 
+const globalAbandonedCarts = require("./International/globalAbandonedCarts");
+const globalRetentionLeads = require("./International/InternationalRoutes/globalRetentionLeads");
+const globalRetentionDetails = require("./International/InternationalRoutes/globalRetentionDetails");
+const globalRetentionSalesRoutes = require("./International/InternationalRoutes/globalRetentionSales");
+
 const app = express(); 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5001; 
 
 app.use(
   compression({
@@ -577,6 +584,7 @@ app.use("/api/order-analytics", orderConfirmAnalytics);
 
 app.use("/api/assets", assetsRoutes); 
 app.use("/api/asset-allotments", assetAllotmentsRoutes);
+app.use("/api/asset-journey", assetJourneyRouter);
 app.use("/api/orders-un", UnAssignedDelivered); 
 
 app.use('/api/bobot', bobotSyncRoutes);  
@@ -597,6 +605,12 @@ app.use("/api/tasks/reporting", taskReportingRoutes);
 app.use("/api/employees", SwitchEmployee);
 app.use("/api/order-confirmation", ConfirmedOrders);
 app.use('/api/invoices', invoiceRoutes);
+
+app.use("/api", globalShopifyOrders);
+app.use("/api", globalAbandonedCarts);
+app.use("/api/global-retention-leads", globalRetentionLeads);
+app.use("/api/global-retention-sales", globalRetentionSalesRoutes);
+app.use("/api/global-retention-details", globalRetentionDetails);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
