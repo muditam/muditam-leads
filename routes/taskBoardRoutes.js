@@ -109,7 +109,8 @@ function nextOrderIndex(board, status) {
 
 function addActiveSeconds(task, seconds) {
   const s = Math.max(0, Number(seconds) || 0);
-  task.totalActiveSeconds = Number(task.totalActiveSeconds || 0) + s;
+  task.totalActiveSeconds =
+    Number(task.totalActiveSeconds || 0) + s;
 }
 
 function sortColumns(columns) {
@@ -145,7 +146,12 @@ async function findBoardWithTask(taskId, ownerKey) {
  * Centralised status/timer transition
  * fromStatus -> toStatus
  */
-function handleStatusTransition(task, fromStatus, toStatus, now = new Date()) {
+function handleStatusTransition(
+  task,
+  fromStatus,
+  toStatus,
+  now = new Date()
+) {
   if (!toStatus || fromStatus === toStatus) return;
 
   const wasOpen = fromStatus === COLUMN_IDS.OPEN;
@@ -180,6 +186,85 @@ function handleStatusTransition(task, fromStatus, toStatus, now = new Date()) {
   task.status = toStatus;
 }
 
+/**
+ * Apply recurring rules to all tasks on a board.
+ * If a recurring task is due, reset it into NEW list, reset timers,
+ * and optionally bump dueDate.
+ */
+async function applyRecurrenceToBoard(board) {
+  if (!board || !Array.isArray(board.tasks)) return;
+
+  const now = new Date();
+  let changed = false;
+
+  board.tasks.forEach((task) => {
+    if (!task.recurring) return;
+
+    const interval = task.recurringInterval || "DAILY";
+
+    // Base reference date: last time we recurred, or when it was assigned/created/closed
+    const base =
+      task.lastRecurringAt ||
+      task.closedAt ||
+      task.assignedDate ||
+      task.createdAt;
+
+    if (!base) return;
+
+    const baseDate = new Date(base);
+
+    // Compute next due date based on interval
+    const next = new Date(baseDate);
+    if (interval === "DAILY") {
+      next.setDate(next.getDate() + 1);
+    } else if (interval === "WEEKLY") {
+      next.setDate(next.getDate() + 7);
+    } else if (interval === "MONTHLY") {
+      next.setMonth(next.getMonth() + 1);
+    }
+
+    // Not yet due
+    if (now < next) return;
+
+    // 🔁 It is due → move to NEW, reset timers (no matter where it is currently)
+    const fromStatus = task.status;
+    const toStatus = COLUMN_IDS.NEW;
+
+    // Use central transition helper to clean up timers / closedAt
+    handleStatusTransition(task, fromStatus, toStatus, now);
+
+    // For recurring, we want a "fresh" cycle
+    task.totalActiveSeconds = 0;
+    task.startedAt = null;
+    task.activeSince = null;
+    task.closedAt = null;
+
+    // Bump dueDate forward if it exists
+    if (task.dueDate) {
+      const d = new Date(task.dueDate);
+      if (interval === "DAILY") {
+        d.setDate(d.getDate() + 1);
+      } else if (interval === "WEEKLY") {
+        d.setDate(d.getDate() + 7);
+      } else if (interval === "MONTHLY") {
+        d.setMonth(d.getMonth() + 1);
+      }
+      task.dueDate = d;
+    }
+
+    task.lastRecurringAt = now;
+
+    // Place it at the end of NEW column
+    task.orderIndex = nextOrderIndex(board, COLUMN_IDS.NEW);
+
+    changed = true;
+  });
+
+  if (changed) {
+    await board.save();
+  }
+}
+
 // -------- Routes --------
 
 // GET board
@@ -189,6 +274,9 @@ router.get("/board", async (req, res) => {
     if (!ownerKey) return;
 
     const board = await getOrCreateBoardByOwnerKey(ownerKey);
+
+    // 🔁 Apply recurring logic before we send columns/tasks
+    await applyRecurrenceToBoard(board);
 
     const columns = sortColumns(board.columns);
 
@@ -305,7 +393,8 @@ router.delete("/columns/:id", async (req, res) => {
         .json({ message: "Column not found" });
     }
 
-    const fallbackId = COLUMN_IDS.NEW || board.columns[0]?.id || colId;
+    const fallbackId =
+      COLUMN_IDS.NEW || board.columns[0]?.id || colId;
 
     board.tasks.forEach((t) => {
       if (t.status === colId) {
@@ -341,6 +430,9 @@ router.post("/", async (req, res) => {
       assignedDate,
       dueDate,
       attachments,
+      // 🔁 recurring
+      recurring,
+      recurringInterval,
     } = req.body;
 
     if (!title)
@@ -374,6 +466,10 @@ router.post("/", async (req, res) => {
       activeSince: null,
       startedAt: null,
       closedAt: null,
+      // 🔁 Recurring settings
+      recurring: !!recurring,
+      recurringInterval: recurringInterval || "DAILY",
+      lastRecurringAt: null,
     };
 
     // Initialise timers based on initial status
@@ -525,6 +621,9 @@ router.put("/:id", async (req, res) => {
       assignedDate,
       dueDate,
       attachments,
+      // 🔁 recurring
+      recurring,
+      recurringInterval,
     } = req.body;
 
     const board = await findBoardWithTask(taskId, ownerKey);
@@ -574,6 +673,11 @@ router.put("/:id", async (req, res) => {
       task.attachments = Array.isArray(attachments)
         ? attachments
         : [];
+
+    // 🔁 Recurring fields
+    if (recurring !== undefined) task.recurring = !!recurring;
+    if (recurringInterval !== undefined)
+      task.recurringInterval = recurringInterval || "DAILY";
 
     await board.save();
     res.json(task);
@@ -601,6 +705,9 @@ router.patch("/:id", async (req, res) => {
       attachments,
       title,
       description,
+      // 🔁 recurring
+      recurring,
+      recurringInterval,
     } = req.body;
 
     const board = await findBoardWithTask(taskId, ownerKey);
@@ -649,6 +756,11 @@ router.patch("/:id", async (req, res) => {
       task.attachments = Array.isArray(attachments)
         ? attachments
         : [];
+
+    // 🔁 Recurring fields
+    if (recurring !== undefined) task.recurring = !!recurring;
+    if (recurringInterval !== undefined)
+      task.recurringInterval = recurringInterval || "DAILY";
 
     await board.save();
     res.json(task);

@@ -18,7 +18,17 @@ const EmployeeSchema = new mongoose.Schema({
   languages: { type: [String], default: [] }, 
   orderConfirmActive: { type: Boolean, default: false, index: true },
   teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: [] }], 
-  teamLeader: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null }  
+  teamLeader: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
+  permissions: {
+    menubar: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    navbar: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+  },
 });
 
 module.exports = mongoose.model("Employee", EmployeeSchema);

@@ -321,11 +321,6 @@ router.patch("/:id/faulty", async (req, res) => {
   }
 });
 
-
-
-
-
-
 module.exports = router;
 
 

@@ -26,6 +26,16 @@ const TaskSchema = new mongoose.Schema(
     // Scheduling
     dueDate: Date,
 
+    // 🔁 Recurring settings
+    recurring: { type: Boolean, default: false },
+    recurringInterval: {
+      type: String,
+      enum: ["DAILY", "WEEKLY", "MONTHLY"],
+      default: "DAILY",
+    },
+    // last time this task was auto-reset for recurrence
+    lastRecurringAt: Date,
+
     // Ordering within a column
     orderIndex: { type: Number, default: 0 },
 
@@ -33,10 +43,10 @@ const TaskSchema = new mongoose.Schema(
     attachments: [String],
 
     // Time-tracking fields
-    startedAt: Date,              // first time it became OPEN
-    activeSince: Date,            // when it was last moved into OPEN
+    startedAt: Date, // first time it became OPEN
+    activeSince: Date, // when it was last moved into OPEN
     totalActiveSeconds: { type: Number, default: 0 }, // accumulated seconds
-    closedAt: Date,               // when moved to CLOSED
+    closedAt: Date, // when moved to CLOSED
   },
   { _id: true, timestamps: true }
 );
