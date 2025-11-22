@@ -2,7 +2,8 @@ const mongoose = require("mongoose");
 
 const ShopifyFinanceOrderSchema = new mongoose.Schema(
   { 
-    orderName: { type: String, required: true, index: true, unique: true }, 
+    orderName: { type: String, required: true, index: true, unique: true },
+    orderDate: { type: Date, required: true, index: true }, 
     createdAt: { type: Date, required: true, index: true }, 
     billingName: { type: String, default: "" }, 
     phone: { type: String, default: "" },

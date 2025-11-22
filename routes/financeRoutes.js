@@ -15,7 +15,7 @@ const BluedartSettlement = require("../models/BluedartSettlement");
 
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const SHOPIFY_STORE_NAME = process.env.SHOPIFY_STORE_NAME;
- 
+
 function monthRangeUTC({ year, month }) {
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
   const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
@@ -35,7 +35,7 @@ function shopifyOrdersBaseUrl({ start, end }) {
 async function fetchShopifyOrdersMinimal(start, end) {
   const out = [];
   let nextUrl = shopifyOrdersBaseUrl({ start, end });
- 
+
   try {
     while (nextUrl) {
       const res = await axios.get(nextUrl, {
@@ -46,7 +46,9 @@ async function fetchShopifyOrdersMinimal(start, end) {
       out.push(...batch);
 
       const linkHeader = res.headers?.link;
-      const nextLink = linkHeader?.split(",")?.find((s) => s.includes('rel="next"'));
+      const nextLink = linkHeader
+        ?.split(",")
+        ?.find((s) => s.includes('rel="next"'));
       if (nextLink) {
         const m = nextLink.match(/<([^>]+)>/);
         nextUrl = m?.[1] || null;
@@ -68,28 +70,30 @@ function mapShopifyToSnapshot(o) {
   const billingName =
     o?.customer?.first_name && o?.customer?.last_name
       ? `${o.customer.first_name} ${o.customer.last_name}`.trim()
-      : o?.customer?.first_name ||
-        o?.billing_address?.name ||
-        "Unknown";
+      : o?.customer?.first_name || o?.billing_address?.name || "Unknown";
 
-  const phone =
-    o?.customer?.phone ||
-    o?.billing_address?.phone ||
-    "";
+  const phone = o?.customer?.phone || o?.billing_address?.phone || "";
 
   const paymentMethod =
-    o?.payment_gateway_names?.[0] ||
-    o?.gateway ||
-    "";
+    o?.payment_gateway_names?.[0] || o?.gateway || "";
 
   const lmsNote =
     (Array.isArray(o?.note_attributes)
       ? o.note_attributes.find((a) => a?.name === "transaction_id")?.value
       : "") || "";
 
+  // 🔴 Shopify order created_at (true order date)
+  const shopifyCreated = o?.created_at ? new Date(o.created_at) : new Date();
+
   return {
     orderName: o?.name || "",
-    createdAt: o?.created_at ? new Date(o.created_at) : new Date(),
+
+    // 🔴 Use this for filtering + showing in UI
+    orderDate: shopifyCreated,
+
+    // keep createdAt also (can be same)
+    createdAt: shopifyCreated,
+
     billingName,
     phone,
     financialStatus: o?.financial_status || "",
@@ -150,8 +154,18 @@ function parseSettlementDateString(s) {
     const monStr = m[2].toLowerCase();
     const yy = parseInt(m[3], 10);
     const monMap = {
-      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+      jan: 0,
+      feb: 1,
+      mar: 2,
+      apr: 3,
+      may: 4,
+      jun: 5,
+      jul: 6,
+      aug: 7,
+      sep: 8,
+      oct: 9,
+      nov: 10,
+      dec: 11,
     };
     const month = monMap[monStr];
     if (month !== undefined) {
@@ -177,14 +191,26 @@ function parseSettlementDateString(s) {
   return null;
 }
 
-/* -------------------- Routes -------------------- */
-
+/**
+ * 🔁 Incremental refresh (used by frontend Refresh button)
+ */
 router.post("/refresh-shopify", async (req, res) => {
   try {
-    const year = parseInt(req.query.year || "2025", 10);
-    const month = parseInt(req.query.month || "7", 10); // July = 7
+    const lastDoc = await ShopifyFinanceOrder.findOne()
+      .sort({ orderDate: -1 }) // use orderDate if available
+      .lean();
 
-    const { start, end } = monthRangeUTC({ year, month });
+    let start;
+    let isInitialBackfill = false;
+
+    if (lastDoc?.orderDate || lastDoc?.createdAt) {
+      start = new Date(lastDoc.orderDate || lastDoc.createdAt);
+    } else {
+      start = new Date(Date.UTC(2025, 3, 1, 0, 0, 0, 0)); // 2025-04-01
+      isInitialBackfill = true;
+    }
+
+    const end = new Date();
 
     const shopifyOrders = await fetchShopifyOrdersMinimal(start, end);
 
@@ -207,11 +233,15 @@ router.post("/refresh-shopify", async (req, res) => {
     });
 
     if (ops.length) {
-      const result = await ShopifyFinanceOrder.bulkWrite(ops, { ordered: false });
+      const result = await ShopifyFinanceOrder.bulkWrite(ops, {
+        ordered: false,
+      });
       return res.status(200).json({
         ok: true,
-        year,
-        month,
+        mode: "incremental",
+        isInitialBackfill,
+        start: start.toISOString(),
+        end: end.toISOString(),
         fetched: shopifyOrders.length,
         saved: filtered.length,
         skipped: shopifyOrders.length - filtered.length,
@@ -222,8 +252,10 @@ router.post("/refresh-shopify", async (req, res) => {
     } else {
       return res.status(200).json({
         ok: true,
-        year,
-        month,
+        mode: "incremental",
+        isInitialBackfill,
+        start: start.toISOString(),
+        end: end.toISOString(),
         fetched: shopifyOrders.length,
         saved: 0,
         skipped: shopifyOrders.length,
@@ -234,29 +266,119 @@ router.post("/refresh-shopify", async (req, res) => {
     }
   } catch (err) {
     console.error("refresh-shopify error:", err);
-    return res.status(500).json({ ok: false, error: "Failed to refresh from Shopify" });
+    return res
+      .status(500)
+      .json({ ok: false, error: "Failed to refresh from Shopify" });
   }
 });
 
+/**
+ * 🧨 FULL BACKFILL / RANGE REFRESH (for Postman)
+ */
+router.post("/refresh-shopify-full", async (req, res) => {
+  try {
+    let { startDate, endDate } = req.query;
+
+    // Default start = 1 April 2025
+    let start = startDate
+      ? new Date(`${startDate}T00:00:00.000Z`)
+      : new Date(Date.UTC(2025, 3, 1, 0, 0, 0, 0));
+
+    // Default end = now
+    let end = endDate
+      ? new Date(`${endDate}T23:59:59.999Z`)
+      : new Date();
+
+    const shopifyOrders = await fetchShopifyOrdersMinimal(start, end);
+
+    const filtered = shopifyOrders.filter((o) => {
+      const isVoided = (o?.financial_status || "").toLowerCase() === "voided";
+      const isArchived = !!o?.archived;
+      const isCancelled = !!o?.cancelled_at;
+      return !isVoided && !isArchived && !isCancelled;
+    });
+
+    const ops = filtered.map((o) => {
+      const snap = mapShopifyToSnapshot(o);
+      return {
+        updateOne: {
+          filter: { orderName: snap.orderName },
+          update: { $set: snap },
+          upsert: true,
+        },
+      };
+    });
+
+    if (ops.length) {
+      const result = await ShopifyFinanceOrder.bulkWrite(ops, {
+        ordered: false,
+      });
+      return res.status(200).json({
+        ok: true,
+        mode: "full-range",
+        rangeStart: start.toISOString(),
+        rangeEnd: end.toISOString(),
+        fetched: shopifyOrders.length,
+        saved: filtered.length,
+        skipped: shopifyOrders.length - filtered.length,
+        upserted: result.upsertedCount || 0,
+        modified: result.modifiedCount || 0,
+        matched: result.matchedCount || 0,
+      });
+    } else {
+      return res.status(200).json({
+        ok: true,
+        mode: "full-range",
+        rangeStart: start.toISOString(),
+        rangeEnd: end.toISOString(),
+        fetched: shopifyOrders.length,
+        saved: 0,
+        skipped: shopifyOrders.length,
+        upserted: 0,
+        modified: 0,
+        matched: 0,
+      });
+    }
+  } catch (err) {
+    console.error("refresh-shopify-full error:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: "Failed to full-refresh from Shopify" });
+  }
+});
+
+/**
+ * 📄 Paged + filtered list for frontend
+ * - Expects startDate / endDate as "YYYY-MM-DD" (or empty)
+ * - Filters by orderDate (Shopify order date)
+ */
 router.get("/orders", async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 200);
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit || "50", 10), 1),
+      200
+    );
     const skip = (page - 1) * limit;
 
     const { startDate, endDate } = req.query;
     const findQuery = { financialStatus: { $ne: "voided" } };
 
     if (startDate || endDate) {
-      findQuery.createdAt = {};
-      if (startDate) findQuery.createdAt.$gte = new Date(startDate);
-      if (endDate) findQuery.createdAt.$lte = new Date(endDate);
+      const orderDate = {};
+      if (startDate) {
+        orderDate.$gte = new Date(`${startDate}T00:00:00.000Z`);
+      }
+      if (endDate) {
+        orderDate.$lte = new Date(`${endDate}T23:59:59.999Z`);
+      }
+      findQuery.orderDate = orderDate;
     }
 
     const [totalCount, baseRows] = await Promise.all([
       ShopifyFinanceOrder.countDocuments(findQuery),
       ShopifyFinanceOrder.find(findQuery)
-        .sort({ createdAt: -1 })
+        .sort({ orderDate: -1 }) // 🔴 sort by orderDate (reverse chronological)
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -267,20 +389,30 @@ router.get("/orders", async (req, res) => {
     }
 
     const orderNames = baseRows.map((r) => r.orderName).filter(Boolean);
-    const { raw: rawKeys, clean: cleanKeys, numeric: numericKeys } = buildMatchSets(orderNames);
+    const {
+      raw: rawKeys,
+      clean: cleanKeys,
+      numeric: numericKeys,
+    } = buildMatchSets(orderNames);
 
-    // 1) Order
+    // 1) Order (includes shipment_status)
     const ordersDocs = await Order.find({ order_id: { $in: cleanKeys } })
-      .select("order_id tracking_number carrier_title last_updated_at")
+      .select(
+        "order_id tracking_number carrier_title last_updated_at shipment_status"
+      )
       .lean();
 
     // 2) MyOrder
-    const myOrdersStrDocs = await MyOrder.find({ orderId: { $in: [...rawKeys, ...cleanKeys] } })
+    const myOrdersStrDocs = await MyOrder.find({
+      orderId: { $in: [...rawKeys, ...cleanKeys] },
+    })
       .select("orderId partialPayment")
       .lean();
     let myOrdersNumDocs = [];
     if (numericKeys.length) {
-      myOrdersNumDocs = await MyOrder.find({ orderId: { $in: numericKeys } })
+      myOrdersNumDocs = await MyOrder.find({
+        orderId: { $in: numericKeys },
+      })
         .select("orderId partialPayment")
         .lean();
     }
@@ -308,7 +440,8 @@ router.get("/orders", async (req, res) => {
     let dtdcNumDocs = [];
     if (numericKeys.length) {
       dtdcNumDocs = await DtdcSettlement.find({
-        customerReferenceNumber: { $in: numericKeys } })
+        customerReferenceNumber: { $in: numericKeys },
+      })
         .select("customerReferenceNumber utrNumber codAmount remittanceDate")
         .lean();
     }
@@ -455,7 +588,9 @@ router.get("/orders", async (req, res) => {
 
     const rows = baseRows.map((r) => {
       const cleanId = normalizeOrderNameToId(r.orderName);
-      const numericId = Number.isFinite(Number(cleanId)) ? Number(cleanId) : null;
+      const numericId = Number.isFinite(Number(cleanId))
+        ? Number(cleanId)
+        : null;
 
       const od = mapOrderByCleanId.get(cleanId);
       const mo =
@@ -467,7 +602,11 @@ router.get("/orders", async (req, res) => {
       const courierPartner = od?.carrier_title || "--";
       const deliveredDate = od?.last_updated_at || null;
 
-      const partialPayment = typeof mo?.partialPayment === "number" ? mo.partialPayment : 0;
+      // Shipment status from Orders collection
+      const shipmentStatus = od?.shipment_status || "—";
+
+      const partialPayment =
+        typeof mo?.partialPayment === "number" ? mo.partialPayment : 0;
 
       const utr =
         mapUtrByKey.get(r.orderName) ??
@@ -484,16 +623,30 @@ router.get("/orders", async (req, res) => {
       const totalReceived =
         (mapAmountByKey.get(r.orderName) ?? 0) +
         (mapAmountByKey.get(cleanId) ?? 0) +
-        (numericId !== null ? (mapAmountByKey.get(numericId) ?? 0) : 0);
+        (numericId !== null ? mapAmountByKey.get(numericId) ?? 0 : 0);
 
-      // *** CHANGED LOGIC ***
       // Remaining = max(0, Partial Payment - Total Received)
-      // If no partial payment, Remaining = 0
       const remainingAmount =
         partialPayment > 0 ? Math.max(0, partialPayment - totalReceived) : 0;
 
+      // 🔒 Auto-close logic
+      // 1) If shipmentStatus is "RTO Delivered" → closed
+      // 2) If UTR exists AND shipmentStatus is "Delivered" AND remainingAmount == 0 → closed
+      let customOrderStatus = "open";
+
+      if (shipmentStatus === "RTO Delivered") {
+        customOrderStatus = "closed";
+      }
+
+      if (utr && shipmentStatus === "Delivered" && remainingAmount === 0) {
+        customOrderStatus = "closed";
+      }
+
       return {
+        // 🔴 frontend can use this for date column
+        orderDate: r.orderDate,
         createdAt: r.createdAt,
+
         orderName: r.orderName,
         billingName: r.billingName,
         phone: r.phone,
@@ -504,7 +657,8 @@ router.get("/orders", async (req, res) => {
 
         trackingId,
         courierPartner,
-        customOrderStatus: "open",
+        shipmentStatus,
+        customOrderStatus,
         partialPayment,
 
         deliveredDate,
@@ -527,4 +681,3 @@ router.get("/orders", async (req, res) => {
 });
 
 module.exports = router;
-
