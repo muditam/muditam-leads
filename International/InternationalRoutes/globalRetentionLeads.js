@@ -198,13 +198,7 @@ router.post("/", async (req, res) => {
     // upsert by phoneNumber so duplicates aren't created
     const saved = await GlobalRetentionLead.findOneAndUpdate(
       { phoneNumber: trimmedPhone },
-      {
-        $setOnInsert: {
-          phoneNumber: trimmedPhone,
-          contactNumber: trimmedPhone,
-        },
-        $set: update,
-      },
+      { $set: update }, // only $set, no $setOnInsert
       {
         new: true,
         upsert: true,
