@@ -130,6 +130,8 @@ const globalRetentionLeads = require("./International/InternationalRoutes/global
 const globalRetentionDetails = require("./International/InternationalRoutes/globalRetentionDetails");
 const globalRetentionSalesRoutes = require("./International/InternationalRoutes/globalRetentionSales");
 
+const accessManagementRoutes = require("./routes/accessManagementRoutes");
+
 const app = express(); 
 const PORT = process.env.PORT || 5001; 
 
@@ -162,7 +164,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-agent-name',],
   })
 );
 
@@ -455,7 +457,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Credentials", "true");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-agent-name");
   next();
 });
 
@@ -611,6 +613,8 @@ app.use("/api", globalAbandonedCarts);
 app.use("/api/global-retention-leads", globalRetentionLeads);
 app.use("/api/global-retention-sales", globalRetentionSalesRoutes);
 app.use("/api/global-retention-details", globalRetentionDetails);
+
+app.use("/api/access", accessManagementRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

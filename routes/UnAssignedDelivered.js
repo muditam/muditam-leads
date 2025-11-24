@@ -5,121 +5,252 @@ const Order = require("../models/Order");
 const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
 
-// -------------------- helpers --------------------
-const TTL_MS = 5 * 60 * 1000; // cache phones for 5 minutes
-let phoneCache = { leadSet: new Set(), custSet: new Set(), builtAt: 0, building: null };
+
+const TTL_MS = 5 * 60 * 1000;
+
+
+
+
+let phoneCache = {
+  leadSet: new Set(),
+  custSet: new Set(),
+  unassignedPhones: [],
+  builtAt: 0,
+  building: null,
+  key: "ALL",
+};
+
 
 function normalizeTo10(str = "") {
   const s = String(str).replace(/\D/g, "");
   return s.length > 10 ? s.slice(-10) : s;
 }
 
-async function buildPhoneSetsFresh() {
+
+
+
+async function buildPhoneSetsFresh(startDate, key) {
   const leadSet = new Set();
   const custSet = new Set();
 
-  // stream minimal fields
+
+
+
   const leadCur = Lead.find(
     { contactNumber: { $exists: true, $ne: null, $ne: "" } },
-    { contactNumber: 1, _id: 0 } 
-  ).lean().cursor();
+    { contactNumber: 1, _id: 0 }
+  )
+    .lean()
+    .cursor();
+
+
   for await (const d of leadCur) {
-    const n = normalizeTo10(d.contactNumber); 
-    if (n) leadSet.add(n);  
-  } 
+    const n = normalizeTo10(d.contactNumber);
+    if (n) leadSet.add(n);
+  }
+
 
   const custCur = Customer.find(
     { phone: { $exists: true, $ne: null, $ne: "" } },
     { phone: 1, _id: 0 }
-  ).lean().cursor(); 
+  )
+    .lean()
+    .cursor();
+
+
   for await (const d of custCur) {
-    const n = normalizeTo10(d.phone); 
+    const n = normalizeTo10(d.phone);
     if (n) custSet.add(n);
   }
 
-  phoneCache = { leadSet, custSet, builtAt: Date.now(), building: null };
+
+  const match = {
+    shipment_status: "Delivered",
+    contact_number: { $exists: true, $ne: "" },
+  };
+
+
+  if (startDate) {
+    const sd = new Date(startDate);
+    if (!isNaN(sd)) {
+      match.order_date = { $gte: sd };
+    }
+  }
+
+
+  const rawPhones = await Order.distinct("contact_number", match);
+
+
+  const unassignedPhones = [];
+  for (const p of rawPhones) {
+    const n = normalizeTo10(p);
+    if (!n) continue;
+    if (!leadSet.has(n) && !custSet.has(n)) {
+
+
+      unassignedPhones.push(p);
+    }
+  }
+
+
+  phoneCache = {
+    leadSet,
+    custSet,
+    unassignedPhones,
+    builtAt: Date.now(),
+    building: null,
+    key,
+  };
+
+
   return phoneCache;
 }
 
-// returns cached or building promise to avoid stampede
-async function getPhoneSets({ force = false } = {}) {
-  const fresh = Date.now() - phoneCache.builtAt < TTL_MS;
+
+
+
+async function getPhoneSets({ force = false, startDate = null } = {}) {
+  const key = startDate || "ALL";
+  const fresh =
+    Date.now() - phoneCache.builtAt < TTL_MS && phoneCache.key === key;
+
+
   if (!force && fresh) return phoneCache;
-  if (phoneCache.building) return phoneCache.building; // reuse in-flight build
-  phoneCache.building = buildPhoneSetsFresh();
+
+
+  if (phoneCache.building) return phoneCache.building;
+
+
+  phoneCache.building = buildPhoneSetsFresh(startDate, key);
   return phoneCache.building;
 }
 
-// -------------------- COUNT: fast path --------------------
-// GET /api/orders-un/unassigned-delivered-count?refresh=1
+
 router.get("/unassigned-delivered-count", async (req, res) => {
   try {
-    const { leadSet, custSet } = await getPhoneSets({ force: req.query.refresh === "1" });
+    const { startDate } = req.query;
 
-    // Avoid heavy aggregation: just distinct delivered contact numbers
-    const rawPhones = await Order.distinct("contact_number", {
-      shipment_status: "Delivered",
-      contact_number: { $exists: true, $ne: "" } 
+
+    const { unassignedPhones } = await getPhoneSets({
+      force: req.query.refresh === "1",
+      startDate,
     });
 
-    let count = 0;
-    for (const p of rawPhones) {
-      const n = normalizeTo10(p);
-      if (n && !leadSet.has(n) && !custSet.has(n)) count++;
-    }
 
-    res.json({ count, cacheAgeMs: Date.now() - phoneCache.builtAt });
+    const count = unassignedPhones.length;
+
+
+    res.json({
+      count,
+      cacheAgeMs: Date.now() - phoneCache.builtAt,
+    });
   } catch (err) {
     console.error("unassigned-delivered-count error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// -------------------- LIST: paginated -------------------- 
-// Shows order_id, shipment_status, contact_number, order_date (normalized compare)
-router.get("/unassigned-delivered", async (req, res) => { 
+
+
+
+router.get("/unassigned-delivered", async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 200); 
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit || "50", 10), 1),
+      200
+    );
     const skip = (page - 1) * limit;
 
-    const sortBy = req.query.sortBy || "last_updated_at";
-    const sortOrder = (req.query.sortOrder || "desc").toLowerCase() === "asc" ? 1 : -1;
 
-    const { leadSet, custSet } = await getPhoneSets({ force: req.query.refresh === "1" });
+    const { startDate } = req.query;
 
-    // Stream delivered orders; filter by normalized phone against cached sets
-    const cur = Order.find(
-      { shipment_status: "Delivered", contact_number: { $exists: true, $ne: "" } },
-      { order_id: 1, shipment_status: 1, contact_number: 1, order_date: 1, last_updated_at: 1, _id: 0 }
-    )
-      .sort({ [sortBy]: sortOrder, _id: 1 })
-      .lean()
-      .cursor();
 
-    const data = [];  
-    let total = 0; 
-    let accepted = 0;
+  const requestedSortBy = req.query.sortBy || "order_date";
+const sortOrder =
+  (req.query.sortOrder || "desc").toLowerCase() === "asc" ? 1 : -1;
 
-    for await (const o of cur) {
-      const n = normalizeTo10(o.contact_number);
-      if (!n) continue;
-      if (!leadSet.has(n) && !custSet.has(n)) {
-        if (accepted >= skip && data.length < limit) {
-          data.push(o);
-        }
-        accepted++;
-        total++;
+
+// only allow known sortable fields to avoid bad input
+const allowedSortFields = ["last_updated_at", "order_date"];
+const sortBy = allowedSortFields.includes(requestedSortBy)
+  ? requestedSortBy
+  : "order_date";
+
+
+const sortStage = {};
+sortStage[sortBy] = sortOrder;
+sortStage.last_updated_at = sortOrder;
+
+
+    const { unassignedPhones } = await getPhoneSets({
+      force: req.query.refresh === "1",
+      startDate,
+    });
+
+
+    const total = unassignedPhones.length;
+    const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+
+
+    // slice only the phone numbers for this page
+    const pagePhones = unassignedPhones.slice(skip, skip + limit);
+
+
+    if (pagePhones.length === 0) {
+      return res.json({
+        page,
+        limit,
+        total,
+        totalPages,
+        data: [],
+        cacheAgeMs: Date.now() - phoneCache.builtAt,
+      });
+    }
+
+
+    // match only orders in the same date range
+    const matchStage = {
+      shipment_status: "Delivered",
+      contact_number: { $in: pagePhones },
+    };
+
+
+    if (startDate) {
+      const sd = new Date(startDate);
+      if (!isNaN(sd)) {
+        matchStage.order_date = { $gte: sd };
       }
     }
+
+
+  const data = await Order.aggregate([
+  { $match: matchStage },
+  { $sort: sortStage }, // ensure "latest" comes first
+  {
+    $group: {
+      _id: "$contact_number",
+      order_id: { $first: "$order_id" },
+      shipment_status: { $first: "$shipment_status" },
+      contact_number: { $first: "$contact_number" },
+      order_date: { $first: "$order_date" },
+       full_name: { $first: "$full_name" },
+      last_updated_at: { $first: "$last_updated_at" },
+    },
+  },
+  { $sort: sortStage },
+]);
+
+
+
 
     res.json({
       page,
       limit,
       total,
-      totalPages: Math.max(1, Math.ceil(total / limit)),
+      totalPages,
       data,
-      cacheAgeMs: Date.now() - phoneCache.builtAt
+      cacheAgeMs: Date.now() - phoneCache.builtAt,
     });
   } catch (err) {
     console.error("unassigned-delivered error:", err);
@@ -127,5 +258,8 @@ router.get("/unassigned-delivered", async (req, res) => {
   }
 });
 
+
 module.exports = router;
+
+
 
