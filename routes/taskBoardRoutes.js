@@ -122,6 +122,14 @@ function sortColumns(columns) {
 function sortTasksForBoard(tasks) {
   return [...(tasks || [])].sort((a, b) => {
     if (a.status === b.status) {
+      // 🔁 Special handling for CLOSED column: newest closed on top
+      if (a.status === COLUMN_IDS.CLOSED) {
+        const aTime = a.closedAt || a.updatedAt || a.createdAt;
+        const bTime = b.closedAt || b.updatedAt || b.createdAt;
+        return new Date(bTime).getTime() - new Date(aTime).getTime(); // DESC
+      }
+
+      // Default behaviour for other columns: by orderIndex asc, then createdAt asc
       const oi = (a.orderIndex ?? 0) - (b.orderIndex ?? 0);
       if (oi !== 0) return oi;
       return (
@@ -129,9 +137,11 @@ function sortTasksForBoard(tasks) {
         new Date(b.createdAt).getTime()
       );
     }
+
     return String(a.status).localeCompare(String(b.status));
   });
 }
+
 
 async function findBoardWithTask(taskId, ownerKey) {
   const scoped = await TaskBoard.findOne({

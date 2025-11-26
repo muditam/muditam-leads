@@ -1954,7 +1954,7 @@ app.get('/api/leads/retentions', async (req, res) => {
     };
 
     const projection = {
-      name:1, contactNumber:1, retentionStatus:1, rtNextFollowupDate:1,
+      name:1, contactNumber:1, alternativeNumber:1, retentionStatus:1, rtNextFollowupDate:1,
       rtFollowupReminder:1, rtFollowupStatus:1, lastOrderDate:1, rowColor:1,
       agentAssigned:1, preferredLanguage:1, communicationMethod:1, rtRemark:1,
       reachoutLogs:1, rtSubcells:1,
@@ -2241,6 +2241,51 @@ app.get('/api/consultation-history', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   } 
+});
+
+app.post('/api/leads/fix-sales-status', async (req, res) => {
+  try {
+    // 1) Update leadStatus where it is blank (missing / null / empty string)
+    const leadStatusResult = await Lead.updateMany(
+      {
+        $or: [
+          { leadStatus: { $exists: false } },
+          { leadStatus: null },
+          { leadStatus: '' },
+        ],
+      },
+      { $set: { leadStatus: 'Sales Done' } }
+    );
+
+    // 2) Update salesStatus where it is blank (missing / null / empty string)
+    const salesStatusResult = await Lead.updateMany(
+      {
+        $or: [
+          { salesStatus: { $exists: false } },
+          { salesStatus: null },
+          { salesStatus: '' },
+        ],
+      },
+      { $set: { salesStatus: 'Sales Done' } }
+    );
+
+    return res.status(200).json({
+      message: 'Lead statuses updated successfully',
+      leadStatus: {
+        matched: leadStatusResult.matchedCount ?? leadStatusResult.nMatched,
+        modified: leadStatusResult.modifiedCount ?? leadStatusResult.nModified,
+      },
+      salesStatus: {
+        matched: salesStatusResult.matchedCount ?? salesStatusResult.nMatched,
+        modified: salesStatusResult.modifiedCount ?? salesStatusResult.nModified,
+      },
+    });
+  } catch (err) {
+    console.error('Error fixing sales statuses:', err);
+    return res
+      .status(500)
+      .json({ message: 'Error fixing sales statuses', error: err.message });
+  }
 });
 
 // Start Server
