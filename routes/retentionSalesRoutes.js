@@ -892,7 +892,98 @@ router.get('/api/retention-sales/shipment-summary', async (req, res) => {
   }
 });
 
+// Normalize date range to full day
+const normalizeDate = (d) => {
+  const date = new Date(d);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
 
+router.get("/api/retention-sales/cod-prepaid-summary", async (req, res) => {
+  try {
+    let { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "startDate & endDate are required" });
+    }
+
+    const start = normalizeDate(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    // =========================
+    // 1) Fetch Active Retention Agents
+    // =========================
+    const retentionAgents = await Employee.find({
+      role: "Retention Agent",
+      status: "active",
+    }).select("fullName");
+
+    // Build agent list
+    const agentNames = retentionAgents.map((a) => a.fullName);
+
+    // Prepare empty summary
+    const summary = {};
+    agentNames.forEach((name) => {
+      summary[name] = {
+        agentName: name,
+        totalOrders: 0,
+        codOrders: 0,
+        prepaidOrders: 0,
+      };
+    });
+
+    // =========================
+    // 2) Fetch MyOrder orders within date range
+    // =========================
+    const myOrders = await MyOrder.find({
+      agentName: { $in: agentNames },
+      orderDate: { $gte: start, $lte: end },
+    });
+
+    myOrders.forEach((order) => {
+      const agent = order.agentName;
+      if (!summary[agent]) return;
+
+      summary[agent].totalOrders += 1;
+
+      if ((order.paymentMethod || "").toUpperCase() === "COD") {
+        summary[agent].codOrders += 1;
+      } else {
+        summary[agent].prepaidOrders += 1;
+      }
+    });
+
+    // =========================
+    // 3) Fetch RetentionSales within date range
+    // =========================
+    const retentionSales = await RetentionSales.find({
+      agentName: { $in: agentNames },
+      createdAt: { $gte: start, $lte: end },
+    });
+
+    retentionSales.forEach((rs) => {
+      const agent = rs.agentName;
+      if (!summary[agent]) return;
+
+      summary[agent].totalOrders += 1;
+
+      if ((rs.modeOfPayment || "").toUpperCase() === "COD") {
+        summary[agent].codOrders += 1;
+      } else {
+        summary[agent].prepaidOrders += 1;
+      }
+    });
+
+    // Convert summary object to array
+    const result = Object.values(summary);
+
+    res.json(result);
+  } catch (err) {
+    console.error("Error in COD vs Prepaid Summary:", err);
+    res.status(500).json({ message: "Internal server error", error: err.message });
+  }
+});
 
 function parseDateRange(req) {
   const { startDate, endDate } = req.query;
@@ -1777,6 +1868,7 @@ router.post('/api/retention-sales/daywise-matrix', async (req, res) => {
     res.status(500).json({ message: "Error building daywise matrix", error: err.message });
   }
 });
+
 
 module.exports = router;
  
