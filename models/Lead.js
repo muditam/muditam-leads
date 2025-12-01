@@ -112,6 +112,7 @@ const LeadSchema = new mongoose.Schema({
 
 
 LeadSchema.index({ contactNumber: 1 });
+LeadSchema.index({ salesStatus: 1, agentAssigned: 1 });
 
 LeadSchema.index({ healthExpertAssigned: 1, salesStatus: 1, retentionStatus: 1, lastOrderDate: -1 });
 

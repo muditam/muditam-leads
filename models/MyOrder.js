@@ -20,5 +20,10 @@ const MyOrderSchema = new mongoose.Schema({
   transactionId: { type: String },        
 });  
 
+MyOrderSchema.index({ agentName: 1 });
+MyOrderSchema.index({ phone: 1 });
+MyOrderSchema.index({ orderDate: -1 });
+
+
 module.exports = mongoose.model('MyOrder', MyOrderSchema);  
 

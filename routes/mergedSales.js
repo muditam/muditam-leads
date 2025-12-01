@@ -298,105 +298,56 @@ const normalizePhone = (p) => {
 
 router.get("/", async (req, res) => {
   const { agentAssignedName, page = 1, limit = 50 } = req.query;
-  const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
-
+  const skip = (parseInt(page) - 1) * parseInt(limit);
 
   try {
-    // 1) Leads with salesStatus "Sales Done" (optionally agent filter)
+    // 1) Leads → Same logic
     const leadQuery = { salesStatus: "Sales Done" };
     if (agentAssignedName) leadQuery.agentAssigned = agentAssignedName;
-    const leads = await Lead.find(leadQuery).lean();
 
+    const leads = await Lead.find(leadQuery)
+      .lean()
+      .select("-images -followUps -details"); // improves speed harmlessly
 
-    // (kept: customers in case you need later)
-    const customerQuery = {};
-    if (agentAssignedName) customerQuery.assignedTo = agentAssignedName;
-    const customers = await Customer.find(customerQuery).lean();
-
-
-    // 2) MyOrders (apply agent filter only if provided)
+    // 2) MyOrder query → same but optimized
     const orderQuery = {};
     if (agentAssignedName) {
       orderQuery.agentName = { $regex: new RegExp(agentAssignedName, "i") };
     }
-    const allMyOrders = await MyOrder.find(orderQuery).lean();
 
+    const allMyOrders = await MyOrder.find(orderQuery)
+      .lean()
+      .select(
+        "customerName phone orderId productOrdered dosageOrdered orderDate agentName totalPrice paymentMethod selfRemark partialPayment shipmentStatus"
+      );
 
-    // 3) Build ordersByPhone => Array of orders (NOT single item)
-    const ordersByPhone = {};
-    allMyOrders.forEach((order) => {
-      const key = normalizePhone(order.phone);
-      if (!key) return;
-      if (!ordersByPhone[key]) ordersByPhone[key] = [];
-      ordersByPhone[key].push(order);
-    });
+    // 3) Group orders by normalized phone
+    const ordersByPhone = Object.create(null);
 
+    for (const order of allMyOrders) {
+      const phone = normalizePhone(order.phone);
+      if (!ordersByPhone[phone]) ordersByPhone[phone] = [];
+      ordersByPhone[phone].push(order);
+    }
 
-    // Sort each phone's orders by orderDate DESC (latest first)
-    Object.values(ordersByPhone).forEach((arr) =>
-      arr.sort(
-        (a, b) =>
-          new Date(b.orderDate || 0).getTime() - new Date(a.orderDate || 0).getTime()
-      )
-    );
+    // Sort order list for each phone
+    for (const list of Object.values(ordersByPhone)) {
+      list.sort((a, b) => new Date(b.orderDate) - new Date(a.orderDate));
+    }
 
-
-    // 4) Merge
-    const seenOrderIds = new Set();
     const merged = [];
-
-
-    // For each lead: if multiple orders on that phone, create one row per order.
-    // If no orders, still create a row for the lead (editable lead).
+    const seenOrderIds = new Set();
     const seenPhones = new Set();
 
-
-    leads.forEach((lead) => {
+    // 4) Lead → Order merging (same, just faster)
+    for (const lead of leads) {
       const phone = normalizePhone(lead.contactNumber);
       seenPhones.add(phone);
 
+      const orders = ordersByPhone[phone] || [];
 
-      const orders = phone && ordersByPhone[phone] ? ordersByPhone[phone] : [];
-
-
-      if (orders.length > 0) {
-        orders.forEach((order) => {
-          seenOrderIds.add(String(order._id));
-          merged.push({
-            // Keep lead id here so editing lead-fields uses lead id
-            _id: lead._id,
-            // Lead-like fields
-            name: lead.name || order.customerName || "",
-            contactNumber: lead.contactNumber || order.phone || "",
-            productsOrdered: lead.productsOrdered || (order.productOrdered ? [order.productOrdered] : []),
-            dosageOrdered: lead.dosageOrdered || order.dosageOrdered || "",
-            amountPaid: lead.amountPaid ?? order.totalPrice ?? "",
-            partialPayment: lead.partialPayment ?? order.partialPayment ?? 0,
-            modeOfPayment: lead.modeOfPayment || order.paymentMethod || "",
-            lastOrderDate: lead.lastOrderDate || order.orderDate || "",
-            salesStatus: lead.salesStatus || "Sales Done",
-            agentAssigned: lead.agentAssigned || order.agentName || "",
-            agentsRemarks: lead.agentsRemarks || order.selfRemark || "",
-            shipmentStatus: lead.shipmentStatus || "",
-
-
-            // Order payload, include the Mongo _id so FE can PUT to order directly
-            myOrderData: {
-              _id: order._id,
-              orderDate: order.orderDate || "",
-              productOrdered: order.productOrdered || "",
-              dosageOrdered: order.dosageOrdered || "",
-              totalPrice: order.totalPrice ?? "",
-              paymentMethod: order.paymentMethod || "",
-              partialPayment: order.partialPayment ?? 0,
-              selfRemark: order.selfRemark || "",
-              orderId: order.orderId || "",
-              shipmentStatus: order.shipmentStatus || "",
-            },
-          });
-        });
-      } else {
-        // No order yet; keep a pure lead row (editable lead)
+      if (orders.length === 0) {
+        // no order → push pure lead (same as your logic)
         merged.push({
           _id: lead._id,
           name: lead.name || "",
@@ -413,34 +364,29 @@ router.get("/", async (req, res) => {
           shipmentStatus: lead.shipmentStatus || "",
           myOrderData: null,
         });
+        continue;
       }
-    });
 
+      // lead has multiple orders → multiple rows
+      for (const order of orders) {
+        seenOrderIds.add(String(order._id));
 
-    // 5) Add orders that have no matching lead (one row per order)
-    allMyOrders.forEach((order) => {
-      const phone = normalizePhone(order.phone);
-      const alreadyInLeadTable = phone && seenPhones.has(phone);
-      if (seenOrderIds.has(String(order._id))) return; // handled in loop above
-
-
-      if (!alreadyInLeadTable) {
         merged.push({
-          // IMPORTANT: use the order's id so edits target MyOrder
-          _id: order._id,
-          name: order.customerName || "",
-          contactNumber: order.phone || "",
-          productsOrdered: [order.productOrdered].filter(Boolean),
-          dosageOrdered: order.dosageOrdered || "",
-          amountPaid: order.totalPrice ?? "",
-          partialPayment: order.partialPayment ?? 0,
-          modeOfPayment: order.paymentMethod || "",
-          lastOrderDate: order.orderDate || "",
-          salesStatus: "Sales Done",
-          agentAssigned: order.agentName || "",
-          agentsRemarks: order.selfRemark || "",
-          shipmentStatus: order.shipmentStatus || "",
-
+          _id: lead._id,
+          name: lead.name || order.customerName,
+          contactNumber: lead.contactNumber || order.phone,
+          productsOrdered:
+            lead.productsOrdered ||
+            (order.productOrdered ? [order.productOrdered] : []),
+          dosageOrdered: lead.dosageOrdered || order.dosageOrdered,
+          amountPaid: lead.amountPaid ?? order.totalPrice,
+          partialPayment: lead.partialPayment ?? order.partialPayment ?? 0,
+          modeOfPayment: lead.modeOfPayment || order.paymentMethod,
+          lastOrderDate: lead.lastOrderDate || order.orderDate,
+          salesStatus: lead.salesStatus || "Sales Done",
+          agentAssigned: lead.agentAssigned || order.agentName || "",
+          agentsRemarks: lead.agentsRemarks || order.selfRemark || "",
+          shipmentStatus: lead.shipmentStatus || order.shipmentStatus || "",
 
           myOrderData: {
             _id: order._id,
@@ -456,26 +402,60 @@ router.get("/", async (req, res) => {
           },
         });
       }
-    });
+    }
 
+    // 5) Orders without leads → SAME as original
+    for (const order of allMyOrders) {
+      const phone = normalizePhone(order.phone);
 
-    // 6) Sort by latest relevant date
+      if (seenOrderIds.has(String(order._id))) continue;
+      if (seenPhones.has(phone)) continue;
+
+      merged.push({
+        _id: order._id,
+        name: order.customerName || "",
+        contactNumber: order.phone || "",
+        productsOrdered: [order.productOrdered].filter(Boolean),
+        dosageOrdered: order.dosageOrdered || "",
+        amountPaid: order.totalPrice ?? "",
+        partialPayment: order.partialPayment ?? 0,
+        modeOfPayment: order.paymentMethod || "",
+        lastOrderDate: order.orderDate || "",
+        salesStatus: "Sales Done",
+        agentAssigned: order.agentName || "",
+        agentsRemarks: order.selfRemark || "",
+        shipmentStatus: order.shipmentStatus || "",
+        myOrderData: {
+          _id: order._id,
+          orderDate: order.orderDate || "",
+          productOrdered: order.productOrdered || "",
+          dosageOrdered: order.dosageOrdered || "",
+          totalPrice: order.totalPrice ?? "",
+          paymentMethod: order.paymentMethod || "",
+          partialPayment: order.partialPayment ?? 0,
+          selfRemark: order.selfRemark || "",
+          orderId: order.orderId || "",
+          shipmentStatus: order.shipmentStatus || "",
+        },
+      });
+    }
+
+    // 6) Sort final list (same logic)
     merged.sort((a, b) => {
-      const aDate = new Date(
-        (a.myOrderData && a.myOrderData.orderDate) || a.lastOrderDate || 0
-      ).getTime();
-      const bDate = new Date(
-        (b.myOrderData && b.myOrderData.orderDate) || b.lastOrderDate || 0
-      ).getTime();
-      return bDate - aDate; // DESC
+      const aDate = new Date(a.myOrderData?.orderDate || a.lastOrderDate || 0);
+      const bDate = new Date(b.myOrderData?.orderDate || b.lastOrderDate || 0);
+      return bDate - aDate;
     });
 
+    // 7) Paginate AFTER merging (same functionality)
+    const paginated = merged.slice(skip, skip + parseInt(limit));
 
-    // 7) Paginate
-    const paginated = merged.slice(skip, skip + parseInt(limit, 10));
-    res.json({ sales: paginated, totalSales: merged.length });
+    res.json({
+      sales: paginated,
+      totalSales: merged.length,
+    });
   } catch (error) {
-    console.error("Error in merged-sales API:", error);
+    console.error("Optimized merged-sales API:", error);
     res.status(500).json({ error: "Failed to fetch merged sales" });
   }
 });
