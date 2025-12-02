@@ -396,7 +396,7 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
               $project: {
                 agentName: "$agentName",
                 salesDone: { $literal: 1 },
-                amountPaid: { $add: ["$_baseAmount", "$_partialPaymentsSum"] }
+                amountPaid: "$_baseAmount"
               }
             },
 
