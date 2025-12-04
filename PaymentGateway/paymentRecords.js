@@ -1,19 +1,21 @@
+// ===========================
 // routes/paymentRecords.js
+// ===========================
+
 const express = require("express");
 const router = express.Router();
-
 
 const mongoose = require("mongoose");
 const multer = require("multer");
 const AWS = require("aws-sdk");
 
-
 const PaymentRecord = require("../models/PaymentRecord");
 const PurchaseRecord = require("../models/PurchaseRecord");
 const Vendor = require("../models/Vendor");
 
-
-// ---------- WASABI S3 CONFIG ----------
+// ---------------------------------------------
+// WASABI S3 CONFIG
+// ---------------------------------------------
 const s3 = new AWS.S3({
   endpoint: process.env.WASABI_ENDPOINT,
   region: process.env.WASABI_REGION,
@@ -22,228 +24,175 @@ const s3 = new AWS.S3({
   s3ForcePathStyle: true,
 });
 
-
 const upload = multer({ storage: multer.memoryStorage() });
 
-
-/* ---------------------------------------------------
-   🔥 DUE CALCULATION (BASE)
-   Returns: dueBase = totalInvoices - totalPaymentsSavedUpToThisDate
---------------------------------------------------- */
 async function calculateDueAtDate(targetDate, vendorName = null) {
   try {
     if (!targetDate) return 0;
 
-
     const baseDate = new Date(targetDate);
-    if (Number.isNaN(baseDate.getTime())) return 0;
-
+    if (isNaN(baseDate.getTime())) return 0;
 
     const endOfDay = new Date(baseDate);
     endOfDay.setHours(23, 59, 59, 999);
 
+    const commonFilter = [
+      { isDeleted: false },
+      { isDeleted: null },
+      { isDeleted: { $exists: false } }
+    ];
 
-    // 1️⃣ ALL invoices up to this date
     const invoiceMatch = {
       date: { $lte: endOfDay },
       vendorName,
-      $or: [
-        { isDeleted: false },
-        { isDeleted: null },
-        { isDeleted: { $exists: false } },
-      ],
+      $or: commonFilter
     };
-
 
     const [invoiceAgg] = await PurchaseRecord.aggregate([
       { $match: invoiceMatch },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: { $ifNull: ["$amount", 0] } },
-        },
-      },
+      { $group: { _id: null, total: { $sum: { $ifNull: ["$amount", 0] } } } }
     ]);
-
 
     const totalInvoices = invoiceAgg?.total || 0;
 
-
-    // 2️⃣ ALL payments up to this date (all saved rows)
+    // -----------------------------
+    // 2️⃣ PAYMENT TOTAL
+    // -----------------------------
     const paymentMatch = {
       date: { $lte: endOfDay },
       vendorName,
-      $or: [
-        { isDeleted: false },
-        { isDeleted: null },
-        { isDeleted: { $exists: false } },
-      ],
+      $or: commonFilter
     };
-
 
     const [paymentAgg] = await PaymentRecord.aggregate([
       { $match: paymentMatch },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: { $ifNull: ["$amountPaid", 0] } },
-        },
-      },
+      { $group: { _id: null, total: { $sum: { $ifNull: ["$amountPaid", 0] } } } }
     ]);
-
 
     const totalPayments = paymentAgg?.total || 0;
 
-
+    // -----------------------------
+    // BASE DUE
+    // -----------------------------
     return totalInvoices - totalPayments;
   } catch (err) {
-    console.error("Error calculating due:", err);
+    console.error("❌ Error calculating due:", err);
     return 0;
   }
 }
 
-
-/* ---------------------------------------------
- * GET PAGINATED PAYMENT RECORDS
- * ------------------------------------------ */
+/* ======================================================
+   1️⃣ GET PAGINATED PAYMENT RECORDS
+====================================================== */
 router.get("/", async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 25;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 25;
     const skip = (page - 1) * limit;
 
-
-    const query = {
+    const filter = {
       $or: [
         { isDeleted: false },
         { isDeleted: null },
-        { isDeleted: { $exists: false } },
-      ],
+        { isDeleted: { $exists: false } }
+      ]
     };
 
-
     const [records, total] = await Promise.all([
-      PaymentRecord.find(query)
+      PaymentRecord.find(filter)
         .sort({ date: -1, createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      PaymentRecord.countDocuments(query),
+      PaymentRecord.countDocuments(filter)
     ]);
-
 
     res.json({
       records,
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit)
     });
-  } catch (error) {
-    console.error("Fetch error:", error);
+  } catch (err) {
+    console.error("❌ Fetch error:", err);
     res.status(500).json({ error: "Failed to fetch payment records" });
   }
 });
 
-
-/* ---------------------------------------------
- * UNIQUE VENDOR LIST
- * ------------------------------------------ */
-router.get("/vendor-list", async (_req, res) => {
+/* ======================================================
+   2️⃣ UNIQUE VENDOR LIST (Used in dropdowns)
+====================================================== */
+router.get("/vendor-list", async (req, res) => {
   try {
-    const vendorDocs = await Vendor.find({}, { name: 1, _id: 0 })
-      .sort({ createdAt: -1 })
-      .lean();
+    const vendorsFromDB = await Vendor.find({}, { name: 1 }).lean();
+    const vendorNames1 = vendorsFromDB.map(v => v.name);
 
+    const vendorNames2 = await PurchaseRecord.distinct("vendorName");
 
-    const vendorNames = vendorDocs.map((v) => v.name);
-    const purchaseVendors = await PurchaseRecord.distinct("vendorName");
-
-
-    const merged = Array.from(
-      new Set([...vendorNames, ...purchaseVendors])
-    ).filter(Boolean);
-
+    const merged = [...new Set([...vendorNames1, ...vendorNames2])].filter(Boolean);
 
     res.json(merged);
   } catch (err) {
-    console.error("Vendor list error:", err);
-    res.status(500).json({ error: "Failed to load vendors" });
+    console.error("❌ Vendor list error:", err);
+    res.status(500).json({ error: "Failed to load vendor list" });
   }
 });
 
-
-/* ---------------------------------------------
- * FILE UPLOAD (Wasabi)
- * ------------------------------------------ */
+/* ======================================================
+   3️⃣ FILE UPLOAD (WASABI)
+====================================================== */
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
-    }
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-
-    const fileName = `payment-records/${Date.now()}-${req.file.originalname}`;
-
+    const filePath = `payment-records/${Date.now()}-${req.file.originalname}`;
 
     const params = {
       Bucket: process.env.WASABI_BUCKET,
-      Key: fileName,
+      Key: filePath,
       Body: req.file.buffer,
       ContentType: req.file.mimetype,
-      ACL: "public-read",
+      ACL: "public-read"
     };
 
-
-    const result = await s3.upload(params).promise();
-
+    const uploaded = await s3.upload(params).promise();
 
     res.json({
       success: true,
-      fileUrl: result.Location,
-      key: result.Key,
+      fileUrl: uploaded.Location,
+      key: uploaded.Key
     });
-  } catch (error) {
-    console.error("Upload error:", error);
+  } catch (err) {
+    console.error("❌ Upload error:", err);
     res.status(500).json({ error: "Upload failed" });
   }
 });
 
-
-/* ---------------------------------------------
- * CREATE PAYMENT RECORD
- * Snapshot logic:
- *  - dueAtThisDate = invoicesTillDate - (allPreviousPayments + thisPayment)
- *  - Once set, it never changes.
- * ------------------------------------------ */
+/* ======================================================
+   4️⃣ CREATE PAYMENT RECORD
+   Snapshot Logic:
+       dueAtThisDate = invoicesTillDate - (previousPayments + thisPayment)
+====================================================== */
 router.post("/", async (req, res) => {
   try {
-    const vendorName = (req.body.vendorName || "").trim();
+    const vendorName = req.body.vendorName?.trim();
     const dateVal = req.body.date ? new Date(req.body.date) : null;
     const amountPaid = Number(req.body.amountPaid) || 0;
-
 
     let amountDue = 0;
     let dueAtThisDate = 0;
 
-
-    // Lock snapshot only if full data is available
+    // Only compute snapshot when complete info is present
     if (vendorName && dateVal && amountPaid > 0) {
-      // base due = invoices - ALL payments saved till this date (excluding current row)
       const baseDue = await calculateDueAtDate(dateVal, vendorName);
 
-
-      // final due should INCLUDE this payment:
-      // due = invoices - (previousPayments + thisPayment)
       const calc = baseDue - amountPaid;
-
-
       amountDue = calc;
       dueAtThisDate = calc;
     }
 
-
-    const newRecord = new PaymentRecord({
+    const newRow = new PaymentRecord({
       date: dateVal,
       vendorName,
       amountPaid,
@@ -251,125 +200,89 @@ router.post("/", async (req, res) => {
       dueAtThisDate,
       screenshot: req.body.screenshot || "",
       isDeleted: false,
-      deletedAt: null,
+      deletedAt: null
     });
 
-
-    const saved = await newRecord.save();
+    const saved = await newRow.save();
     res.status(201).json(saved);
-  } catch (error) {
-    console.error("Create error:", error);
-    res.status(500).json({ error: "Failed to create record" });
+  } catch (err) {
+    console.error("❌ Create error:", err);
+    res.status(500).json({ error: "Failed to create payment record" });
   }
 });
 
-
-/* ---------------------------------------------
- * UPDATE PAYMENT RECORD
- * - If snapshot already exists (dueAtThisDate != 0) → DON'T TOUCH IT
- * - If no snapshot yet (old rows / partial rows) → compute once using current data
- * ------------------------------------------ */
+/* ======================================================
+   5️⃣ UPDATE PAYMENT RECORD
+====================================================== */
 router.patch("/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    const existing = await PaymentRecord.findById(id);
-
-
-    if (!existing) {
-      return res.status(404).json({ error: "Record not found" });
-    }
-
+    const existing = await PaymentRecord.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Record not found" });
 
     const updates = {};
 
-
     if (req.body.vendorName !== undefined)
-      updates.vendorName = req.body.vendorName;
-
+      updates.vendorName = req.body.vendorName.trim();
 
     if (req.body.date !== undefined)
       updates.date = req.body.date ? new Date(req.body.date) : null;
 
-
     if (req.body.amountPaid !== undefined)
       updates.amountPaid = Number(req.body.amountPaid) || 0;
-
 
     if (req.body.screenshot !== undefined)
       updates.screenshot = req.body.screenshot;
 
-
-    // Preserve old snapshot by default
+    // Preserve snapshot unless it was originally 0
     updates.amountDue = existing.amountDue;
     updates.dueAtThisDate = existing.dueAtThisDate;
 
+    // Step 1 — update first
+    let updated = await PaymentRecord.findByIdAndUpdate(
+      req.params.id,
+      updates,
+      { new: true, runValidators: true }
+    );
 
-    // 1️⃣ Apply base update first
-    let updated = await PaymentRecord.findByIdAndUpdate(id, updates, {
-      new: true,
-      runValidators: true,
-    });
-
-
-    // 2️⃣ If snapshot NOT locked yet → compute once using updated row
+    // Step 2 — create snapshot if missing
     if (
-      !existing.dueAtThisDate && // never had a snapshot before
+      !existing.dueAtThisDate &&
       updated.vendorName &&
       updated.date &&
       updated.amountPaid > 0
     ) {
-      // Here calculateDueAtDate already includes this updated row's payment
-      const calc = await calculateDueAtDate(
-        updated.date,
-        updated.vendorName
-      );
-
+      const calc = await calculateDueAtDate(updated.date, updated.vendorName);
 
       updated.amountDue = calc;
       updated.dueAtThisDate = calc;
-
-
       await updated.save();
     }
 
-
     res.json(updated);
-  } catch (error) {
-    console.error("Update error:", error);
-    res.status(500).json({ error: "Failed to update payment record" });
+  } catch (err) {
+    console.error("❌ Update error:", err);
+    res.status(500).json({ error: "Failed to update record" });
   }
 });
 
-
-/* ---------------------------------------------
- * SOFT DELETE PAYMENT RECORD
- * ------------------------------------------ */
+/* ======================================================
+   6️⃣ SOFT DELETE PAYMENT RECORD
+====================================================== */
 router.delete("/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-
-
     const deleted = await PaymentRecord.findByIdAndUpdate(
-      id,
+      req.params.id,
       { isDeleted: true, deletedAt: new Date() },
       { new: true }
     );
 
-
-    if (!deleted) {
-      return res.status(404).json({ error: "Not found" });
-    }
-
+    if (!deleted) return res.status(404).json({ error: "Record not found" });
 
     res.json({ message: "Deleted", record: deleted });
-  } catch (error) {
-    console.error("Delete error:", error);
+  } catch (err) {
+    console.error("❌ Delete error:", err);
     res.status(500).json({ error: "Failed to delete" });
   }
 });
 
-
 module.exports = router;
-
-
-
