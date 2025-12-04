@@ -1,57 +1,136 @@
-const mongoose = require('mongoose');
+// models/PurchaseRecord.js
+const mongoose = require("mongoose");
 
-const purchaseRecordSchema = new mongoose.Schema(
+
+const CATEGORY_ENUM = [
+  "Advertisement",
+  "Assets",
+  "Assets (Intangible)",
+  "Bank Charges",
+  "COGS",
+  "Commision",          // match frontend spelling
+  "Freight Inwards",
+  "Marketing",
+  "Operating Expense",
+  "Packaging Material",
+  "Professional Charges",
+  "Services",
+  "Software & Tools",
+  "Travel Expense",
+  "Freight Outwards",
+  "Stock transfer",
+  "Other",
+];
+
+
+const INVOICE_TYPE_ENUM = ["Credit Note", "Tax Invoice", "Debit Note"];
+
+
+const BILLING_GST_ENUM = [
+  "Himachal Pradesh",
+  "Delhi",
+  "Maharashtra",
+  "Tamil Nadu",
+  "Haryana",
+  "West Bengal",
+];
+
+
+const PurchaseRecordSchema = new mongoose.Schema(
   {
-    date: { type: Date, required: false, default: null },
-    category: { type: String, required: false, default: '', trim: true },
-    invoiceType: { type: String, required: false, default: '', trim: true },
-    billingGst: { type: String, required: false, default: '', trim: true },
-    invoiceNo: { type: String, required: false, default: '', trim: true },
-    partyName: { type: String, trim: true, default: '' },
-    invoiceAmount: { type: Number, required: false, default: 0, min: 0 },
-    physicalInvoice: {
-      type: String,
-      enum: ['Yes', 'No', ''],
-      default: 'No',
+    date: {
+      type: Date,
+      required: true,
+      index: true,
     },
-    link: { type: String, default: '', trim: true },
-    matchedWith2B: {
+
+
+    category: {
       type: String,
-      enum: ['Yes', 'No', ''],
-      default: 'No',
+      required: true,
+      enum: CATEGORY_ENUM,
+      index: true,
     },
-    invoicingTally: {
+
+
+    // ✅ not required, so blur-save works even if user doesn't set it
+    invoiceType: {
       type: String,
-      enum: ['Yes', 'No', ''],
-      default: 'No',
+      enum: INVOICE_TYPE_ENUM,
+      default: "",
     },
-    vendorEmail: { type: String, trim: true, default: '' },
-    vendorPhone: { type: String, trim: true, default: '' },
-    paymentDate: { type: Date, default: null },
-    dueAtThisDate: {
+
+
+    // ✅ not required, so it can be blank too
+    billingGST: {
+      type: String,
+      enum: BILLING_GST_ENUM,
+      default: "",
+    },
+
+
+    invoiceNo: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+
+    vendorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Vendor",
+      required: true,
+      index: true,
+    },
+
+
+    vendorName: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
+
+
+    amount: {
       type: Number,
-      default: 0,
-      description:
-        'Snapshot of total due as of this record date (non-retroactive)',
+      required: true,
       min: 0,
     },
-    isDeleted: { type: Boolean, default: false },
-    deletedAt: { type: Date, default: null },
+
+
+    invoiceLink: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+
+    matched2B: {
+      type: Boolean,
+      default: false,
+    },
+
+
+    invoicingTally: {
+      type: Boolean,
+      default: false,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-purchaseRecordSchema.virtual('serialNumber').get(function () {
-  return this._id;
-});
 
-purchaseRecordSchema.set('toJSON', { virtuals: true });
-purchaseRecordSchema.set('toObject', { virtuals: true });
+// Useful compound / text indexes
+PurchaseRecordSchema.index({ vendorName: "text", invoiceNo: "text" });
+PurchaseRecordSchema.index({ date: -1, category: 1 });
+PurchaseRecordSchema.index({ vendorId: 1, date: -1 });
 
-purchaseRecordSchema.index({ isDeleted: 1, createdAt: -1 });
-purchaseRecordSchema.index({ date: -1 });
-purchaseRecordSchema.index({ partyName: 1 });
 
-module.exports =
-  mongoose.models.PurchaseRecord ||
-  mongoose.model('PurchaseRecord', purchaseRecordSchema);
+const PurchaseRecord = mongoose.model("PurchaseRecord", PurchaseRecordSchema);
+module.exports = PurchaseRecord;
+
+
+

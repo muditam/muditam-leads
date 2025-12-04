@@ -237,8 +237,7 @@ router.patch("/:id", async (req, res) => {
       "lookingFor",
       "lastOrderAt",
       "lastReachedAt",
-      "followupTag",
-      // 🔹 allow full structured medical/lifestyle fields
+      "followupTag", 
       "globalRetentionDetails",
     ];
 

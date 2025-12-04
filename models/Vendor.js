@@ -1,8 +1,10 @@
 // models/Vendor.js
 const mongoose = require('mongoose');
 
+
 const phoneRegex = /^\d{10}$/;
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 
 const vendorSchema = new mongoose.Schema(
   {
@@ -34,13 +36,19 @@ const vendorSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    gstNumber: {
-      type: String,
-      default: '',
-      trim: true,
-      uppercase: true, // ensures consistent casing for uniqueness
-      // (length checks are handled in routes; keep schema flexible)
-    },
+  gstNumber: {
+  type: String,
+  default: "",
+  trim: true,
+  uppercase: true,
+  validate: {
+    validator: (v) =>
+      v === "" || /^[A-Z0-9]{15}$/.test(v),
+    message: "GST number must be 15 characters (A-Z, 0-9)",
+  },
+},
+
+
     isDeleted: {
       type: Boolean,
       default: false,
@@ -55,19 +63,23 @@ const vendorSchema = new mongoose.Schema(
   }
 );
 
+
 // Indexes
 vendorSchema.index({ name: 1 });
 vendorSchema.index({ isDeleted: 1 });
 
+
+// ✅ Unique GST index for non-empty GST numbers
 vendorSchema.index(
   { gstNumber: 1 },
   {
     unique: true,
-    partialFilterExpression: {
-      gstNumber: { $ne: '' },
-      isDeleted: { $ne: true },
-    },
+    partialFilterExpression: { gstNumber: { $ne: '' } },
   }
 );
- 
-module.exports = mongoose.models.Vendor || mongoose.model('Vendor', vendorSchema);
+
+
+module.exports = mongoose.model('Vendor', vendorSchema);
+
+
+
