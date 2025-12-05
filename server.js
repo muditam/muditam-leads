@@ -117,8 +117,8 @@ const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
 const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
 const taskReportingRoutes = require("./routes/taskReportingRoutes");
-// const purchaseRecordRoutes = require('./PaymentGateway/purchaseRecord'); 
-// const paymentRecord = require('./PaymentGateway/paymentRecords');      
+const purchaseRecordRoutes = require('./PaymentGateway/purchaseRecord'); 
+const paymentRecord = require('./PaymentGateway/paymentRecords');      
 const SwitchEmployee = require("./routes/SwitchEmployee");
 const ConfirmedOrders = require("./routes/confirmedOrders");
 const invoiceRoutes = require('./routes/invoiceRoutes');
@@ -600,8 +600,8 @@ app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
 app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
 app.use("/api/tasks", taskBoardRoutes); 
 app.use("/api/tasks/reporting", taskReportingRoutes); 
-// app.use('/api/purchase-records', purchaseRecordRoutes);
-// app.use("/api/payment-records", paymentRecord); 
+app.use('/api/purchase-records', purchaseRecordRoutes);
+app.use("/api/payment-records", paymentRecord); 
 app.use("/api/employees", SwitchEmployee);
 app.use("/api/order-confirmation", ConfirmedOrders);
 app.use('/api/invoices', invoiceRoutes);
@@ -2239,51 +2239,6 @@ app.get('/api/consultation-history', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   } 
-});
-
-app.post('/api/leads/fix-sales-status', async (req, res) => {
-  try {
-    // 1) Update leadStatus where it is blank (missing / null / empty string)
-    const leadStatusResult = await Lead.updateMany(
-      {
-        $or: [
-          { leadStatus: { $exists: false } },
-          { leadStatus: null },
-          { leadStatus: '' },
-        ],
-      },
-      { $set: { leadStatus: 'Sales Done' } }
-    );
-
-    // 2) Update salesStatus where it is blank (missing / null / empty string)
-    const salesStatusResult = await Lead.updateMany(
-      {
-        $or: [
-          { salesStatus: { $exists: false } },
-          { salesStatus: null },
-          { salesStatus: '' },
-        ],
-      },
-      { $set: { salesStatus: 'Sales Done' } }
-    );
-
-    return res.status(200).json({
-      message: 'Lead statuses updated successfully',
-      leadStatus: {
-        matched: leadStatusResult.matchedCount ?? leadStatusResult.nMatched,
-        modified: leadStatusResult.modifiedCount ?? leadStatusResult.nModified,
-      },
-      salesStatus: {
-        matched: salesStatusResult.matchedCount ?? salesStatusResult.nMatched,
-        modified: salesStatusResult.modifiedCount ?? salesStatusResult.nModified,
-      },
-    });
-  } catch (err) {
-    console.error('Error fixing sales statuses:', err);
-    return res
-      .status(500)
-      .json({ message: 'Error fixing sales statuses', error: err.message });
-  }
 });
 
 // Start Server

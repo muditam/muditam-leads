@@ -30,7 +30,7 @@ const LeadSchema = new mongoose.Schema({
   rtFollowupStatus: String,
   lastOrderDate: String,
   repeatDosageOrdered: String,
-  retentionStatus: String,
+  retentionStatus: { type: String, default: "Active" },
   communicationMethod: String,
   preferredLanguage: String,
   rtRemark: String,
