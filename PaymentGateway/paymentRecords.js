@@ -20,11 +20,12 @@ const s3 = new AWS.S3({
   s3ForcePathStyle: true,
 });
 
+// Memory storage → NO disk writes (Heroku safe)
 const upload = multer({ storage: multer.memoryStorage() });
 
 /* ---------------------------------------------------
-   🔥 DUE CALCULATION (BASE) - FIXED
-   Returns: dueBase = totalInvoices - totalPaymentsSavedUpToThisDate
+   🔥 BASE DUE CALCULATION
+   dueBase = invoicesTillDate - paymentsTillDate
 --------------------------------------------------- */
 async function calculateDueAtDate(targetDate, vendorName = null) {
   try {
@@ -42,7 +43,9 @@ async function calculateDueAtDate(targetDate, vendorName = null) {
       { isDeleted: { $exists: false } },
     ];
 
-    // 1️⃣ INVOICES - WRAPPED IN TRY-CATCH
+    // ---------------------
+    // 1️⃣ INVOICES
+    // ---------------------
     let totalInvoices = 0;
     try {
       const invoiceMatch = {
@@ -53,21 +56,17 @@ async function calculateDueAtDate(targetDate, vendorName = null) {
 
       const [invoiceAgg] = await PurchaseRecord.aggregate([
         { $match: invoiceMatch },
-        {
-          $group: {
-            _id: null,
-            total: { $sum: { $ifNull: ["$amount", 0] } },
-          },
-        },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
       ]);
 
       totalInvoices = invoiceAgg?.total || 0;
-    } catch (invoiceErr) {
-      console.error("Invoice aggregation error:", invoiceErr.message);
-      totalInvoices = 0;
+    } catch (err) {
+      console.error("Invoice aggregation error:", err.message);
     }
 
-    // 2️⃣ PAYMENTS - WRAPPED IN TRY-CATCH
+    // ---------------------
+    // 2️⃣ PAYMENTS
+    // ---------------------
     let totalPayments = 0;
     try {
       const paymentMatch = {
@@ -78,24 +77,17 @@ async function calculateDueAtDate(targetDate, vendorName = null) {
 
       const [paymentAgg] = await PaymentRecord.aggregate([
         { $match: paymentMatch },
-        {
-          $group: {
-            _id: null,
-            total: { $sum: { $ifNull: ["$amountPaid", 0] } },
-          },
-        },
+        { $group: { _id: null, total: { $sum: "$amountPaid" } } },
       ]);
 
       totalPayments = paymentAgg?.total || 0;
-    } catch (paymentErr) {
-      console.error("Payment aggregation error:", paymentErr.message);
-      totalPayments = 0;
+    } catch (err) {
+      console.error("Payment aggregation error:", err.message);
     }
 
-    // BASE DUE
     return totalInvoices - totalPayments;
   } catch (err) {
-    console.error("Error calculating due:", err.message);
+    console.error("Error in base due calculation:", err.message);
     return 0;
   }
 }
@@ -109,7 +101,7 @@ router.get("/", async (req, res) => {
     const limit = parseInt(req.query.limit) || 25;
     const skip = (page - 1) * limit;
 
-    const query = {
+    const filter = {
       $or: [
         { isDeleted: false },
         { isDeleted: null },
@@ -118,12 +110,13 @@ router.get("/", async (req, res) => {
     };
 
     const [records, total] = await Promise.all([
-      PaymentRecord.find(query)
+      PaymentRecord.find(filter)
         .sort({ date: -1, createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      PaymentRecord.countDocuments(query),
+
+      PaymentRecord.countDocuments(filter),
     ]);
 
     res.json({
@@ -151,9 +144,7 @@ router.get("/vendor-list", async (_req, res) => {
     const vendorNames = vendorDocs.map((v) => v.name);
     const purchaseVendors = await PurchaseRecord.distinct("vendorName");
 
-    const merged = Array.from(
-      new Set([...vendorNames, ...purchaseVendors])
-    ).filter(Boolean);
+    const merged = Array.from(new Set([...vendorNames, ...purchaseVendors])).filter(Boolean);
 
     res.json(merged);
   } catch (err) {
@@ -163,13 +154,11 @@ router.get("/vendor-list", async (_req, res) => {
 });
 
 /* ---------------------------------------------
- * FILE UPLOAD (Wasabi)
+ * UPLOAD FILE TO WASABI
  * ------------------------------------------ */
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
-    }
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
     const fileName = `payment-records/${Date.now()}-${req.file.originalname}`;
 
@@ -195,10 +184,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 /* ---------------------------------------------
- * CREATE PAYMENT RECORD - FIXED
- * Snapshot logic:
- *  - baseDue = invoicesTillDate - paymentsTillDate (excluding this)
- *  - final due = baseDue - thisPayment
+ * CREATE PAYMENT RECORD
  * ------------------------------------------ */
 router.post("/", async (req, res) => {
   try {
@@ -209,18 +195,13 @@ router.post("/", async (req, res) => {
     let amountDue = 0;
     let dueAtThisDate = 0;
 
-    // CRITICAL FIX: Wrap calculation in try-catch
     if (vendorName && dateVal && amountPaid > 0) {
       try {
         const baseDue = await calculateDueAtDate(dateVal, vendorName);
-        const calc = baseDue - amountPaid;
-        amountDue = calc;
-        dueAtThisDate = calc;
-      } catch (calcErr) {
-        console.error("Due calculation failed:", calcErr.message);
-        // Continue with 0 values - don't crash
-        amountDue = 0;
-        dueAtThisDate = 0;
+        amountDue = baseDue - amountPaid;
+        dueAtThisDate = amountDue;
+      } catch (err) {
+        console.error("Due calculation failed:", err.message);
       }
     }
 
@@ -239,25 +220,17 @@ router.post("/", async (req, res) => {
     res.status(201).json(saved);
   } catch (error) {
     console.error("Create payment record error:", error.message);
-    res.status(500).json({ 
-      error: "Failed to create record",
-      message: error.message 
-    });
+    res.status(500).json({ error: "Failed to create record" });
   }
 });
 
 /* ---------------------------------------------
- * UPDATE PAYMENT RECORD - FIXED
- * - If snapshot already exists → don't touch
- * - If no snapshot → compute once using updated row
+ * UPDATE PAYMENT RECORD
  * ------------------------------------------ */
 router.patch("/:id", async (req, res) => {
   try {
     const existing = await PaymentRecord.findById(req.params.id);
-
-    if (!existing) {
-      return res.status(404).json({ error: "Record not found" });
-    }
+    if (!existing) return res.status(404).json({ error: "Record not found" });
 
     const updates = {};
 
@@ -273,41 +246,30 @@ router.patch("/:id", async (req, res) => {
     if (req.body.screenshot !== undefined)
       updates.screenshot = req.body.screenshot;
 
-    // keep old snapshot by default
     updates.amountDue = existing.amountDue;
     updates.dueAtThisDate = existing.dueAtThisDate;
 
-    let updated = await PaymentRecord.findByIdAndUpdate(
-      req.params.id,
-      updates,
-      { new: true, runValidators: true }
-    );
+    let updated = await PaymentRecord.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
 
-    // CRITICAL FIX: Wrap recalculation in try-catch
-    if (
-      !existing.dueAtThisDate &&
-      updated.vendorName &&
-      updated.date &&
-      updated.amountPaid > 0
-    ) {
+    // Recalculate only if snapshot missing
+    if (!existing.dueAtThisDate && updated.vendorName && updated.date && updated.amountPaid > 0) {
       try {
         const calc = await calculateDueAtDate(updated.date, updated.vendorName);
         updated.amountDue = calc;
         updated.dueAtThisDate = calc;
         await updated.save();
-      } catch (calcErr) {
-        console.error("Due recalculation failed:", calcErr.message);
-        // Continue without recalculation - don't crash
+      } catch (err) {
+        console.error("Due recalculation failed:", err.message);
       }
     }
 
     res.json(updated);
   } catch (error) {
     console.error("Update payment record error:", error.message);
-    res.status(500).json({ 
-      error: "Failed to update payment record",
-      message: error.message 
-    });
+    res.status(500).json({ error: "Failed to update payment record" });
   }
 });
 
@@ -322,9 +284,7 @@ router.delete("/:id", async (req, res) => {
       { new: true }
     );
 
-    if (!deleted) {
-      return res.status(404).json({ error: "Not found" });
-    }
+    if (!deleted) return res.status(404).json({ error: "Not found" });
 
     res.json({ message: "Deleted", record: deleted });
   } catch (error) {
