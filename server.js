@@ -130,6 +130,7 @@ const globalRetentionDetails = require("./International/InternationalRoutes/glob
 const globalRetentionSalesRoutes = require("./International/InternationalRoutes/globalRetentionSales");
 
 const accessManagementRoutes = require("./routes/accessManagementRoutes");
+const superAdminAnalytics = require("./routes/superAdminAnalytics");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001; 
@@ -613,6 +614,7 @@ app.use("/api/global-retention-sales", globalRetentionSalesRoutes);
 app.use("/api/global-retention-details", globalRetentionDetails);
 
 app.use("/api/access", accessManagementRoutes);
+app.use("/api/super-admin/analytics", superAdminAnalytics);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
