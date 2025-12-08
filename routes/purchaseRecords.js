@@ -1,24 +1,25 @@
 const express = require("express");
 const router = express.Router();
+const AWS = require("aws-sdk");
 
-console.log("STEP 2: Testing Mongoose models...");
-
-try {
-  const PurchaseRecord = require("../models/PurchaseRecord");
-  console.log("PurchaseRecord model loaded OK");
-} catch (err) {
-  console.error("PurchaseRecord model error:", err);
-}
+console.log("STEP 3: Testing AWS Wasabi init...");
 
 try {
-  const Vendor = require("../models/Vendor");
-  console.log("Vendor model loaded OK");
+  const s3 = new AWS.S3({
+    endpoint: process.env.WASABI_ENDPOINT,
+    accessKeyId: process.env.WASABI_ACCESS_KEY,
+    secretAccessKey: process.env.WASABI_SECRET_KEY,
+    region: process.env.WASABI_REGION,
+    s3ForcePathStyle: true,
+  });
+
+  console.log("AWS S3 initialized OK");
 } catch (err) {
-  console.error("Vendor model error:", err);
+  console.error("AWS INIT ERROR:", err);
 }
 
 router.get("/", (req, res) => {
-  res.send("STEP 2 OK");
+  res.send("STEP 3 OK");
 });
 
 module.exports = router;
