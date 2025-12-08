@@ -131,8 +131,8 @@ const accessManagementRoutes = require("./routes/accessManagementRoutes");
 const superAdminAnalytics = require("./routes/superAdminAnalytics");
 const retentionAuto = require("./routes/retentionAutoReactivate");
 
-// const vendorsRoute = require("./PaymentGateway/vendors");
-// const purchaseRoute = require("./PaymentGateway/purchaseRecords");
+const vendorsRoute = require("./routes/vendors");
+const purchaseRoute = require("./routes/purchaseRecords");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001; 
@@ -143,7 +143,7 @@ app.use(
       if (req.path === '/api/sse') return false;
 
       const type = String(res.getHeader('Content-Type') || '');
-      if (type.includes('text/event-stream')) return false;
+      if (type.includes('text/event-stream')) return false; 
 
       return compression.filter(req, res);
     },
@@ -617,8 +617,8 @@ app.use("/api/access", accessManagementRoutes);
 app.use("/api/super-admin/analytics", superAdminAnalytics);
 app.use("/api/retention", retentionAuto);
 
-// app.use("/api/vendors", vendorsRoute);
-// app.use("/api/purchase-records", purchaseRoute);
+app.use("/api/vendors", vendorsRoute);
+app.use("/api/purchase-records", purchaseRoute);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
