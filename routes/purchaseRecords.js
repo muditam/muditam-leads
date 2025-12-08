@@ -1,55 +1,34 @@
 const express = require("express");
 const router = express.Router();
 const PurchaseRecord = require("../models/PurchaseRecord");
-const Vendor = require("../models/Vendor");
-const multer = require("multer");
-const AWS = require("aws-sdk");
 const XLSX = require("xlsx");
+const multer = require("multer");
 
-// ----------------------
-// MULTER
-// ----------------------
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ----------------------
-// WASABI CONFIG
-// ----------------------
-const s3 = new AWS.S3({
-  endpoint: process.env.WASABI_ENDPOINT,
-  accessKeyId: process.env.WASABI_ACCESS_KEY,
-  secretAccessKey: process.env.WASABI_SECRET_KEY,
-  region: process.env.WASABI_REGION,
-  s3ForcePathStyle: true,
-});
-
-// ----------------------
 // GET ALL RECORDS
-// ----------------------
 router.get("/", async (req, res) => {
   try {
     const records = await PurchaseRecord.find().sort({ createdAt: -1 });
     res.json(records);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch purchase records" });
   }
 });
 
-// ----------------------
-// CREATE A RECORD (INLINE ADD)  ✔ Option A
-// ----------------------
+// CREATE (Inline Add)
 router.post("/", async (req, res) => {
   try {
     const record = await PurchaseRecord.create(req.body);
     res.json(record);
   } catch (err) {
-    console.log(err);
+    console.error(err);
     res.status(500).json({ error: "Failed to create purchase record" });
   }
 });
 
-// ----------------------
-// UPDATE A RECORD (INLINE PATCH)
-// ----------------------
+// UPDATE
 router.patch("/:id", async (req, res) => {
   try {
     const updated = await PurchaseRecord.findByIdAndUpdate(
@@ -59,13 +38,12 @@ router.patch("/:id", async (req, res) => {
     );
     res.json(updated);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to update purchase record" });
   }
 });
 
-// ----------------------
-// SOFT DELETE RECORD
-// ----------------------
+// SOFT DELETE
 router.delete("/:id", async (req, res) => {
   try {
     const updated = await PurchaseRecord.findByIdAndUpdate(
@@ -75,39 +53,16 @@ router.delete("/:id", async (req, res) => {
     );
     res.json(updated);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to delete record" });
   }
 });
 
-// ----------------------
-// UPLOAD INVOICE → WASABI
-// ----------------------
-router.post("/upload-invoice", upload.single("file"), async (req, res) => {
-  try {
-    const file = req.file;
-
-    const params = {
-      Bucket: process.env.WASABI_BUCKET,
-      Key: `purchase-invoices/${Date.now()}_${file.originalname}`,
-      Body: file.buffer,
-      ACL: "public-read",
-      ContentType: file.mimetype,
-    };
-
-    const uploadRes = await s3.upload(params).promise();
-
-    res.json({ url: uploadRes.Location });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Invoice upload failed" });
-  }
-});
-
-// ----------------------
-// BULK UPLOAD (CSV / EXCEL)
-// ----------------------
+// BULK UPLOAD ONLY (NO WASABI)
 router.post("/bulk-upload", upload.single("file"), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
     const file = req.file;
     const defaultDate = req.body.date;
 
@@ -135,7 +90,7 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
 
     res.json(created);
   } catch (err) {
-    console.log(err);
+    console.error("Bulk upload error:", err);
     res.status(500).json({ error: "Bulk upload failed" });
   }
 });
