@@ -116,9 +116,7 @@ const bankCc1101Routes = require("./PaymentGateway/bankCc1101");
 const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
 const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
-const taskReportingRoutes = require("./routes/taskReportingRoutes");
-// const purchaseRecordRoutes = require('./PaymentGateway/purchaseRecord'); 
-// const paymentRecord = require('./PaymentGateway/paymentRecords');      
+const taskReportingRoutes = require("./routes/taskReportingRoutes");     
 const SwitchEmployee = require("./routes/SwitchEmployee");
 const ConfirmedOrders = require("./routes/confirmedOrders");
 const invoiceRoutes = require('./routes/invoiceRoutes');
@@ -131,6 +129,10 @@ const globalRetentionSalesRoutes = require("./International/InternationalRoutes/
 
 const accessManagementRoutes = require("./routes/accessManagementRoutes");
 const superAdminAnalytics = require("./routes/superAdminAnalytics");
+const retentionAuto = require("./routes/retentionAutoReactivate");
+
+const vendorsRoute = require("./PaymentGateway/vendors");
+const purchaseRoute = require("./PaymentGateway/purchaseRecords");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001; 
@@ -600,9 +602,7 @@ app.use("/api/bank-reconciliation", bankCc1101Routes);
 app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
 app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
 app.use("/api/tasks", taskBoardRoutes); 
-app.use("/api/tasks/reporting", taskReportingRoutes); 
-// app.use('/api/purchase-records', purchaseRecordRoutes);
-// app.use("/api/payment-records", paymentRecord); 
+app.use("/api/tasks/reporting", taskReportingRoutes);  
 app.use("/api/employees", SwitchEmployee);
 app.use("/api/order-confirmation", ConfirmedOrders);
 app.use('/api/invoices', invoiceRoutes);
@@ -615,6 +615,10 @@ app.use("/api/global-retention-details", globalRetentionDetails);
 
 app.use("/api/access", accessManagementRoutes);
 app.use("/api/super-admin/analytics", superAdminAnalytics);
+app.use("/api/retention", retentionAuto);
+
+app.use("/api/vendors", vendorsRoute);
+app.use("/api/purchase-records", purchaseRoute);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
