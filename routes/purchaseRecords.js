@@ -1,12 +1,26 @@
 const express = require("express");
 const router = express.Router();
 const PurchaseRecord = require("../models/PurchaseRecord");
-const XLSX = require("xlsx");
 const multer = require("multer");
+const AWS = require("aws-sdk");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// GET ALL RECORDS
+// WASABI CONFIG
+let s3;
+try {
+  s3 = new AWS.S3({
+    endpoint: process.env.WASABI_ENDPOINT,
+    accessKeyId: process.env.WASABI_ACCESS_KEY,
+    secretAccessKey: process.env.WASABI_SECRET_KEY,
+    region: process.env.WASABI_REGION,
+    s3ForcePathStyle: true,
+  });
+} catch (err) {
+  console.error("Wasabi Init Error:", err);
+}
+
+// GET ALL
 router.get("/", async (req, res) => {
   try {
     const records = await PurchaseRecord.find().sort({ createdAt: -1 });
@@ -17,7 +31,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// CREATE (Inline Add)
+// CREATE
 router.post("/", async (req, res) => {
   try {
     const record = await PurchaseRecord.create(req.body);
@@ -43,7 +57,7 @@ router.patch("/:id", async (req, res) => {
   }
 });
 
-// SOFT DELETE
+// DELETE (soft)
 router.delete("/:id", async (req, res) => {
   try {
     const updated = await PurchaseRecord.findByIdAndUpdate(
@@ -58,40 +72,27 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// BULK UPLOAD ONLY (NO WASABI)
-router.post("/bulk-upload", upload.single("file"), async (req, res) => {
+// INVOICE UPLOAD ONLY (NO BULK)
+router.post("/upload-invoice", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    if (!req.file)
+      return res.status(400).json({ error: "No file uploaded" });
 
     const file = req.file;
-    const defaultDate = req.body.date;
 
-    const workbook = XLSX.read(file.buffer, { type: "buffer" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet);
+    const params = {
+      Bucket: process.env.WASABI_BUCKET,
+      Key: `purchase-invoices/${Date.now()}_${file.originalname}`,
+      Body: file.buffer,
+      ACL: "public-read",
+      ContentType: file.mimetype,
+    };
 
-    const created = [];
-
-    for (const r of rows) {
-      const record = await PurchaseRecord.create({
-        date: r["Date"] || defaultDate,
-        category: r["Category"] || "",
-        invoiceType: r["Invoice Type"] || "",
-        billingGST: r["Billing GST"] || "",
-        invoiceNo: r["Invoice No"] || "",
-        vendorName: r["Vendor Name"] || "",
-        amount: r["Amount"] || 0,
-        matched2B: false,
-        tally: false,
-      });
-
-      created.push(record);
-    }
-
-    res.json(created);
+    const result = await s3.upload(params).promise();
+    res.json({ url: result.Location });
   } catch (err) {
-    console.error("Bulk upload error:", err);
-    res.status(500).json({ error: "Bulk upload failed" });
+    console.error("WASABI Upload Error:", err);
+    res.status(500).json({ error: "Invoice upload failed" });
   }
 });
 
