@@ -1,11 +1,13 @@
 // models/ShopifyOrder.js
 const mongoose = require("mongoose");
 
+
 function normalizePhone(phone) {
   if (!phone) return "";
   const d = String(phone).replace(/\D/g, "");
   return d.length >= 10 ? d.slice(-10) : d;
 }
+
 
 const ProductSchema = new mongoose.Schema(
   {
@@ -14,13 +16,14 @@ const ProductSchema = new mongoose.Schema(
     sku: String,
     variant_id: Number,
     price: Number,
-    month: { type: String, default: "" }, 
+    month: { type: String, default: "" },
     cohort: { type: String, default: "" },  
   },
   { _id: false }
 );
 
-const AddressSchema = new mongoose.Schema( 
+
+const AddressSchema = new mongoose.Schema(
   {
     name: String,
     phone: { type: String, set: normalizePhone },
@@ -34,6 +37,7 @@ const AddressSchema = new mongoose.Schema(
   { _id: false }
 );
 
+
 const OrderConfirmOpsSchema = new mongoose.Schema(
   {
     callStatus: {
@@ -43,21 +47,28 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
     },
     callStatusUpdatedAt: { type: Date, default: null, index: true },
 
+
     shopifyNotes: { type: String, default: "" },
+
 
     doctorCallNeeded: { type: Boolean },
     dietPlanNeeded: { type: Boolean },
-    assignedExpert: { type: String, default: "" }, 
+    assignedExpert: { type: String, default: "" },
+
 
     languageUsed: { type: String, default: "" },  
 
-    codToPrepaid: { type: Boolean }, 
+
+    codToPrepaid: { type: Boolean },
+
 
     paymentLink: { type: String, default: "" },
 
+
     plusCount: { type: Number, default: 0 },
-    plusUpdatedAt: { type: Date, default: null, index: true }, 
+    plusUpdatedAt: { type: Date, default: null, index: true },
     ocCancelReason: { type: String, default: "" },
+
 
     assignedAgentId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", index: true, default: null },
     assignedAgentName: { type: String, default: "" },
@@ -66,14 +77,17 @@ const OrderConfirmOpsSchema = new mongoose.Schema(
   { _id: false }
 );  
 
+
 const ShopifyOrderSchema = new mongoose.Schema(
   {
     orderId: { type: Number, unique: true, index: true },
     orderName: { type: String, index: true },
 
+
     customerName: String,
     contactNumber: { type: String, set: normalizePhone },
     normalizedPhone: { type: String, index: true },
+
 
     orderDate: Date,
     amount: Number,
@@ -81,25 +95,32 @@ const ShopifyOrderSchema = new mongoose.Schema(
     modeOfPayment: String,
     productsOrdered: [ProductSchema],
 
-    channelName: String, 
+
+    channelName: String,
     customerAddress: AddressSchema,
+
 
     currency: String,
     financial_status: String,
-    fulfillment_status: String, 
+    fulfillment_status: String,
 
-    shipment_status: { type: String, default: "" }, 
+
+    shipment_status: { type: String, default: "" },
+
 
     shopifyCreatedAt: Date,
     shopifyUpdatedAt: Date,
 
+
     cancelled_at: Date,
     cancel_reason: String,
+
 
     orderConfirmOps: { type: OrderConfirmOpsSchema, default: () => ({}) },
   },
   { timestamps: true }
 );
+
 
 ShopifyOrderSchema.pre("validate", function (next) {
   if (this.contactNumber) {
@@ -113,23 +134,57 @@ ShopifyOrderSchema.pre("validate", function (next) {
     this.normalizedPhone = "";
   }
 
+
   if (this.customerAddress && this.customerAddress.phone) {
     this.customerAddress.phone = normalizePhone(this.customerAddress.phone);
   }
   next();
 });
+ShopifyOrderSchema.index(
+  { normalizedPhone: 1, orderDate: 1 },
+  { name: "cohort_phone_date" }
+);
 
+
+// SECONDARY: For filtering with products
+ShopifyOrderSchema.index(
+  { normalizedPhone: 1, orderDate: 1, productsOrdered: 1 },
+  { name: "cohort_full_lookup" }
+);
+
+
+// TERTIARY: For existence checks
+ShopifyOrderSchema.index(
+  { normalizedPhone: 1, orderDate: -1 },
+  { name: "cohort_phone_latest" }
+);
+ShopifyOrderSchema.index(
+  { normalizedPhone: 1, orderDate: 1, "productsOrdered.month": 1 },
+  { name: "cohort_products_index", background: true }
+);
 ShopifyOrderSchema.index({ orderDate: -1, createdAt: -1 });
 ShopifyOrderSchema.index({ "customerAddress.province": 1 });
 ShopifyOrderSchema.index({ modeOfPayment: 1 });
 ShopifyOrderSchema.index({ paymentGatewayNames: 1 });
 ShopifyOrderSchema.index({ orderName: 1 });
 ShopifyOrderSchema.index({ contactNumber: 1 });
+// Range & sorting
+ShopifyOrderSchema.index({ orderDate: 1 });
+ShopifyOrderSchema.index({ normalizedPhone: 1, orderDate: 1 });
+
+
+// Product expansion optimization
+ShopifyOrderSchema.index({ "productsOrdered.month": 1 });
+ShopifyOrderSchema.index({ "productsOrdered.cohort": 1 });
+
+
+
 
 ShopifyOrderSchema.index({ "orderConfirmOps.callStatus": 1, orderDate: -1 });
 ShopifyOrderSchema.index({ "orderConfirmOps.callStatusUpdatedAt": -1 });
 ShopifyOrderSchema.index({ "orderConfirmOps.assignedAgentId": 1, "orderConfirmOps.callStatus": 1 });
 ShopifyOrderSchema.index({ "orderConfirmOps.assignedAt": -1 });
+
 
 ShopifyOrderSchema.index(
   { "orderConfirmOps.shopifyNotes": "text" },
@@ -139,6 +194,11 @@ ShopifyOrderSchema.index(
   }
 );
 
+
 module.exports = mongoose.model("ShopifyOrder", ShopifyOrderSchema);
 module.exports.normalizePhone = normalizePhone;
+
+
+
+
 
