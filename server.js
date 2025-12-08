@@ -131,8 +131,8 @@ const accessManagementRoutes = require("./routes/accessManagementRoutes");
 const superAdminAnalytics = require("./routes/superAdminAnalytics");
 const retentionAuto = require("./routes/retentionAutoReactivate");
 
-const vendorsRoute = require("./PaymentGateway/vendors");
-const purchaseRoute = require("./PaymentGateway/purchaseRecords");
+// const vendorsRoute = require("./PaymentGateway/vendors");
+// const purchaseRoute = require("./PaymentGateway/purchaseRecords");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001; 
@@ -617,8 +617,8 @@ app.use("/api/access", accessManagementRoutes);
 app.use("/api/super-admin/analytics", superAdminAnalytics);
 app.use("/api/retention", retentionAuto);
 
-app.use("/api/vendors", vendorsRoute);
-app.use("/api/purchase-records", purchaseRoute);
+// app.use("/api/vendors", vendorsRoute);
+// app.use("/api/purchase-records", purchaseRoute);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
