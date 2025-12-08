@@ -1,3 +1,4 @@
+// models/PurchaseRcrd.js
 const mongoose = require("mongoose");
 
 const PurchaseRecordSchema = new mongoose.Schema(
@@ -10,7 +11,11 @@ const PurchaseRecordSchema = new mongoose.Schema(
 
     invoiceNo: { type: String, default: "" },
 
-    vendorId: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", default: null },
+    vendorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Vendor",
+      default: null,
+    },
     vendorName: { type: String, default: "" },
 
     amount: { type: Number, default: 0 },
@@ -25,4 +30,7 @@ const PurchaseRecordSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("PurchaseRecord", PurchaseRecordSchema);
+// IMPORTANT: avoid OverwriteModelError if model is required twice
+module.exports =
+  mongoose.models.PurchaseRcrd ||
+  mongoose.model("PurchaseRcrd", PurchaseRecordSchema);

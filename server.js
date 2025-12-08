@@ -131,8 +131,8 @@ const accessManagementRoutes = require("./routes/accessManagementRoutes");
 const superAdminAnalytics = require("./routes/superAdminAnalytics");
 const retentionAuto = require("./routes/retentionAutoReactivate");
 
-const vendorsRoute = require("./routes/vendors");
-const purchaseRoute = require("./routes/purchaseRecords");
+const vendorsRoute = require("./routes/vendorsname");
+const purchaseRoute = require("./routes/PurchaseRcrds");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001; 
