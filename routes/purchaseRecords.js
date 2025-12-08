@@ -1,25 +1,24 @@
 const express = require("express");
 const router = express.Router();
-const AWS = require("aws-sdk");
+const multer = require("multer");
 
-console.log("STEP 3: Testing AWS Wasabi init...");
+console.log("STEP 4: Testing multer...");
 
+let upload;
 try {
-  const s3 = new AWS.S3({
-    endpoint: process.env.WASABI_ENDPOINT,
-    accessKeyId: process.env.WASABI_ACCESS_KEY,
-    secretAccessKey: process.env.WASABI_SECRET_KEY,
-    region: process.env.WASABI_REGION,
-    s3ForcePathStyle: true,
-  });
-
-  console.log("AWS S3 initialized OK");
+  upload = multer({ storage: multer.memoryStorage() });
+  console.log("Multer initialized OK");
 } catch (err) {
-  console.error("AWS INIT ERROR:", err);
+  console.error("Multer init error:", err);
 }
 
+router.post("/test-upload", upload.single("file"), (req, res) => {
+  console.log("Upload endpoint hit");
+  res.json({ message: "File received", size: req.file?.size || 0 });
+});
+
 router.get("/", (req, res) => {
-  res.send("STEP 3 OK");
+  res.send("STEP 4 OK");
 });
 
 module.exports = router;
