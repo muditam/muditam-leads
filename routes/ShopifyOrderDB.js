@@ -53,7 +53,7 @@ function getContact(o) {
 }
 
 function stripOrderNameHash(name) {
-  return String(name || "").replace(/^#+\s*/, ""); // remove all leading #'s and any space
+  return String(name || "").replace(/^#+\s*/, "");  
 }
 
 function mapOrder(o) {
@@ -81,14 +81,12 @@ function mapOrder(o) {
       [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(" ").trim() ||
       o.customer?.default_address?.name ||
       "",
-
-    // Store ONLY 10-digit phone
+ 
     contactNumber: ten,
     normalizedPhone: ten,
 
     orderDate: o.created_at ? new Date(o.created_at) : null,
-
-    // Watermarks for sync
+ 
     shopifyCreatedAt: o.created_at ? new Date(o.created_at) : null,
     shopifyUpdatedAt: o.updated_at ? new Date(o.updated_at) : null,
 
@@ -125,10 +123,7 @@ async function fetchPageWithRetry(url, headers, attempt = 0) {
   }
 }
 
-/**
- * Page through a given URL until done; upserts orders.
- * Returns stats and last cursor info.
- */
+ 
 async function pageAndUpsertAll(url, headers) {
   let fetched = 0,
     created = 0,

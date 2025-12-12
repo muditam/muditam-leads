@@ -33,6 +33,7 @@
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "form-data": "^4.0.2",
+    "googleapis": "^167.0.0",
     "http": "^0.0.1-security",
     "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.2",

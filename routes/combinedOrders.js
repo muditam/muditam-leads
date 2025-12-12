@@ -282,6 +282,3 @@ router.put("/update-by-contact", async (req, res) => {
 
 
 module.exports = router;
-
-
-

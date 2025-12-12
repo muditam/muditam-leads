@@ -134,6 +134,7 @@ const retentionAuto = require("./routes/retentionAutoReactivate");
 const vendorsRoute = require("./routes/vendorsname");
 const purchaseRoute = require("./routes/PurchaseRcrds");
 const paymentRoute = require("./routes/paymentRcrds");
+const shopifyExport = require("./routes/shopifyExport");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001; 
@@ -621,6 +622,7 @@ app.use("/api/retention", retentionAuto);
 app.use("/api/vendors", vendorsRoute);
 app.use("/api/purchase-records", purchaseRoute);
 app.use("/api/payment-records", paymentRoute);
+app.use("/api/shopify", shopifyExport);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

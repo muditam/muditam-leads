@@ -61,7 +61,7 @@ router.get("/status", async (req, res) => {
           order_id: order.order_id,
           shipment_status: order.shipment_status,
           order_date: order.order_date,
-          tracking_number: order.tracking_number, // Include tracking_number
+          tracking_number: order.tracking_number,   
         },
       ]);
     } else {

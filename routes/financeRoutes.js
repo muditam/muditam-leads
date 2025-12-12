@@ -88,11 +88,10 @@ function mapShopifyToSnapshot(o) {
   return {
     orderName: o?.name || "",
 
-    // 🔴 Use this for filtering + showing in UI
+    // 🔴 Use this for filtering + showing in UI (actual Shopify order date)
     orderDate: shopifyCreated,
 
-    // keep createdAt also (can be same)
-    createdAt: shopifyCreated,
+    // ⚠️ createdAt is NOT set here – Mongoose timestamps will handle it.
 
     billingName,
     phone,
@@ -193,19 +192,23 @@ function parseSettlementDateString(s) {
 
 /**
  * 🔁 Incremental refresh (used by frontend Refresh button)
+ * - First time: from 1 April 2025
+ * - After that: from latest orderDate stored
  */
 router.post("/refresh-shopify", async (req, res) => {
   try {
     const lastDoc = await ShopifyFinanceOrder.findOne()
-      .sort({ orderDate: -1 }) // use orderDate if available
+      .sort({ orderDate: -1 }) // use orderDate
       .lean();
 
     let start;
     let isInitialBackfill = false;
 
-    if (lastDoc?.orderDate || lastDoc?.createdAt) {
-      start = new Date(lastDoc.orderDate || lastDoc.createdAt);
+    if (lastDoc?.orderDate) {
+      // Incremental: fetch from last known orderDate
+      start = new Date(lastDoc.orderDate);
     } else {
+      // First time: from 1 April 2025
       start = new Date(Date.UTC(2025, 3, 1, 0, 0, 0, 0)); // 2025-04-01
       isInitialBackfill = true;
     }
@@ -372,7 +375,7 @@ router.get("/orders", async (req, res) => {
       if (endDate) {
         orderDate.$lte = new Date(`${endDate}T23:59:59.999Z`);
       }
-      findQuery.orderDate = orderDate;
+      findQuery.orderDate = orderDate; // 🔴 filter by true Shopify order date
     }
 
     const [totalCount, baseRows] = await Promise.all([
@@ -644,8 +647,8 @@ router.get("/orders", async (req, res) => {
 
       return {
         // 🔴 frontend can use this for date column
-        orderDate: r.orderDate,
-        createdAt: r.createdAt,
+        orderDate: r.orderDate,    // actual Shopify order date
+        createdAt: r.createdAt,    // Mongo doc creation date
 
         orderName: r.orderName,
         billingName: r.billingName,
