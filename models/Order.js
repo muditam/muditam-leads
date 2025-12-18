@@ -13,6 +13,9 @@ const OrderSchema = new mongoose.Schema({
   email_count: { type: Number, default: 0 },
   threadId: { type: String },  
   issue: { type: String, default: "" },
+  notificationFlags: {
+  rtoNotified: { type: Boolean, default: false },
+},
 }, { timestamps: true }); 
 
 OrderSchema.index(

@@ -23,4 +23,21 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.delete("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deleted = await Vendor.findByIdAndDelete(id);
+
+    if (!deleted) {
+      return res.status(404).json({ error: "Vendor not found" });
+    }
+
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete vendor" });
+  }
+});
+
 module.exports = router;

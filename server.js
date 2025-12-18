@@ -129,12 +129,14 @@ const globalRetentionSalesRoutes = require("./International/InternationalRoutes/
 
 const accessManagementRoutes = require("./routes/accessManagementRoutes");
 const superAdminAnalytics = require("./routes/superAdminAnalytics");
-const retentionAuto = require("./routes/retentionAutoReactivate");
+// const retentionAuto = require("./routes/retentionAutoReactivate");
 
 const vendorsRoute = require("./routes/vendorsname");
 const purchaseRoute = require("./routes/PurchaseRcrds");
 const paymentRoute = require("./routes/paymentRcrds");
 const shopifyExport = require("./routes/shopifyExport");
+const utmShopifyRoutes = require("./routes/utmShopifyRoutes");
+const notificationsRoutes = require("./routes/notifications");
 
 const app = express(); 
 const PORT = process.env.PORT || 5001; 
@@ -617,12 +619,15 @@ app.use("/api/global-retention-details", globalRetentionDetails);
 
 app.use("/api/access", accessManagementRoutes);
 app.use("/api/super-admin/analytics", superAdminAnalytics);
-app.use("/api/retention", retentionAuto);
+// app.use("/api/retention", retentionAuto);
 
 app.use("/api/vendors", vendorsRoute);
 app.use("/api/purchase-records", purchaseRoute);
 app.use("/api/payment-records", paymentRoute);
+
 app.use("/api/shopify", shopifyExport);
+app.use("/api/utm", utmShopifyRoutes);
+app.use("/api/notifications", notificationsRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -635,7 +640,7 @@ app.get('/api/sse', (req, res) => {
   const { did } = req.query; 
   if (!did) return res.status(400).send('Missing did');
  
-  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Content-Type', 'text/event-stream'); 
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');

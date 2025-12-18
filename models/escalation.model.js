@@ -16,6 +16,7 @@ const EscalationSchema = new mongoose.Schema({
   amount: String,              
   products: [String],
   trackingId: { type: String, default: '' }, 
+  notificationRead: { type: Boolean, default: false },
 }, { timestamps: true });
 
 // indexes to speed up list pages & filters 

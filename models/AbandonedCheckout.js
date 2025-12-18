@@ -51,6 +51,8 @@ const AbandonedCheckoutSchema = new mongoose.Schema(
     eventAt:    { type: Date, default: Date.now },
     receivedAt: { type: Date, default: Date.now },
 
+    notificationRead: { type: Boolean, default: false },
+
     // PERSISTED assignment
     assignedExpert: {
       _id: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" },

@@ -262,6 +262,13 @@ async function applyRecurrenceToBoard(board) {
       task.dueDate = d;
     }
 
+    if (shouldNotify(task, board.ownerKey)) {
+      task.notifications = {
+        unread: true,
+        notifiedAt: now,
+      };
+    }
+
     task.lastRecurringAt = now;
 
     // Place it at the end of NEW column
@@ -274,6 +281,15 @@ async function applyRecurrenceToBoard(board) {
     await board.save();
   }
 }
+
+function shouldNotify(task, ownerKey) {
+  if (!task.assigneeId) return false;
+  if (task.assigneeId === ownerKey) return false;
+  if (task.status !== COLUMN_IDS.NEW) return false;
+  if (task.notifications?.unread) return false;
+  return true;
+}
+
 
 // -------- Routes --------
 
@@ -490,6 +506,20 @@ router.post("/", async (req, res) => {
       task.closedAt = now;
     }
 
+    if (
+      task.assigneeId &&
+      task.assigneeId !== ownerKey &&
+      task.status === COLUMN_IDS.NEW
+    ) {
+      task.notifications = {
+        unread: true,
+        notifiedAt: new Date(),
+      };
+    } else {
+      task.notifications = { unread: false };
+    }
+
+
     board.tasks.push(task);
     await board.save();
 
@@ -601,6 +631,17 @@ router.patch("/:id/status", async (req, res) => {
 
     // apply timer/status transition
     handleStatusTransition(task, currentStatus, to, now);
+
+    if (
+      to === COLUMN_IDS.NEW &&
+      task.assigneeId &&
+      task.assigneeId !== ownerKey
+    ) {
+      task.notifications = {
+        unread: true,
+        notifiedAt: new Date(),
+      };
+    }
 
     // move to end of new column
     task.orderIndex = nextOrderIndex(board, to);
@@ -869,5 +910,70 @@ router.delete("/:id", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+// 🔔 GET unread task notifications
+router.get("/notifications", async (req, res) => {
+  try {
+    const ownerKey = req.query.userId;
+    if (!ownerKey) {
+      return res.status(400).json({ message: "userId required" });
+    }
+
+    const board = await TaskBoard.findOne({ ownerKey }, { tasks: 1 });
+    if (!board) return res.json([]);
+
+    const notifications = board.tasks
+      .filter(
+        (t) =>
+          t.status === COLUMN_IDS.NEW &&
+          t.assigneeId === ownerKey &&
+          t.notifications?.unread
+      )
+      .map((t) => ({
+        taskId: t._id,
+        title: t.title,
+        assignedByName: t.assignedByName,
+        notifiedAt: t.notifications.notifiedAt,
+      }))
+      .sort(
+        (a, b) =>
+          new Date(b.notifiedAt) - new Date(a.notifiedAt)
+      );
+
+    res.json(notifications);
+  } catch (err) {
+    console.error("GET /notifications error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ✅ Mark notifications as read
+router.patch("/notifications/read", async (req, res) => {
+  try {
+    const { userId, taskIds } = req.body;
+    if (!userId || !Array.isArray(taskIds)) {
+      return res.status(400).json({ message: "Invalid payload" });
+    }
+
+    const board = await TaskBoard.findOne({ ownerKey: userId });
+    if (!board) return res.json({ success: true });
+
+    board.tasks.forEach((task) => {
+      if (
+        taskIds.includes(String(task._id)) &&
+        task.notifications?.unread
+      ) {
+        task.notifications.unread = false;
+      }
+    });
+
+    await board.save();
+    res.json({ success: true });
+  } catch (err) {
+    console.error("PATCH /notifications/read error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 module.exports = router;

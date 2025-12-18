@@ -1,15 +1,12 @@
-// routes/orders-un.js
+
+
 const express = require("express");
 const router = express.Router();
 const Order = require("../models/Order");
 const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
 
-
 const TTL_MS = 5 * 60 * 1000;
-
-
-
 
 let phoneCache = {
   leadSet: new Set(),
@@ -26,15 +23,9 @@ function normalizeTo10(str = "") {
   return s.length > 10 ? s.slice(-10) : s;
 }
 
-
-
-
 async function buildPhoneSetsFresh(startDate, key) {
   const leadSet = new Set();
   const custSet = new Set();
-
-
-
 
   const leadCur = Lead.find(
     { contactNumber: { $exists: true, $ne: null, $ne: "" } },
@@ -43,12 +34,10 @@ async function buildPhoneSetsFresh(startDate, key) {
     .lean()
     .cursor();
 
-
   for await (const d of leadCur) {
     const n = normalizeTo10(d.contactNumber);
     if (n) leadSet.add(n);
   }
-
 
   const custCur = Customer.find(
     { phone: { $exists: true, $ne: null, $ne: "" } },
@@ -57,18 +46,15 @@ async function buildPhoneSetsFresh(startDate, key) {
     .lean()
     .cursor();
 
-
   for await (const d of custCur) {
     const n = normalizeTo10(d.phone);
     if (n) custSet.add(n);
   }
 
-
   const match = {
     shipment_status: "Delivered",
     contact_number: { $exists: true, $ne: "" },
   };
-
 
   if (startDate) {
     const sd = new Date(startDate);
@@ -77,9 +63,7 @@ async function buildPhoneSetsFresh(startDate, key) {
     }
   }
 
-
   const rawPhones = await Order.distinct("contact_number", match);
-
 
   const unassignedPhones = [];
   for (const p of rawPhones) {
@@ -87,11 +71,9 @@ async function buildPhoneSetsFresh(startDate, key) {
     if (!n) continue;
     if (!leadSet.has(n) && !custSet.has(n)) {
 
-
       unassignedPhones.push(p);
     }
   }
-
 
   phoneCache = {
     leadSet,
@@ -102,24 +84,17 @@ async function buildPhoneSetsFresh(startDate, key) {
     key,
   };
 
-
   return phoneCache;
 }
-
-
-
 
 async function getPhoneSets({ force = false, startDate = null } = {}) {
   const key = startDate || "ALL";
   const fresh =
     Date.now() - phoneCache.builtAt < TTL_MS && phoneCache.key === key;
 
-
   if (!force && fresh) return phoneCache;
 
-
   if (phoneCache.building) return phoneCache.building;
-
 
   phoneCache.building = buildPhoneSetsFresh(startDate, key);
   return phoneCache.building;
@@ -137,7 +112,40 @@ router.get("/unassigned-delivered-count", async (req, res) => {
     });
 
 
-    const count = unassignedPhones.length;
+    if (unassignedPhones.length === 0) {
+      return res.json({
+        count: 0,
+        cacheAgeMs: Date.now() - phoneCache.builtAt,
+      });
+    }
+
+
+    const match = {
+      shipment_status: "Delivered",
+      contact_number: { $in: unassignedPhones },
+      order_id: { $regex: /^MA\d+$/ }, 
+    };
+
+
+    if (startDate) {
+      const sd = new Date(startDate);
+      if (!isNaN(sd)) {
+        match.order_date = { $gte: sd };
+      }
+    }
+
+    const result = await Order.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$contact_number",
+        },
+      },
+      { $count: "count" },
+    ]);
+
+
+    const count = result[0]?.count || 0;
 
 
     res.json({
@@ -149,8 +157,6 @@ router.get("/unassigned-delivered-count", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-
 
 
 router.get("/unassigned-delivered", async (req, res) => {
@@ -166,21 +172,11 @@ router.get("/unassigned-delivered", async (req, res) => {
     const { startDate } = req.query;
 
 
-  const requestedSortBy = req.query.sortBy || "order_date";
-const sortOrder =
-  (req.query.sortOrder || "desc").toLowerCase() === "asc" ? 1 : -1;
+    const sortOrder =
+      (req.query.sortOrder || "desc").toLowerCase() === "asc" ? 1 : -1;
 
 
-// only allow known sortable fields to avoid bad input
-const allowedSortFields = ["last_updated_at", "order_date"];
-const sortBy = allowedSortFields.includes(requestedSortBy)
-  ? requestedSortBy
-  : "order_date";
-
-
-const sortStage = {};
-sortStage[sortBy] = sortOrder;
-sortStage.last_updated_at = sortOrder;
+    const sortField = "order_date";  
 
 
     const { unassignedPhones } = await getPhoneSets({
@@ -189,30 +185,20 @@ sortStage.last_updated_at = sortOrder;
     });
 
 
-    const total = unassignedPhones.length;
-    const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
-
-
-    // slice only the phone numbers for this page
-    const pagePhones = unassignedPhones.slice(skip, skip + limit);
-
-
-    if (pagePhones.length === 0) {
+    if (unassignedPhones.length === 0) {
       return res.json({
         page,
         limit,
-        total,
-        totalPages,
+        total: 0,
+        totalPages: 1,
         data: [],
-        cacheAgeMs: Date.now() - phoneCache.builtAt,
       });
     }
 
 
-    // match only orders in the same date range
     const matchStage = {
       shipment_status: "Delivered",
-      contact_number: { $in: pagePhones },
+      contact_number: { $in: unassignedPhones },
     };
 
 
@@ -224,24 +210,47 @@ sortStage.last_updated_at = sortOrder;
     }
 
 
-  const data = await Order.aggregate([
-  { $match: matchStage },
-  { $sort: sortStage }, // ensure "latest" comes first
+ const pipeline = [
+  {
+    $match: {
+      shipment_status: "Delivered",
+      contact_number: { $in: unassignedPhones },
+      order_id: { $regex: /^MA\d+$/ }, 
+    },
+  },
+
+  { $sort: { order_date: sortOrder } },
+
   {
     $group: {
       _id: "$contact_number",
       order_id: { $first: "$order_id" },
+      full_name: { $first: "$full_name" },
       shipment_status: { $first: "$shipment_status" },
       contact_number: { $first: "$contact_number" },
       order_date: { $first: "$order_date" },
-       full_name: { $first: "$full_name" },
       last_updated_at: { $first: "$last_updated_at" },
     },
   },
-  { $sort: sortStage },
-]);
 
 
+
+
+  { $sort: { order_date: sortOrder } },
+
+
+
+
+  { $skip: skip },
+  { $limit: limit },
+];
+
+
+    const data = await Order.aggregate(pipeline);
+
+
+    const total = unassignedPhones.length;
+    const totalPages = Math.ceil(total / limit);
 
 
     res.json({
@@ -250,16 +259,131 @@ sortStage.last_updated_at = sortOrder;
       total,
       totalPages,
       data,
-      cacheAgeMs: Date.now() - phoneCache.builtAt,
     });
   } catch (err) {
     console.error("unassigned-delivered error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+router.post("/assign-employee", async (req, res) => {
+  try {
+    const { phone, employeeId } = req.body;
+
+
+    if (!phone || !employeeId) {
+      return res.status(400).json({ error: "phone and employeeId required" });
+    }
+
+
+    const employee = await require("../models/Employee").findById(employeeId);
+    if (!employee) {
+      return res.status(404).json({ error: "Employee not found" });
+    }
+
+
+    const normalized = String(phone).replace(/\D/g, "").slice(-10);
+
+
+    let lead = await Lead.findOne({ contactNumber: normalized });
+
+
+    if (!lead) {
+      lead = await Lead.create({
+        contactNumber: normalized,
+        leadSource: "Unassigned Delivered",
+      });
+    }
+
+
+    if (employee.role.toLowerCase().includes("sales")) {
+      lead.agentAssigned = employee._id;
+    }
+
+
+    if (employee.role.toLowerCase().includes("retention")) {
+      lead.healthExpertAssigned = employee._id;
+    }
+
+
+    await lead.save();
+
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("assign-employee error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+router.post("/update-lead-from-unassigned", async (req, res) => {
+  try {
+    const {
+      name,
+      contactNumber,
+      orderId,
+      orderDate,
+      assignedName,
+    } = req.body;
+
+
+    if (!contactNumber || !assignedName) {
+      return res.status(400).json({
+        error: "contactNumber and assignedName are required",
+      });
+    }
+
+
+    const normalizedContact = String(contactNumber)
+      .replace(/\D/g, "")
+      .slice(-10);
+
+
+    let lead = await Lead.findOne({ contactNumber: normalizedContact });
+
+
+    if (!lead) {
+      const now = new Date();
+
+
+      lead = new Lead({
+        contactNumber: normalizedContact,
+        leadSource: "Unassigned Delivered",
+        date: now.toISOString().slice(0, 10), // YYYY-MM-DD
+        time: now.toLocaleTimeString("en-IN", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
+      });
+    }
+
+
+
+
+    lead.name = name || lead.name;
+    lead.contactNumber = normalizedContact;
+    lead.orderId = orderId;
+    lead.healthExpertAssigned = assignedName;
+    lead.leadStatus = "Sales Done";
+    lead.salesStatus = "Sales Done";
+    lead.agentAssigned = "Online Order";
+
+
+    if (orderDate) {
+      lead.lastOrderDate = new Date(orderDate)
+        .toISOString()
+        .slice(0, 10);
+    }
+
+
+    await lead.save();
+
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("update-lead-from-unassigned error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 
 module.exports = router;
-
-
-
