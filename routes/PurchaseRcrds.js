@@ -1,4 +1,3 @@
-// routes/PurchaseRcrds.js
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -23,6 +22,18 @@ const s3 = new AWS.S3({
   s3ForcePathStyle: true,
 });
 
+// ----------------------
+// BOOLEAN PARSER
+// YES / TRUE / 1  -> true
+// anything else   -> false
+// ----------------------
+function parseBoolean(val) {
+  if (val === true) return true;
+  if (!val) return false;
+
+  const s = String(val).toLowerCase().trim();
+  return ["yes", "true", "1", "y"].includes(s);
+}
 
 // -----------------------------------------------------
 // GET ALL PURCHASE RECORDS
@@ -39,9 +50,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-
 // -----------------------------------------------------
-// CREATE A SINGLE PURCHASE RECORD
+// CREATE SINGLE RECORD
 // -----------------------------------------------------
 router.post("/", async (req, res) => {
   try {
@@ -52,7 +62,6 @@ router.post("/", async (req, res) => {
     return res.status(500).json({ error: "Failed to create purchase record" });
   }
 });
-
 
 // -----------------------------------------------------
 // UPDATE RECORD
@@ -76,7 +85,6 @@ router.patch("/:id", async (req, res) => {
   }
 });
 
-
 // -----------------------------------------------------
 // SOFT DELETE RECORD
 // -----------------------------------------------------
@@ -99,14 +107,14 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-
 // -----------------------------------------------------
-// UPLOAD INVOICE → WASABI
+// UPLOAD INVOICE (WASABI)
 // -----------------------------------------------------
 router.post("/upload-invoice", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file)
+    if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
+    }
 
     const file = req.file;
 
@@ -127,24 +135,22 @@ router.post("/upload-invoice", upload.single("file"), async (req, res) => {
   }
 });
 
-
 // -----------------------------------------------------
 // BULK UPLOAD (CSV / EXCEL)
 // -----------------------------------------------------
 router.post("/bulk-upload", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file)
+    if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
+    }
 
-    const fileBuffer = req.file.buffer;
-
-    const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet);
 
     const defaultDate = req.body.date || new Date();
 
-    let createdList = [];
+    const createdList = [];
 
     for (const r of rows) {
       const entry = await PurchaseRecord.create({
@@ -155,8 +161,12 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
         invoiceNo: r["Invoice No"] || "",
         vendorName: r["Vendor Name"] || "",
         amount: Number(r["Amount"] || 0),
-        matched2B: false,
-        tally: false,
+
+        // ✅ NEW FIELDS FROM EXCEL
+        invoiceUrl: r["Invoice Link"] || "",
+        matched2B: parseBoolean(r["Matched 2B"]),
+        tally: parseBoolean(r["Tally"]),
+
         isDeleted: false,
       });
 
@@ -174,6 +184,4 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-
-// -----------------------------------------------------
 module.exports = router;
