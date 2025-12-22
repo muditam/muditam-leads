@@ -1869,6 +1869,201 @@ router.post('/api/retention-sales/daywise-matrix', async (req, res) => {
   }
 });
 
+const normalizeOrderId = (v = "") =>
+  String(v).replace(/^#/, "").trim();
+
+const normalizeDateRange = (startDate, endDate) => {
+  const start = startDate ? new Date(startDate) : null;
+  const end = endDate ? new Date(endDate + "T23:59:59.999") : null;
+  return { start, end };
+};
+
+// --------------------
+// MAIN INCENTIVE API
+// --------------------
+router.get("/api/incentives", async (req, res) => {
+  try {
+    const { agentName, startDate, endDate } = req.query;
+    if (!agentName) {
+      return res.status(400).json({ message: "agentName is required" });
+    }
+
+    // 1️⃣ Detect agent role
+    const employee = await Employee.findOne(
+      { fullName: agentName },
+      { role: 1 }
+    ).lean();
+
+    if (!employee) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
+
+    const role = employee.role;
+    const { start, end } = normalizeDateRange(startDate, endDate);
+
+    let rows = [];
+
+    // ==================================================
+    // 🟦 SALES AGENT
+    // ==================================================
+    if (role === "Sales Agent") {
+      // ---------- Leads ----------
+      const leadQuery = { agentAssigned: agentName };
+      if (startDate || endDate) {
+        leadQuery.date = {};
+        if (startDate) leadQuery.date.$gte = startDate;
+        if (endDate) leadQuery.date.$lte = endDate;
+      }
+
+      const leads = await Lead.find(leadQuery).lean();
+
+      // ---------- MyOrders ----------
+      const myOrderQuery = { agentName };
+      if (start || end) {
+        myOrderQuery.orderDate = {};
+        if (start) myOrderQuery.orderDate.$gte = start;
+        if (end) myOrderQuery.orderDate.$lte = end;
+      }
+
+      const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+      rows = [
+        // 🔹 Lead → amountPaid
+        ...leads.map((l) => ({
+          date: l.date,
+          name: l.name,
+          orderId: l.orderId || "",
+          phone: l.contactNumber || "",
+          modeOfPayment: l.modeOfPayment || "",
+          deliveryStatus: "",
+          amount: Number(l.amountPaid || 0),
+        })),
+
+        // 🔹 MyOrder → totalPrice + partialPayment + upsellAmount
+        ...myOrders.map((o) => ({
+          date: o.orderDate
+            ? o.orderDate.toISOString().slice(0, 10)
+            : "",
+          name: o.customerName,
+          orderId: o.orderId || "",
+          phone: o.phone || "",
+          modeOfPayment: o.paymentMethod || "",
+          deliveryStatus: "",
+          amount:
+            Number(o.totalPrice || 0) +
+            Number(o.partialPayment || 0) +
+            Number(o.upsellAmount || 0),
+        })),
+      ];
+    }
+
+    // ==================================================
+    // 🟩 RETENTION AGENT
+    // ==================================================
+    if (role === "Retention Agent") {
+      // ---------- RetentionSales ----------
+      const retentionQuery = { orderCreatedBy: agentName };
+      if (startDate || endDate) {
+        retentionQuery.date = {};
+        if (startDate) retentionQuery.date.$gte = startDate;
+        if (endDate) retentionQuery.date.$lte = endDate;
+      }
+
+      const retentionSales = await RetentionSales.find(retentionQuery).lean();
+
+      // ---------- MyOrders ----------
+      const myOrderQuery = { agentName };
+      if (start || end) {
+        myOrderQuery.orderDate = {};
+        if (start) myOrderQuery.orderDate.$gte = start;
+        if (end) myOrderQuery.orderDate.$lte = end;
+      }
+
+      const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+      rows = [
+        // 🔹 RetentionSales → amountPaid
+        ...retentionSales.map((r) => ({
+          date: r.date,
+          name: r.name || "",
+          orderId: r.orderId || "",
+          phone: r.contactNumber || "",
+          modeOfPayment: r.modeOfPayment || "",
+          deliveryStatus: r.shipway_status || "",
+          amount: Number(r.amountPaid || 0),
+        })),
+
+        // 🔹 MyOrder → totalPrice + partialPayment + upsellAmount
+        ...myOrders.map((o) => ({
+          date: o.orderDate
+            ? o.orderDate.toISOString().slice(0, 10)
+            : "",
+          name: o.customerName,
+          orderId: o.orderId || "",
+          phone: o.phone || "",
+          modeOfPayment: o.paymentMethod || "",
+          deliveryStatus: "",
+          amount:
+            Number(o.totalPrice || 0) +
+            Number(o.partialPayment || 0) +
+            Number(o.upsellAmount || 0),
+        })),
+      ];
+    }
+
+    // ==================================================
+    // 🚚 SHIPMENT STATUS RESOLUTION (ROBUST)
+    // ==================================================
+    const orderIdVariants = new Set();
+
+    rows.forEach((r) => {
+      if (!r.orderId) return;
+
+      const raw = String(r.orderId).trim();
+      const clean = normalizeOrderId(raw);
+
+      orderIdVariants.add(raw);
+      orderIdVariants.add(clean);
+      orderIdVariants.add(`#${clean}`);
+    });
+
+    const orderIds = [...orderIdVariants];
+
+    if (orderIds.length) {
+      const orders = await Order.find(
+        { order_id: { $in: orderIds } },
+        { order_id: 1, shipment_status: 1 }
+      ).lean();
+
+      const shipwayMap = orders.reduce((acc, o) => {
+        const clean = normalizeOrderId(o.order_id);
+        acc[clean] = o.shipment_status || "";
+        return acc;
+      }, {});
+
+      rows = rows.map((r) => {
+        if (!r.deliveryStatus && r.orderId) {
+          const clean = normalizeOrderId(r.orderId);
+          r.deliveryStatus = shipwayMap[clean] || "";
+        }
+        return r;
+      });
+    }
+
+    // ==================================================
+    // 🔽 FINAL SORT (Newest first)
+    // ==================================================
+    rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json(rows);
+  } catch (error) {
+    console.error("Error in /api/incentives:", error);
+    res.status(500).json({
+      message: "Failed to fetch incentives",
+      error: error.message,
+    });
+  }
+});
 
 module.exports = router;
  
