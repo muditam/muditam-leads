@@ -1877,18 +1877,14 @@ const normalizeDateRange = (startDate, endDate) => {
   const end = endDate ? new Date(endDate + "T23:59:59.999") : null;
   return { start, end };
 };
-
-// --------------------
-// MAIN INCENTIVE API
-// --------------------
+ 
 router.get("/api/incentives", async (req, res) => {
   try {
     const { agentName, startDate, endDate } = req.query;
     if (!agentName) {
       return res.status(400).json({ message: "agentName is required" });
     }
-
-    // 1️⃣ Detect agent role
+ 
     const employee = await Employee.findOne(
       { fullName: agentName },
       { role: 1 }
@@ -1902,10 +1898,7 @@ router.get("/api/incentives", async (req, res) => {
     const { start, end } = normalizeDateRange(startDate, endDate);
 
     let rows = [];
-
-    // ==================================================
-    // 🟦 SALES AGENT
-    // ==================================================
+ 
     if (role === "Sales Agent") {
       // ---------- Leads ----------
       const leadQuery = { agentAssigned: agentName };
@@ -1956,12 +1949,8 @@ router.get("/api/incentives", async (req, res) => {
         })),
       ];
     }
-
-    // ==================================================
-    // 🟩 RETENTION AGENT
-    // ==================================================
-    if (role === "Retention Agent") {
-      // ---------- RetentionSales ----------
+ 
+    if (role === "Retention Agent") { 
       const retentionQuery = { orderCreatedBy: agentName };
       if (startDate || endDate) {
         retentionQuery.date = {};
@@ -1992,8 +1981,7 @@ router.get("/api/incentives", async (req, res) => {
           deliveryStatus: r.shipway_status || "",
           amount: Number(r.amountPaid || 0),
         })),
-
-        // 🔹 MyOrder → totalPrice + partialPayment + upsellAmount
+ 
         ...myOrders.map((o) => ({
           date: o.orderDate
             ? o.orderDate.toISOString().slice(0, 10)
@@ -2010,10 +1998,7 @@ router.get("/api/incentives", async (req, res) => {
         })),
       ];
     }
-
-    // ==================================================
-    // 🚚 SHIPMENT STATUS RESOLUTION (ROBUST)
-    // ==================================================
+ 
     const orderIdVariants = new Set();
 
     rows.forEach((r) => {
@@ -2049,10 +2034,7 @@ router.get("/api/incentives", async (req, res) => {
         return r;
       });
     }
-
-    // ==================================================
-    // 🔽 FINAL SORT (Newest first)
-    // ==================================================
+ 
     rows.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     res.json(rows);
@@ -2066,4 +2048,3 @@ router.get("/api/incentives", async (req, res) => {
 });
 
 module.exports = router;
- 

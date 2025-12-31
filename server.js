@@ -9,7 +9,7 @@ const path = require('path');
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const Lead = require('./models/Lead');
-const Customer = require('./models/Customer'); 
+const Customer = require('./models/Customer');
 const ConsultationDetails = require('./models/ConsultationDetails');
 const XLSX = require("xlsx");
 const axios = require('axios');
@@ -23,7 +23,7 @@ const shopifyProductsRoute = require("./services/shopifyProducts");
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
 const razorpayRoutes = require("./services/razorpay");
-const shopifyRoutes = require("./routes/shopifyRoutes"); 
+const shopifyRoutes = require("./routes/shopifyRoutes");
 const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
@@ -61,7 +61,7 @@ const searchRoutes = require('./routes/searchRoutes');
 const Addemployee = require('./routes/Addemployee');
 const authRoutes = require('./routes/loginRoutes');
 const clickToCallRoutes = require('./routes/clickToCallRoutes');
-const financeRoutes = require("./routes/financeRoutes"); 
+const financeRoutes = require("./routes/financeRoutes");
 const razorpaySettlementRoutes = require("./PaymentGateway/razorpaySettlements");
 const GokwikSettlementRoutes = require("./PaymentGateway/easebuzz");
 const phonepeFinance = require("./PaymentGateway/phonepeFinance");
@@ -77,7 +77,7 @@ const abandonedRouter = require('./routes/abandoned');
 const financeDashboard = require("./routes/financeDashboard");
 const UndeliveredordersRoute = require('./operations/undelivered-orders');
 
-const zohoMailRoutes = require("./routes/zohoMail"); 
+const zohoMailRoutes = require("./routes/zohoMail");
 
 const smartfloRoutes = require("./routes/smartflo");
 
@@ -87,7 +87,7 @@ const dietTemplatesRouter = require("./routes/dietTemplatesadmin");
 
 const dietPlansRouter = require("./routes/dietPlans");
 
-const ordersRouter = require("./routes/ShopifyOrderDB"); 
+const ordersRouter = require("./routes/ShopifyOrderDB");
 
 const cohartDataApiRouter = require("./routes/cohart-dataApi");
 
@@ -95,15 +95,15 @@ const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders");
 
 const shopifyOrdersTable = require("./routes/shopifyOrdersTable");
 
-const leadsMigration = require('./routes/leadMigration'); 
+const leadsMigration = require('./routes/leadMigration');
 const orderConfirmationsRouter = require("./routes/orderConfirmations");
-const scheduleCallsRouter = require("./routes/scheduleCalls"); 
+const scheduleCallsRouter = require("./routes/scheduleCalls");
 const opsDashboardRoutes = require("./routes/opsDashboard");
-const orderConfirmAnalytics = require("./routes/orderConfirmAnalytics"); 
+const orderConfirmAnalytics = require("./routes/orderConfirmAnalytics");
 const assetsRoutes = require("./routes/add-assets");
-const assetAllotmentsRoutes = require("./routes/assetAllotments"); 
+const assetAllotmentsRoutes = require("./routes/assetAllotments");
 const assetJourneyRouter = require("./routes/assetJourney");
-const UnAssignedDelivered = require("./routes/UnAssignedDelivered"); 
+const UnAssignedDelivered = require("./routes/UnAssignedDelivered");
 
 const bobotSyncRoutes = require('./routes/bobotSync');
 
@@ -114,14 +114,14 @@ const bankCapital6389Routes = require("./PaymentGateway/bankCapital6389");
 const bankAxis3361Routes = require("./PaymentGateway/bankAxis3361");
 const bankCc1101Routes = require("./PaymentGateway/bankCc1101");
 const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
-const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay"); 
+const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay");
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
-const taskReportingRoutes = require("./routes/taskReportingRoutes");     
+const taskReportingRoutes = require("./routes/taskReportingRoutes");
 const SwitchEmployee = require("./routes/SwitchEmployee");
 const ConfirmedOrders = require("./routes/confirmedOrders");
 const invoiceRoutes = require('./routes/invoiceRoutes');
 
-const globalShopifyOrders = require("./International/globalShopifyOrders"); 
+const globalShopifyOrders = require("./International/globalShopifyOrders");
 const globalAbandonedCarts = require("./International/globalAbandonedCarts");
 const globalRetentionLeads = require("./International/InternationalRoutes/globalRetentionLeads");
 const globalRetentionDetails = require("./International/InternationalRoutes/globalRetentionDetails");
@@ -138,16 +138,19 @@ const shopifyExport = require("./routes/shopifyExport");
 const utmShopifyRoutes = require("./routes/utmShopifyRoutes");
 const notificationsRoutes = require("./routes/notifications");
 
-const app = express(); 
-const PORT = process.env.PORT || 5001; 
+const WhatsAppRoutes = require("./whatsapp/whatsapp.routes");
+const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes");
+
+const app = express();
+const PORT = process.env.PORT || 5001;
 
 app.use(
   compression({
-    filter: (req, res) => { 
+    filter: (req, res) => {
       if (req.path === '/api/sse') return false;
 
       const type = String(res.getHeader('Content-Type') || '');
-      if (type.includes('text/event-stream')) return false; 
+      if (type.includes('text/event-stream')) return false;
 
       return compression.filter(req, res);
     },
@@ -194,7 +197,7 @@ app.use(
     },
   })
 );
- 
+
 function toNumberLoose(v) {
   if (v === null || v === undefined) return undefined;
   if (typeof v === "number" && !Number.isNaN(v)) return v;
@@ -210,13 +213,13 @@ function toNumberLoose(v) {
   return undefined;
 }
 const pickFirst = (...vals) => vals.find(v => v !== undefined && v !== null && v !== "");
- 
-function majorToMinor(v) { 
+
+function majorToMinor(v) {
   const n = toNumberLoose(v);
   if (n === undefined) return undefined;
-  return Math.round(n * 100); 
+  return Math.round(n * 100);
 }
- 
+
 function isAbandoned(root, mergedTypeText = "") {
   if (root?.is_abandoned === true) return true;
   const txt = String(mergedTypeText || "").toLowerCase();
@@ -229,17 +232,17 @@ function hashId(buf) {
   try { return crypto.createHash("sha256").update(buf).digest("hex"); }
   catch { return undefined; }
 }
- 
+
 app.post(
   "/api/webhook",
   bodyParser.json({ verify: rawSaver, limit: "2mb", type: ["application/json", "application/cloudevents+json", "text/json"] }),
   bodyParser.urlencoded({ verify: rawSaver, extended: false, limit: "2mb", type: ["application/x-www-form-urlencoded"] }),
   bodyParser.text({ verify: rawSaver, type: ["text/plain"], limit: "2mb" }),
   async (req, res) => {
-    try { 
+    try {
       const ctype = (req.headers["content-type"] || "").split(";")[0];
       const raw = req.rawBody || Buffer.from("");
- 
+
       const sharedSecret = process.env.GOKWIK_WEBHOOK_SECRET;
       const sig = req.get("X-GK-Signature") || req.get("x-gk-signature");
       if (sharedSecret && sig) {
@@ -247,7 +250,7 @@ app.post(
         const ok = sig.replace(/^sha256=/, "") === digest;
         if (!ok) return res.status(401).send("Invalid signature");
       }
- 
+
       let event;
       if (ctype === "application/json" || ctype === "application/cloudevents+json" || ctype === "text/json") {
         event = req.body;
@@ -269,20 +272,20 @@ app.post(
           return res.status(400).send("Unsupported body format");
         }
       }
- 
+
       const root = event?.data || event?.payload || event;
- 
+
       const typeText = [
         event?.type, event?.event, event?.topic, event?.event_type,
         root?.event, root?.event_type, root?.event_name, root?.name
       ].filter(Boolean).join("|");
- 
+
       const rawForHash = raw?.length ? raw : Buffer.from(JSON.stringify(event || {}));
- 
+
       const eventId = pickFirst(root.request_id, event.id, event.event_id) || hashId(rawForHash);
       const checkoutId = pickFirst(root.token, root.checkout_id, root.cart_id, root.checkout_token);
       const orderId = pickFirst(root.order_id, root.orderId);
- 
+
       const cust = root.customer || root.customer_details || {};
       const addr = root.address || {};
       const shipping = root.shipping_address || root.shipping || {};
@@ -295,12 +298,12 @@ app.post(
         billing.state, billing.province, billing.region,
         root.state, root.province, root.region
       );
- 
+
       const email = pickFirst(
         cust.email, addr.email, shipping.email, billing.email,
         root.email, root.customer_email, root.contact_email, root.user_email
       );
- 
+
       const phone = pickFirst(
         cust.phone, addr.phone, shipping.phone, billing.phone,
         root.phone, root.mobile, root.mobile_number, root.contact, root.contact_number,
@@ -318,9 +321,9 @@ app.post(
           ) || undefined,
         email: email || undefined,
         phone: phone || undefined,
-        state: stateName ? String(stateName) : undefined,  
+        state: stateName ? String(stateName) : undefined,
       };
- 
+
       const addressParts = {
         name: pickFirst(shipping.name, billing.name, addr.name, customer.name, root.name),
         line1: pickFirst(shipping.address1, billing.address1, addr.address1, root.address1, root.addr1),
@@ -342,7 +345,7 @@ app.post(
           .join(", ");
       }
       const customerAddressText = compactAddressStr(addressParts);
- 
+
       const itemsSrc = Array.isArray(root.items)
         ? root.items
         : (Array.isArray(root.line_items) ? root.line_items : []);
@@ -360,11 +363,11 @@ app.post(
           title: it.title || it.product_title || it.name || "",
           variantTitle,
           quantity: qty,
-          unitPrice: unitMinor,     
-          finalLinePrice: lineMinor,  
+          unitPrice: unitMinor,
+          finalLinePrice: lineMinor,
         };
       });
- 
+
       const currency = pickFirst(root.currency, "INR");
       const totalMinor =
         toNumberLoose(root.total_price) !== undefined
@@ -375,13 +378,13 @@ app.post(
             majorToMinor(root.original_total_price) ||
             0
           );
- 
+
       const eventAt =
         (root.created_at && new Date(root.created_at)) ||
         (root.updated_at && new Date(root.updated_at)) ||
         (event.timestamp && new Date(event.timestamp)) ||
         new Date();
- 
+
       const normalized = {
         eventId,
         checkoutId,
@@ -397,12 +400,12 @@ app.post(
         recoveryUrl: root.abc_url ? String(root.abc_url).trim() : undefined,
         eventAt,
         receivedAt: new Date(),
-        raw: root,  
+        raw: root,
         meta: {
           phoneOnly: Boolean(customer.phone) && !customer.name && !customer.email,
         },
       };
- 
+
       const abandoned = isAbandoned(root, typeText);
       if (abandoned) {
         const query = normalized.eventId
@@ -423,7 +426,7 @@ app.post(
   }
 );
 
-const sseClients = new Map();  
+const sseClients = new Map();
 
 function didKey(v) {
   return String(v || "").replace(/\D/g, "").slice(-10);
@@ -516,7 +519,7 @@ app.use('/api/escalations', escalationRoutes);
 app.use("/api/orders", orderRoutes);
 
 app.use(getActiveProductsRoute);
- 
+
 app.use('/api/phonepe', phonepeRoutes);
 
 app.use('/api/myorders/download', downloadRoute);
@@ -583,30 +586,30 @@ app.use("/api", allProductsFromOrdersRoute);
 
 app.use("/api", shopifyOrdersTable);
 
-app.use('/api/lead-migration', leadsMigration); 
+app.use('/api/lead-migration', leadsMigration);
 app.use("/api/order-confirmations", orderConfirmationsRouter);
 app.use("/api/schedule-calls", scheduleCallsRouter);
 
 app.use("/api/ops-dashboard", opsDashboardRoutes);
-app.use("/api/order-analytics", orderConfirmAnalytics); 
+app.use("/api/order-analytics", orderConfirmAnalytics);
 
-app.use("/api/assets", assetsRoutes); 
+app.use("/api/assets", assetsRoutes);
 app.use("/api/asset-allotments", assetAllotmentsRoutes);
 app.use("/api/asset-journey", assetJourneyRouter);
-app.use("/api/orders-un", UnAssignedDelivered); 
+app.use("/api/orders-un", UnAssignedDelivered);
 
-app.use('/api/bobot', bobotSyncRoutes);  
+app.use('/api/bobot', bobotSyncRoutes);
 
 app.use("/", shipmentSyncRouter);
- 
-app.use(bankTxnRouter); 
+
+app.use(bankTxnRouter);
 app.use("/api/bank-reconciliation", bankCapital6389Routes);
 app.use("/api/bank-reconciliation", bankAxis3361Routes);
 app.use("/api/bank-reconciliation", bankCc1101Routes);
 app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
-app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes); 
-app.use("/api/tasks", taskBoardRoutes); 
-app.use("/api/tasks/reporting", taskReportingRoutes);  
+app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes);
+app.use("/api/tasks", taskBoardRoutes);
+app.use("/api/tasks/reporting", taskReportingRoutes);
 app.use("/api/employees", SwitchEmployee);
 app.use("/api/order-confirmation", ConfirmedOrders);
 app.use('/api/invoices', invoiceRoutes);
@@ -629,29 +632,32 @@ app.use("/api/shopify", shopifyExport);
 app.use("/api/utm", utmShopifyRoutes);
 app.use("/api/notifications", notificationsRoutes);
 
+app.use("/api/whatsapp", WhatsAppRoutes);
+app.use("/api/whatsapp/templates", whatsappTemplatesRoutes);
+
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-}).then(() => console.log('MongoDB connected')) 
+}).then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
-   
+
 
 app.get('/api/sse', (req, res) => {
-  const { did } = req.query; 
+  const { did } = req.query;
   if (!did) return res.status(400).send('Missing did');
- 
-  res.setHeader('Content-Type', 'text/event-stream'); 
+
+  res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
- 
+
   req.socket?.setKeepAlive?.(true);
   req.socket?.setNoDelay?.(true);
- 
+
   res.flushHeaders?.();
 
   addSseClient(String(did), res);
- 
+
   const ping = setInterval(() => {
     try { res.write(':\n\n'); } catch { }
   }, 15000);
@@ -661,7 +667,7 @@ app.get('/api/sse', (req, res) => {
     removeSseClient(String(did), res);
     try { res.end(); } catch { }
   });
- 
+
   res.write(`data: ${JSON.stringify({ type: 'connected', did: String(did) })}\n\n`);
 });
 
@@ -672,28 +678,28 @@ const jsonParser = bodyParser.json();
 app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
   try {
     const p = req.body || {};
- 
+
     const uuid = p.$uuid || p.uuid || p.$UUID || p.UUID;
     const callId = p.$call_id || p.call_id;
     const didRaw = p.$call_to_number || p.call_to_number;
     const callerRaw =
       p.$caller_id_number || p.caller_id_number ||
       p.$customer_no_with_prefix || p.customer_no_with_prefix || '';
- 
+
     const didKeyStr = didKey(didRaw);
     const ani = String(callerRaw || '').replace(/\D/g, '').slice(-10);
- 
+
     console.log("[CRM webhook] incoming call", {
       uuid, callId, didRaw, didKey: didKeyStr, ani
     });
- 
+
     let lead = null;
     if (ani) {
       lead = await Lead.findOne({
         contactNumber: { $regex: new RegExp(`${ani}$`) }
       }).select('_id name agentAssigned lastOrderDate');
     }
- 
+
     const event = {
       type: 'incoming_call',
       callId: callId || uuid,
@@ -709,7 +715,7 @@ app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
         lastOrderDate: lead.lastOrderDate || ''
       } : null,
     };
- 
+
     if (didKeyStr) sseSend(didKeyStr, event);
 
     return res.status(200).json({ success: true });
@@ -726,7 +732,7 @@ const httpsAgent = new https.Agent({
 });
 
 async function fetchAllOrders(url, accessToken, allOrders = []) {
-  try { 
+  try {
     const response = await axios.get(url, {
       headers: {
         'X-Shopify-Access-Token': accessToken,
@@ -973,8 +979,8 @@ app.post('/api/leads/by-phones', async (req, res) => {
   if (!Array.isArray(phoneNumbers)) {
     return res.status(400).json({ message: 'phoneNumbers should be an array' });
   }
- 
-  const last10List = [...new Set(phoneNumbers.map((p) => phoneLast10(p)).filter(Boolean))]; 
+
+  const last10List = [...new Set(phoneNumbers.map((p) => phoneLast10(p)).filter(Boolean))];
   const regexes = last10List.map((p) => new RegExp(`${p}$`));
 
   try {
@@ -1059,7 +1065,7 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
     }
 
     const pipeline = [
-      { $sort: { order_date: -1 } }, 
+      { $sort: { order_date: -1 } },
       {
         $group: {
           _id: "$contact_number",
@@ -1067,7 +1073,7 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
         }
       },
       { $replaceRoot: { newRoot: "$mostRecentOrder" } },
-      { $match: { shipment_status } }  
+      { $match: { shipment_status } }
     ];
 
     const recentOrders = await Order.aggregate(pipeline);
@@ -1079,14 +1085,14 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
   }
 });
 
- 
+
 cron.schedule('0 8 * * *', async () => {
   try {
     const orders = await Order.find({});
     for (const order of orders) {
       try {
         if (!order.order_date) continue;
- 
+
         if (order.shipment_status === "Delivered" || order.shipment_status === "RTO Delivered") {
           console.log(`Skipping cron update for order ${order.order_id} with final status: ${order.shipment_status}`);
           continue;
@@ -1108,14 +1114,14 @@ cron.schedule('0 8 * * *', async () => {
     console.error("Cron job error:", error);
   }
 });
- 
+
 function normalizePhone(phone) {
   if (!phone) return "";
   const cleaned = phone.replace(/\D/g, '').replace(/^91/, '');
   return cleaned.length === 10 ? cleaned : "";
 }
 
- 
+
 async function fetchShopifyFirstOrderDateByPhone(phone) {
   if (!phone) return null;
 
@@ -1148,7 +1154,7 @@ async function fetchShopifyFirstOrderDateByPhone(phone) {
     }
 
     console.log(`Fetching orders for customer ID: ${customer.id}`);
- 
+
     const ordersRes = await axios.get(`${shopifyBase}/orders.json`, {
       params: {
         customer_id: customer.id,
@@ -1181,7 +1187,7 @@ async function fetchShopifyFirstOrderDateByPhone(phone) {
 app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
   try {
     console.log("Starting update of lastOrderDate from Shopify...");
- 
+
     const leadsToUpdate = await Lead.find({
       $and: [
         {
@@ -1200,7 +1206,7 @@ app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
     if (!leadsToUpdate.length) {
       return res.json({ message: "No leads require lastOrderDate update" });
     }
- 
+
     const phoneToLeadsMap = {};
 
     leadsToUpdate.forEach((lead) => {
@@ -1209,14 +1215,14 @@ app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
       if (!phoneToLeadsMap[phone]) phoneToLeadsMap[phone] = [];
       phoneToLeadsMap[phone].push(lead._id);
     });
- 
+
     let updatedCount = 0;
 
     for (const phone of Object.keys(phoneToLeadsMap)) {
       console.log(`Fetching Shopify data for phone: ${phone}`);
       const firstOrderDate = await fetchShopifyFirstOrderDateByPhone(phone);
 
-      if (firstOrderDate) { 
+      if (firstOrderDate) {
         await Lead.updateMany(
           { _id: { $in: phoneToLeadsMap[phone] } },
           { lastOrderDate: firstOrderDate }
@@ -1257,12 +1263,12 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
     const requiredFields = ["Date", "Name", "Contact No"];
     const errors = [];
     const validLeads = [];
- 
+
     const contactNumbers = rows
       .map(row => row["Contact No"])
       .filter(Boolean)
       .map(num => String(num).trim());
- 
+
     const existing = await Lead.find({
       contactNumber: { $in: contactNumbers }
     }).select("contactNumber");
@@ -1275,7 +1281,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
         errors.push(`Row ${index + 2} is missing mandatory fields: ${missingFields.join(", ")}`);
         return;
       }
- 
+
       if (existingSet.has(String(row["Contact No"]).trim())) {
         errors.push(`Row ${index + 2} skipped - contact number already exists`);
         return;
@@ -1333,7 +1339,7 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
   const { contactNumber } = req.query;
 
   try {
-    const last10 = phoneLast10(contactNumber); 
+    const last10 = phoneLast10(contactNumber);
     const lead = await Lead.findOne({ contactNumber: { $regex: new RegExp(`${last10}$`) } });
 
     if (lead) {
@@ -1381,8 +1387,8 @@ app.get('/api/leads', async (req, res) => {
       const parsedlastOrderDate = parseDate(filterCriteria.lastOrderDate);
       if (parsedlastOrderDate) {
         query.lastOrderDate = parsedlastOrderDate;
-      } 
-    } 
+      }
+    }
 
     if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
     if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
@@ -1486,7 +1492,7 @@ app.put('/api/leads/:id', async (req, res) => {
 
 
 app.delete('/api/leads/:id', async (req, res) => {
-  try { 
+  try {
     const deletedLead = await Lead.findByIdAndDelete(req.params.id);
     if (!deletedLead) {
       return res.status(404).json({ message: 'Lead not found' });
@@ -1526,13 +1532,13 @@ app.get("/api/leads/retention", async (req, res) => {
 
     page = parseInt(page);
     limit = parseInt(limit);
- 
-    let match = { salesStatus: "Sales Done" }; 
- 
+
+    let match = { salesStatus: "Sales Done" };
+
     if (retentionStatus && retentionStatus !== "All") {
-      match.retentionStatus = retentionStatus; 
+      match.retentionStatus = retentionStatus;
     }
- 
+
     if (search && search.trim() !== "") {
       const s = search.trim();
       match.$or = [
@@ -1541,14 +1547,14 @@ app.get("/api/leads/retention", async (req, res) => {
         { orderId: { $regex: s, $options: "i" } },
       ];
     }
- 
+
     if (agentAssigned) {
       let arr = Array.isArray(agentAssigned)
         ? agentAssigned
         : agentAssigned.split(",");
       match.agentAssigned = { $in: arr };
     }
- 
+
     if (healthExpertAssigned) {
       let arr = Array.isArray(healthExpertAssigned)
         ? healthExpertAssigned
@@ -1561,7 +1567,7 @@ app.get("/api/leads/retention", async (req, res) => {
         calculatedReminder: {
           $switch: {
             branches: [
-              { 
+              {
                 case: {
                   $or: [
                     { $eq: ["$rtNextFollowupDate", null] },
@@ -1574,7 +1580,7 @@ app.get("/api/leads/retention", async (req, res) => {
             ],
             default: {
               $let: {
-                vars: { 
+                vars: {
                   dYmd: {
                     $dateFromString: {
                       dateString: "$rtNextFollowupDate",
@@ -1582,14 +1588,14 @@ app.get("/api/leads/retention", async (req, res) => {
                       onError: null,
                       onNull: null,
                     },
-                  }, 
+                  },
                   dGeneral: {
                     $dateFromString: {
                       dateString: "$rtNextFollowupDate",
                       onError: null,
                       onNull: null,
                     },
-                  }, 
+                  },
                   excelDays: {
                     $cond: [
                       {
@@ -1606,7 +1612,7 @@ app.get("/api/leads/retention", async (req, res) => {
                       { $toInt: "$rtNextFollowupDate" },
                       null
                     ]
-                  }, 
+                  },
                   todayIST: {
                     $dateTrunc: {
                       date: "$$NOW",
@@ -1617,7 +1623,7 @@ app.get("/api/leads/retention", async (req, res) => {
                 },
                 in: {
                   $let: {
-                    vars: { 
+                    vars: {
                       followupDate: {
                         $cond: [
                           { $ne: ["$$dYmd", null] }, "$$dYmd",
@@ -1643,9 +1649,9 @@ app.get("/api/leads/retention", async (req, res) => {
                       }
                     },
                     in: {
-                      $cond: [ 
+                      $cond: [
                         { $eq: ["$$followupDate", null] },
-                        "NotSet", 
+                        "NotSet",
                         {
                           $let: {
                             vars: {
@@ -1680,7 +1686,7 @@ app.get("/api/leads/retention", async (req, res) => {
         }
       }
     };
- 
+
     const countPipeline = [
       { $match: match },
       addFieldsStage,
@@ -1691,7 +1697,7 @@ app.get("/api/leads/retention", async (req, res) => {
         }
       }
     ];
- 
+
     const statusCountsPromise = Lead.aggregate([
       { $match: { salesStatus: "Sales Done" } },
       {
@@ -1701,12 +1707,12 @@ app.get("/api/leads/retention", async (req, res) => {
         }
       }
     ]);
- 
+
     let mainPipeline = [
       { $match: match },
       addFieldsStage
     ];
- 
+
     if (followup) {
       mainPipeline.push({ $match: { calculatedReminder: followup } });
     }
@@ -1716,13 +1722,13 @@ app.get("/api/leads/retention", async (req, res) => {
       { $skip: (page - 1) * limit },
       { $limit: limit }
     );
- 
+
     let [leads, followupCountsArr, statusCountsArr] = await Promise.all([
       Lead.aggregate(mainPipeline),
       Lead.aggregate(countPipeline),
       statusCountsPromise,
     ]);
- 
+
     const profileFields = [
       "name", "contactNumber", "agentAssigned", "leadSource", "enquiryFor",
       "orderId", "productsOrdered", "amountPaid", "modeOfPayment", "deliveryStatus",
@@ -1742,12 +1748,12 @@ app.get("/api/leads/retention", async (req, res) => {
       }
       lead.profilePercent = Math.round((filled / profileFields.length) * 100);
     }
- 
+
     const counts = { Today: 0, Tomorrow: 0, Missed: 0, Later: 0, NotSet: 0 };
     for (const f of followupCountsArr) {
       counts[f._id] = f.count;
     }
- 
+
     let topCounts = { All: 0, Active: 0, Lost: 0 };
     let total = 0;
     for (const s of statusCountsArr) {
@@ -1757,7 +1763,7 @@ app.get("/api/leads/retention", async (req, res) => {
       total += s.count;
     }
     topCounts.All = total;
- 
+
     res.json({
       leads,
       counts,
@@ -1779,7 +1785,7 @@ app.get('/api/leads/retentions', async (req, res) => {
   }
 
   const IST_TZ = 'Asia/Kolkata';
- 
+
   const startOfISTDay = (d = new Date()) => {
     const ymd = new Intl.DateTimeFormat('en-CA', {
       timeZone: IST_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -1788,12 +1794,12 @@ app.get('/api/leads/retentions', async (req, res) => {
   };
   const shiftDaysIST = (date, days) => new Date(date.getTime() + days * 86400000);
 
-  const startTodayIST_UTC    = startOfISTDay();
+  const startTodayIST_UTC = startOfISTDay();
   const startTomorrowIST_UTC = shiftDaysIST(startTodayIST_UTC, 1);
   const startDayAfterIST_UTC = shiftDaysIST(startTodayIST_UTC, 2);
 
   const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
- 
+
   const strToDateExprFor = (field) => ({
     $let: {
       vars: { s: `$${field}` },
@@ -1822,16 +1828,16 @@ app.get('/api/leads/retentions', async (req, res) => {
       }
     }
   });
- 
-  const isDateField   = (field) => ({ [field]: { $type: 'date'   } });
+
+  const isDateField = (field) => ({ [field]: { $type: 'date' } });
   const isStringField = (field) => ({ [field]: { $type: 'string' } });
 
-  const stringLT      = (field, b) => ({ $and: [ isStringField(field), { $expr: { $lt:  [strToDateExprFor(field), b] } } ] });
-  const stringGTE     = (field, b) => ({ $and: [ isStringField(field), { $expr: { $gte: [strToDateExprFor(field), b] } } ] });
-  const stringInRange = (field, g,l)=> ({ $and: [ isStringField(field), { $expr: { $and: [ { $gte: [strToDateExprFor(field), g] }, { $lt: [strToDateExprFor(field), l] } ] } } ] });
-  const dateLT        = (field, b) => ({ $and: [ isDateField(field),   { [field]: { $lt:  b } } ] });
-  const dateGTE       = (field, b) => ({ $and: [ isDateField(field),   { [field]: { $gte: b } } ] });
-  const dateInRange   = (field, g,l)=> ({ $and: [ isDateField(field),   { [field]: { $gte: g, $lt: l } } ] });
+  const stringLT = (field, b) => ({ $and: [isStringField(field), { $expr: { $lt: [strToDateExprFor(field), b] } }] });
+  const stringGTE = (field, b) => ({ $and: [isStringField(field), { $expr: { $gte: [strToDateExprFor(field), b] } }] });
+  const stringInRange = (field, g, l) => ({ $and: [isStringField(field), { $expr: { $and: [{ $gte: [strToDateExprFor(field), g] }, { $lt: [strToDateExprFor(field), l] }] } }] });
+  const dateLT = (field, b) => ({ $and: [isDateField(field), { [field]: { $lt: b } }] });
+  const dateGTE = (field, b) => ({ $and: [isDateField(field), { [field]: { $gte: b } }] });
+  const dateInRange = (field, g, l) => ({ $and: [isDateField(field), { [field]: { $gte: g, $lt: l } }] });
 
   try {
     const {
@@ -1841,13 +1847,13 @@ app.get('/api/leads/retentions', async (req, res) => {
       followupCategory,
       search: searchRaw,
       followupDate: followupDateStr,
-      serial: serialRaw, 
-      rowColor,               
-      acquiredYear,          
-      acquiredMonth,        
+      serial: serialRaw,
+      rowColor,
+      acquiredYear,
+      acquiredMonth,
     } = req.query;
 
-    const page  = Math.max(parseInt(pageRaw ?? '1', 10), 1);
+    const page = Math.max(parseInt(pageRaw ?? '1', 10), 1);
     const limit = Math.min(Math.max(parseInt(limitRaw ?? '50', 10), 1), 500);
 
     const serial = serialRaw != null && /^\d+$/.test(String(serialRaw))
@@ -1856,39 +1862,39 @@ app.get('/api/leads/retentions', async (req, res) => {
 
     let skip = (page - 1) * limit;
     if (serial != null) skip = serial;
- 
-    const notsetCond   = { $or: [ { rtNextFollowupDate: { $exists: false } }, { rtNextFollowupDate: null }, { rtNextFollowupDate: '' } ] };
-    const missedCond   = { $or: [ dateLT('rtNextFollowupDate', startTodayIST_UTC), stringLT('rtNextFollowupDate', startTodayIST_UTC) ] };
-    const todayCond    = { $or: [ dateInRange('rtNextFollowupDate', startTodayIST_UTC, startTomorrowIST_UTC), stringInRange('rtNextFollowupDate', startTodayIST_UTC, startTomorrowIST_UTC) ] };
-    const tomorrowCond = { $or: [ dateInRange('rtNextFollowupDate', startTomorrowIST_UTC, startDayAfterIST_UTC), stringInRange('rtNextFollowupDate', startTomorrowIST_UTC, startDayAfterIST_UTC) ] };
-    const laterCond    = { $or: [ dateGTE('rtNextFollowupDate', startDayAfterIST_UTC), stringGTE('rtNextFollowupDate', startDayAfterIST_UTC) ] };
+
+    const notsetCond = { $or: [{ rtNextFollowupDate: { $exists: false } }, { rtNextFollowupDate: null }, { rtNextFollowupDate: '' }] };
+    const missedCond = { $or: [dateLT('rtNextFollowupDate', startTodayIST_UTC), stringLT('rtNextFollowupDate', startTodayIST_UTC)] };
+    const todayCond = { $or: [dateInRange('rtNextFollowupDate', startTodayIST_UTC, startTomorrowIST_UTC), stringInRange('rtNextFollowupDate', startTodayIST_UTC, startTomorrowIST_UTC)] };
+    const tomorrowCond = { $or: [dateInRange('rtNextFollowupDate', startTomorrowIST_UTC, startDayAfterIST_UTC), stringInRange('rtNextFollowupDate', startTomorrowIST_UTC, startDayAfterIST_UTC)] };
+    const laterCond = { $or: [dateGTE('rtNextFollowupDate', startDayAfterIST_UTC), stringGTE('rtNextFollowupDate', startDayAfterIST_UTC)] };
 
     let followScope = null;
     if (followupCategory) {
       const cat = String(followupCategory).toLowerCase();
-      if (cat === 'notset')   followScope = notsetCond;
-      if (cat === 'missed')   followScope = missedCond;
-      if (cat === 'today')    followScope = todayCond;
+      if (cat === 'notset') followScope = notsetCond;
+      if (cat === 'missed') followScope = missedCond;
+      if (cat === 'today') followScope = todayCond;
       if (cat === 'tomorrow') followScope = tomorrowCond;
-      if (cat === 'later')    followScope = laterCond;
+      if (cat === 'later') followScope = laterCond;
     }
- 
+
     let followupOnScope = null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(followupDateStr ?? '')) {
       const dayStartIST = new Date(`${followupDateStr}T00:00:00+05:30`);
-      const nextDayIST  = new Date(dayStartIST.getTime() + 86400000);
+      const nextDayIST = new Date(dayStartIST.getTime() + 86400000);
       followupOnScope = {
-        $or: [ dateInRange('rtNextFollowupDate', dayStartIST, nextDayIST), stringInRange('rtNextFollowupDate', dayStartIST, nextDayIST) ]
+        $or: [dateInRange('rtNextFollowupDate', dayStartIST, nextDayIST), stringInRange('rtNextFollowupDate', dayStartIST, nextDayIST)]
       };
     }
- 
+
     let acquiredScope = null;
     const y = acquiredYear && /^\d{4}$/.test(String(acquiredYear)) ? parseInt(acquiredYear, 10) : null;
-    const m = acquiredMonth && /^\d{1,2}$/.test(String(acquiredMonth)) ? Math.min(Math.max(parseInt(acquiredMonth,10),1),12) : null;
+    const m = acquiredMonth && /^\d{1,2}$/.test(String(acquiredMonth)) ? Math.min(Math.max(parseInt(acquiredMonth, 10), 1), 12) : null;
 
     if (y && m) {
-      const monthStartIST = new Date(`${String(y)}-${String(m).padStart(2,'0')}-01T00:00:00+05:30`);
-      const monthEndIST   = new Date(new Date(monthStartIST).setMonth(monthStartIST.getMonth()+1));
+      const monthStartIST = new Date(`${String(y)}-${String(m).padStart(2, '0')}-01T00:00:00+05:30`);
+      const monthEndIST = new Date(new Date(monthStartIST).setMonth(monthStartIST.getMonth() + 1));
       acquiredScope = {
         $or: [
           dateInRange('lastOrderDate', monthStartIST, monthEndIST),
@@ -1896,16 +1902,16 @@ app.get('/api/leads/retentions', async (req, res) => {
         ]
       };
     }
- 
+
     let colorScope = null;
-    if (rowColor !== undefined) { 
+    if (rowColor !== undefined) {
       if (rowColor === '') {
-        colorScope = { $or: [ { rowColor: { $exists: false } }, { rowColor: '' }, { rowColor: null } ] };
+        colorScope = { $or: [{ rowColor: { $exists: false } }, { rowColor: '' }, { rowColor: null }] };
       } else {
         colorScope = { rowColor: String(rowColor) };
       }
     }
- 
+
     const search = (searchRaw ?? '').toString().trim();
     let searchScope = null;
     if (search) {
@@ -1922,14 +1928,15 @@ app.get('/api/leads/retentions', async (req, res) => {
         };
       }
     }
- 
+
     const blankOrNullPieces = [
       { retentionStatus: { $exists: false } },
       { retentionStatus: null },
       { retentionStatus: '' },
     ];
     const ACTIVE_REGEX = /^\s*active\s*$/i;
-    const LOST_REGEX   = /^\s*lost\s*$/i;
+    const LOST_REGEX = /^\s*lost\s*$/i;
+    const NO_CALL_REGEX = /^\s*no[-\s]*call\s*$/i;
 
     let retentionScope;
     const rs = String(retentionStatus || 'All').toLowerCase();
@@ -1938,39 +1945,41 @@ app.get('/api/leads/retentions', async (req, res) => {
       retentionScope = {
         $and: [
           { $or: [{ retentionStatus: ACTIVE_REGEX }, ...blankOrNullPieces] },
-          { $nor: [{ retentionStatus: LOST_REGEX }] },
+          { $nor: [{ retentionStatus: LOST_REGEX }, { retentionStatus: NO_CALL_REGEX }] },
         ],
       };
     } else if (rs === 'lost') {
       retentionScope = { retentionStatus: LOST_REGEX };
+    } else if (rs === 'no-call' || rs === 'nocall' || rs === 'no call') {
+      retentionScope = { retentionStatus: NO_CALL_REGEX };
     } else {
       retentionScope = {
-        $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, ...blankOrNullPieces],
+        $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, { retentionStatus: NO_CALL_REGEX }, ...blankOrNullPieces],
       };
     }
- 
+
     const common = {
       healthExpertAssigned: { $in: [fullName, `${fullName} (${email})`] },
       salesStatus: 'Sales Done',
     };
- 
+
     const base = {
       ...common,
       $and: [
         retentionScope,
-        ...(followScope     ? [followScope]     : []),
+        ...(followScope ? [followScope] : []),
         ...(followupOnScope ? [followupOnScope] : []),
-        ...(acquiredScope   ? [acquiredScope]   : []),  
-        ...(colorScope      ? [colorScope]      : []), 
-        ...(searchScope     ? [searchScope]     : []),
+        ...(acquiredScope ? [acquiredScope] : []),
+        ...(colorScope ? [colorScope] : []),
+        ...(searchScope ? [searchScope] : []),
       ],
     };
 
     const projection = {
-      name:1, contactNumber:1, alternativeNumber:1, retentionStatus:1, rtNextFollowupDate:1,
-      rtFollowupReminder:1, rtFollowupStatus:1, lastOrderDate:1, rowColor:1,
-      agentAssigned:1, preferredLanguage:1, communicationMethod:1, rtRemark:1,
-      reachoutLogs:1, rtSubcells:1,
+      name: 1, contactNumber: 1, alternativeNumber: 1, retentionStatus: 1, rtNextFollowupDate: 1,
+      rtFollowupReminder: 1, rtFollowupStatus: 1, lastOrderDate: 1, rowColor: 1,
+      agentAssigned: 1, preferredLanguage: 1, communicationMethod: 1, rtRemark: 1,
+      reachoutLogs: 1, rtSubcells: 1,
     };
 
     const sort = { lastOrderDate: -1, _id: -1 };
@@ -1978,30 +1987,44 @@ app.get('/api/leads/retentions', async (req, res) => {
     const query = Lead.find(base, projection)
       .read('secondaryPreferred')
       .sort(sort).skip(skip).limit(limit)
-      .slice('reachoutLogs', -5) 
+      .slice('reachoutLogs', -5)
       .lean();
- 
+
     const countsBase = { ...common };
     const countsScope =
       rs === 'active'
-        ? { $and: [{ $or: [{ retentionStatus: ACTIVE_REGEX }, ...blankOrNullPieces] }, { $nor: [{ retentionStatus: LOST_REGEX }] }] }
+        ? {
+            $and: [
+              { $or: [{ retentionStatus: ACTIVE_REGEX }, ...blankOrNullPieces] },
+              { $nor: [{ retentionStatus: LOST_REGEX }, { retentionStatus: NO_CALL_REGEX }] },
+            ],
+          }
         : rs === 'lost'
-          ? { retentionStatus: LOST_REGEX }
-          : { $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, ...blankOrNullPieces] };
-
-    const notsetCountQ   = { ...countsBase, ...countsScope, ...notsetCond };
-    const missedCountQ   = { ...countsBase, ...countsScope, ...missedCond };
-    const todayCountQ    = { ...countsBase, ...countsScope, ...todayCond };
+        ? { retentionStatus: LOST_REGEX }
+        : rs === 'no-call' || rs === 'nocall' || rs === 'no call'
+        ? { retentionStatus: NO_CALL_REGEX }
+        : {
+            $or: [
+              { retentionStatus: ACTIVE_REGEX },
+              { retentionStatus: LOST_REGEX },
+              { retentionStatus: NO_CALL_REGEX },
+              ...blankOrNullPieces,
+            ],
+          };
+    const notsetCountQ = { ...countsBase, ...countsScope, ...notsetCond };
+    const missedCountQ = { ...countsBase, ...countsScope, ...missedCond };
+    const todayCountQ = { ...countsBase, ...countsScope, ...todayCond };
     const tomorrowCountQ = { ...countsBase, ...countsScope, ...tomorrowCond };
-    const laterCountQ    = { ...countsBase, ...countsScope, ...laterCond };
+    const laterCountQ = { ...countsBase, ...countsScope, ...laterCond };
 
-    const totalAllQ    = { ...common, $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, ...blankOrNullPieces] };
-    const totalActiveQ = { ...common, $and: [{ $or: [{ retentionStatus: ACTIVE_REGEX }, ...blankOrNullPieces] }, { $nor: [{ retentionStatus: LOST_REGEX }] }] };
-    const totalLostQ   = { ...common, retentionStatus: LOST_REGEX };
+    const totalAllQ = { ...common, $or: [{ retentionStatus: ACTIVE_REGEX }, { retentionStatus: LOST_REGEX }, { retentionStatus: NO_CALL_REGEX }, ...blankOrNullPieces] };
+    const totalActiveQ = { ...common, $and: [{ $or: [{ retentionStatus: ACTIVE_REGEX }, ...blankOrNullPieces] }, { $nor: [{ retentionStatus: LOST_REGEX }, { retentionStatus: NO_CALL_REGEX }] }] };
+    const totalLostQ = { ...common, retentionStatus: LOST_REGEX };
+    const totalNoCallQ = { ...common, retentionStatus: NO_CALL_REGEX };
 
     const [
       items, total,
-      cAll, cActive, cLost,
+      cAll, cActive, cLost, cNoCall,
       cNotset, cMissed,
       cToday, cTomorrow, cLater
     ] = await Promise.all([
@@ -2010,6 +2033,7 @@ app.get('/api/leads/retentions', async (req, res) => {
       Lead.countDocuments(totalAllQ),
       Lead.countDocuments(totalActiveQ),
       Lead.countDocuments(totalLostQ),
+      Lead.countDocuments(totalNoCallQ),
       Lead.countDocuments(notsetCountQ),
       Lead.countDocuments(missedCountQ),
       Lead.countDocuments(todayCountQ),
@@ -2026,7 +2050,7 @@ app.get('/api/leads/retentions', async (req, res) => {
       serialStart: effectiveSkip + 1,
       hasMore,
       counts: {
-        all: cAll, active: cActive, lost: cLost,
+        all: cAll, active: cActive, lost: cLost, nocall: cNoCall,
         followups: { notset: cNotset, missed: cMissed, today: cToday, tomorrow: cTomorrow, later: cLater },
       },
     });
@@ -2034,10 +2058,10 @@ app.get('/api/leads/retentions', async (req, res) => {
     console.error('Error fetching retention leads:', error);
     res.status(500).json({ message: 'Error fetching retention leads', error });
   }
-});  
+});
 
 
-app.patch('/api/leads/:id/images', async (req, res) => { 
+app.patch('/api/leads/:id/images', async (req, res) => {
   const leadId = req.params.id;
   const { images } = req.body;
 
@@ -2045,7 +2069,7 @@ app.patch('/api/leads/:id/images', async (req, res) => {
     const lead = await Lead.findById(leadId);
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-    lead.images = images;  
+    lead.images = images;
     await lead.save();
 
     res.json({ message: 'Images updated', lead });
@@ -2066,7 +2090,7 @@ app.post('/api/leads/:id/reachout-log', async (req, res) => {
     if (!lead) return res.status(404).json({ message: "Lead not found" });
 
     lead.reachoutLogs = lead.reachoutLogs || [];
- 
+
     const existing = lead.reachoutLogs.find(log => log.timestamp?.toISOString() === new Date(timestamp).toISOString());
     if (existing) {
       if (method) existing.method = method;
@@ -2095,7 +2119,7 @@ app.get("/api/leads/:id/reachout-logs", async (req, res) => {
 });
 
 app.get('/api/leads/new-orders', async (req, res) => {
-  try { 
+  try {
     const { page = 1, limit = 30, ...filters } = req.query;
 
     const query = {
@@ -2148,7 +2172,7 @@ app.get('/api/leads/new-orders', async (req, res) => {
       }
       query.productsOrdered = { $in: productsArr };
     }
- 
+
     if (filters.startDate) {
       query.lastOrderDate = query.lastOrderDate || {};
       query.lastOrderDate.$gte = new Date(filters.startDate);
@@ -2163,13 +2187,13 @@ app.get('/api/leads/new-orders', async (req, res) => {
       orderDateEnd.setDate(orderDateEnd.getDate() + 1);
       query.lastOrderDate = { $gte: orderDateStart, $lt: orderDateEnd };
     }
- 
+
     const pageNumber = parseInt(page, 10);
     const limitNumber = parseInt(limit, 10);
     const skip = (pageNumber - 1) * limitNumber;
- 
+
     const total = await Lead.countDocuments(query);
- 
+
     const leads = await Lead.find(query, {
       lastOrderDate: 1,
       name: 1,
@@ -2228,8 +2252,8 @@ app.get('/api/retention-orders', async (req, res) => {
 });
 
 app.get('/api/leads/:id', async (req, res) => {
-  try { 
-    const lead = await Lead.findById(req.params.id); 
+  try {
+    const lead = await Lead.findById(req.params.id);
     if (!lead) {
       return res.status(404).json({ message: 'Lead not found' });
     }
@@ -2242,18 +2266,18 @@ app.get('/api/leads/:id', async (req, res) => {
 
 app.get('/api/consultation-history', async (req, res) => {
   try {
-    const { contactNumber } = req.query; 
+    const { contactNumber } = req.query;
     if (!contactNumber) return res.status(400).json({ error: "Missing contactNumber" });
- 
+
     const customer = await Customer.findOne({ phone: contactNumber });
     if (!customer) return res.status(404).json({ error: "Customer not found" });
- 
+
     const consultations = await ConsultationDetails.find({ customerId: customer._id }).sort({ createdAt: -1 });
 
     res.json({ consultations });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  } 
+  }
 });
 
 
