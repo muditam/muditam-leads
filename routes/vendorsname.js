@@ -16,9 +16,21 @@ router.get("/", async (req, res) => {
 // ADD VENDOR
 router.post("/", async (req, res) => {
   try {
-    const vendor = await Vendor.create(req.body);
+    const body = { ...req.body };
+ 
+    if (body.hasGST && body.gstNumber) {
+      body.gstNumber = String(body.gstNumber).trim().toUpperCase();
+    } else {
+      body.gstNumber = "";
+      body.hasGST = false;
+    }
+
+    const vendor = await Vendor.create(body);
     res.json(vendor);
-  } catch (err) {
+  } catch (err) { 
+    if (err?.code === 11000) {
+      return res.status(409).json({ error: "GST number already exists" });
+    }
     res.status(500).json({ error: "Failed to create vendor" });
   }
 });

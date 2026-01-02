@@ -3,7 +3,6 @@ const express = require("express");
 const axios = require("axios");
 
 const WhatsAppTemplate = require("./whatsaapModels/WhatsAppTemplate");
-
 const router = express.Router();
 
 /* ================================
@@ -11,9 +10,10 @@ const router = express.Router();
 ================================ */
 function normalizeBaseUrl(raw = "") {
   const u = String(raw || "").replace(/\/+$/, "");
-  if (u.endsWith("/v1")) return u;
-  return `${u}/v1`;
+  if (!u) return "";
+  return u.endsWith("/v1") ? u : `${u}/v1`;
 }
+
 const WHATSAPP_V1_BASE = normalizeBaseUrl(process.env.WHATSAPP_BASE_URL);
 
 /** 360dialog client */
@@ -43,8 +43,7 @@ function normalizeStatus(raw) {
   if (!v) return "UNKNOWN";
   if (v.includes("APPROV")) return "APPROVED";
   if (v.includes("REJECT") || v.includes("DISAPPROV")) return "REJECTED";
-  if (v.includes("PEND") || v.includes("SUBMIT") || v.includes("IN_REVIEW"))
-    return "PENDING";
+  if (v.includes("PEND") || v.includes("SUBMIT") || v.includes("IN_REVIEW")) return "PENDING";
   return v;
 }
 
@@ -72,7 +71,7 @@ function pickStatus(t) {
   return "UNKNOWN";
 }
 
-function getComponentsFrom360(t) {
+function pickComponents(t) {
   return (
     (Array.isArray(t?.components) && t.components) ||
     (Array.isArray(t?.template?.components) && t.template.components) ||
@@ -80,44 +79,14 @@ function getComponentsFrom360(t) {
   );
 }
 
-function pickBodyFromComponents(components = []) {
-  const body = components.find(
-    (c) => String(c?.type || "").toUpperCase() === "BODY"
-  );
+function pickBodyTextFromComponents(components) {
+  const body = (components || []).find((c) => String(c?.type || "").toUpperCase() === "BODY");
   return String(body?.text || "");
 }
 
-function pickHeaderFromComponents(components = []) {
-  const header = components.find(
-    (c) => String(c?.type || "").toUpperCase() === "HEADER"
-  );
-  if (!header) return {};
-  return {
-    type: String(header?.format || "").toUpperCase(), // TEXT/IMAGE/VIDEO/DOCUMENT
-    text: header?.text || "",
-    mediaUrl: "", // 360 doesn't always return URL
-    filename: "",
-  };
-}
-
-function pickFooterFromComponents(components = []) {
-  const footer = components.find(
-    (c) => String(c?.type || "").toUpperCase() === "FOOTER"
-  );
+function pickFooterTextFromComponents(components) {
+  const footer = (components || []).find((c) => String(c?.type || "").toUpperCase() === "FOOTER");
   return String(footer?.text || "");
-}
-
-function pickButtonsFromComponents(components = []) {
-  const btn = components.find(
-    (c) => String(c?.type || "").toUpperCase() === "BUTTONS"
-  );
-  const buttons = Array.isArray(btn?.buttons) ? btn.buttons : [];
-  return buttons.map((b) => ({
-    type: String(b?.type || "").toUpperCase(),
-    text: String(b?.text || ""),
-    url: b?.url || "",
-    phoneNumber: b?.phone_number || "",
-  }));
 }
 
 /** =========================
@@ -125,16 +94,18 @@ function pickButtonsFromComponents(components = []) {
 ========================= */
 router.get("/", async (req, res) => {
   try {
-    const templates = await WhatsAppTemplate.find({})
-      .sort({ updatedAt: -1 })
-      .lean();
-    res.json(templates);
+    const templates = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
+    res.json(templates || []);
   } catch (err) {
     console.error("Templates list error:", err);
     res.status(500).json({ success: false });
   }
 });
- 
+
+/** =========================
+ * SYNC from 360dialog -> upsert into Mongo
+ * POST /api/whatsapp/templates/sync
+========================= */
 router.post("/sync", async (req, res) => {
   try {
     const r = await whatsappClient.get("/configs/templates");
@@ -156,12 +127,11 @@ router.post("/sync", async (req, res) => {
 
       const name = normalizeTemplateName(rawName);
       const status = pickStatus(t);
+      const components = pickComponents(t);
 
-      const components = getComponentsFrom360(t);
-      const body = pickBodyFromComponents(components);
-      const header = pickHeaderFromComponents(components);
-      const footer = pickFooterFromComponents(components);
-      const buttons = pickButtonsFromComponents(components);
+      // ✅ IMPORTANT: store BODY text so UI can detect variables
+      const body = pickBodyTextFromComponents(components);
+      const footer = pickFooterTextFromComponents(components);
 
       ops.push({
         updateOne: {
@@ -173,12 +143,9 @@ router.post("/sync", async (req, res) => {
               category: String(t?.category || t?.template?.category || "").toUpperCase(),
               status,
               rejectionReason: t?.reason || t?.rejectionReason || "",
-              // ✅ IMPORTANT: store BODY so UI can detect variables
-              body,
-              header,
-              footer,
-              buttons,
-              components, // optional but useful
+              body: body || "",
+              footer: footer || "",
+              components: components || [],
               raw360: t,
               syncedAt: new Date(),
             },
@@ -190,17 +157,11 @@ router.post("/sync", async (req, res) => {
 
     if (ops.length) await WhatsAppTemplate.bulkWrite(ops);
 
-    const templates = await WhatsAppTemplate.find({})
-      .sort({ updatedAt: -1 })
-      .lean();
-
+    const templates = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
     res.json({ success: true, count: ops.length, templates });
   } catch (err) {
     console.error("Templates sync error:", err.response?.data || err);
-    res.status(500).json({
-      success: false,
-      error: err.response?.data || "SYNC_FAILED",
-    });
+    res.status(500).json({ success: false, error: err.response?.data || "SYNC_FAILED" });
   }
 });
 

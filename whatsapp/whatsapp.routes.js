@@ -13,8 +13,8 @@ const router = express.Router();
 ================================ */
 function normalizeBaseUrl(raw = "") {
   const u = String(raw || "").replace(/\/+$/, "");
-  if (u.endsWith("/v1")) return u;
-  return `${u}/v1`;
+  if (!u) return "";
+  return u.endsWith("/v1") ? u : `${u}/v1`;
 }
 const WHATSAPP_V1_BASE = normalizeBaseUrl(process.env.WHATSAPP_BASE_URL);
 
@@ -37,7 +37,7 @@ function digitsOnly(v = "") {
   return String(v || "").replace(/\D/g, "");
 }
 
-// Always send/store wa_id with country code.
+// Always store/send full wa_id (country code + number).
 // If user provides 10 digits, prefix DEFAULT_COUNTRY_CODE (91).
 function normalizeWaId(v = "") {
   const d = digitsOnly(v);
@@ -58,7 +58,7 @@ function normalizeTemplateName(name) {
     .slice(0, 250);
 }
 
-// Find highest {{n}} index in BODY
+// max placeholder index in body ({{1}}, {{2}} ...)
 function maxVarIndex(bodyText) {
   const text = String(bodyText || "");
   let max = 0;
@@ -69,37 +69,42 @@ function maxVarIndex(bodyText) {
   return max;
 }
 
+// returns sorted array of unique variable indexes found, e.g. [1,2,3]
+function extractVarIndexes(bodyText) {
+  const text = String(bodyText || "");
+  const set = new Set();
+  for (const m of text.matchAll(/{{\s*(\d+)\s*}}/g)) {
+    const n = Number(m[1] || 0);
+    if (n > 0) set.add(n);
+  }
+  return Array.from(set).sort((a, b) => a - b);
+}
+
 function extractTextFromInbound(msg) {
   if (!msg) return "";
   if (msg.type === "text") return msg.text?.body || "";
   if (msg.type === "button") return msg.button?.text || "";
   if (msg.type === "interactive") {
     const i = msg.interactive || {};
-    return (
-      i.button_reply?.title ||
-      i.list_reply?.title ||
-      i.list_reply?.description ||
-      ""
-    );
+    return i.button_reply?.title || i.list_reply?.title || i.list_reply?.description || "";
   }
   return "";
 }
 
-// BODY text picker (from your DB fields OR raw360)
 function pickBodyTextFromTemplateDoc(tpl) {
-  if (!tpl) return "";
-  if (tpl.body) return String(tpl.body || "");
+  // Priority:
+  // 1) tpl.body (your Mongo field)
+  // 2) tpl.components
+  // 3) tpl.raw360.components / tpl.raw360.template.components
+  if (tpl?.body) return String(tpl.body || "");
 
   const comps =
-    (Array.isArray(tpl.components) && tpl.components) ||
-    (Array.isArray(tpl.raw360?.components) && tpl.raw360.components) ||
-    (Array.isArray(tpl.raw360?.template?.components) &&
-      tpl.raw360.template.components) ||
+    (Array.isArray(tpl?.components) && tpl.components) ||
+    (Array.isArray(tpl?.raw360?.components) && tpl.raw360.components) ||
+    (Array.isArray(tpl?.raw360?.template?.components) && tpl.raw360.template.components) ||
     [];
 
-  const body = comps.find(
-    (c) => String(c?.type || "").toUpperCase() === "BODY"
-  );
+  const body = comps.find((c) => String(c?.type || "").toUpperCase() === "BODY");
   return String(body?.text || "");
 }
 
@@ -119,31 +124,14 @@ async function upsertConversation(phone, patch = {}) {
 
 async function ensureMessageOnce(doc) {
   if (doc?.waId) {
-    const exists = await WhatsAppMessage.findOne({ waId: doc.waId })
-      .select("_id")
-      .lean();
+    const exists = await WhatsAppMessage.findOne({ waId: doc.waId }).select("_id").lean();
     if (exists) return null;
   }
   return WhatsAppMessage.create(doc);
 }
 
-function safeAxiosError(err) {
-  const status = err?.response?.status || 500;
-  const data = err?.response?.data || null;
-  const msg =
-    (typeof data === "string" ? data : data?.message) ||
-    err?.message ||
-    "Request failed";
-
-  return {
-    status,
-    message: msg,
-    data,
-  };
-}
-
 /* ================================
-   GET CONVERSATIONS (from DB)
+   GET CONVERSATIONS
 ================================ */
 router.get("/conversations", async (req, res) => {
   try {
@@ -158,7 +146,59 @@ router.get("/conversations", async (req, res) => {
 });
 
 /* ================================
-   GET MESSAGES (from DB)
+   REBUILD CONVERSATIONS FROM MESSAGES
+   Use this once if you already have messages in DB
+================================ */
+router.post("/conversations/rebuild", async (req, res) => {
+  try {
+    // Group by "other party" for each message
+    const biz = normalizeWaId(process.env.WHATSAPP_BUSINESS_PHONE || "");
+    const biz10 = biz ? biz.slice(-10) : "";
+
+    const rows = await WhatsAppMessage.aggregate([
+      {
+        $addFields: {
+          peer: {
+            $cond: [
+              { $eq: ["$direction", "INBOUND"] },
+              "$from",
+              "$to",
+            ],
+          },
+        },
+      },
+      { $match: { peer: { $ne: null, $ne: "" } } },
+      {
+        $group: {
+          _id: "$peer",
+          lastMessageAt: { $max: "$timestamp" },
+          lastMessageText: { $last: "$text" },
+        },
+      },
+      { $sort: { lastMessageAt: -1 } },
+    ]);
+
+    let upserts = 0;
+    for (const r of rows) {
+      const peer = normalizeWaId(r._id);
+      if (!peer) continue;
+      await upsertConversation(peer, {
+        lastMessageAt: r.lastMessageAt || new Date(),
+        lastMessageText: String(r.lastMessageText || "").slice(0, 300),
+      });
+      upserts++;
+    }
+
+    res.json({ success: true, upserts });
+  } catch (err) {
+    console.error("Rebuild conversations error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+/* ================================
+   GET MESSAGES
+   Accepts full waId OR 10-digit; searches using both
 ================================ */
 router.get("/messages", async (req, res) => {
   try {
@@ -190,23 +230,22 @@ router.get("/messages", async (req, res) => {
 
 /* ================================
    SEND TEMPLATE MESSAGE
-   - requires correct # of variables
-   - IMPORTANT: return REAL 360dialog error (no blind 500)
+   ✅ validates variable count and returns useful errors
 ================================ */
 router.post("/send-template", async (req, res) => {
+  const startedAt = Date.now();
   try {
     const { to, templateName, language = "en", parameters = [] } = req.body || {};
 
     const phone = normalizeWaId(to);
     const tplNorm = normalizeTemplateName(templateName);
+
     const params = Array.isArray(parameters)
-      ? parameters.map((x) => String(x ?? ""))
+      ? parameters.map((x) => String(x ?? "").trim())
       : [];
 
     if (!phone || !tplNorm) {
-      return res
-        .status(400)
-        .json({ success: false, message: "to + templateName required" });
+      return res.status(400).json({ success: false, message: "to + templateName required" });
     }
 
     const tpl = await WhatsAppTemplate.findOne({ name: tplNorm }).lean();
@@ -216,27 +255,28 @@ router.post("/send-template", async (req, res) => {
       return res.status(400).json({
         success: false,
         message: `Template not approved in DB: ${tplNorm} (${status})`,
-        hint: "Run POST /api/whatsapp/templates/sync",
+        hint: "Run POST /api/whatsapp/templates/sync and ensure webhook/status updates are working.",
       });
     }
 
     const bodyText = pickBodyTextFromTemplateDoc(tpl);
-    const requiredCount = maxVarIndex(bodyText);
-
     if (!bodyText) {
       return res.status(400).json({
         success: false,
-        message:
-          "Template BODY text not available in DB for this template. (Fix sync to store BODY text.)",
-        hint: "Update templates sync to store BODY (see updated whatsappTemplates.routes.js below).",
+        message: "Template BODY text not available in DB for this template.",
+        hint: "Fix sync to store BODY text (use updated templates sync route below).",
       });
     }
 
-    if (requiredCount > 0 && params.length < requiredCount) {
+    const requiredMax = maxVarIndex(bodyText);
+    const varIndexes = extractVarIndexes(bodyText); // e.g. [1,2,3]
+
+    if (requiredMax > 0 && params.length < requiredMax) {
       return res.status(400).json({
         success: false,
-        message: `Missing template variables. Required ${requiredCount}, got ${params.length}.`,
-        requiredCount,
+        message: `Missing template variables. Required ${requiredMax}, got ${params.length}.`,
+        requiredCount: requiredMax,
+        varIndexes,
         body: bodyText,
       });
     }
@@ -248,18 +288,23 @@ router.post("/send-template", async (req, res) => {
         name: tplNorm,
         language: { code: String(language || tpl?.language || "en") },
         components:
-          requiredCount > 0
+          requiredMax > 0
             ? [
                 {
                   type: "body",
                   parameters: params
-                    .slice(0, requiredCount)
+                    .slice(0, requiredMax)
                     .map((v) => ({ type: "text", text: String(v) })),
                 },
               ]
             : [],
       },
     };
+
+    // Debug log (safe)
+    if (process.env.WHATSAPP_DEBUG_SEND === "1") {
+      console.log("[SEND TEMPLATE] payload:", JSON.stringify(payload, null, 2));
+    }
 
     const response = await whatsappClient.post("/messages", payload);
     const now = new Date();
@@ -283,18 +328,23 @@ router.post("/send-template", async (req, res) => {
       lastMessageText: `[TEMPLATE] ${tplNorm}`,
     });
 
-    res.json({ success: true });
+    res.json({ success: true, ms: Date.now() - startedAt });
   } catch (err) {
-    const e = safeAxiosError(err);
-    console.error("WhatsApp template send error:", e.data || e.message);
+    const status = err?.response?.status || 500;
+    const provider = err?.response?.data;
 
-    // ✅ return the same status 360dialog returns (usually 400),
-    // so UI can show the real reason
-    return res.status(e.status).json({
+    console.error("WhatsApp template send error:", provider || err);
+
+    // IMPORTANT: return provider status (400 stays 400), so UI sees real reason
+    res.status(status).json({
       success: false,
       message: "Send template failed",
-      providerStatus: e.status,
-      providerError: e.data || e.message,
+      providerStatus: status,
+      providerError: provider || null,
+      hint:
+        status === 400
+          ? "Provider says Bad request. Usually means: missing variables, wrong language code, or template name mismatch."
+          : "Check WHATSAPP_BASE_URL / WHATSAPP_API_KEY and server logs.",
     });
   }
 });
@@ -309,9 +359,7 @@ router.post("/send-text", async (req, res) => {
     const body = String(text || "").trim();
 
     if (!phone || !body) {
-      return res
-        .status(400)
-        .json({ success: false, message: "to + text required" });
+      return res.status(400).json({ success: false, message: "to + text required" });
     }
 
     const payload = { to: phone, type: "text", text: { body } };
@@ -340,20 +388,19 @@ router.post("/send-text", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    const e = safeAxiosError(err);
-    console.error("WhatsApp text send error:", e.data || e.message);
-
-    return res.status(e.status).json({
+    const status = err?.response?.status || 500;
+    console.error("WhatsApp text send error:", err.response?.data || err);
+    res.status(status).json({
       success: false,
       message: "Send text failed",
-      providerStatus: e.status,
-      providerError: e.data || e.message,
+      providerStatus: status,
+      providerError: err.response?.data || null,
     });
   }
 });
 
 /* ================================
-   WEBHOOK VERIFY
+   WEBHOOK VERIFY (Meta style)
 ================================ */
 router.get("/webhook", (req, res) => {
   try {
@@ -361,11 +408,7 @@ router.get("/webhook", (req, res) => {
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
 
-    if (
-      mode === "subscribe" &&
-      token &&
-      token === process.env.WHATSAPP_VERIFY_TOKEN
-    ) {
+    if (mode === "subscribe" && token && token === process.env.WHATSAPP_VERIFY_TOKEN) {
       return res.status(200).send(challenge);
     }
     return res.sendStatus(403);
@@ -376,7 +419,7 @@ router.get("/webhook", (req, res) => {
 
 /* ================================
    WEBHOOK (incoming messages)
-   NOTE: chat history only exists if this works.
+   NOTE: This is what makes chats "real-time" in your DB.
 ================================ */
 router.post("/webhook", async (req, res) => {
   try {
@@ -393,7 +436,6 @@ router.post("/webhook", async (req, res) => {
       for (const ch of changes) {
         const value = ch?.value || {};
 
-        // inbound messages
         if (Array.isArray(value?.messages) && value.messages.length) {
           for (const msg of value.messages) {
             const from = normalizeWaId(msg.from);

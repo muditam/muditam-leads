@@ -1,4 +1,4 @@
-//models/Vendorname.js
+// models/Vendorname.js
 const mongoose = require("mongoose");
 
 const VendorSchema = new mongoose.Schema(
@@ -8,9 +8,20 @@ const VendorSchema = new mongoose.Schema(
     email: { type: String, default: "" },
 
     hasGST: { type: Boolean, default: false },
-    gstNumber: { type: String, default: "" },
+ 
+    gstNumber: {
+      type: String,
+      default: "",
+      trim: true,
+      uppercase: true,
+    },
   },
   { timestamps: true }
+);
+ 
+VendorSchema.index(
+  { gstNumber: 1 },
+  { unique: true, partialFilterExpression: { gstNumber: { $type: "string", $ne: "" } } }
 );
 
 module.exports = mongoose.model("Vendor", VendorSchema);
