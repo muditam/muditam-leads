@@ -19,10 +19,18 @@ const NOTES_BG =
 
 // final extra image slide (after notes)
 const FINAL_IMAGE_URL =
-  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/A4_-_17.png?v=1757678833"; 
+  "https://cdn.shopify.com/s/files/1/0734/7155/7942/files/A4_-_17.png?v=1757678833";
 
 const MEALS = ["Breakfast", "Lunch", "Snacks", "Dinner"];
-const MONTHLY_SLOTS = ["Breakfast", "Lunch", "Evening Snack", "Dinner"];
+const MONTHLY_SLOTS = [
+  "Early Morning",
+  "Breakfast",
+  "Mid Morning",
+  "Lunch",
+  "Evening Snack",
+  "Dinner",
+  "Bed Time",
+];
 
 // ---------- helpers ----------
 function escapeHtml(s = "") {
@@ -303,18 +311,18 @@ function dayPageHtml({ dayIndex, dateIso, meals, times }) {
       </div>
 
       ${MEALS.map((m) => {
-        const parsed = parseMeal(meals[m] || "");
-        const mealTimeRaw =
-          times && Object.prototype.hasOwnProperty.call(times, m)
-            ? String(times[m] ?? "")
-            : "";
+    const parsed = parseMeal(meals[m] || "");
+    const mealTimeRaw =
+      times && Object.prototype.hasOwnProperty.call(times, m)
+        ? String(times[m] ?? "")
+        : "";
 
-        return `
+    return `
       <div class="mealrow">
         <div class="left">
           <div class="mealname">${m}</div> 
 ${mealTimeRaw
-  ? `
+        ? `
     <div class="meal-time">
       <svg class="icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
         <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
@@ -322,8 +330,8 @@ ${mealTimeRaw
       </svg>
       <span>${escapeHtml(mealTimeRaw)}</span>
     </div>`
-  : ""
-}
+        : ""
+      }
 
         </div>
         <div class="rightcol">
@@ -332,7 +340,7 @@ ${mealTimeRaw
         </div>
       </div>
       <div class="sep"></div>`;
-      }).join("")}
+  }).join("")}
     </div>
   </div>
 </section>`;
@@ -390,6 +398,17 @@ function finalImageSlideHtml({ imageUrl }) {
 </section>`;
 }
 
+function shouldRenderMonthlySlot(slot) {
+  if (!slot) return false;
+
+  const hasTime = typeof slot.time === "string" && slot.time.trim().length > 0;
+  const hasOptions =
+    Array.isArray(slot.options) &&
+    slot.options.some((o) => String(o || "").trim().length > 0);
+
+  return hasTime || hasOptions;
+}
+
 /* ================== MONTHLY PAGE — REDESIGN ONLY (Weekly untouched) ================== */
 // Monthly page – left-top tag and proper "Time | Menu" table
 function monthlyPageHtml({ slots }) {
@@ -410,23 +429,24 @@ function monthlyPageHtml({ slots }) {
     return `<div class="timeblock"><div class="tline">${escapeHtml(raw)}</div></div>`;
   };
 
-  const blocks = MONTHLY_SLOTS.map((slot) => {
-    const s = slots[slot] || { time: "", options: [] };
-    const opts =
-      (s.options || [])
-        .map((o, i) => {
-          const text = String(o || "").trim();
-          if (!text) return "";
-          return `
+  const blocks = MONTHLY_SLOTS.filter((slot) => shouldRenderMonthlySlot(slots[slot]))
+    .map((slot) => {
+      const s = slots[slot] || { time: "", options: [] };
+      const opts =
+        (s.options || [])
+          .map((o, i) => {
+            const text = String(o || "").trim();
+            if (!text) return "";
+            return `
             <div class="optrow">
               <span class="optlbl">Option ${i + 1} :</span>
               <span class="opttxt">${escapeHtml(text)}</span>
             </div>`;
-        })
-        .filter(Boolean)
-        .join("") || `<p class="dash">—</p>`;
+          })
+          .filter(Boolean)
+          .join("") || `<p class="dash">—</p>`;
 
-    return `
+      return `
       <div class="slot-card">
         <div class="slot-ribbon" aria-hidden="true"><span>${escapeHtml(slot)}</span></div>
 
@@ -442,7 +462,7 @@ function monthlyPageHtml({ slots }) {
           </div>
         </div>
       </div>`;
-  }).join("");
+    }).join("");
 
   return `
 <section class="page sheet-plain monthly-only">
@@ -841,7 +861,7 @@ router.get("/diet-plan/:id", async (req, res) => {
           leadConditions = cleanStringArray(lc);
           leadGoals = cleanStringArray(lg);
         }
-      } catch {}
+      } catch { }
     }
     custName = custName || "Customer";
     custPhone = custPhone || "—";
@@ -868,7 +888,7 @@ router.get("/diet-plan/:id", async (req, res) => {
       try {
         const tpl = await DietTemplate.findById(doc.templateId).lean();
         weeklyTimes = tpl?.body?.weeklyTimes || weeklyTimes;
-      } catch {}
+      } catch { }
     }
     weeklyTimes = normalizeWeeklyTimes(weeklyTimes || {});
 
@@ -940,10 +960,13 @@ router.get("/diet-plan/:id", async (req, res) => {
     } else {
       const monthly = pickMonthly(doc);
       const slots = {
+        "Early Morning": monthly?.["Early Morning"] || { time: "", options: [] },
         Breakfast: monthly?.Breakfast || { time: "", options: [] },
+        "Mid Morning": monthly?.["Mid Morning"] || { time: "", options: [] },
         Lunch: monthly?.Lunch || { time: "", options: [] },
         "Evening Snack": monthly?.["Evening Snack"] || { time: "", options: [] },
         Dinner: monthly?.Dinner || { time: "", options: [] },
+        "Bed Time": monthly?.["Bed Time"] || { time: "", options: [] },
       };
       pages.push(monthlyPageHtml({ slots }));
     }
@@ -1146,11 +1169,11 @@ router.get("/diet-plan/:id", async (req, res) => {
 </html>`;
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=60"); 
+    res.setHeader("Cache-Control", "public, max-age=60");
     return res.status(200).send(html);
   } catch (err) {
     console.error("Error in /diet-plan route:", err);
-    return res.status(500).send("Internal server error"); 
+    return res.status(500).send("Internal server error");
   }
 });
 

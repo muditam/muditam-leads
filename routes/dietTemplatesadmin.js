@@ -98,7 +98,13 @@ const monthlyOptionsSchema = {
   properties: {
     monthly: {
       type: "object",
-      required: ["Breakfast", "Lunch", "Evening Snack", "Dinner"],
+      required: ["Early Morning",
+  "Breakfast",
+  "Mid Morning",
+  "Lunch",
+  "Evening Snack",
+  "Dinner",
+  "Bed Time"],
       properties: {
         Breakfast: slotSchema(),
         "Mid-Morning Snack": slotSchema(),

@@ -1,44 +1,32 @@
-// whatsaapModels/WhatsAppTemplate.js
 const mongoose = require("mongoose");
 
 const ButtonSchema = new mongoose.Schema(
   {
-    type: { type: String, default: "" }, // QUICK_REPLY / URL / PHONE_NUMBER
-    text: { type: String, default: "" },
-    url: { type: String, default: "" },
-    phoneNumber: { type: String, default: "" },
+    type: String, // QUICK_REPLY | URL | PHONE_NUMBER
+    text: String,
+    url: String,
+    phoneNumber: String,
   },
   { _id: false }
 );
 
 const WhatsAppTemplateSchema = new mongoose.Schema(
   {
-    category: { type: String, default: "" }, // MARKETING / UTILITY / AUTHENTICATION
-    name: { type: String, required: true, index: true, unique: true },
+    name: { type: String, required: true, unique: true, index: true },
+    category: { type: String }, // MARKETING | UTILITY | AUTHENTICATION
     language: { type: String, default: "en" },
-
-    header: {
-      type: { type: String, default: "" }, // DOCUMENT / IMAGE / VIDEO / ""
-      mediaUrl: { type: String, default: "" },
-      filename: { type: String, default: "" },
-    },
 
     body: { type: String, default: "" },
     footer: { type: String, default: "" },
+    components: { type: Array, default: [] },
 
-    buttons: { type: [ButtonSchema], default: [] },
-
-    sample: {
-      headerMedia: { type: String, default: "" }, // optional
-      variables: { type: [String], default: [] }, // ["Muditam", "12345"]
-    },
-
-    status: { type: String, default: "UNKNOWN" },
+    status: { type: String, default: "UNKNOWN" }, // APPROVED | PENDING | REJECTED
     rejectionReason: { type: String, default: "" },
 
-    raw360: { type: mongoose.Schema.Types.Mixed, default: {} },
-    syncedAt: { type: Date },
-    lastSubmittedAt: { type: Date },
+    raw360: { type: mongoose.Schema.Types.Mixed },
+
+    syncedAt: Date,
+    lastSubmittedAt: Date,
   },
   { timestamps: true }
 );

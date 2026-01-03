@@ -33,9 +33,9 @@ const fortnightSchema = {
 
 const monthlySchema = {
   type: "object",
-  required: ["Breakfast", "Lunch", "Evening Snack", "Dinner"],
+  required: ["Early Morning", "Breakfast", "Mid Morning", "Lunch", "Evening Snack", "Dinner", "Bed Time", ],
   additionalProperties: false,
-  properties: ["Breakfast", "Lunch", "Evening Snack", "Dinner"].reduce((acc, slot) => {
+  properties: ["Early Morning", "Breakfast", "Mid Morning", "Lunch", "Evening Snack", "Dinner", "Bed Time",].reduce((acc, slot) => {
     acc[slot] = {
       type: "object",
       required: ["time", "options"],

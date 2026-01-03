@@ -26,32 +26,35 @@ const DietPlanSchema = new mongoose.Schema(
     durationDays: { type: Number, required: true },
 
     // Weekly (14) body 
-    fortnight: { 
+    fortnight: {
       Breakfast: { type: [String], default: undefined },
-      Lunch:     { type: [String], default: undefined }, 
-      Snacks:    { type: [String], default: undefined },
-      Dinner:    { type: [String], default: undefined },
+      Lunch: { type: [String], default: undefined },
+      Snacks: { type: [String], default: undefined },
+      Dinner: { type: [String], default: undefined },
     },
 
     // Weekly meal times (editable in UI)
     weeklyTimes: {
       Breakfast: { type: String, default: "" },
-      Lunch:     { type: String, default: "" },
-      Snacks:    { type: String, default: "" },
-      Dinner:    { type: String, default: "" },
-    }, 
- 
-    // Monthly (options) body
-    monthly: {
-      Breakfast:      { type: MonthlySlotSchema, default: undefined },
-      Lunch:          { type: MonthlySlotSchema, default: undefined },
-      "Evening Snack":{ type: MonthlySlotSchema, default: undefined },
-      Dinner:         { type: MonthlySlotSchema, default: undefined },
+      Lunch: { type: String, default: "" },
+      Snacks: { type: String, default: "" },
+      Dinner: { type: String, default: "" },
     },
 
-    conditions:    { type: [String], default: [] },
-    healthGoals:   { type: [String], default: [] },
-  
+    // Monthly (options) body
+    monthly: {
+      "Early Morning": { type: MonthlySlotSchema, default: undefined },
+      Breakfast: { type: MonthlySlotSchema, default: undefined },
+      "Mid Morning": { type: MonthlySlotSchema, default: undefined },
+      Lunch: { type: MonthlySlotSchema, default: undefined },
+      "Evening Snack": { type: MonthlySlotSchema, default: undefined },
+      Dinner: { type: MonthlySlotSchema, default: undefined },
+      "Bed Time": { type: MonthlySlotSchema, default: undefined },
+    },
+
+    conditions: { type: [String], default: [] },
+    healthGoals: { type: [String], default: [] },
+
     createdBy: { type: String, default: "Muditam" },
     version: { type: Number, default: 1 },
     notes: { type: String, default: "" },
