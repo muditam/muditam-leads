@@ -207,22 +207,75 @@ router.post("/send-template", async (req, res) => {
   }
 });
 
+function verify360Dialog(req, res, next) {
+  const apiKey = req.headers["d360-api-key"];
+  if (!apiKey || apiKey !== process.env.WHATSAPP_API_KEY) {
+    return res.sendStatus(403);
+  }
+  next();
+}
+
+
+router.get("/webhook", (req, res) => {
+  return res.sendStatus(200);
+});
+
+
 /* ================================
    WEBHOOK (INBOUND)
 ================================ */
-router.post("/webhook", async (req, res) => {
+router.post("/webhook", verify360Dialog, async (req, res) => {
   try {
-    const entries = req.body?.entry || [];
+    const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
 
     for (const entry of entries) {
       for (const change of entry.changes || []) {
         const value = change.value || {};
-        for (const msg of value.messages || []) {
-          const from = normalizeWaId(msg.from);
-          const to = normalizeWaId(value.metadata?.display_phone_number);
-          const text = msg.text?.body || "";
-          const now = new Date(Number(msg.timestamp) * 1000);
 
+        const messages = Array.isArray(value.messages)
+          ? value.messages
+          : [];
+
+        for (const msg of messages) {
+          // Ignore delivery/read/status updates
+          if (!msg?.id || !msg?.from) continue;
+
+          const from = normalizeWaId(msg.from);
+          const to = normalizeWaId(
+            value.metadata?.display_phone_number || ""
+          );
+
+          // ⛔ Ignore echoes (your own sent messages)
+          if (from === to) continue;
+
+          // ⛔ Deduplicate
+          const exists = await WhatsAppMessage.findOne({ waId: msg.id });
+          if (exists) continue;
+
+          let text = "";
+
+          switch (msg.type) {
+            case "text":
+              text = msg.text?.body || "";
+              break;
+            case "button":
+              text = msg.button?.text || "";
+              break;
+            case "interactive":
+              text =
+                msg.interactive?.button_reply?.title ||
+                msg.interactive?.list_reply?.title ||
+                "";
+              break;
+            default:
+              text = `[${msg.type}]`;
+          }
+
+          const now = new Date(
+            Number(msg.timestamp) * 1000 || Date.now()
+          );
+
+          // ✅ Save inbound message
           await WhatsAppMessage.create({
             waId: msg.id,
             from,
@@ -234,12 +287,16 @@ router.post("/webhook", async (req, res) => {
             raw: msg,
           });
 
+          // ✅ Update conversation & 24h window
           await WhatsAppConversation.findOneAndUpdate(
             { phone: from },
             {
               phone: from,
               lastMessageAt: now,
               lastMessageText: text.slice(0, 200),
+              windowExpiresAt: new Date(
+                Date.now() + 24 * 60 * 60 * 1000
+              ),
             },
             { upsert: true }
           );
@@ -249,7 +306,7 @@ router.post("/webhook", async (req, res) => {
 
     res.sendStatus(200);
   } catch (e) {
-    console.error(e);
+    console.error("Webhook error:", e);
     res.sendStatus(500);
   }
 });
