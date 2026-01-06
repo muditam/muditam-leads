@@ -140,6 +140,7 @@ const notificationsRoutes = require("./routes/notifications");
 
 const WhatsAppRoutes = require("./whatsapp/whatsapp.routes");
 const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes");
+const whatsappMediaRoutes = require("./whatsapp/whatsappMedia.routes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -634,6 +635,7 @@ app.use("/api/notifications", notificationsRoutes);
 
 app.use("/api/whatsapp", WhatsAppRoutes);
 app.use("/api/whatsapp/templates", whatsappTemplatesRoutes);
+app.use("/api/whatsapp", whatsappMediaRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
