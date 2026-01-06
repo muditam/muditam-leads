@@ -42,10 +42,11 @@
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",
+    "openai": "^6.15.0",
     "path": "^0.12.7",
     "pdfkit": "^0.17.2",
     "razorpay": "^2.9.6",
-    "socket.io": "^4.8.1",
+    "socket.io": "^4.8.3",
     "socket.io-server": "^1.0.0-b",
     "xlsx": "^0.18.5"
   },

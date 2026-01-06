@@ -1,3 +1,4 @@
+// routes/whatsappMedia.routes.js  (or whatever file you use for send-media)
 const express = require("express");
 const axios = require("axios");
 const multer = require("multer");
@@ -12,6 +13,8 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
+const last10 = (v = "") => digitsOnly(v).slice(-10);
+
 const normalizeWaId = (v = "") => {
   const d = digitsOnly(v);
   if (d.length === 10) return `91${d}`;
@@ -38,6 +41,26 @@ const whatsappClient = axios.create({
   timeout: 20000,
 });
 
+// ================================
+// Socket emit helpers (rooms: wa:<last10>)
+// ================================
+const roomForPhone10 = (p10) => `wa:${String(p10 || "").slice(-10)}`;
+const emitToPhone10 = (req, phone10, event, payload) => {
+  const io = req?.app?.get("io");
+  if (!io) return;
+  const p10 = last10(phone10);
+  if (!p10) return;
+  io.to(roomForPhone10(p10)).emit(event, payload);
+};
+const emitMessage = (req, msgDoc) => {
+  if (!msgDoc) return;
+  const p10 = last10(msgDoc.to || msgDoc.from || "");
+  emitToPhone10(req, p10, "wa:message", msgDoc);
+};
+const emitConversationPatch = (req, { phone10, patch }) => {
+  emitToPhone10(req, phone10, "wa:conversation", { phone: last10(phone10), patch });
+};
+
 function safeFilename(name = "file") {
   return String(name)
     .replace(/[^a-zA-Z0-9._-]/g, "_")
@@ -62,7 +85,6 @@ async function uploadToWasabi({ buffer, mimetype, originalname }) {
     })
     .promise();
 
-  // result.Location is the public URL (when public-read works)
   return { url: result.Location, key };
 }
 
@@ -77,8 +99,8 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ message: "file required" });
 
     const to = normalizeWaId(toRaw);
+    const p10 = last10(to);
 
-    // 0) (optional) client-side limit already exists, but keep server safety
     if (req.file.size > 5 * 1024 * 1024) {
       return res.status(400).json({ message: "Max attachment size is 5MB" });
     }
@@ -138,16 +160,17 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     const now = new Date();
 
     // 4) Save in DB with Wasabi URL
-    await WhatsAppMessage.create({
+    const created = await WhatsAppMessage.create({
       waId: msgRes.data?.messages?.[0]?.id,
       from: process.env.WHATSAPP_BUSINESS_PHONE,
       to,
       direction: "OUTBOUND",
       type,
-      text: "", // ✅ no "[IMAGE]" text; UI will render using media.url
+      text: "",
+      status: "sent", // ✅ important for ticks
       media: {
         id: mediaId,
-        url: wasabi.url, // ✅ store Wasabi link here
+        url: wasabi.url,
         mime,
         filename: req.file.originalname,
       },
@@ -160,10 +183,22 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       {
         phone: to,
         lastMessageAt: now,
-        lastMessageText: type === "image" ? "📷 Photo" : `📎 ${req.file.originalname}`.slice(0, 200),
+        lastMessageText:
+          type === "image" ? "📷 Photo" : `📎 ${req.file.originalname}`.slice(0, 200),
       },
       { upsert: true }
     );
+
+    // ✅ realtime emits
+    emitMessage(req, created);
+    emitConversationPatch(req, {
+      phone10: p10,
+      patch: {
+        lastMessageAt: now,
+        lastMessageText:
+          type === "image" ? "📷 Photo" : `📎 ${req.file.originalname}`.slice(0, 200),
+      },
+    });
 
     return res.json({ success: true, mediaId, mediaUrl: wasabi.url });
   } catch (e) {

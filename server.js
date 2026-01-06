@@ -13,6 +13,8 @@ const Customer = require('./models/Customer');
 const ConsultationDetails = require('./models/ConsultationDetails');
 const XLSX = require("xlsx");
 const axios = require('axios');
+const http = require("http");
+const { Server } = require("socket.io");
 const https = require('https');
 const cron = require('node-cron');
 const bodyParser = require('body-parser');
@@ -141,6 +143,7 @@ const notificationsRoutes = require("./routes/notifications");
 const WhatsAppRoutes = require("./whatsapp/whatsapp.routes");
 const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes");
 const whatsappMediaRoutes = require("./whatsapp/whatsappMedia.routes");
+const whatsappAiRoutes = require("./whatsapp/whatsapp.ai.routes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -636,6 +639,7 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/whatsapp", WhatsAppRoutes);
 app.use("/api/whatsapp/templates", whatsappTemplatesRoutes);
 app.use("/api/whatsapp", whatsappMediaRoutes);
+app.use("/api/whatsapp", whatsappAiRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -2284,6 +2288,42 @@ app.get('/api/consultation-history', async (req, res) => {
 
 
 // Start Server
-app.listen(PORT, () => {
+const httpServer = http.createServer(app);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowedOrigins,        // reuse your existing allowedOrigins
+    credentials: true,
+    methods: ["GET", "POST"],
+  },
+  transports: ["websocket", "polling"], // works on Heroku too
+});
+
+// Make io available inside routes via req.app.get("io")
+app.set("io", io);
+
+// Rooms: wa:<last10>
+// client will emit wa:join { phone: "xxxxxxxxxx" }
+const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
+const last10 = (v = "") => digitsOnly(v).slice(-10);
+
+io.on("connection", (socket) => {
+  socket.on("wa:join", ({ phone }) => {
+    const p10 = last10(phone);
+    if (!p10) return;
+    socket.join(`wa:${p10}`);
+  });
+
+  socket.on("wa:leave", ({ phone }) => {
+    const p10 = last10(phone);
+    if (!p10) return;
+    socket.leave(`wa:${p10}`);
+  });
+});
+
+// --------------------
+// START SERVER
+// --------------------
+httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); 
+});

@@ -35,6 +35,33 @@ const normalizeWaId = (v = "") => {
   return d;
 };
 
+// ================================
+// Socket emit helpers (rooms: wa:<last10>)
+// NOTE: requires you to set io on app:
+//   app.set("io", io)
+// and have socket join rooms `wa:<phone10>`
+// ================================
+const roomForPhone10 = (p10) => `wa:${String(p10 || "").slice(-10)}`;
+const emitToPhone10 = (req, phone10, event, payload) => {
+  const io = req?.app?.get("io");
+  if (!io) return;
+  const p10 = last10(phone10);
+  if (!p10) return;
+  io.to(roomForPhone10(p10)).emit(event, payload);
+};
+const emitMessage = (req, msgDoc) => {
+  if (!msgDoc) return;
+  const p10 = last10(msgDoc.to || msgDoc.from || "");
+  emitToPhone10(req, p10, "wa:message", msgDoc);
+};
+const emitStatus = (req, { phone10, waId, status }) => {
+  if (!waId) return;
+  emitToPhone10(req, phone10, "wa:status", { waId, status });
+};
+const emitConversationPatch = (req, { phone10, patch }) => {
+  emitToPhone10(req, phone10, "wa:conversation", { phone: last10(phone10), patch });
+};
+
 // ---------- Template helpers (server-side preview text) ----------
 function extractTemplateBodyText(tpl) {
   if (!tpl) return "";
@@ -185,6 +212,7 @@ router.post("/send-text", async (req, res) => {
     }
 
     const phone = normalizeWaId(to);
+    const p10 = last10(phone);
 
     const convo = await WhatsAppConversation.findOne({ phone }).lean();
     if (!convo?.windowExpiresAt || convo.windowExpiresAt < new Date()) {
@@ -204,14 +232,14 @@ router.post("/send-text", async (req, res) => {
     const r = await whatsappClient.post("/messages", payload);
     const now = new Date();
 
-    await WhatsAppMessage.create({
+    const created = await WhatsAppMessage.create({
       waId: r.data.messages?.[0]?.id,
       from: process.env.WHATSAPP_BUSINESS_PHONE,
       to: phone,
       text,
       direction: "OUTBOUND",
       type: "text",
-      status: "sent", // ✅ important for ticks
+      status: "sent",
       timestamp: now,
       raw: r.data,
     });
@@ -225,6 +253,16 @@ router.post("/send-text", async (req, res) => {
       },
       { upsert: true }
     );
+
+    // ✅ realtime emits
+    emitMessage(req, created);
+    emitConversationPatch(req, {
+      phone10: p10,
+      patch: {
+        lastMessageAt: now,
+        lastMessageText: text.slice(0, 200),
+      },
+    });
 
     res.json({ success: true });
   } catch (e) {
@@ -243,6 +281,7 @@ router.post("/send-template", async (req, res) => {
   try {
     const { to, templateName, parameters = [], renderedText = "" } = req.body;
     const phone = normalizeWaId(to);
+    const p10 = last10(phone);
 
     const tpl = await WhatsAppTemplate.findOne({ name: templateName }).lean();
     if (!tpl) return res.status(400).json({ message: "Template not found" });
@@ -272,20 +311,19 @@ router.post("/send-template", async (req, res) => {
     const r = await whatsappClient.post("/messages", payload);
     const now = new Date();
 
-    // ✅ compute the real message text to store
     const clientText = String(renderedText || "").trim();
     const serverBody = extractTemplateBodyText(tpl);
     const serverText = serverBody ? applyTemplateVars(serverBody, parameters) : "";
     const finalText = clientText || serverText || `[TEMPLATE] ${tpl.name}`;
 
-    await WhatsAppMessage.create({
+    const created = await WhatsAppMessage.create({
       waId: r.data.messages?.[0]?.id,
       from: process.env.WHATSAPP_BUSINESS_PHONE,
       to: phone,
       direction: "OUTBOUND",
       type: "template",
       text: finalText,
-      status: "sent", // ✅ important for ticks
+      status: "sent",
       templateMeta: {
         name: tpl.name,
         language: tpl.language || "en",
@@ -305,6 +343,16 @@ router.post("/send-template", async (req, res) => {
       { upsert: true }
     );
 
+    // ✅ realtime emits
+    emitMessage(req, created);
+    emitConversationPatch(req, {
+      phone10: p10,
+      patch: {
+        lastMessageAt: now,
+        lastMessageText: finalText.slice(0, 200),
+      },
+    });
+
     res.json({ success: true });
   } catch (e) {
     console.error(e.response?.data || e);
@@ -317,10 +365,6 @@ router.post("/send-template", async (req, res) => {
 
 /* ================================
    WEBHOOK
-   ✅ handles:
-   - inbound messages
-   - inbound media (stores media url/id)
-   - delivery receipts for ticks (value.statuses)
 ================================ */
 router.get("/webhook", (req, res) => res.sendStatus(200));
 
@@ -332,6 +376,9 @@ router.post("/webhook", async (req, res) => {
       for (const change of entry.changes || []) {
         const value = change.value || {};
 
+        // WhatsApp business number (may be empty depending on provider payload)
+        const businessPhone = normalizeWaId(value.metadata?.display_phone_number || "");
+
         /* -------------------------
            1) STATUS UPDATES (ticks)
         -------------------------- */
@@ -340,14 +387,20 @@ router.post("/webhook", async (req, res) => {
           const waId = st?.id;
           if (!waId) continue;
 
-          const newStatus = String(st.status || "").toLowerCase(); // sent/delivered/read/failed
+          const newStatus = String(st.status || "").toLowerCase().trim();
           if (!newStatus) continue;
 
-          await WhatsAppMessage.findOneAndUpdate(
+          const updated = await WhatsAppMessage.findOneAndUpdate(
             { waId },
             { $set: { status: newStatus } },
             { new: true }
-          );
+          ).lean();
+
+          // ✅ realtime tick update
+          if (updated) {
+            const p10 = last10(updated.to || updated.from || "");
+            emitStatus(req, { phone10: p10, waId, status: newStatus });
+          }
         }
 
         /* -------------------------
@@ -359,16 +412,16 @@ router.post("/webhook", async (req, res) => {
           if (!msg?.id || !msg?.from) continue;
 
           const from = normalizeWaId(msg.from);
-          const to = normalizeWaId(value.metadata?.display_phone_number || "");
+          const to = businessPhone || normalizeWaId(value.metadata?.display_phone_number || "");
 
           // ignore echo
-          if (from === to) continue;
+          if (from && to && from === to) continue;
 
-          const exists = await WhatsAppMessage.findOne({ waId: msg.id });
+          const exists = await WhatsAppMessage.findOne({ waId: msg.id }).lean();
           if (exists) continue;
 
           let text = "";
-          let media; // keep undefined if not exists
+          let media;
 
           if (msg.type === "text") {
             text = msg.text?.body || "";
@@ -384,7 +437,6 @@ router.post("/webhook", async (req, res) => {
             const mediaId = obj.id;
 
             if (mediaId) {
-              // NOTE: 360dialog media URLs can be short-lived. For production, download+upload to Wasabi.
               let mediaUrl = "";
               try {
                 const infoRes = await whatsappClient.get(`/media/${mediaId}`);
@@ -406,7 +458,7 @@ router.post("/webhook", async (req, res) => {
 
           const now = new Date(Number(msg.timestamp) * 1000 || Date.now());
 
-          await WhatsAppMessage.create({
+          const createdInbound = await WhatsAppMessage.create({
             waId: msg.id,
             from,
             to,
@@ -414,7 +466,7 @@ router.post("/webhook", async (req, res) => {
             ...(media ? { media } : {}),
             direction: "INBOUND",
             type: msg.type,
-            status: "delivered", // inbound is already delivered to business
+            status: "delivered",
             timestamp: now,
             raw: msg,
           });
@@ -431,6 +483,19 @@ router.post("/webhook", async (req, res) => {
             },
             { upsert: true }
           );
+
+          // ✅ realtime inbound message + window expiry patch
+          emitMessage(req, createdInbound);
+          emitConversationPatch(req, {
+            phone10: last10(from),
+            patch: {
+              lastMessageAt: now,
+              lastMessageText:
+                (text && text.slice(0, 200)) ||
+                (media?.filename ? `${media.filename}` : media ? "Media" : ""),
+              windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            },
+          });
         }
       }
     }
