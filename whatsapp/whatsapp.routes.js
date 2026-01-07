@@ -91,8 +91,78 @@ function applyTemplateVars(bodyText, vars) {
 /* ================================
    GET CONVERSATIONS (ENRICHED)
 ================================ */
+// router.get("/conversations", async (req, res) => {
+//   try {
+//     const conversations = await WhatsAppConversation.find({})
+//       .sort({ lastMessageAt: -1 })
+//       .lean();
+
+//     if (!conversations.length) return res.json([]);
+
+//     const phones10 = conversations.map((c) => last10(c.phone));
+
+//     // --- Fetch Leads ---
+//     const leads = await Lead.find({
+//       contactNumber: { $in: phones10 },
+//     })
+//       .select("contactNumber name healthExpertAssigned agentAssigned")
+//       .lean();
+
+//     const leadMap = {};
+//     leads.forEach((l) => {
+//       leadMap[last10(l.contactNumber)] = l;
+//     });
+
+//     // --- Fetch Customers (fallback only) ---
+//     const missingPhones = phones10.filter((p) => !leadMap[p]);
+
+//     const customers = await Customer.find({
+//       phone: { $in: missingPhones },
+//     })
+//       .select("phone name assignedTo")
+//       .lean();
+
+//     const customerMap = {};
+//     customers.forEach((c) => {
+//       customerMap[last10(c.phone)] = c;
+//     });
+
+//     // --- Enrich conversations ---
+//     const enriched = conversations.map((conv) => {
+//       const p10 = last10(conv.phone);
+
+//       const lead = leadMap[p10];
+//       const customer = customerMap[p10];
+
+//       let displayName = p10;
+//       let assignedToLabel = "Unassigned";
+
+//       if (lead) {
+//         displayName = lead.name || p10;
+//         assignedToLabel = lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
+//       } else if (customer) {
+//         displayName = customer.name || p10;
+//         assignedToLabel = customer.assignedTo || "Unassigned";
+//       }
+
+//       return {
+//         ...conv,
+//         displayName,
+//         assignedToLabel,
+//       };
+//     });
+
+//     res.json(enriched);
+//   } catch (e) {
+//     console.error("Conversation load error:", e);
+//     res.status(500).json({ message: "Failed to load conversations" });
+//   }
+// });
+
 router.get("/conversations", async (req, res) => {
   try {
+    const { role, userName } = req.query;
+
     const conversations = await WhatsAppConversation.find({})
       .sort({ lastMessageAt: -1 })
       .lean();
@@ -101,36 +171,21 @@ router.get("/conversations", async (req, res) => {
 
     const phones10 = conversations.map((c) => last10(c.phone));
 
-    // --- Fetch Leads ---
-    const leads = await Lead.find({
-      contactNumber: { $in: phones10 },
-    })
-      .select("contactNumber name healthExpertAssigned agentAssigned")
-      .lean();
+    // Fetch Leads and Customers for enrichment
+    const [leads, customers] = await Promise.all([
+      Lead.find({ contactNumber: { $in: phones10 } }).select("contactNumber name healthExpertAssigned agentAssigned").lean(),
+      Customer.find({ phone: { $in: phones10 } }).select("phone name assignedTo").lean()
+    ]);
 
     const leadMap = {};
-    leads.forEach((l) => {
-      leadMap[last10(l.contactNumber)] = l;
-    });
-
-    // --- Fetch Customers (fallback only) ---
-    const missingPhones = phones10.filter((p) => !leadMap[p]);
-
-    const customers = await Customer.find({
-      phone: { $in: missingPhones },
-    })
-      .select("phone name assignedTo")
-      .lean();
+    leads.forEach(l => { leadMap[last10(l.contactNumber)] = l; });
 
     const customerMap = {};
-    customers.forEach((c) => {
-      customerMap[last10(c.phone)] = c;
-    });
+    customers.forEach(c => { customerMap[last10(c.phone)] = c; });
 
-    // --- Enrich conversations ---
-    const enriched = conversations.map((conv) => {
+    // Enriching conversations with Name and Assignee
+    let enriched = conversations.map((conv) => {
       const p10 = last10(conv.phone);
-
       const lead = leadMap[p10];
       const customer = customerMap[p10];
 
@@ -139,18 +194,26 @@ router.get("/conversations", async (req, res) => {
 
       if (lead) {
         displayName = lead.name || p10;
+        // Check both health expert and agent assignment
         assignedToLabel = lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
       } else if (customer) {
         displayName = customer.name || p10;
         assignedToLabel = customer.assignedTo || "Unassigned";
       }
 
-      return {
-        ...conv,
-        displayName,
-        assignedToLabel,
-      };
+      return { ...conv, displayName, assignedToLabel };
     });
+
+    // ROLE-BASED FILTERING
+    // Managers and Developers see everything. 
+    // Sales/Retention agents only see chats where assignedToLabel matches their fullName.
+    const isAdmin = role === "Manager" || role === "Developer";
+    
+    if (!isAdmin) {
+      enriched = enriched.filter(chat => 
+        String(chat.assignedToLabel).toLowerCase() === String(userName).toLowerCase()
+      );
+    }
 
     res.json(enriched);
   } catch (e) {
