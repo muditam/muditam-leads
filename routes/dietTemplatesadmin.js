@@ -2,7 +2,7 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const DietTemplate = require("../models/DietTemplate");
-const DietPlan = require("../models/DietPlan");
+const DietPlan = require("../models/DietPlan"); // (kept as-is; used in some installs)
 const Employee = require("../models/Employee");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
@@ -22,7 +22,9 @@ function normalizeWeeklyBody(body) {
     const arr = Array.isArray(fortnight[meal]) ? [...fortnight[meal]] : [];
     const fixed = arr.slice(0, FORTNIGHT_DAYS);
     while (fixed.length < FORTNIGHT_DAYS) fixed.push("");
-    normalizedFortnight[meal] = fixed.map((v) => (typeof v === "string" ? v : String(v ?? "")));
+    normalizedFortnight[meal] = fixed.map((v) =>
+      typeof v === "string" ? v : String(v ?? "")
+    );
   });
 
   const wt = body.weeklyTimes || {};
@@ -36,6 +38,54 @@ function normalizeWeeklyBody(body) {
     ...body,
     fortnight: normalizedFortnight,
     weeklyTimes: normalizedWeeklyTimes,
+  };
+}
+
+function normalizeMonthlyBody(body) {
+  // Ensures your UI shape passes AJV:
+  // monthly: {
+  //   "Early Morning": { title,time,options:[...non-empty strings...] },
+  //   ...
+  // }
+  if (!body || typeof body !== "object") return body;
+
+  const monthly = body.monthly;
+  if (!monthly || typeof monthly !== "object") return body;
+
+  const ORDER = [
+    "Early Morning",
+    "Breakfast",
+    "Mid Morning",
+    "Lunch",
+    "Evening Snack",
+    "Dinner",
+    "Bed Time",
+  ];
+
+  const normalizedMonthly = {};
+  ORDER.forEach((slot) => {
+    const s = monthly[slot] || {};
+    const title = typeof s.title === "string" ? s.title.trim() : "";
+    const time = typeof s.time === "string" ? s.time.trim() : "";
+
+    let options = Array.isArray(s.options) ? s.options : [];
+    options = options
+      .map((x) => (typeof x === "string" ? x.trim() : String(x ?? "").trim()))
+      .filter((x) => x.length > 0);
+
+    // Keep at least 1 option to satisfy minItems=1
+    if (options.length === 0) options = ["-"];
+
+    normalizedMonthly[slot] = {
+      title: title || `${slot} Options (Select any one)`,
+      time: time || "-",
+      options,
+    };
+  });
+
+  return {
+    ...body,
+    monthly: normalizedMonthly,
   };
 }
 
@@ -91,6 +141,16 @@ function slotSchema() {
   };
 }
 
+const MONTHLY_SLOTS = [
+  "Early Morning",
+  "Breakfast",
+  "Mid Morning",
+  "Lunch",
+  "Evening Snack",
+  "Dinner",
+  "Bed Time",
+];
+
 const monthlyOptionsSchema = {
   $id: "monthly-options",
   type: "object",
@@ -98,20 +158,11 @@ const monthlyOptionsSchema = {
   properties: {
     monthly: {
       type: "object",
-      required: ["Early Morning",
-  "Breakfast",
-  "Mid Morning",
-  "Lunch",
-  "Evening Snack",
-  "Dinner",
-  "Bed Time"],
-      properties: {
-        Breakfast: slotSchema(),
-        "Mid-Morning Snack": slotSchema(),
-        Lunch: slotSchema(),
-        "Evening Snack": slotSchema(),
-        Dinner: slotSchema(),
-      },
+      required: MONTHLY_SLOTS,
+      properties: MONTHLY_SLOTS.reduce((p, slot) => {
+        p[slot] = slotSchema();
+        return p;
+      }, {}),
       additionalProperties: false,
     },
   },
@@ -121,6 +172,7 @@ const monthlyOptionsSchema = {
 /* ---------------- Ajv Setup ---------------- */
 const ajv = new Ajv({ allErrors: true, strict: false });
 addFormats(ajv);
+
 const validators = {
   "weekly-14": ajv.compile(weekly14Schema),
   "monthly-options": ajv.compile(monthlyOptionsSchema),
@@ -135,7 +187,9 @@ function validateBody(type, body) {
   }
   const ok = validate(body);
   if (!ok) {
-    const msg = validate.errors?.map(e => `${e.instancePath || "body"} ${e.message}`).join("; ");
+    const msg = (validate.errors || [])
+      .map((e) => `${e.instancePath || "body"} ${e.message}`)
+      .join("; ");
     const err = new Error(msg || "Validation failed");
     err.status = 400;
     throw err;
@@ -150,18 +204,16 @@ function isBogusName(v) {
 }
 
 async function resolveEmployeeFullName({ clientValue, reqUser }) {
-  // If client sent a non-empty string and it's not an email, assume full name
   if (typeof clientValue === "string" && clientValue.trim()) {
     const v = clientValue.trim();
     if (isBogusName(v)) return "";
     if (v.includes("@")) {
       const emp = await Employee.findOne({ email: v }).lean();
-      return emp?.fullName || ""; // no email fallback
+      return emp?.fullName || "";
     }
-    return v; // full name from client
+    return v;
   }
 
-  // Try req.user if available
   if (reqUser?.fullName && !isBogusName(reqUser.fullName)) return reqUser.fullName;
 
   if (reqUser?.email) {
@@ -174,7 +226,7 @@ async function resolveEmployeeFullName({ clientValue, reqUser }) {
     if (emp?.fullName && !isBogusName(emp.fullName)) return emp.fullName;
   }
 
-  return ""; // final fallback: show nothing rather than "system"
+  return "";
 }
 
 /* ---------------- Routes ---------------- */
@@ -184,6 +236,7 @@ router.get("/", async (req, res) => {
   const q = {};
   if (type) q.type = type;
   if (status) q.status = status;
+
   const docs = await DietTemplate.find(q).sort({ updatedAt: -1 }).lean();
   res.json(docs);
 });
@@ -205,9 +258,9 @@ router.post("/", async (req, res) => {
     }
 
     // normalize + validate
-    if (type === "weekly-14") {
-      body = normalizeWeeklyBody(body);
-    }
+    if (type === "weekly-14") body = normalizeWeeklyBody(body);
+    if (type === "monthly-options") body = normalizeMonthlyBody(body);
+
     validateBody(type, body);
 
     const createdBy = await resolveEmployeeFullName({
@@ -229,7 +282,7 @@ router.post("/", async (req, res) => {
 
     res.json(doc);
   } catch (e) {
-    res.status(400).json({ error: e.message || "Failed to create template" });
+    res.status(e.status || 400).json({ error: e.message || "Failed to create template" });
   }
 });
 
@@ -247,9 +300,9 @@ router.put("/:id", async (req, res) => {
     }
 
     if (body) {
-      if (doc.type === "weekly-14") {
-        body = normalizeWeeklyBody(body);
-      }
+      if (doc.type === "weekly-14") body = normalizeWeeklyBody(body);
+      if (doc.type === "monthly-options") body = normalizeMonthlyBody(body);
+
       validateBody(doc.type, body);
       doc.body = body;
     }
@@ -259,7 +312,6 @@ router.put("/:id", async (req, res) => {
     if (tags !== undefined) doc.tags = Array.isArray(tags) ? tags : [];
     if (status) doc.status = status;
 
-    // Save updater as fullName when possible
     const updatedBy = await resolveEmployeeFullName({ clientValue: "", reqUser: req.user });
     doc.version = (doc.version || 1) + 1;
     doc.updatedBy = updatedBy;
@@ -279,11 +331,13 @@ router.patch("/:id/status", async (req, res) => {
       return res.status(400).json({ error: "Invalid status" });
     }
     const updatedBy = await resolveEmployeeFullName({ clientValue: "", reqUser: req.user });
+
     const doc = await DietTemplate.findByIdAndUpdate(
       req.params.id,
       { status, $inc: { version: 1 }, updatedBy },
       { new: true }
     );
+
     if (!doc) return res.status(404).json({ error: "Not found" });
     res.json(doc);
   } catch (e) {
@@ -297,7 +351,7 @@ router.delete("/:id", async (req, res) => {
     const doc = await DietTemplate.findByIdAndDelete(req.params.id);
     if (!doc) return res.status(404).json({ error: "Not found" });
     res.json({ ok: true, deletedId: doc._id });
-  } catch (e) { 
+  } catch (e) {
     res.status(500).json({ error: e.message || "Failed to delete template" });
   }
 });

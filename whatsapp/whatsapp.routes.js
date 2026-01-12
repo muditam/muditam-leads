@@ -35,13 +35,11 @@ const normalizeWaId = (v = "") => {
   return d;
 };
 
-// ================================
-// Socket emit helpers (rooms: wa:<last10>)
-// NOTE: requires you to set io on app:
-//   app.set("io", io)
-// and have socket join rooms `wa:<phone10>`
-// ================================
+/* ================================
+   Socket emit helpers (rooms: wa:<last10>)
+================================ */
 const roomForPhone10 = (p10) => `wa:${String(p10 || "").slice(-10)}`;
+
 const emitToPhone10 = (req, phone10, event, payload) => {
   const io = req?.app?.get("io");
   if (!io) return;
@@ -49,20 +47,28 @@ const emitToPhone10 = (req, phone10, event, payload) => {
   if (!p10) return;
   io.to(roomForPhone10(p10)).emit(event, payload);
 };
+
 const emitMessage = (req, msgDoc) => {
   if (!msgDoc) return;
   const p10 = last10(msgDoc.to || msgDoc.from || "");
   emitToPhone10(req, p10, "wa:message", msgDoc);
 };
+
 const emitStatus = (req, { phone10, waId, status }) => {
   if (!waId) return;
   emitToPhone10(req, phone10, "wa:status", { waId, status });
 };
+
 const emitConversationPatch = (req, { phone10, patch }) => {
-  emitToPhone10(req, phone10, "wa:conversation", { phone: last10(phone10), patch });
+  emitToPhone10(req, phone10, "wa:conversation", {
+    phone: last10(phone10),
+    patch,
+  });
 };
 
-// ---------- Template helpers (server-side preview text) ----------
+/* ================================
+   Template helpers (server-side preview text)
+================================ */
 function extractTemplateBodyText(tpl) {
   if (!tpl) return "";
   if (typeof tpl?.bodyText === "string") return tpl.bodyText;
@@ -89,76 +95,37 @@ function applyTemplateVars(bodyText, vars) {
 }
 
 /* ================================
-   GET CONVERSATIONS (ENRICHED)
+   ✅ Mark conversation as read
+   Frontend calls:
+     POST /api/whatsapp/conversations/mark-read
+     body: { phone: "<digits>" }
 ================================ */
-// router.get("/conversations", async (req, res) => {
-//   try {
-//     const conversations = await WhatsAppConversation.find({})
-//       .sort({ lastMessageAt: -1 })
-//       .lean();
+router.post("/conversations/mark-read", async (req, res) => {
+  try {
+    const phoneRaw = req.body?.phone || "";
+    const p10 = last10(phoneRaw);
+    if (!p10) return res.status(400).json({ message: "phone required" });
 
-//     if (!conversations.length) return res.json([]);
+    const now = new Date();
 
-//     const phones10 = conversations.map((c) => last10(c.phone));
+    // We match both "91xxxxxxxxxx" and "xxxxxxxxxx" by regex ending in last10
+    const updated = await WhatsAppConversation.findOneAndUpdate(
+      { phone: new RegExp(`${p10}$`) },
+      { $set: { unreadCount: 0, lastReadAt: now } },
+      { new: true }
+    ).lean();
 
-//     // --- Fetch Leads ---
-//     const leads = await Lead.find({
-//       contactNumber: { $in: phones10 },
-//     })
-//       .select("contactNumber name healthExpertAssigned agentAssigned")
-//       .lean();
+    return res.json({ success: true, conversation: updated || null });
+  } catch (e) {
+    console.error("mark-read error:", e);
+    return res.status(500).json({ message: e.message || "mark-read failed" });
+  }
+});
 
-//     const leadMap = {};
-//     leads.forEach((l) => {
-//       leadMap[last10(l.contactNumber)] = l;
-//     });
-
-//     // --- Fetch Customers (fallback only) ---
-//     const missingPhones = phones10.filter((p) => !leadMap[p]);
-
-//     const customers = await Customer.find({
-//       phone: { $in: missingPhones },
-//     })
-//       .select("phone name assignedTo")
-//       .lean();
-
-//     const customerMap = {};
-//     customers.forEach((c) => {
-//       customerMap[last10(c.phone)] = c;
-//     });
-
-//     // --- Enrich conversations ---
-//     const enriched = conversations.map((conv) => {
-//       const p10 = last10(conv.phone);
-
-//       const lead = leadMap[p10];
-//       const customer = customerMap[p10];
-
-//       let displayName = p10;
-//       let assignedToLabel = "Unassigned";
-
-//       if (lead) {
-//         displayName = lead.name || p10;
-//         assignedToLabel = lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
-//       } else if (customer) {
-//         displayName = customer.name || p10;
-//         assignedToLabel = customer.assignedTo || "Unassigned";
-//       }
-
-//       return {
-//         ...conv,
-//         displayName,
-//         assignedToLabel,
-//       };
-//     });
-
-//     res.json(enriched);
-//   } catch (e) {
-//     console.error("Conversation load error:", e);
-//     res.status(500).json({ message: "Failed to load conversations" });
-//   }
-// });
-
+/* ================================
+   GET CONVERSATIONS (ENRICHED)
+   - Returns unreadCount + lastReadAt from conversation docs
+================================ */
 router.get("/conversations", async (req, res) => {
   try {
     const { role, userName } = req.query;
@@ -173,15 +140,23 @@ router.get("/conversations", async (req, res) => {
 
     // Fetch Leads and Customers for enrichment
     const [leads, customers] = await Promise.all([
-      Lead.find({ contactNumber: { $in: phones10 } }).select("contactNumber name healthExpertAssigned agentAssigned").lean(),
-      Customer.find({ phone: { $in: phones10 } }).select("phone name assignedTo").lean()
+      Lead.find({ contactNumber: { $in: phones10 } })
+        .select("contactNumber name healthExpertAssigned agentAssigned")
+        .lean(),
+      Customer.find({ phone: { $in: phones10 } })
+        .select("phone name assignedTo")
+        .lean(),
     ]);
 
     const leadMap = {};
-    leads.forEach(l => { leadMap[last10(l.contactNumber)] = l; });
+    leads.forEach((l) => {
+      leadMap[last10(l.contactNumber)] = l;
+    });
 
     const customerMap = {};
-    customers.forEach(c => { customerMap[last10(c.phone)] = c; });
+    customers.forEach((c) => {
+      customerMap[last10(c.phone)] = c;
+    });
 
     // Enriching conversations with Name and Assignee
     let enriched = conversations.map((conv) => {
@@ -194,8 +169,8 @@ router.get("/conversations", async (req, res) => {
 
       if (lead) {
         displayName = lead.name || p10;
-        // Check both health expert and agent assignment
-        assignedToLabel = lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
+        assignedToLabel =
+          lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
       } else if (customer) {
         displayName = customer.name || p10;
         assignedToLabel = customer.assignedTo || "Unassigned";
@@ -204,14 +179,13 @@ router.get("/conversations", async (req, res) => {
       return { ...conv, displayName, assignedToLabel };
     });
 
-    // ROLE-BASED FILTERING
-    // Managers and Developers see everything. 
-    // Sales/Retention agents only see chats where assignedToLabel matches their fullName.
     const isAdmin = role === "Manager" || role === "Developer";
-    
+
     if (!isAdmin) {
-      enriched = enriched.filter(chat => 
-        String(chat.assignedToLabel).toLowerCase() === String(userName).toLowerCase()
+      enriched = enriched.filter(
+        (chat) =>
+          String(chat.assignedToLabel).toLowerCase() ===
+          String(userName).toLowerCase()
       );
     }
 
@@ -256,7 +230,9 @@ router.get("/messages", async (req, res) => {
 ================================ */
 router.get("/templates", async (req, res) => {
   try {
-    const tpls = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
+    const tpls = await WhatsAppTemplate.find({})
+      .sort({ updatedAt: -1 })
+      .lean();
     res.json(tpls || []);
   } catch (e) {
     console.error(e);
@@ -266,6 +242,8 @@ router.get("/templates", async (req, res) => {
 
 /* ================================
    SEND TEXT
+   ✅ also updates lastOutboundAt (if in schema)
+   ✅ does NOT increment unreadCount
 ================================ */
 router.post("/send-text", async (req, res) => {
   try {
@@ -310,9 +288,12 @@ router.post("/send-text", async (req, res) => {
     await WhatsAppConversation.findOneAndUpdate(
       { phone },
       {
-        phone,
-        lastMessageAt: now,
-        lastMessageText: text.slice(0, 200),
+        $set: {
+          phone,
+          lastMessageAt: now,
+          lastMessageText: text.slice(0, 200),
+          lastOutboundAt: now,
+        },
       },
       { upsert: true }
     );
@@ -324,6 +305,7 @@ router.post("/send-text", async (req, res) => {
       patch: {
         lastMessageAt: now,
         lastMessageText: text.slice(0, 200),
+        lastOutboundAt: now,
       },
     });
 
@@ -338,7 +320,8 @@ router.post("/send-text", async (req, res) => {
 });
 
 /* ================================
-   SEND TEMPLATE  ✅ store exact template text
+   SEND TEMPLATE ✅ store exact template text
+   ✅ does NOT increment unreadCount
 ================================ */
 router.post("/send-template", async (req, res) => {
   try {
@@ -348,7 +331,8 @@ router.post("/send-template", async (req, res) => {
 
     const tpl = await WhatsAppTemplate.findOne({ name: templateName }).lean();
     if (!tpl) return res.status(400).json({ message: "Template not found" });
-    if (tpl.status !== "APPROVED") return res.status(400).json({ message: "Template not approved" });
+    if (tpl.status !== "APPROVED")
+      return res.status(400).json({ message: "Template not approved" });
 
     const payload = {
       messaging_product: "whatsapp",
@@ -399,9 +383,12 @@ router.post("/send-template", async (req, res) => {
     await WhatsAppConversation.findOneAndUpdate(
       { phone },
       {
-        phone,
-        lastMessageAt: now,
-        lastMessageText: finalText.slice(0, 200),
+        $set: {
+          phone,
+          lastMessageAt: now,
+          lastMessageText: finalText.slice(0, 200),
+          lastOutboundAt: now,
+        },
       },
       { upsert: true }
     );
@@ -413,6 +400,7 @@ router.post("/send-template", async (req, res) => {
       patch: {
         lastMessageAt: now,
         lastMessageText: finalText.slice(0, 200),
+        lastOutboundAt: now,
       },
     });
 
@@ -440,7 +428,9 @@ router.post("/webhook", async (req, res) => {
         const value = change.value || {};
 
         // WhatsApp business number (may be empty depending on provider payload)
-        const businessPhone = normalizeWaId(value.metadata?.display_phone_number || "");
+        const businessPhone = normalizeWaId(
+          value.metadata?.display_phone_number || ""
+        );
 
         /* -------------------------
            1) STATUS UPDATES (ticks)
@@ -468,6 +458,7 @@ router.post("/webhook", async (req, res) => {
 
         /* -------------------------
            2) INBOUND MESSAGES
+           ✅ increments unreadCount
         -------------------------- */
         const messages = Array.isArray(value.messages) ? value.messages : [];
 
@@ -495,7 +486,9 @@ router.post("/webhook", async (req, res) => {
               msg.interactive?.button_reply?.title ||
               msg.interactive?.list_reply?.title ||
               "";
-          } else if (["image", "video", "audio", "document", "sticker"].includes(msg.type)) {
+          } else if (
+            ["image", "video", "audio", "document", "sticker"].includes(msg.type)
+          ) {
             const obj = msg[msg.type] || {};
             const mediaId = obj.id;
 
@@ -534,15 +527,23 @@ router.post("/webhook", async (req, res) => {
             raw: msg,
           });
 
+          const previewText =
+            (text && text.slice(0, 200)) ||
+            (media?.filename ? `${media.filename}` : media ? "Media" : "");
+
+          const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
           await WhatsAppConversation.findOneAndUpdate(
             { phone: from },
             {
-              phone: from,
-              lastMessageAt: now,
-              lastMessageText:
-                (text && text.slice(0, 200)) ||
-                (media?.filename ? `${media.filename}` : media ? "Media" : ""),
-              windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+              $set: {
+                phone: from,
+                lastMessageAt: now,
+                lastMessageText: previewText,
+                windowExpiresAt: windowExpiry,
+                lastInboundAt: now,
+              },
+              $inc: { unreadCount: 1 }, // ✅ unread++
             },
             { upsert: true }
           );
@@ -553,10 +554,12 @@ router.post("/webhook", async (req, res) => {
             phone10: last10(from),
             patch: {
               lastMessageAt: now,
-              lastMessageText:
-                (text && text.slice(0, 200)) ||
-                (media?.filename ? `${media.filename}` : media ? "Media" : ""),
-              windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+              lastMessageText: previewText,
+              windowExpiresAt: windowExpiry,
+              lastInboundAt: now,
+              // note: unreadCount is computed server-side; frontend refreshConversations will pull it,
+              // but we still push a hint patch:
+              unreadCountDelta: 1,
             },
           });
         }

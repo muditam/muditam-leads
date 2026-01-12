@@ -8,24 +8,23 @@ const DietTemplateSchema = new mongoose.Schema(
       type: String,
       enum: ["weekly-14", "monthly-options"],
       required: true,
-      index: true, 
+      index: true,
     },
     category: { type: String },
     tags: { type: [String], default: [], index: true },
     status: {
       type: String,
-      enum: ["draft", "published", "archived"], 
+      enum: ["draft", "published", "archived"],
       index: true,
+      default: "draft",  
     },
     version: { type: Number, default: 1 },
-    body: { type: mongoose.Schema.Types.Mixed, required: true },    
+    body: { type: mongoose.Schema.Types.Mixed, required: true },
 
-    createdBy: { type: String },
-    updatedBy: { type: String },
-  }, 
+    createdBy: { type: String, default: "" }, 
+    updatedBy: { type: String, default: "" }, 
+  },
   { timestamps: true }
 );
 
 module.exports = mongoose.model("DietTemplate", DietTemplateSchema);
-
-

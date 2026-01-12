@@ -2,7 +2,8 @@
 const mongoose = require("mongoose");
 
 const MonthlySlotSchema = new mongoose.Schema(
-  {
+  { 
+    title: { type: String, default: "" }, // ✅ ADDED (your monthly schema requires title)
     time: { type: String, default: "" },
     options: { type: [String], default: [] },
   },
@@ -25,7 +26,7 @@ const DietPlanSchema = new mongoose.Schema(
     startDate: { type: Date, required: true, index: true },
     durationDays: { type: Number, required: true },
 
-    // Weekly (14) body 
+    // Weekly (14) body
     fortnight: {
       Breakfast: { type: [String], default: undefined },
       Lunch: { type: [String], default: undefined },
