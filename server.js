@@ -148,6 +148,8 @@ const whatsappAiRoutes = require("./whatsapp/whatsapp.ai.routes");
 const app = express();
 const PORT = process.env.PORT || 5001;
 
+
+
 app.use(
   compression({
     filter: (req, res) => {
@@ -168,6 +170,37 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const rawSaver = (req, res, buf) => { req.rawBody = buf; };
 
+// Start Server
+const httpServer = http.createServer(app);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowedOrigins,         
+    credentials: true,
+    methods: ["GET", "POST"],
+  },
+  transports: ["websocket", "polling"],  
+});
+ 
+app.set("io", io);
+ 
+const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
+const last10 = (v = "") => digitsOnly(v).slice(-10);
+
+io.on("connection", (socket) => {
+  socket.on("wa:join", ({ phone }) => {
+    const p10 = last10(phone);
+    if (!p10) return;
+    socket.join(`wa:${p10}`);
+  });
+
+  socket.on("wa:leave", ({ phone }) => {
+    const p10 = last10(phone);
+    if (!p10) return;
+    socket.leave(`wa:${p10}`);
+  });
+});
+
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -177,7 +210,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-agent-name',],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-agent-name', 'x-user-json'],
   })
 );
 
@@ -186,17 +219,19 @@ app.options('*', cors({
   credentials: true,
 }));
 
+app.set("trust proxy", 1);
+ 
 app.use(
   session({
     name: 'sid',
-    secret: process.env.SESSION_SECRET || 'dev-secret',
+    secret: 'dev-secret',
     resave: false,
     saveUninitialized: false,
     store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
     cookie: {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false, // true only when serving over HTTPS
+      httpOnly: true, 
+      sameSite: "none",
+      secure: true,  
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   })
@@ -470,7 +505,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Credentials", "true");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-agent-name");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-agent-name, x-user-json");
   next();
 });
 
@@ -2285,45 +2320,7 @@ app.get('/api/consultation-history', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-
-// Start Server
-const httpServer = http.createServer(app);
-
-const io = new Server(httpServer, {
-  cors: {
-    origin: allowedOrigins,        // reuse your existing allowedOrigins
-    credentials: true,
-    methods: ["GET", "POST"],
-  },
-  transports: ["websocket", "polling"], // works on Heroku too
-});
-
-// Make io available inside routes via req.app.get("io")
-app.set("io", io);
-
-// Rooms: wa:<last10>
-// client will emit wa:join { phone: "xxxxxxxxxx" }
-const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
-const last10 = (v = "") => digitsOnly(v).slice(-10);
-
-io.on("connection", (socket) => {
-  socket.on("wa:join", ({ phone }) => {
-    const p10 = last10(phone);
-    if (!p10) return;
-    socket.join(`wa:${p10}`);
-  });
-
-  socket.on("wa:leave", ({ phone }) => {
-    const p10 = last10(phone);
-    if (!p10) return;
-    socket.leave(`wa:${p10}`);
-  });
-});
-
-// --------------------
-// START SERVER
-// --------------------
+ 
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
