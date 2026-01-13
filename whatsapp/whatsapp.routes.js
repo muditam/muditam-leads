@@ -565,7 +565,6 @@ router.post("/webhook", async (req, res) => {
         }
       }
     }
-
     res.sendStatus(200);
   } catch (e) {
     console.error("Webhook error:", e.response?.data || e);
@@ -573,4 +572,4 @@ router.post("/webhook", async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = router; 
