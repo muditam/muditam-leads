@@ -185,17 +185,17 @@ const io = new Server(httpServer, {
 app.set("io", io);
  
 const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
-const last10 = (v = "") => digitsOnly(v).slice(-10);
+const last10 = (v = "") => digitsOnly(v).slice(-10); 
 
 io.on("connection", (socket) => {
-  socket.on("wa:join", ({ phone }) => {
-    const p10 = last10(phone);
+  socket.on("wa:join", ({ phone10, phone } = {}) => {
+    const p10 = last10(phone10 || phone || "");
     if (!p10) return;
     socket.join(`wa:${p10}`);
   });
 
-  socket.on("wa:leave", ({ phone }) => {
-    const p10 = last10(phone);
+  socket.on("wa:leave", ({ phone10, phone } = {}) => {
+    const p10 = last10(phone10 || phone || "");
     if (!p10) return;
     socket.leave(`wa:${p10}`);
   });
