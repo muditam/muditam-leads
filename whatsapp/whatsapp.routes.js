@@ -13,10 +13,23 @@ const Customer = require("../models/Customer");
 const router = express.Router();
 
 /* ================================
+   360dialog base url normalize (avoid /v1/v1)
+   Prefer: https://waba-v2.360dialog.io
+================================ */
+function normalizeBaseUrl(raw = "") {
+  const u = String(raw || "").replace(/\/+$/, "");
+  if (!u) return "";
+  return u.endsWith("/v1") ? u : `${u}/v1`;
+}
+
+const WHATSAPP_V1_BASE =
+  normalizeBaseUrl(process.env.WHATSAPP_BASE_URL) || "https://waba-v2.360dialog.io/v1";
+
+/* ================================
    360dialog client
 ================================ */
 const whatsappClient = axios.create({
-  baseURL: "https://waba-v2.360dialog.io",
+  baseURL: WHATSAPP_V1_BASE,
   headers: {
     "D360-API-KEY": process.env.WHATSAPP_API_KEY,
     "Content-Type": "application/json",
@@ -32,7 +45,10 @@ const WASABI_REGION = process.env.WASABI_REGION || "ap-southeast-1";
 const WASABI_BUCKET = process.env.WASABI_BUCKET;
 
 const s3 =
-  WASABI_ENDPOINT && process.env.WASABI_ACCESS_KEY_ID && process.env.WASABI_SECRET_ACCESS_KEY
+  WASABI_ENDPOINT &&
+  process.env.WASABI_ACCESS_KEY_ID &&
+  process.env.WASABI_SECRET_ACCESS_KEY &&
+  WASABI_BUCKET
     ? new AWS.S3({
         endpoint: new AWS.Endpoint(WASABI_ENDPOINT),
         region: WASABI_REGION,
@@ -64,7 +80,7 @@ const emitToPhone10 = (req, phone10, event, payload) => {
   io.to(roomForPhone10(p10)).emit(event, payload);
 };
 
-// ✅ choose customer phone based on direction
+// ✅ choose customer phone based on direction (matches frontend logic)
 const customerPhoneFromMsg = (msgDoc) => {
   const dir = String(msgDoc?.direction || "").toUpperCase();
   if (dir === "INBOUND") return msgDoc?.from; // customer
@@ -72,7 +88,7 @@ const customerPhoneFromMsg = (msgDoc) => {
   return msgDoc?.to || msgDoc?.from;
 };
 
-// ✅ Emit message in a shape frontend already supports: { phone10, message }
+// ✅ Emit message in shape frontend supports: { phone10, message }
 const emitMessage = (req, msgDoc) => {
   if (!msgDoc) return;
   const customerPhone = customerPhoneFromMsg(msgDoc);
@@ -152,7 +168,7 @@ async function downloadMediaBuffer(mediaUrl) {
       headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY },
     });
     return Buffer.from(r.data);
-  } catch (e1) {
+  } catch {
     const r = await axios.get(mediaUrl, {
       responseType: "arraybuffer",
       timeout: 30000,
@@ -167,10 +183,7 @@ async function uploadInboundToWasabi({ buffer, mime, filename, from10, mediaId, 
   const day = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   const ext = extFromMime(mime);
   const safeName = filename ? String(filename).replace(/[^\w.\-() ]+/g, "_") : "";
-  const base =
-    safeName ||
-    `${msgType || "media"}_${from10 || "unknown"}_${mediaId || Date.now()}.${ext}`;
-
+  const base = safeName || `${msgType || "media"}_${from10 || "unknown"}_${mediaId || Date.now()}.${ext}`;
   const key = `whatsapp-inbound/${day}/${base}`;
 
   const up = await s3
@@ -183,7 +196,6 @@ async function uploadInboundToWasabi({ buffer, mime, filename, from10, mediaId, 
     })
     .promise();
 
-  // AWS SDK v2 returns Location
   return up?.Location || null;
 }
 
@@ -262,11 +274,15 @@ router.get("/conversations", async (req, res) => {
       return { ...conv, displayName, assignedToLabel };
     });
 
-    const isAdmin = role === "Manager" || role === "Developer";
+    const r = String(role || "");
+    const isAdmin =
+      ["Manager", "Developer", "Super Admin", "Admin"].includes(r) ||
+      r.toLowerCase().includes("admin") ||
+      r.toLowerCase().includes("manager");
+
     if (!isAdmin) {
-      enriched = enriched.filter(
-        (chat) => String(chat.assignedToLabel).toLowerCase() === String(userName).toLowerCase()
-      );
+      const u = String(userName || "").toLowerCase();
+      enriched = enriched.filter((chat) => String(chat.assignedToLabel || "").toLowerCase() === u);
     }
 
     res.json(enriched);
@@ -300,7 +316,7 @@ router.get("/messages", async (req, res) => {
 
     res.json(msgs || []);
   } catch (e) {
-    console.error(e);
+    console.error("load messages error:", e);
     res.status(500).json({ message: "Failed to load messages" });
   }
 });
@@ -315,13 +331,14 @@ router.get("/templates", async (req, res) => {
       .lean();
     res.json(tpls || []);
   } catch (e) {
-    console.error(e);
+    console.error("load templates error:", e);
     res.status(500).json({ message: "Failed to load templates" });
   }
 });
 
 /* ================================
    SEND TEXT
+   - requires session window active (windowExpiresAt)
 ================================ */
 router.post("/send-text", async (req, res) => {
   try {
@@ -333,7 +350,8 @@ router.post("/send-text", async (req, res) => {
     const phone = normalizeWaId(to);
     const p10 = last10(phone);
 
-    const convo = await WhatsAppConversation.findOne({ phone }).lean();
+    // robust convo lookup (handles stored phone with 91 or raw)
+    const convo = await WhatsAppConversation.findOne({ phone: new RegExp(`${p10}$`) }).lean();
     if (!convo?.windowExpiresAt || convo.windowExpiresAt < new Date()) {
       return res.status(400).json({
         message: "Session expired. Use template message.",
@@ -352,7 +370,7 @@ router.post("/send-text", async (req, res) => {
     const now = new Date();
 
     const created = await WhatsAppMessage.create({
-      waId: r.data.messages?.[0]?.id,
+      waId: r.data?.messages?.[0]?.id,
       from: process.env.WHATSAPP_BUSINESS_PHONE,
       to: phone,
       text,
@@ -363,14 +381,16 @@ router.post("/send-text", async (req, res) => {
       raw: r.data,
     });
 
+    // keep conversation phone normalized consistently
     await WhatsAppConversation.findOneAndUpdate(
-      { phone },
+      { phone: new RegExp(`${p10}$`) },
       {
         $set: {
-          phone,
+          phone, // store normalized
           lastMessageAt: now,
           lastMessageText: text.slice(0, 200),
           lastOutboundAt: now,
+          // NOTE: windowExpiresAt is driven by last inbound OR template reopen; don't change here
         },
       },
       { upsert: true }
@@ -391,7 +411,7 @@ router.post("/send-text", async (req, res) => {
   } catch (e) {
     console.error("Send text error:", e.response?.data || e);
     res.status(400).json({
-      message: "Send text failed",
+      message: e.response?.data?.message || "Send text failed",
       providerError: e.response?.data || null,
     });
   }
@@ -399,6 +419,7 @@ router.post("/send-text", async (req, res) => {
 
 /* ================================
    SEND TEMPLATE
+   ✅ ALSO reopens the 24h session window (windowExpiresAt)
 ================================ */
 router.post("/send-template", async (req, res) => {
   try {
@@ -408,8 +429,9 @@ router.post("/send-template", async (req, res) => {
 
     const tpl = await WhatsAppTemplate.findOne({ name: templateName }).lean();
     if (!tpl) return res.status(400).json({ message: "Template not found" });
-    if (tpl.status !== "APPROVED")
+    if (String(tpl.status || "").toUpperCase() !== "APPROVED") {
       return res.status(400).json({ message: "Template not approved" });
+    }
 
     const payload = {
       messaging_product: "whatsapp",
@@ -435,13 +457,14 @@ router.post("/send-template", async (req, res) => {
     const r = await whatsappClient.post("/messages", payload);
     const now = new Date();
 
+    // Prefer client-rendered text; fallback to server render; fallback to tag
     const clientText = String(renderedText || "").trim();
     const serverBody = extractTemplateBodyText(tpl);
     const serverText = serverBody ? applyTemplateVars(serverBody, parameters) : "";
     const finalText = clientText || serverText || `[TEMPLATE] ${tpl.name}`;
 
     const created = await WhatsAppMessage.create({
-      waId: r.data.messages?.[0]?.id,
+      waId: r.data?.messages?.[0]?.id,
       from: process.env.WHATSAPP_BUSINESS_PHONE,
       to: phone,
       direction: "OUTBOUND",
@@ -457,14 +480,18 @@ router.post("/send-template", async (req, res) => {
       raw: r.data,
     });
 
+    // ✅ sending a template reopens 24h window
+    const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
     await WhatsAppConversation.findOneAndUpdate(
-      { phone },
+      { phone: new RegExp(`${p10}$`) },
       {
         $set: {
-          phone,
+          phone, // store normalized
           lastMessageAt: now,
           lastMessageText: finalText.slice(0, 200),
           lastOutboundAt: now,
+          windowExpiresAt: windowExpiry,
         },
       },
       { upsert: true }
@@ -477,15 +504,16 @@ router.post("/send-template", async (req, res) => {
         lastMessageAt: now,
         lastMessageText: finalText.slice(0, 200),
         lastOutboundAt: now,
+        windowExpiresAt: windowExpiry,
         unreadCount: 0,
       },
     });
 
     res.json({ success: true });
   } catch (e) {
-    console.error(e.response?.data || e);
+    console.error("Send template error:", e.response?.data || e);
     res.status(400).json({
-      message: "Send template failed",
+      message: e.response?.data?.message || "Send template failed",
       providerError: e.response?.data || null,
     });
   }
@@ -534,7 +562,7 @@ router.post("/webhook", async (req, res) => {
         /* -------------------------
            2) INBOUND MESSAGES
            ✅ increments unreadCount
-           ✅ NEW: persist inbound media to Wasabi
+           ✅ persists inbound media to Wasabi (if configured)
         -------------------------- */
         const messages = Array.isArray(value.messages) ? value.messages : [];
 
@@ -544,7 +572,7 @@ router.post("/webhook", async (req, res) => {
           const from = normalizeWaId(msg.from); // customer
           const to = businessPhone || normalizeWaId(value.metadata?.display_phone_number || "");
 
-          // ignore echo
+          // ignore echo / weird cases
           if (from && to && from === to) continue;
 
           const exists = await WhatsAppMessage.findOne({ waId: msg.id }).lean();
@@ -592,7 +620,7 @@ router.post("/webhook", async (req, res) => {
                     msgType: msg.type,
                   });
                   if (wasabiUrl) finalUrl = wasabiUrl;
-                } catch (e) {
+                } catch {
                   // fallback: keep providerUrl
                 }
               }
@@ -602,8 +630,7 @@ router.post("/webhook", async (req, res) => {
                 url: finalUrl || "",
                 mime,
                 filename,
-                // optional: keep original providerUrl (comment out if you don't want it stored)
-                // sourceUrl: providerUrl || "",
+                // sourceUrl: providerUrl || "", // enable if you want to keep provider URL too
               };
             }
 
@@ -627,15 +654,24 @@ router.post("/webhook", async (req, res) => {
 
           const previewText =
             (text && text.slice(0, 200)) ||
-            (media?.filename ? `${media.filename}` : media ? "Media" : "");
+            (media?.url
+              ? (() => {
+                  const mt = String(media.mime || "").toLowerCase();
+                  if (mt.startsWith("image/")) return "📷 Photo";
+                  if (mt.startsWith("video/")) return "🎥 Video";
+                  if (mt.startsWith("audio/")) return "🎙️ Audio";
+                  return media.filename ? `📎 ${media.filename}` : "📎 Attachment";
+                })()
+              : "");
 
+          // customer replied => 24h window opens
           const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
           const updatedConv = await WhatsAppConversation.findOneAndUpdate(
-            { phone: from },
+            { phone: new RegExp(`${last10(from)}$`) },
             {
               $set: {
-                phone: from,
+                phone: from, // store normalized
                 lastMessageAt: now,
                 lastMessageText: previewText,
                 windowExpiresAt: windowExpiry,

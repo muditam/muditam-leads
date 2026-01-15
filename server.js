@@ -164,7 +164,7 @@ app.use(
 );
 
 
-const allowedOrigins = ['https://www.60brands.com', 'http://localhost:3000'];
+const allowedOrigins = ['https://www.60brands.com', 'https://60brands.com', 'http://localhost:3000'];
 
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
@@ -175,17 +175,35 @@ const httpServer = http.createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,         
+    origin: (origin, cb) => {
+      // allow non-browser clients (no origin)
+      if (!origin) return cb(null, true);
+
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error(`Socket.IO CORS blocked origin: ${origin}`), false);
+    },
     credentials: true,
     methods: ["GET", "POST"],
   },
-  transports: ["websocket", "polling"],  
+
+  transports: ["polling", "websocket"],  
+  allowUpgrades: true,
+  pingTimeout: 20000,
+  pingInterval: 25000,
 });
- 
+
+io.engine.on("connection_error", (err) => {
+  console.log("[socket.io] connection_error", {
+    code: err.code,
+    message: err.message,
+    context: err.context,
+  });
+});
+
 app.set("io", io);
  
 const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
-const last10 = (v = "") => digitsOnly(v).slice(-10); 
+const last10 = (v = "") => digitsOnly(v).slice(-10);
 
 io.on("connection", (socket) => {
   socket.on("wa:join", ({ phone10, phone } = {}) => {
@@ -214,28 +232,42 @@ app.use(
   })
 );
 
-app.options('*', cors({
-  origin: allowedOrigins,
+app.options("*", cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
   credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Origin",
+    "X-Requested-With",
+    "Content-Type",
+    "Accept",
+    "Authorization",
+    "x-agent-name",
+    "x-user-json",
+  ],
 }));
 
 app.set("trust proxy", 1);
  
-app.use(
-  session({
-    name: 'sid',
-    secret: 'dev-secret',
-    resave: false,
-    saveUninitialized: false,
-    store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
-    cookie: {
-      httpOnly: true, 
-      sameSite: "none",
-      secure: true,  
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    },
-  })
-);
+const isProd = process.env.NODE_ENV === "production";
+
+app.use(session({
+  name: "sid",
+  secret: process.env.SESSION_SECRET || "dev-secret",
+  resave: false,
+  saveUninitialized: false,
+  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
+  cookie: {
+    httpOnly: true,
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd, // true only on https
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+}));
 
 function toNumberLoose(v) {
   if (v === null || v === undefined) return undefined;
@@ -498,16 +530,16 @@ function sseSend(did, payload) {
   console.log("[SSE] Sent event", { key, listeners: set.size, type: payload?.type });
 }
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-  }
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-agent-name, x-user-json");
-  next();
-});
+// app.use((req, res, next) => {
+//   const origin = req.headers.origin;
+//   if (allowedOrigins.includes(origin)) {
+//     res.setHeader("Access-Control-Allow-Origin", origin);
+//     res.setHeader("Access-Control-Allow-Credentials", "true");
+//   }
+//   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+//   res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-agent-name, x-user-json");
+//   next();
+// });
 
 app.use(express.json());
 
