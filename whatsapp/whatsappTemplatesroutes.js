@@ -10,15 +10,15 @@ const router = express.Router();
    Use: https://waba-v2.360dialog.io  (recommended)
 ================================ */
 function normalizeBaseUrl(raw = "") {
-  const u = String(raw || "").replace(/\/+$/, "");
+  const u = String(raw || "").trim().replace(/\/+$/, "");
   if (!u) return "";
-  return u.endsWith("/v1") ? u : `${u}/v1`;
+  if (u.endsWith("/v1")) return u;
+  if (u.endsWith("/v1/")) return u.replace(/\/v1\/$/, "/v1");
+  return `${u}/v1`;
 }
 
-// If you set WHATSAPP_BASE_URL="https://waba-v2.360dialog.io"
 const WHATSAPP_V1_BASE =
-  normalizeBaseUrl(process.env.WHATSAPP_BASE_URL) ||
-  "https://waba-v2.360dialog.io/v1";
+  normalizeBaseUrl(process.env.WHATSAPP_BASE_URL) || "https://waba-v2.360dialog.io/v1";
 
 /** 360dialog client */
 const whatsappClient = axios.create({
@@ -42,13 +42,22 @@ function normalizeName(v = "") {
     .slice(0, 250);
 }
 
+function normalizeLanguage(v = "en") {
+  const s = String(v || "en").trim();
+  return s || "en";
+}
+
+function normalizeCategory(v = "") {
+  const s = String(v || "").trim().toUpperCase();
+  return s || "UTILITY";
+}
+
 function normalizeStatus(raw = "") {
   const v = String(raw || "").trim().toUpperCase();
   if (!v) return "UNKNOWN";
   if (v.includes("APPROV")) return "APPROVED";
   if (v.includes("REJECT") || v.includes("DISAPPROV")) return "REJECTED";
-  if (v.includes("PEND") || v.includes("SUBMIT") || v.includes("IN_REVIEW"))
-    return "PENDING";
+  if (v.includes("PEND") || v.includes("SUBMIT") || v.includes("IN_REVIEW")) return "PENDING";
   return v;
 }
 
@@ -86,32 +95,71 @@ function pickComponents(t) {
 }
 
 function getBodyFromComponents(components = []) {
-  const body = components.find(
-    (c) => String(c?.type || "").toUpperCase() === "BODY"
-  );
+  const body = components.find((c) => String(c?.type || "").toUpperCase() === "BODY");
   return String(body?.text || "");
 }
 
 function getFooterFromComponents(components = []) {
-  const footer = components.find(
-    (c) => String(c?.type || "").toUpperCase() === "FOOTER"
-  );
+  const footer = components.find((c) => String(c?.type || "").toUpperCase() === "FOOTER");
   return String(footer?.text || "");
+}
+
+function getHeaderMetaFromComponents(components = []) {
+  const header = components.find((c) => String(c?.type || "").toUpperCase() === "HEADER");
+  const format = String(header?.format || "").toUpperCase(); // TEXT / IMAGE / VIDEO / DOCUMENT
+  const text = String(header?.text || "");
+
+  return {
+    headerFormat: ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(format) ? format : "",
+    headerText: text,
+  };
+}
+
+// capture example media handles for HEADER media templates (helps frontend enforce upload)
+// 360 can return example header handles under "example.header_handle" or variants
+function getHeaderExampleFromComponents(components = []) {
+  const header = components.find((c) => String(c?.type || "").toUpperCase() === "HEADER");
+  const ex = header?.example;
+
+  if (!ex) return [];
+
+  const h = ex?.header_handle ?? ex?.header_handles ?? ex?.HEADER_HANDLE ?? null;
+
+  if (Array.isArray(h)) return h.filter(Boolean).map(String);
+  if (typeof h === "string" && h.trim()) return [h.trim()];
+
+  // sometimes example is directly an array
+  if (Array.isArray(ex)) return ex.filter(Boolean).map(String);
+
+  return [];
 }
 
 // 360dialog list response can be: array OR {data: []} OR {templates: []} etc.
 function extractTemplateList(data) {
   if (Array.isArray(data)) return data;
 
+  // common direct shapes
   if (Array.isArray(data?.data)) return data.data;
   if (Array.isArray(data?.templates)) return data.templates;
   if (Array.isArray(data?.waba_templates)) return data.waba_templates;
 
-  // sometimes: { success:true, payload:{data:[]} }
+  // nested shapes (seen in some providers/proxies)
+  if (Array.isArray(data?.data?.data)) return data.data.data;
+
   if (Array.isArray(data?.payload?.data)) return data.payload.data;
   if (Array.isArray(data?.payload?.templates)) return data.payload.templates;
+  if (Array.isArray(data?.payload?.data?.data)) return data.payload.data.data;
+
+  if (Array.isArray(data?.templates?.data)) return data.templates.data;
 
   return [];
+}
+
+// normalize 360 errors to something readable on UI
+function normalizeProviderError(err) {
+  const data = err?.response?.data;
+  if (!data) return { error: err?.message || "UNKNOWN_ERROR" };
+  return data;
 }
 
 /* ===============================
@@ -120,9 +168,7 @@ function extractTemplateList(data) {
 ================================ */
 router.get("/", async (req, res) => {
   try {
-    const templates = await WhatsAppTemplate.find({})
-      .sort({ updatedAt: -1 })
-      .lean();
+    const templates = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
 
     res.json({
       templates: templates || [],
@@ -138,6 +184,23 @@ router.get("/", async (req, res) => {
 });
 
 /* ===============================
+   GET /api/whatsapp/templates/by-name/:name
+   Handy for debugging send-template issues
+================================ */
+router.get("/by-name/:name", async (req, res) => {
+  try {
+    const name = normalizeName(req.params.name || "");
+    if (!name) return res.status(400).json({ success: false, error: "name required" });
+
+    const tpl = await WhatsAppTemplate.findOne({ name }).lean();
+    return res.json({ success: true, template: tpl || null });
+  } catch (err) {
+    console.error("GET BY NAME ERROR:", err);
+    res.status(500).json({ success: false, error: "GET_BY_NAME_FAILED" });
+  }
+});
+
+/* ===============================
    POST /api/whatsapp/templates
    Create template (send to 360) + save in Mongo
 ================================ */
@@ -146,7 +209,12 @@ router.post("/", async (req, res) => {
     const payload = req.body || {};
     const cleanName = normalizeName(payload.name);
 
-    if (!payload.category || !cleanName || !payload.components?.length) {
+    if (
+      !payload.category ||
+      !cleanName ||
+      !Array.isArray(payload.components) ||
+      !payload.components.length
+    ) {
       return res.status(400).json({
         success: false,
         error: "category, name, components are required",
@@ -154,15 +222,18 @@ router.post("/", async (req, res) => {
     }
 
     // Send to 360dialog
-    // Endpoint: POST /configs/templates
     const createResp = await whatsappClient.post("/configs/templates", {
       ...payload,
       name: cleanName,
+      category: normalizeCategory(payload.category),
+      language: normalizeLanguage(payload.language || "en"),
     });
 
     const components = payload.components || [];
     const body = getBodyFromComponents(components);
     const footer = getFooterFromComponents(components);
+    const headerMeta = getHeaderMetaFromComponents(components);
+    const headerExample = getHeaderExampleFromComponents(components);
 
     // Save locally (PENDING until sync updates status)
     const doc = await WhatsAppTemplate.findOneAndUpdate(
@@ -170,14 +241,20 @@ router.post("/", async (req, res) => {
       {
         $set: {
           name: cleanName,
-          category: String(payload.category || "").toUpperCase(),
-          language: payload.language || "en",
+          category: normalizeCategory(payload.category),
+          language: normalizeLanguage(payload.language || "en"),
           body: body || "",
           footer: footer || "",
           components,
           status: "PENDING",
+          rejectionReason: "",
           raw360: createResp?.data || {},
           lastSubmittedAt: new Date(),
+
+          // avoid stale values (always set)
+          headerFormat: headerMeta.headerFormat || "",
+          headerText: headerMeta.headerText || "",
+          headerExampleHandles: headerExample || [],
         },
       },
       { upsert: true, new: true }
@@ -186,29 +263,57 @@ router.post("/", async (req, res) => {
     res.json({ success: true, template: doc });
   } catch (err) {
     console.error("CREATE ERROR:", err.response?.data || err);
-    res.status(400).json({
+
+    // friendly duplicate handling
+    const msg = String(err?.response?.data?.message || "");
+    if (
+      err?.response?.status === 409 ||
+      msg.toLowerCase().includes("already exists") ||
+      msg.toLowerCase().includes("duplicate")
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: { message: "Template name already exists. Choose a different name." },
+      });
+    }
+
+    res.status(err.response?.status || 400).json({
       success: false,
-      error: err.response?.data || "CREATE_FAILED",
+      error: normalizeProviderError(err),
     });
   }
 });
 
-/* ===============================
-   POST /api/whatsapp/templates/sync
-   Sync from 360dialog -> upsert into Mongo
-================================ */
 router.post("/sync", async (req, res) => {
   try {
-    const r = await whatsappClient.get("/configs/templates");
+    const endpointsToTry = ["/configs/templates", "/configs/templates?limit=500", "/templates"];
 
-    const list = extractTemplateList(r.data);
+    let list = [];
+    let lastRaw = null;
+    let usedEndpoint = "";
 
-    // If still empty, log for debugging
+    for (const ep of endpointsToTry) {
+      try {
+        const r = await whatsappClient.get(ep);
+        lastRaw = r.data;
+        const extracted = extractTemplateList(r.data);
+        if (extracted.length) {
+          list = extracted;
+          usedEndpoint = ep;
+          break;
+        }
+      } catch (e) {
+        lastRaw = e.response?.data || null;
+      }
+    }
+
     if (!list.length) {
-      console.log("SYNC: No templates returned. Raw response keys:", Object.keys(r.data || {}));
+      console.log("SYNC: No templates returned. usedEndpoint:", usedEndpoint || "none");
+      console.log("SYNC: Raw response keys:", Object.keys(lastRaw || {}));
     }
 
     const ops = [];
+    const syncAt = new Date();
 
     for (const t of list) {
       const rawName = t?.name || t?.template?.name;
@@ -220,6 +325,15 @@ router.post("/sync", async (req, res) => {
 
       const body = getBodyFromComponents(components);
       const footer = getFooterFromComponents(components);
+      const headerMeta = getHeaderMetaFromComponents(components);
+      const headerExample = getHeaderExampleFromComponents(components);
+
+      const rejectionReason =
+        t?.rejectionReason ||
+        t?.reason ||
+        t?.template?.rejectionReason ||
+        t?.template?.reason ||
+        "";
 
       ops.push({
         updateOne: {
@@ -227,15 +341,20 @@ router.post("/sync", async (req, res) => {
           update: {
             $set: {
               name,
-              language: t?.language || t?.template?.language || "en",
-              category: String(t?.category || t?.template?.category || "").toUpperCase(),
+              language: normalizeLanguage(t?.language || t?.template?.language || "en"),
+              category: normalizeCategory(t?.category || t?.template?.category || ""),
               status,
-              rejectionReason: t?.reason || t?.rejectionReason || "",
+              rejectionReason: String(rejectionReason || ""),
               body: body || "",
               footer: footer || "",
               components: components || [],
               raw360: t,
-              syncedAt: new Date(),
+              syncedAt: syncAt,
+
+              // avoid stale values (always set)
+              headerFormat: headerMeta.headerFormat || "",
+              headerText: headerMeta.headerText || "",
+              headerExampleHandles: headerExample || [],
             },
           },
           upsert: true,
@@ -245,33 +364,65 @@ router.post("/sync", async (req, res) => {
 
     if (ops.length) await WhatsAppTemplate.bulkWrite(ops);
 
-    const templates = await WhatsAppTemplate.find({})
-      .sort({ updatedAt: -1 })
-      .lean();
+    const templates = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
 
     res.json({
       success: true,
       templates: templates || [],
       meta: {
-        lastSyncAt: new Date(),
+        lastSyncAt: syncAt,
         inSync: true,
         pulledCount: list.length,
         upsertedCount: ops.length,
+        usedEndpoint: usedEndpoint || null,
       },
     });
   } catch (err) {
     console.error("SYNC ERROR:", err.response?.data || err);
     res.status(500).json({
       success: false,
-      error: err.response?.data || "SYNC_FAILED",
+      error: normalizeProviderError(err),
     });
   }
 });
 
-/* ===============================
-   DELETE /api/whatsapp/templates/:id
-   Deletes FROM MONGO only
-================================ */
+router.post("/:id/resubmit", async (req, res) => {
+  try {
+    const tpl = await WhatsAppTemplate.findById(req.params.id).lean();
+    if (!tpl) return res.status(404).json({ success: false, error: "NOT_FOUND" });
+
+    const payload = {
+      name: tpl.name,
+      category: normalizeCategory(tpl.category),
+      language: normalizeLanguage(tpl.language || "en"),
+      components: tpl.components || [],
+    };
+
+    const r = await whatsappClient.post("/configs/templates", payload);
+
+    const updated = await WhatsAppTemplate.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          status: "PENDING",
+          rejectionReason: "",
+          raw360: r?.data || {},
+          lastSubmittedAt: new Date(),
+        },
+      },
+      { new: true }
+    ).lean();
+
+    return res.json({ success: true, template: updated });
+  } catch (err) {
+    console.error("RESUBMIT ERROR:", err.response?.data || err);
+    res.status(err.response?.status || 400).json({
+      success: false,
+      error: normalizeProviderError(err),
+    });
+  }
+});
+
 router.delete("/:id", async (req, res) => {
   try {
     await WhatsAppTemplate.findByIdAndDelete(req.params.id);

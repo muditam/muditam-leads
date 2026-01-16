@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const ButtonSchema = new mongoose.Schema(
   {
-    type: String, // QUICK_REPLY | URL | PHONE_NUMBER
+    type: String,  
     text: String,
     url: String,
     phoneNumber: String,
@@ -13,14 +13,18 @@ const ButtonSchema = new mongoose.Schema(
 const WhatsAppTemplateSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, unique: true, index: true },
-    category: { type: String }, // MARKETING | UTILITY | AUTHENTICATION
+    category: { type: String },  
     language: { type: String, default: "en" },
 
     body: { type: String, default: "" },
     footer: { type: String, default: "" },
     components: { type: Array, default: [] },
+ 
+    headerFormat: { type: String, default: "" },  
+    headerText: { type: String, default: "" },
+    headerExampleHandles: { type: [String], default: [] },
 
-    status: { type: String, default: "UNKNOWN" }, // APPROVED | PENDING | REJECTED
+    status: { type: String, default: "UNKNOWN" },  
     rejectionReason: { type: String, default: "" },
 
     raw360: { type: mongoose.Schema.Types.Mixed },
