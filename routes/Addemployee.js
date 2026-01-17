@@ -2,11 +2,6 @@ const express = require("express");
 const router = express.Router();
 const Employee = require("../models/Employee");
 
-
-
-
-
-
 function getChangedFields(oldData, newData) {
   const changes = {};
   const oldObj = oldData.toObject ? oldData.toObject() : oldData;
@@ -24,19 +19,15 @@ function getChangedFields(oldData, newData) {
   return changes;
 }
 
-
 router.get("/api/employees", async (req, res) => {
   const { role, fullName, email } = req.query;
 
-
   try {
-    // Special case: used by Navbar to fetch target/async etc for logged-in user
     if (fullName && email) {
       const employee = await Employee.findOne({ fullName, email });
       if (!employee) {
         return res.status(404).json({ message: "Employee not found" });
       }
-
 
       const {
         async,
@@ -51,9 +42,7 @@ router.get("/api/employees", async (req, res) => {
       ]);
     }
 
-
     const query = role ? { role } : {};
-
 
     const employees = await Employee.find(query)
       .select(
