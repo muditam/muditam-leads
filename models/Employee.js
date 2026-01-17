@@ -1,23 +1,24 @@
 const mongoose = require("mongoose");
 
+
 const EmployeeSchema = new mongoose.Schema({
-  fullName: { type: String, required: true }, 
-  email: { type: String, required: true, unique: true },  
+  fullName: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
   callerId: { type: String },
   role: { type: String, required: true },
-  password: { type: String, required: true },  
-  agentNumber: { type: String },   
+  password: { type: String, required: true },
+  agentNumber: { type: String },
   async: { type: Number, default: 1 },
-  status: { type: String, default: "active" }, 
-  target: { type: Number, default: 0 }, 
+  status: { type: String, default: "active" },
+  target: { type: Number, default: 0 },
   hasTeam: { type: Boolean, default: false },
   isDoctor: { type: Boolean, default: false },
   joiningDate: { type: Date, default: null },
   monthlyDeliveredSales: { type: mongoose.Schema.Types.Mixed, default: {} },
-  totalDeliveredSales: { type: Number, default: 0 }, 
-  languages: { type: [String], default: [] }, 
+  totalDeliveredSales: { type: Number, default: 0 },
+  languages: { type: [String], default: [] },
   orderConfirmActive: { type: Boolean, default: false, index: true },
-  teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: [] }], 
+  teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: [] }],
   teamLeader: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
   permissions: {
     menubar: {
@@ -29,7 +30,40 @@ const EmployeeSchema = new mongoose.Schema({
       default: {},
     },
   },
+  auditLogs: [{
+    actionType: {
+      type: String,
+      enum: ["CREATE", "UPDATE", "ACTIVATE", "INACTIVATE"],
+      required: true,
+    },
+    changedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    changedByName: {
+      type: String,
+      required: true,
+    },
+    targetEmployeeName: {
+      type: String,
+      required: true,
+    },
+  }],
 });
 
-module.exports = mongoose.model("Employee", EmployeeSchema);
+EmployeeSchema.methods.addAuditLog = function (actionType, changedBy) {
+  const changedByName =
+    typeof changedBy === "string"
+      ? changedBy
+      : changedBy?.fullName || "Unknown";
 
+
+  this.auditLogs.push({
+    actionType,
+    changedAt: new Date(),
+    changedByName,
+    targetEmployeeName: this.fullName,
+  });
+};
+
+module.exports = mongoose.model("Employee", EmployeeSchema);

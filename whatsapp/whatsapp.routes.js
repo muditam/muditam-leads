@@ -13,45 +13,34 @@ const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
 
 const router = express.Router();
-
-/* ================================
-   Upload (template header media)
-================================ */
+ 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },  
 });
 
-/* ================================
-   360dialog base url normalize (avoid /v1/v1)
-   Prefer: https://waba-v2.360dialog.io
-================================ */
-function normalizeBaseUrl(raw = "") {
-  const u = String(raw || "").trim().replace(/\/+$/, "");
-  if (!u) return "";
-  return u.endsWith("/v1") ? u : `${u}/v1`;
+ 
+function normalizeMessagingBaseUrl(raw = "") {
+  let u = String(raw || "").trim().replace(/\/+$/, "");
+  if (!u) return ""; 
+  u = u.replace(/\/v1$/i, "");
+  return u;
 }
 
-const WHATSAPP_V1_BASE =
-  normalizeBaseUrl(process.env.WHATSAPP_BASE_URL) ||
-  "https://waba-v2.360dialog.io/v1";
-
-/* ================================
-   360dialog client
-================================ */
+const WHATSAPP_MSG_BASE =
+  normalizeMessagingBaseUrl(process.env.WHATSAPP_BASE_URL) ||
+  "https://waba-v2.360dialog.io";
+ 
 const whatsappClient = axios.create({
-  baseURL: WHATSAPP_V1_BASE,
+  baseURL: WHATSAPP_MSG_BASE, // ✅ NO /v1 here
   headers: {
     "D360-API-KEY": process.env.WHATSAPP_API_KEY,
     "Content-Type": "application/json",
   },
-  timeout: 20000,
+  timeout: 30000,
 });
-
-/* ================================
-   Wasabi S3 client (for inbound media persistence)
-================================ */
-const WASABI_ENDPOINT = process.env.WASABI_ENDPOINT; // e.g. https://s3.ap-southeast-1.wasabisys.com
+ 
+const WASABI_ENDPOINT = process.env.WASABI_ENDPOINT; 
 const WASABI_REGION = process.env.WASABI_REGION || "ap-southeast-1";
 const WASABI_BUCKET = process.env.WASABI_BUCKET;
 
@@ -80,8 +69,7 @@ const normalizeWaId = (v = "") => {
   if (d.length === 10) return `91${d}`;
   return d;
 };
-
-// ✅ normalize template name same as templates.routes.js
+ 
 function normalizeTemplateName(v = "") {
   return String(v || "")
     .toLowerCase()
@@ -100,16 +88,14 @@ const emitToPhone10 = (req, phone10, event, payload) => {
   if (!p10) return;
   io.to(roomForPhone10(p10)).emit(event, payload);
 };
-
-// ✅ choose customer phone based on direction (matches frontend logic)
+ 
 const customerPhoneFromMsg = (msgDoc) => {
   const dir = String(msgDoc?.direction || "").toUpperCase();
-  if (dir === "INBOUND") return msgDoc?.from; // customer
-  if (dir === "OUTBOUND") return msgDoc?.to; // customer
+  if (dir === "INBOUND") return msgDoc?.from; 
+  if (dir === "OUTBOUND") return msgDoc?.to; 
   return msgDoc?.to || msgDoc?.from;
 };
-
-// ✅ Emit message in shape frontend supports: { phone10, message }
+ 
 const emitMessage = (req, msgDoc) => {
   if (!msgDoc) return;
   const customerPhone = customerPhoneFromMsg(msgDoc);
@@ -134,10 +120,7 @@ const emitConversationPatch = (req, { phone10, patch }) => {
     patch,
   });
 };
-
-/* ================================
-   Template helpers (server-side preview text)
-================================ */
+ 
 function extractTemplateBodyText(tpl) {
   if (!tpl) return "";
   if (typeof tpl?.bodyText === "string") return tpl.bodyText;
@@ -161,41 +144,32 @@ function applyTemplateVars(bodyText, vars) {
     return v != null && String(v).trim() !== "" ? String(v) : `{{${num}}}`;
   });
 }
-
-// ✅ Detect header media requirement from template (IMAGE / VIDEO / DOCUMENT / "")
+ 
 function getHeaderMediaFormatFromTemplate(tpl) {
   const comps = Array.isArray(tpl?.components) ? tpl.components : [];
   const header = comps.find((c) => String(c?.type || "").toUpperCase() === "HEADER");
-  const fmt = String(header?.format || "").toUpperCase(); // IMAGE / VIDEO / DOCUMENT / TEXT
+  const fmt = String(header?.format || "").toUpperCase(); 
   if (["IMAGE", "VIDEO", "DOCUMENT"].includes(fmt)) return fmt;
   return "";
 }
 
-// ✅ Create WhatsApp API header parameter for template message
-// ✅ Supports BOTH {id} and {link}
-function buildHeaderComponentFromMedia(headerMedia) {
-  if (!headerMedia) return null;
-
-  const fmt = String(headerMedia?.format || "").toUpperCase();
-  const id = String(headerMedia?.id || "").trim();
-  const link = String(headerMedia?.link || "").trim();
-
-  const mediaObj = id ? { id } : link ? { link } : null;
-  if (!mediaObj) return null;
+function buildHeaderComponentFromMedia({ format, id }) {
+  const fmt = String(format || "").toUpperCase();
+  const mediaId = String(id || "").trim();
+  if (!mediaId) return null;
 
   if (fmt === "IMAGE") {
-    return { type: "header", parameters: [{ type: "image", image: mediaObj }] };
+    return { type: "header", parameters: [{ type: "image", image: { id: mediaId } }] };
   }
   if (fmt === "VIDEO") {
-    return { type: "header", parameters: [{ type: "video", video: mediaObj }] };
+    return { type: "header", parameters: [{ type: "video", video: { id: mediaId } }] };
   }
   if (fmt === "DOCUMENT") {
-    return { type: "header", parameters: [{ type: "document", document: mediaObj }] };
+    return { type: "header", parameters: [{ type: "document", document: { id: mediaId } }] };
   }
   return null;
 }
-
-// ✅ Validate template BODY params count based on {{1}}, {{2}}...
+ 
 function validateTemplateParamsOrThrow(tpl, parameters) {
   const bodyText = extractTemplateBodyText(tpl) || "";
   const matches = Array.from(bodyText.matchAll(/{{\s*(\d+)\s*}}/g));
@@ -212,13 +186,7 @@ function validateTemplateParamsOrThrow(tpl, parameters) {
     throw err;
   }
 }
-
-/* ================================
-   ✅ Upload template header media to 360dialog /media
-   Frontend calls:
-   POST /api/whatsapp/upload-template-media  (multipart: file)
-   Returns: { mediaId }
-================================ */
+ 
 router.post("/upload-template-media", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "file required" });
@@ -230,8 +198,8 @@ router.post("/upload-template-media", upload.single("file"), async (req, res) =>
       knownLength: req.file.size,
     });
     fd.append("messaging_product", "whatsapp");
-
-    const mediaUrl = `${String(WHATSAPP_V1_BASE || "").replace(/\/+$/, "")}/media`;
+ 
+    const mediaUrl = `${String(WHATSAPP_MSG_BASE || "").replace(/\/+$/, "")}/media`;
 
     const r = await axios.post(mediaUrl, fd, {
       headers: {
@@ -239,6 +207,7 @@ router.post("/upload-template-media", upload.single("file"), async (req, res) =>
         "D360-API-KEY": process.env.WHATSAPP_API_KEY,
       },
       maxBodyLength: Infinity,
+      maxContentLength: Infinity,
       timeout: 30000,
     });
 
@@ -259,10 +228,7 @@ router.post("/upload-template-media", upload.single("file"), async (req, res) =>
     });
   }
 });
-
-/* ================================
-   ✅ Inbound media: download from 360dialog + upload to Wasabi
-================================ */
+ 
 function extFromMime(mime = "") {
   const m = String(mime || "").toLowerCase();
   if (m.includes("jpeg")) return "jpg";
@@ -298,7 +264,7 @@ async function downloadMediaBuffer(mediaUrl) {
 async function uploadInboundToWasabi({ buffer, mime, filename, from10, mediaId, msgType }) {
   if (!s3 || !WASABI_BUCKET) return null;
 
-  const day = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const day = new Date().toISOString().slice(0, 10);  
   const ext = extFromMime(mime);
   const safeName = filename ? String(filename).replace(/[^\w.\-() ]+/g, "_") : "";
   const base =
@@ -317,10 +283,7 @@ async function uploadInboundToWasabi({ buffer, mime, filename, from10, mediaId, 
 
   return up?.Location || null;
 }
-
-/* ================================
-   ✅ Mark conversation as read
-================================ */
+ 
 router.post("/conversations/mark-read", async (req, res) => {
   try {
     const phoneRaw = req.body?.phone || "";
@@ -343,10 +306,7 @@ router.post("/conversations/mark-read", async (req, res) => {
     return res.status(500).json({ message: e.message || "mark-read failed" });
   }
 });
-
-/* ================================
-   GET CONVERSATIONS (ENRICHED)
-================================ */
+ 
 router.get("/conversations", async (req, res) => {
   try {
     const { role, userName } = req.query;
@@ -412,10 +372,7 @@ router.get("/conversations", async (req, res) => {
     res.status(500).json({ message: "Failed to load conversations" });
   }
 });
-
-/* ================================
-   GET MESSAGES
-================================ */
+ 
 router.get("/messages", async (req, res) => {
   try {
     const q = digitsOnly(req.query.phone);
@@ -441,11 +398,7 @@ router.get("/messages", async (req, res) => {
     res.status(500).json({ message: "Failed to load messages" });
   }
 });
-
-/* ================================
-   GET TEMPLATES (kept for backward compatibility)
-   Prefer /api/whatsapp/templates from templates router.
-================================ */
+ 
 router.get("/templates", async (req, res) => {
   try {
     const tpls = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
@@ -455,11 +408,7 @@ router.get("/templates", async (req, res) => {
     res.status(500).json({ message: "Failed to load templates" });
   }
 });
-
-/* ================================
-   SEND TEXT
-   - requires session window active (windowExpiresAt)
-================================ */
+ 
 router.post("/send-text", async (req, res) => {
   try {
     const { to, text } = req.body;
@@ -480,6 +429,7 @@ router.post("/send-text", async (req, res) => {
 
     const payload = {
       messaging_product: "whatsapp",
+      recipient_type: "individual",
       to: phone,
       type: "text",
       text: { body: text },
@@ -519,7 +469,7 @@ router.post("/send-text", async (req, res) => {
       patch: {
         lastMessageAt: now,
         lastMessageText: text.slice(0, 200),
-        lastOutboundAt: now, 
+        lastOutboundAt: now,
       },
     });
 
@@ -535,7 +485,6 @@ router.post("/send-text", async (req, res) => {
     });
   }
 });
-
  
 router.post("/send-template", async (req, res) => {
   try {
@@ -544,14 +493,13 @@ router.post("/send-template", async (req, res) => {
       templateName,
       parameters = [],
       renderedText = "",
-      headerMedia = null, // { format:"IMAGE"|"VIDEO"|"DOCUMENT", id?: "...", link?: "https://..." }
+      headerMedia = null,  
     } = req.body;
 
     if (!to || !templateName) {
       return res.status(400).json({ message: "to & templateName required" });
     }
-
-    // ✅ Normalize WA recipient (support 10-digit India input)
+ 
     const rawDigits = String(to || "").replace(/\D/g, "");
     const normalizedTo = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
     const phone = normalizeWaId(normalizedTo);
@@ -561,55 +509,53 @@ router.post("/send-template", async (req, res) => {
 
     const tpl = await WhatsAppTemplate.findOne({ name: cleanTemplateName }).lean();
     if (!tpl) return res.status(400).json({ message: "Template not found" });
+ 
     if (String(tpl.status || "").toUpperCase() !== "APPROVED") {
       return res.status(400).json({ message: "Template not approved" });
     }
+    if (String(tpl.category || "").toUpperCase() !== "UTILITY") {
+      return res.status(400).json({ message: "Only UTILITY templates are allowed" });
+    }
 
-    // ✅ validate body parameter count (prevents provider 400)
     validateTemplateParamsOrThrow(tpl, parameters);
+ 
+    const lang = String(tpl.language || "").trim();
+    if (!lang) {
+      return res.status(400).json({
+        message: "Template language missing in DB. Sync templates again.",
+        code: "TEMPLATE_LANGUAGE_MISSING",
+      });
+    }
 
-    const neededHeaderFmt = getHeaderMediaFormatFromTemplate(tpl); // IMAGE/VIDEO/DOCUMENT/""
-
-    // ✅ If template needs header media, enforce it
+    const neededHeaderFmt = getHeaderMediaFormatFromTemplate(tpl); 
+ 
     if (neededHeaderFmt) {
-      const providedFmt = String(headerMedia?.format || "").toUpperCase();
       const providedId = String(headerMedia?.id || "").trim();
-      const providedLink = String(headerMedia?.link || "").trim();
-
-      if (!providedId && !providedLink) {
+      if (!providedId) {
         return res.status(400).json({
-          message: `This template requires a HEADER ${neededHeaderFmt} attachment.`,
-          code: "HEADER_MEDIA_REQUIRED",
-        });
-      }
-      if (providedFmt && providedFmt !== neededHeaderFmt) {
-        return res.status(400).json({
-          message: `Header format mismatch. Template needs ${neededHeaderFmt} but got ${providedFmt}.`,
-          code: "HEADER_MEDIA_FORMAT_MISMATCH",
+          message: `This template requires HEADER ${neededHeaderFmt}. Upload header media first and send headerMedia.id`,
+          code: "HEADER_MEDIA_ID_REQUIRED",
         });
       }
     }
 
     const components = [];
-
-    // ✅ HEADER component
+ 
     if (neededHeaderFmt) {
       const headerComp = buildHeaderComponentFromMedia({
         format: neededHeaderFmt,
         id: headerMedia?.id,
-        link: headerMedia?.link,
       });
 
       if (!headerComp) {
         return res.status(400).json({
-          message: "Invalid headerMedia. Send {format, id} or {format, link}.",
+          message: "Invalid headerMedia. Send { id } for header media templates.",
           code: "HEADER_MEDIA_INVALID",
         });
       }
       components.push(headerComp);
     }
-
-    // ✅ BODY vars
+ 
     if (Array.isArray(parameters) && parameters.length) {
       components.push({
         type: "body",
@@ -622,18 +568,20 @@ router.post("/send-template", async (req, res) => {
 
     const payload = {
       messaging_product: "whatsapp",
+      recipient_type: "individual",
       to: phone,
       type: "template",
       template: {
         name: tpl.name,
-        language: { code: tpl.language || "en" },
-        ...(components.length ? { components } : {}), // ✅ avoid empty array
+        language: { code: lang },  
+        ...(components.length ? { components } : {}),
       },
     };
-
+ 
     const r = await whatsappClient.post("/messages", payload);
     const now = new Date();
 
+    // build UI text
     const clientText = String(renderedText || "").trim();
     const serverBody = extractTemplateBodyText(tpl);
     const serverText = serverBody ? applyTemplateVars(serverBody, parameters) : "";
@@ -649,14 +597,13 @@ router.post("/send-template", async (req, res) => {
       status: "sent",
       templateMeta: {
         name: tpl.name,
-        language: tpl.language || "en",
+        language: lang,
         parameters: (parameters || []).map((x) => String(x ?? "")),
-        ...(neededHeaderFmt && (headerMedia?.id || headerMedia?.link)
+        ...(neededHeaderFmt && headerMedia?.id
           ? {
               headerMedia: {
                 format: neededHeaderFmt,
-                ...(headerMedia?.id ? { id: String(headerMedia.id) } : {}),
-                ...(headerMedia?.link ? { link: String(headerMedia.link) } : {}),
+                id: String(headerMedia.id),
               },
             }
           : {}),
@@ -694,22 +641,21 @@ router.post("/send-template", async (req, res) => {
 
     return res.json({ success: true });
   } catch (e) {
-    const status = e.status || e.response?.status || 400;
-    const data = e.response?.data || null;
+    const status = e?.response?.status || e?.status || 400;
+    const data = e?.response?.data || null;
 
     console.error("Send template error:", {
       status,
-      data,
-      message: e.message,
-      code: e.code,
+      providerError: data,
+      message: e?.message,
     });
 
     return res.status(status).json({
       message: "Send template failed",
-      providerError: data || { error: e.message, code: e.code || null },
+      providerError: data || { error: e?.message || "UNKNOWN_ERROR" },
     });
   }
-}); 
+});
 
 /* ================================
    WEBHOOK
@@ -723,7 +669,6 @@ router.post("/webhook", async (req, res) => {
     for (const entry of entries) {
       for (const change of entry.changes || []) {
         const value = change.value || {};
-
         const businessPhone = normalizeWaId(value.metadata?.display_phone_number || "");
 
         /* -------------------------
@@ -753,132 +698,166 @@ router.post("/webhook", async (req, res) => {
 
         /* -------------------------
            2) INBOUND MESSAGES
-           ✅ increments unreadCount
-           ✅ persists inbound media to Wasabi (if configured)
         -------------------------- */
         const messages = Array.isArray(value.messages) ? value.messages : [];
 
         for (const msg of messages) {
           if (!msg?.id || !msg?.from) continue;
 
-          const from = normalizeWaId(msg.from); // customer 
-          const to = businessPhone || normalizeWaId(value.metadata?.display_phone_number || "");
+          // de-dupe (Meta may retry webhooks)
+          const already = await WhatsAppMessage.findOne({ waId: msg.id })
+            .select("_id")
+            .lean();
+          if (already) continue;
 
+          const from = normalizeWaId(msg.from); // customer
+          const to = businessPhone || normalizeWaId(value.metadata?.display_phone_number || "");
           if (from && to && from === to) continue;
 
-          const exists = await WhatsAppMessage.findOne({ waId: msg.id }).lean();
-          if (exists) continue;
+          const p10 = last10(from);
+          const now = new Date();
+          const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
+          const msgType = String(msg.type || "").toLowerCase();
+
+          // ---------- TEXT / BUTTON / INTERACTIVE ----------
           let text = "";
-          let media;
+          let type = msgType || "text";
 
-          if (msg.type === "text") {
-            text = msg.text?.body || "";
-          } else if (msg.type === "button") {
-            text = msg.button?.text || "";
-          } else if (msg.type === "interactive") {
-            text =
-              msg.interactive?.button_reply?.title ||
-              msg.interactive?.list_reply?.title ||
-              "";
-          } else if (["image", "video", "audio", "document", "sticker"].includes(msg.type)) {
-            const obj = msg[msg.type] || {};
-            const mediaId = obj.id;
+          if (msgType === "text") {
+            text = String(msg?.text?.body || "");
+          } else if (msgType === "button") {
+            text = String(msg?.button?.text || msg?.button?.payload || "");
+          } else if (msgType === "interactive") {
+            const it = msg?.interactive || {};
+            const itType = String(it.type || "").toLowerCase();
+            if (itType === "button_reply") {
+              text = String(it?.button_reply?.title || it?.button_reply?.id || "");
+            } else if (itType === "list_reply") {
+              text = String(it?.list_reply?.title || it?.list_reply?.id || "");
+            } else {
+              // fallback
+              text = JSON.stringify(it).slice(0, 500);
+            }
+          }
 
-            if (mediaId) {
-              let providerUrl = "";
-              try {
-                const infoRes = await whatsappClient.get(`/media/${mediaId}`);
-                providerUrl = infoRes.data?.url || "";
-              } catch {
-                providerUrl = "";
-              }
+          // ---------- MEDIA ----------
+          // Meta message shapes: msg.image.id / msg.video.id / msg.audio.id / msg.document.id
+          const mediaObj =
+            msg?.image ||
+            msg?.video ||
+            msg?.audio ||
+            msg?.document ||
+            null;
 
-              let finalUrl = providerUrl;
-              const mime = obj.mime_type || "";
-              const filename = obj.filename || "";
+          const mediaId = mediaObj?.id ? String(mediaObj.id) : "";
+          let media = null;
 
-              if (providerUrl) {
-                try {
-                  const buf = await downloadMediaBuffer(providerUrl);
-                  const wasabiUrl = await uploadInboundToWasabi({
-                    buffer: buf,
-                    mime,
-                    filename,
-                    from10: last10(from),
-                    mediaId,
-                    msgType: msg.type,
-                  });
-                  if (wasabiUrl) finalUrl = wasabiUrl;
-                } catch {
-                  // fallback: keep providerUrl
-                }
-              }
+          if (mediaId) {
+            try {
+              // 360dialog/Meta: GET /media/:id returns { url, mime_type, ... }
+              const mediaInfo = await whatsappClient.get(`/media/${mediaId}`);
+              const providerUrl = mediaInfo?.data?.url || "";
+              const mime = mediaInfo?.data?.mime_type || mediaObj?.mime_type || "";
+
+              // download bytes
+              const buffer = providerUrl ? await downloadMediaBuffer(providerUrl) : null;
+
+              // optional filename (document usually has filename)
+              const filename =
+                String(mediaObj?.filename || mediaObj?.name || "").trim() ||
+                `${type || "media"}_${p10 || "unknown"}_${mediaId}.${extFromMime(mime)}`;
+
+              // upload to Wasabi for a stable public URL (recommended)
+              const wasabiUrl =
+                buffer
+                  ? await uploadInboundToWasabi({
+                      buffer,
+                      mime,
+                      filename,
+                      from10: p10,
+                      mediaId,
+                      msgType: type || msgType,
+                    })
+                  : null;
 
               media = {
                 id: mediaId,
-                url: finalUrl || "",
-                mime,
+                url: wasabiUrl || providerUrl || "",
+                mime: mime || "application/octet-stream",
                 filename,
               };
-            }
 
-            text = obj.caption || "";
+              // if no text, set a nice preview label
+              if (!text) {
+                const t = (type || msgType || "").toLowerCase();
+                text =
+                  t === "image"
+                    ? "📷 Photo"
+                    : t === "video"
+                    ? "🎥 Video"
+                    : t === "audio"
+                    ? "🎙️ Audio"
+                    : "📎 Attachment";
+              }
+            } catch (e) {
+              console.error("Inbound media handling failed:", e.response?.data || e);
+              // keep message anyway (without media)
+              if (!text) text = "📎 Attachment";
+            }
           }
 
-          const now = new Date(Number(msg.timestamp) * 1000 || Date.now());
+          // Normalize type for your UI rendering
+          if (mediaId) {
+            if (msg.image) type = "image";
+            else if (msg.video) type = "video";
+            else if (msg.audio) type = "audio";
+            else if (msg.document) type = "document";
+            else type = msgType || "document";
+          } else {
+            // keep type as text/button/interactive
+            type = msgType || "text";
+          }
 
-          const createdInbound = await WhatsAppMessage.create({
+          const created = await WhatsAppMessage.create({
             waId: msg.id,
-            from,
-            to,
-            text,
-            ...(media ? { media } : {}),
+            from, // customer
+            to,   // business
             direction: "INBOUND",
-            type: msg.type,
-            status: "delivered",
+            type,
+            text: String(text || "").slice(0, 4000),
+            status: "received",
             timestamp: now,
+            media: media || undefined,
             raw: msg,
           });
 
-          const previewText =
-            (text && text.slice(0, 200)) ||
-            (media?.url
-              ? (() => {
-                  const mt = String(media.mime || "").toLowerCase();
-                  if (mt.startsWith("image/")) return "📷 Photo";
-                  if (mt.startsWith("video/")) return "🎥 Video";
-                  if (mt.startsWith("audio/")) return "🎙️ Audio";
-                  return media.filename ? `📎 ${media.filename}` : "📎 Attachment";
-                })()
-              : "");
-
-          const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-          const updatedConv = await WhatsAppConversation.findOneAndUpdate(
-            { phone: new RegExp(`${last10(from)}$`) },
+          // Conversation upsert (+ unread, + window)
+          await WhatsAppConversation.findOneAndUpdate(
+            { phone: new RegExp(`${p10}$`) },
             {
               $set: {
-                phone: from,
+                phone: from, // store customer phone (with country code)
                 lastMessageAt: now,
-                lastMessageText: previewText,
-                windowExpiresAt: windowExpiry,
+                lastMessageText: String(text || "").slice(0, 200),
                 lastInboundAt: now,
+                windowExpiresAt: windowExpiry,
               },
               $inc: { unreadCount: 1 },
             },
-            { upsert: true, new: true }
-          ).lean();
+            { upsert: true }
+          );
 
-          emitMessage(req, createdInbound);
+          // realtime UI updates
+          emitMessage(req, created);
           emitConversationPatch(req, {
-            phone10: last10(from),
+            phone10: p10,
             patch: {
               lastMessageAt: now,
-              lastMessageText: previewText,
-              windowExpiresAt: windowExpiry,
+              lastMessageText: String(text || "").slice(0, 200),
               lastInboundAt: now,
-              unreadCount: Number(updatedConv?.unreadCount || 0),
+              windowExpiresAt: windowExpiry,
+              unreadCountDelta: 1,
             },
           });
         }
@@ -887,8 +866,8 @@ router.post("/webhook", async (req, res) => {
 
     return res.sendStatus(200);
   } catch (e) {
-    console.error("Webhook error:", e.response?.data || e);
-    return res.sendStatus(500);
+    console.error("webhook error:", e.response?.data || e);
+    return res.sendStatus(200);  
   }
 });
 
