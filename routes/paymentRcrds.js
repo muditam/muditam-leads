@@ -3,12 +3,16 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const AWS = require("aws-sdk");
+const mongoose = require("mongoose");
+
 
 const PaymentRcrd = require("../models/PaymentRcrd");
-const PurchaseRcrd = require("../models/PurchaseRcrd");
+const PurchaseRcrd = require("../models/PurchaseRcrd"); // ✅ make sure filename matches
+const Vendor = require("../models/Vendorname");
 
-// Upload middleware
+
 const upload = multer({ storage: multer.memoryStorage() });
+
 
 // Wasabi S3
 const s3 = new AWS.S3({
@@ -19,47 +23,98 @@ const s3 = new AWS.S3({
   s3ForcePathStyle: true,
 });
 
-// ------------------------------------------------------
-// GET ALL PAYMENT RECORDS
-// ------------------------------------------------------
+
+function isValidObjectId(id) {
+  return mongoose.Types.ObjectId.isValid(String(id || ""));
+}
+
+
+async function resolveVendor({ vendorId, vendorName }) {
+  const id = String(vendorId || "").trim();
+  const name = String(vendorName || "").trim();
+
+
+  if (id) {
+    if (!isValidObjectId(id)) return null;
+    const v = await Vendor.findById(id, { _id: 1, name: 1 }).lean();
+    return v ? { _id: v._id, name: v.name } : null;
+  }
+
+
+  if (name) {
+
+
+    const v = await Vendor.findOne(
+      { name: new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i") },
+      { _id: 1, name: 1 }
+    ).lean();
+    return v ? { _id: v._id, name: v.name } : { _id: null, name }; // allow name-only snapshot
+  }
+
+
+  return null;
+}
+
+
+function vendorMatchFilter(vendor) {
+
+
+  const or = [];
+  if (vendor?._id) {
+    or.push({ vendorId: vendor._id });
+
+
+    or.push({ vendorId: String(vendor._id) });
+  }
+  if (vendor?.name) {
+    or.push({ vendorName: new RegExp(`^\\s*${vendor.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i") });
+  }
+  return or.length ? { $or: or } : {};
+}
+
+
 router.get("/", async (req, res) => {
   try {
-    const records = await PaymentRcrd.find({ isDeleted: { $ne: true } })
-      .sort({ date: -1 });
+    const records = await PaymentRcrd.find({ isDeleted: { $ne: true } }).sort({ date: -1 });
     res.json(records);
   } catch (err) {
     console.error("GET /payment-records error:", err);
     res.status(500).json({ error: "Failed to fetch payment records" });
   }
 });
-
-// ------------------------------------------------------
-// LIVE DUE CALCULATION (NO SAVE)
-// ------------------------------------------------------
 router.get("/calc-due", async (req, res) => {
   try {
-    const { date, amountPaid } = req.query;
+    const { date, amountPaid, vendorId, vendorName } = req.query;
     if (!date) return res.status(400).json({ error: "Date required" });
 
-    const amt = Number(amountPaid || 0);
 
-    const dayStart = new Date(date + "T00:00:00.000Z");
-    const dayEnd = new Date(date + "T23:59:59.999Z");
+    const vendor = await resolveVendor({ vendorId, vendorName });
+    if (!vendor) return res.status(400).json({ error: "Vendor required" });
+
+
+    const amt = Number(amountPaid || 0);
+    const dayEnd = new Date(String(date).slice(0, 10) + "T23:59:59.999Z");
+
+
+    const vMatch = vendorMatchFilter(vendor);
+
 
     const purchases = await PurchaseRcrd.aggregate([
-      { $match: { date: { $gte: dayStart, $lte: dayEnd }, isDeleted: { $ne: true } }},
-      { $group: { _id: null, total: { $sum: "$amount" }}}
+      { $match: { ...vMatch, date: { $lte: dayEnd }, isDeleted: { $ne: true } } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
 
+
     const payments = await PaymentRcrd.aggregate([
-      { $match: { date: { $gte: dayStart, $lte: dayEnd }, isDeleted: { $ne: true } }},
-      { $group: { _id: null, total: { $sum: "$amountPaid" }}}
+      { $match: { ...vMatch, date: { $lte: dayEnd }, isDeleted: { $ne: true } } },
+      { $group: { _id: null, total: { $sum: "$amountPaid" } } },
     ]);
+
 
     const totalPurchases = purchases[0]?.total || 0;
     const totalPayments = payments[0]?.total || 0;
-
     const due = totalPurchases - totalPayments - amt;
+
 
     res.json({ due });
   } catch (err) {
@@ -68,39 +123,54 @@ router.get("/calc-due", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------
-// SAVE PAYMENT RECORD
-// ------------------------------------------------------
+
 router.post("/", async (req, res) => {
   try {
     const { date, vendorId, vendorName, amountPaid, screenshotUrl } = req.body;
 
-    const currentDate = new Date(date);
 
-    // Final due calculation for saved record
+    if (!date) return res.status(400).json({ error: "Date required" });
+    if (!amountPaid || Number(amountPaid) <= 0) return res.status(400).json({ error: "amountPaid must be > 0" });
+
+
+    const vendor = await resolveVendor({ vendorId, vendorName });
+    if (!vendor) return res.status(400).json({ error: "Vendor required" });
+
+
+    const d = String(date).slice(0, 10);
+    const dayEnd = new Date(d + "T23:59:59.999Z");
+    const vMatch = vendorMatchFilter(vendor);
+
+
     const purchases = await PurchaseRcrd.aggregate([
-      { $match: { date: { $lte: currentDate }, isDeleted: { $ne: true } }},
-      { $group: { _id: null, total: { $sum: "$amount" }}}
+      { $match: { ...vMatch, date: { $lte: dayEnd }, isDeleted: { $ne: true } } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
+
 
     const payments = await PaymentRcrd.aggregate([
-      { $match: { date: { $lte: currentDate }, isDeleted: { $ne: true } }},
-      { $group: { _id: null, total: { $sum: "$amountPaid" }}}
+      { $match: { ...vMatch, date: { $lte: dayEnd }, isDeleted: { $ne: true } } },
+      { $group: { _id: null, total: { $sum: "$amountPaid" } } },
     ]);
+
 
     const totalPurchases = purchases[0]?.total || 0;
     const totalPayments = payments[0]?.total || 0;
 
+
     const due = totalPurchases - totalPayments - Number(amountPaid || 0);
 
+
     const record = await PaymentRcrd.create({
-      date,
-      vendorId,
-      vendorName,
-      amountPaid,
+      date: new Date(d + "T00:00:00.000Z"),
+      vendorId: vendor._id || null,
+      vendorName: vendor.name || "",
+      amountPaid: Number(amountPaid),
       due,
-      screenshotUrl,
+      screenshotUrl: String(screenshotUrl || ""),
+      isDeleted: false,
     });
+
 
     res.json(record);
   } catch (err) {
@@ -108,17 +178,12 @@ router.post("/", async (req, res) => {
     res.status(500).json({ error: "Failed to add payment record" });
   }
 });
-
-// ------------------------------------------------------
-// SCREENSHOT UPLOAD TO WASABI
-// ------------------------------------------------------
 router.post("/upload-screenshot", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file)
-      return res.status(400).json({ error: "No file uploaded" });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
 
     const file = req.file;
-
     const params = {
       Bucket: process.env.WASABI_BUCKET,
       Key: `payment-screenshots/${Date.now()}_${file.originalname}`,
@@ -127,18 +192,14 @@ router.post("/upload-screenshot", upload.single("file"), async (req, res) => {
       ContentType: file.mimetype,
     };
 
-    const uploaded = await s3.upload(params).promise();
 
+    const uploaded = await s3.upload(params).promise();
     res.json({ url: uploaded.Location });
   } catch (err) {
     console.error("Upload Screenshot Error:", err);
     res.status(500).json({ error: "Screenshot upload failed" });
   }
 });
-
-// ------------------------------------------------------
-// SOFT DELETE
-// ------------------------------------------------------
 router.delete("/:id", async (req, res) => {
   try {
     const updated = await PaymentRcrd.findByIdAndUpdate(
@@ -147,11 +208,14 @@ router.delete("/:id", async (req, res) => {
       { new: true }
     );
 
+
     res.json(updated);
   } catch (err) {
     console.error("DELETE payment error:", err);
     res.status(500).json({ error: "Failed to delete record" });
   }
 });
-
 module.exports = router;
+
+
+

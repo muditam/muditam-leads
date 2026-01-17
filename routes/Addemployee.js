@@ -2,6 +2,11 @@ const express = require("express");
 const router = express.Router();
 const Employee = require("../models/Employee");
 
+
+
+
+
+
 function getChangedFields(oldData, newData) {
   const changes = {};
   const oldObj = oldData.toObject ? oldData.toObject() : oldData;
@@ -19,15 +24,19 @@ function getChangedFields(oldData, newData) {
   return changes;
 }
 
+
 router.get("/api/employees", async (req, res) => {
   const { role, fullName, email } = req.query;
 
+
   try {
+    // Special case: used by Navbar to fetch target/async etc for logged-in user
     if (fullName && email) {
       const employee = await Employee.findOne({ fullName, email });
       if (!employee) {
         return res.status(404).json({ message: "Employee not found" });
       }
+
 
       const {
         async,
@@ -42,7 +51,9 @@ router.get("/api/employees", async (req, res) => {
       ]);
     }
 
+
     const query = role ? { role } : {};
+
 
     const employees = await Employee.find(query)
       .select(
@@ -238,11 +249,14 @@ router.put("/api/employees/:id", async (req, res) => {
       req.session?.user?.fullName ||
       req.session?.user?.email ||
       "Unknown";
- 
+
+
     const oldStatus = employee.status;
- 
+
+
     const updateData = { ...rest };
- 
+
+
     if (callerId !== undefined) updateData.callerId = callerId;
     if (agentNumber !== undefined) updateData.agentNumber = agentNumber;
     if (password) updateData.password = password;
@@ -252,17 +266,20 @@ router.put("/api/employees/:id", async (req, res) => {
     if (teamLeader !== undefined) updateData.teamLeader = teamLeader || null;
     if (joiningDate !== undefined) updateData.joiningDate = joiningDate || null;
     if (status !== undefined) updateData.status = status;
- 
+
+
     if (Array.isArray(languages)) {
       updateData.languages = [...new Set(languages.map(s => String(s).trim()))].filter(Boolean);
     }
- 
+
+
     if (permissions && typeof permissions === "object") {
       updateData.permissions = {
         menubar: permissions.menubar || {},
         navbar: permissions.navbar || {},
       };
-    } 
+    }
+
 
     let actionType = "UPDATE";
     if (status !== undefined && status !== oldStatus) {
@@ -270,10 +287,11 @@ router.put("/api/employees/:id", async (req, res) => {
     }
   
     employee.addAuditLog(actionType, actorName);
- 
+
     Object.assign(employee, { async: 1, ...updateData });
     await employee.save();
- 
+
+
     return res.status(200).json({
       message: "Employee updated successfully",
       employee,
@@ -287,29 +305,40 @@ router.put("/api/employees/:id", async (req, res) => {
 
 router.delete("/api/employees/:id", async (req, res) => {
   const { id } = req.params;
- 
-  try { 
+
+
+  try {
+    // ✅ actor name for audit log (no middleware)
     const actorName =
       req.headers["x-agent-name"] ||
       req.body?.changedByName ||
       req.session?.user?.fullName ||
       req.session?.user?.email ||
       "Unknown";
- 
+
+
+    // 1) Find employee first (needed for audit log)
     const employee = await Employee.findById(id);
     if (!employee) {
       return res.status(404).json({ message: "Employee not found" });
     }
- 
+
+
+    // 2) Add audit log BEFORE deleting (only works if you keep the document)
     employee.addAuditLog("INACTIVATE", actorName);
- 
+
+
+    // 3) Save audit log
     await employee.save();
- 
+
+
+    // 4) Delete employee
     await employee.deleteOne();
 
 
     const employees = await Employee.find({}, "-password");
- 
+
+
     return res.status(200).json({
       message: "Employee deleted successfully",
       employees,
@@ -322,56 +351,76 @@ router.delete("/api/employees/:id", async (req, res) => {
     });
   }
 });
- 
+
+
 router.put("/api/employees/:id/team", async (req, res) => {
   const { id } = req.params;
   const { teamMembers } = req.body;
- 
+
+
   if (!Array.isArray(teamMembers)) {
     return res
       .status(400)
       .json({ message: "teamMembers must be an array of employee IDs" });
   }
- 
-  try { 
+
+
+  try {
+    // ✅ actor name for audit log (no middleware)
     const actorName =
       req.headers["x-agent-name"] ||
       req.body.changedByName ||
       req.session?.user?.fullName ||
       req.session?.user?.email ||
       "Unknown";
- 
+
+
+    // ✅ Load manager first so we can append auditLogs
     const manager = await Employee.findById(id);
     if (!manager) return res.status(404).json({ message: "Manager not found" });
 
+
+    // ✅ Audit log for team update (counts as UPDATE)
     manager.addAuditLog("UPDATE", actorName);
 
+
+    // ✅ Apply update + save
     manager.teamMembers = teamMembers;
     manager.hasTeam = teamMembers.length > 0;
     manager.async = 1;
 
+
     await manager.save();
 
+
+    // Populate for response
     const populated = await Employee.findById(id).populate(
       "teamMembers",
       "fullName email role status target"
     );
+
+
     return res.status(200).json({ message: "Team updated", manager: populated });
   } catch (error) {
     console.error("Error updating team:", error);
     return res.status(500).json({ message: "Error updating team", error });
   }
 });
- 
+
+
+
+
 router.get("/api/employees/:id/audit-logs", async (req, res) => {
   try {
     const employee = await Employee.findById(req.params.id).select(
       "fullName email auditLogs"
     );
 
+
     if (!employee) {
       return res.status(404).json({ message: "Employee not found" });
     }
+
 
     return res.status(200).json({
       employee: { name: employee.fullName, email: employee.email },
@@ -385,3 +434,6 @@ router.get("/api/employees/:id/audit-logs", async (req, res) => {
   }
 });
 module.exports = router;
+
+
+
