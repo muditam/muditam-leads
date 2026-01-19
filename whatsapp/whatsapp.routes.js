@@ -830,63 +830,12 @@ router.post("/webhook", async (req, res) => {
           }
 
           // ---------- MEDIA ----------
-          const mediaObj = msg?.image || msg?.video || msg?.audio || msg?.document || null;
+          const mediaObj =
+            msg?.image || msg?.video || msg?.audio || msg?.document || null;
           const mediaId = mediaObj?.id ? String(mediaObj.id) : "";
           let media = null;
 
-          if (mediaId) {
-            try {
-              const mediaInfo = await whatsappClient.get(`/media/${mediaId}`);
-              const providerUrl = mediaInfo?.data?.url || "";
-              const mimeFromInfo = String(mediaInfo?.data?.mime_type || mediaObj?.mime_type || "").trim();
-
-              const dl = providerUrl ? await downloadMediaWithMeta(providerUrl) : null;
-              const buffer = dl?.buffer || null;
-
-              // ✅ BEST mime: download header > provider meta > fallback
-              const mime = String(dl?.mime || mimeFromInfo || "").trim() || "application/octet-stream";
-
-
-              const filename =
-                String(mediaObj?.filename || mediaObj?.name || "").trim() ||
-                `${type || "media"}_${p10 || "unknown"}_${mediaId}.${extFromMime(mime)}`;
-
-              const wasabiUrl =
-                buffer
-                  ? await uploadInboundToWasabi({
-                    buffer,
-                    mime,
-                    filename,
-                    from10: p10,
-                    mediaId,
-                    msgType: type || msgType,
-                  })
-                  : null;
-
-              media = {
-                id: mediaId,
-                url: wasabiUrl || providerUrl || "",
-                mime: mime || "application/octet-stream",
-                filename,
-              };
-
-              if (!text) {
-                const t = (type || msgType || "").toLowerCase();
-                text =
-                  t === "image"
-                    ? "📷 Photo"
-                    : t === "video"
-                      ? "🎥 Video"
-                      : t === "audio"
-                        ? "🎙️ Audio"
-                        : "📎 Attachment";
-              }
-            } catch (e) {
-              console.error("Inbound media handling failed:", e.response?.data || e);
-              if (!text) text = "📎 Attachment";
-            }
-          }
-
+          // ✅ Decide type early (important for audio/voice notes)
           if (mediaId) {
             if (msg.image) type = "image";
             else if (msg.video) type = "video";
@@ -895,6 +844,112 @@ router.post("/webhook", async (req, res) => {
             else type = msgType || "document";
           } else {
             type = msgType || "text";
+          }
+
+          if (mediaId) {
+            try {
+              // 1) Fetch provider media URL (try /media, then /v1/media for compatibility)
+              let mediaInfo;
+              try {
+                mediaInfo = await whatsappClient.get(`/media/${mediaId}`);
+              } catch (e1) {
+                mediaInfo = await whatsappClient.get(`/v1/media/${mediaId}`);
+              }
+
+              const providerUrl = String(mediaInfo?.data?.url || "").trim();
+              const mimeFromInfo = String(
+                mediaInfo?.data?.mime_type || mediaObj?.mime_type || ""
+              ).trim();
+
+              // 2) Build minimal media object FIRST (so UI can render even if Wasabi fails)
+              const baseMime =
+                (mimeFromInfo || "application/octet-stream").trim() ||
+                "application/octet-stream";
+
+              const filename =
+                String(mediaObj?.filename || mediaObj?.name || "").trim() ||
+                `${type || "media"}_${p10 || "unknown"}_${mediaId}.${extFromMime(
+                  baseMime
+                )}`;
+
+              media = {
+                id: mediaId,
+                url: providerUrl || "",
+                mime: baseMime,
+                filename,
+              };
+
+              // 3) Optional: download + upload to Wasabi.
+              //    If this fails, KEEP providerUrl so audio still plays.
+              if (providerUrl) {
+                try {
+                  const dl = await downloadMediaWithMeta(providerUrl); // { buffer, mime }
+                  const buffer = dl?.buffer || null;
+
+                  const bestMime =
+                    String(dl?.mime || mimeFromInfo || "").trim() ||
+                    "application/octet-stream";
+
+                  let wasabiUrl = null;
+                  if (buffer) {
+                    wasabiUrl = await uploadInboundToWasabi({
+                      buffer,
+                      mime: bestMime,
+                      filename,
+                      from10: p10,
+                      mediaId,
+                      msgType: type || msgType,
+                    });
+                  }
+
+                  media = {
+                    id: mediaId,
+                    url: wasabiUrl || providerUrl || "",
+                    mime: bestMime,
+                    filename,
+                  };
+                } catch (uploadErr) {
+                  console.error(
+                    "Inbound Wasabi upload failed (keeping provider url):",
+                    uploadErr?.response?.data || uploadErr
+                  );
+                }
+              }
+
+              // 4) Friendly text label (if missing)
+              if (!text) {
+                const t = String(type || msgType || "").toLowerCase();
+                text =
+                  t === "image"
+                    ? "📷 Photo"
+                    : t === "video"
+                    ? "🎥 Video"
+                    : t === "audio"
+                    ? "🎙️ Audio"
+                    : "📎 Attachment";
+              }
+            } catch (e) {
+              console.error(
+                "Inbound media handling failed:",
+                e.response?.data || e
+              );
+
+              // ✅ still show correct label for audio
+              if (!text) {
+                const t = String(type || msgType || "").toLowerCase();
+                text = t === "audio" ? "🎙️ Audio" : "📎 Attachment";
+              }
+
+              // ✅ keep at least mediaId so you can debug later
+              if (!media) {
+                media = {
+                  id: mediaId,
+                  url: "",
+                  mime: "",
+                  filename: "",
+                };
+              }
+            }
           }
 
           const created = await WhatsAppMessage.create({
@@ -933,7 +988,9 @@ router.post("/webhook", async (req, res) => {
             phone10: p10,
             patch: {
               lastMessageAt: updatedConv?.lastMessageAt || now,
-              lastMessageText: updatedConv?.lastMessageText || String(text || "").slice(0, 200),
+              lastMessageText:
+                updatedConv?.lastMessageText ||
+                String(text || "").slice(0, 200),
               lastInboundAt: updatedConv?.lastInboundAt || now,
               windowExpiresAt: updatedConv?.windowExpiresAt || windowExpiry,
               unreadCount: updatedConv?.unreadCount ?? 1,
