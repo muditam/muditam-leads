@@ -161,28 +161,33 @@ function getHeaderMediaFormatFromTemplate(tpl) {
   return "";
 }
 
-function buildHeaderComponentFromMedia({ format, id }) {
+function buildHeaderComponentFromMedia({ format, id, filename }) {
   const fmt = String(format || "").toUpperCase();
   const mediaId = String(id || "").trim();
+  const fname = String(filename || "").trim();
+
   if (!mediaId) return null;
 
-  if (fmt === "IMAGE") {
-    return {
-      type: "header",
-      parameters: [{ type: "image", image: { id: mediaId } }],
-    };
-  }
-  if (fmt === "VIDEO") {
-    return {
-      type: "header",
-      parameters: [{ type: "video", video: { id: mediaId } }],
-    };
-  }
   if (fmt === "DOCUMENT") {
     return {
       type: "header",
-      parameters: [{ type: "document", document: { id: mediaId } }],
+      parameters: [
+        {
+          type: "document",
+          document: {
+            id: mediaId,
+            ...(fname ? { filename: fname } : {}), // ✅ important
+          },
+        },
+      ],
     };
+  }
+
+  if (fmt === "IMAGE") {
+    return { type: "header", parameters: [{ type: "image", image: { id: mediaId } }] };
+  }
+  if (fmt === "VIDEO") {
+    return { type: "header", parameters: [{ type: "video", video: { id: mediaId } }] };
   }
   return null;
 }
@@ -603,6 +608,7 @@ router.post("/send-template", async (req, res) => {
       const headerComp = buildHeaderComponentFromMedia({
         format: neededHeaderFmt,
         id: headerMedia?.id,
+        filename: headerMedia?.filename,
       });
 
       if (!headerComp) {

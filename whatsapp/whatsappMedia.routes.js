@@ -54,11 +54,14 @@ const emitToPhone10 = (req, phone10, event, payload) => {
 };
 const emitMessage = (req, msgDoc) => {
   if (!msgDoc) return;
-  const p10 = last10(msgDoc.to || msgDoc.from || "");
-  emitToPhone10(req, p10, "wa:message", msgDoc);
+  const customerPhone = msgDoc?.direction === "INBOUND" ? msgDoc?.from : msgDoc?.to;
+  const p10 = last10(customerPhone || "");
+  if (!p10) return;
+  emitToPhone10(req, p10, "wa:message", { phone10: p10, message: msgDoc }); // ✅ consistent
 };
 const emitConversationPatch = (req, { phone10, patch }) => {
-  emitToPhone10(req, phone10, "wa:conversation", { phone: last10(phone10), patch });
+  const p10 = last10(phone10);
+  emitToPhone10(req, p10, "wa:conversation", { phone10: p10, patch }); // ✅ include phone10
 };
 
 function safeFilename(name = "file") {
