@@ -13,16 +13,15 @@ const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
 
 const router = express.Router();
- 
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },  
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
 
- 
 function normalizeMessagingBaseUrl(raw = "") {
   let u = String(raw || "").trim().replace(/\/+$/, "");
-  if (!u) return ""; 
+  if (!u) return "";
   u = u.replace(/\/v1$/i, "");
   return u;
 }
@@ -30,7 +29,7 @@ function normalizeMessagingBaseUrl(raw = "") {
 const WHATSAPP_MSG_BASE =
   normalizeMessagingBaseUrl(process.env.WHATSAPP_BASE_URL) ||
   "https://waba-v2.360dialog.io";
- 
+
 const whatsappClient = axios.create({
   baseURL: WHATSAPP_MSG_BASE, // ✅ NO /v1 here
   headers: {
@@ -39,8 +38,8 @@ const whatsappClient = axios.create({
   },
   timeout: 30000,
 });
- 
-const WASABI_ENDPOINT = process.env.WASABI_ENDPOINT; 
+
+const WASABI_ENDPOINT = process.env.WASABI_ENDPOINT;
 const WASABI_REGION = process.env.WASABI_REGION || "ap-southeast-1";
 const WASABI_BUCKET = process.env.WASABI_BUCKET;
 
@@ -69,7 +68,7 @@ const normalizeWaId = (v = "") => {
   if (d.length === 10) return `91${d}`;
   return d;
 };
- 
+
 function normalizeTemplateName(v = "") {
   return String(v || "")
     .toLowerCase()
@@ -88,14 +87,14 @@ const emitToPhone10 = (req, phone10, event, payload) => {
   if (!p10) return;
   io.to(roomForPhone10(p10)).emit(event, payload);
 };
- 
+
 const customerPhoneFromMsg = (msgDoc) => {
   const dir = String(msgDoc?.direction || "").toUpperCase();
-  if (dir === "INBOUND") return msgDoc?.from; 
-  if (dir === "OUTBOUND") return msgDoc?.to; 
+  if (dir === "INBOUND") return msgDoc?.from;
+  if (dir === "OUTBOUND") return msgDoc?.to;
   return msgDoc?.to || msgDoc?.from;
 };
- 
+
 const emitMessage = (req, msgDoc) => {
   if (!msgDoc) return;
   const customerPhone = customerPhoneFromMsg(msgDoc);
@@ -120,7 +119,14 @@ const emitConversationPatch = (req, { phone10, patch }) => {
     patch,
   });
 };
- 
+
+// ✅ Use lastInboundAt to compute free-form window (truth source)
+function freeformExpiryFromConvo(convo) {
+  const t = convo?.lastInboundAt ? new Date(convo.lastInboundAt).getTime() : 0;
+  if (!t) return null;
+  return new Date(t + 24 * 60 * 60 * 1000);
+}
+
 function extractTemplateBodyText(tpl) {
   if (!tpl) return "";
   if (typeof tpl?.bodyText === "string") return tpl.bodyText;
@@ -144,11 +150,13 @@ function applyTemplateVars(bodyText, vars) {
     return v != null && String(v).trim() !== "" ? String(v) : `{{${num}}}`;
   });
 }
- 
+
 function getHeaderMediaFormatFromTemplate(tpl) {
   const comps = Array.isArray(tpl?.components) ? tpl.components : [];
-  const header = comps.find((c) => String(c?.type || "").toUpperCase() === "HEADER");
-  const fmt = String(header?.format || "").toUpperCase(); 
+  const header = comps.find(
+    (c) => String(c?.type || "").toUpperCase() === "HEADER"
+  );
+  const fmt = String(header?.format || "").toUpperCase();
   if (["IMAGE", "VIDEO", "DOCUMENT"].includes(fmt)) return fmt;
   return "";
 }
@@ -159,17 +167,26 @@ function buildHeaderComponentFromMedia({ format, id }) {
   if (!mediaId) return null;
 
   if (fmt === "IMAGE") {
-    return { type: "header", parameters: [{ type: "image", image: { id: mediaId } }] };
+    return {
+      type: "header",
+      parameters: [{ type: "image", image: { id: mediaId } }],
+    };
   }
   if (fmt === "VIDEO") {
-    return { type: "header", parameters: [{ type: "video", video: { id: mediaId } }] };
+    return {
+      type: "header",
+      parameters: [{ type: "video", video: { id: mediaId } }],
+    };
   }
   if (fmt === "DOCUMENT") {
-    return { type: "header", parameters: [{ type: "document", document: { id: mediaId } }] };
+    return {
+      type: "header",
+      parameters: [{ type: "document", document: { id: mediaId } }],
+    };
   }
   return null;
 }
- 
+
 function validateTemplateParamsOrThrow(tpl, parameters) {
   const bodyText = extractTemplateBodyText(tpl) || "";
   const matches = Array.from(bodyText.matchAll(/{{\s*(\d+)\s*}}/g));
@@ -186,7 +203,10 @@ function validateTemplateParamsOrThrow(tpl, parameters) {
     throw err;
   }
 }
- 
+
+/* ================================
+   TEMPLATE HEADER MEDIA UPLOAD
+================================ */
 router.post("/upload-template-media", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "file required" });
@@ -198,7 +218,7 @@ router.post("/upload-template-media", upload.single("file"), async (req, res) =>
       knownLength: req.file.size,
     });
     fd.append("messaging_product", "whatsapp");
- 
+
     const mediaUrl = `${String(WHATSAPP_MSG_BASE || "").replace(/\/+$/, "")}/media`;
 
     const r = await axios.post(mediaUrl, fd, {
@@ -223,12 +243,16 @@ router.post("/upload-template-media", upload.single("file"), async (req, res) =>
   } catch (e) {
     console.error("upload-template-media error:", e.response?.data || e);
     return res.status(e.response?.status || 400).json({
-      message: e.response?.data?.message || e.message || "Upload template media failed",
+      message:
+        e.response?.data?.message || e.message || "Upload template media failed",
       providerError: e.response?.data || null,
     });
   }
 });
- 
+
+/* ================================
+   INBOUND MEDIA HELPERS
+================================ */
 function extFromMime(mime = "") {
   const m = String(mime || "").toLowerCase();
   if (m.includes("jpeg")) return "jpg";
@@ -261,14 +285,24 @@ async function downloadMediaBuffer(mediaUrl) {
   }
 }
 
-async function uploadInboundToWasabi({ buffer, mime, filename, from10, mediaId, msgType }) {
+async function uploadInboundToWasabi({
+  buffer,
+  mime,
+  filename,
+  from10,
+  mediaId,
+  msgType,
+}) {
   if (!s3 || !WASABI_BUCKET) return null;
 
-  const day = new Date().toISOString().slice(0, 10);  
+  const day = new Date().toISOString().slice(0, 10);
   const ext = extFromMime(mime);
-  const safeName = filename ? String(filename).replace(/[^\w.\-() ]+/g, "_") : "";
+  const safeName = filename
+    ? String(filename).replace(/[^\w.\-() ]+/g, "_")
+    : "";
   const base =
-    safeName || `${msgType || "media"}_${from10 || "unknown"}_${mediaId || Date.now()}.${ext}`;
+    safeName ||
+    `${msgType || "media"}_${from10 || "unknown"}_${mediaId || Date.now()}.${ext}`;
   const key = `whatsapp-inbound/${day}/${base}`;
 
   const up = await s3
@@ -283,7 +317,10 @@ async function uploadInboundToWasabi({ buffer, mime, filename, from10, mediaId, 
 
   return up?.Location || null;
 }
- 
+
+/* ================================
+   READ TRACKING
+================================ */
 router.post("/conversations/mark-read", async (req, res) => {
   try {
     const phoneRaw = req.body?.phone || "";
@@ -298,7 +335,10 @@ router.post("/conversations/mark-read", async (req, res) => {
       { new: true }
     ).lean();
 
-    emitConversationPatch(req, { phone10: p10, patch: { unreadCount: 0, lastReadAt: now } });
+    emitConversationPatch(req, {
+      phone10: p10,
+      patch: { unreadCount: 0, lastReadAt: now },
+    });
 
     return res.json({ success: true, conversation: updated || null });
   } catch (e) {
@@ -306,7 +346,10 @@ router.post("/conversations/mark-read", async (req, res) => {
     return res.status(500).json({ message: e.message || "mark-read failed" });
   }
 });
- 
+
+/* ================================
+   CONVERSATIONS (enriched)
+================================ */
 router.get("/conversations", async (req, res) => {
   try {
     const { role, userName } = req.query;
@@ -344,7 +387,8 @@ router.get("/conversations", async (req, res) => {
 
       if (lead) {
         displayName = lead.name || p10;
-        assignedToLabel = lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
+        assignedToLabel =
+          lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
       } else if (customer) {
         displayName = customer.name || p10;
         assignedToLabel = customer.assignedTo || "Unassigned";
@@ -372,7 +416,10 @@ router.get("/conversations", async (req, res) => {
     res.status(500).json({ message: "Failed to load conversations" });
   }
 });
- 
+
+/* ================================
+   MESSAGES
+================================ */
 router.get("/messages", async (req, res) => {
   try {
     const q = digitsOnly(req.query.phone);
@@ -398,7 +445,10 @@ router.get("/messages", async (req, res) => {
     res.status(500).json({ message: "Failed to load messages" });
   }
 });
- 
+
+/* ================================
+   TEMPLATES
+================================ */
 router.get("/templates", async (req, res) => {
   try {
     const tpls = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
@@ -408,7 +458,10 @@ router.get("/templates", async (req, res) => {
     res.status(500).json({ message: "Failed to load templates" });
   }
 });
- 
+
+/* ================================
+   SEND TEXT (FREEFORM) ✅ uses lastInboundAt
+================================ */
 router.post("/send-text", async (req, res) => {
   try {
     const { to, text } = req.body;
@@ -419,8 +472,14 @@ router.post("/send-text", async (req, res) => {
     const phone = normalizeWaId(to);
     const p10 = last10(phone);
 
-    const convo = await WhatsAppConversation.findOne({ phone: new RegExp(`${p10}$`) }).lean();
-    if (!convo?.windowExpiresAt || convo.windowExpiresAt < new Date()) {
+    const convo = await WhatsAppConversation.findOne({
+      phone: new RegExp(`${p10}$`),
+    }).lean();
+
+    // ✅ primary: lastInboundAt, fallback: windowExpiresAt for old data
+    const expiry = freeformExpiryFromConvo(convo) || convo?.windowExpiresAt || null;
+
+    if (!expiry || expiry < new Date()) {
       return res.status(400).json({
         message: "Session expired. Use template message.",
         code: "SESSION_EXPIRED",
@@ -458,6 +517,7 @@ router.post("/send-text", async (req, res) => {
           lastMessageAt: now,
           lastMessageText: text.slice(0, 200),
           lastOutboundAt: now,
+          // ❌ do NOT touch lastInboundAt / windowExpiresAt here
         },
       },
       { upsert: true }
@@ -485,21 +545,19 @@ router.post("/send-text", async (req, res) => {
     });
   }
 });
- 
+
+/* ================================
+   SEND TEMPLATE ✅ does NOT extend session window
+================================ */
 router.post("/send-template", async (req, res) => {
   try {
-    const {
-      to,
-      templateName,
-      parameters = [],
-      renderedText = "",
-      headerMedia = null,  
-    } = req.body;
+    const { to, templateName, parameters = [], renderedText = "", headerMedia = null } =
+      req.body;
 
     if (!to || !templateName) {
       return res.status(400).json({ message: "to & templateName required" });
     }
- 
+
     const rawDigits = String(to || "").replace(/\D/g, "");
     const normalizedTo = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
     const phone = normalizeWaId(normalizedTo);
@@ -509,7 +567,7 @@ router.post("/send-template", async (req, res) => {
 
     const tpl = await WhatsAppTemplate.findOne({ name: cleanTemplateName }).lean();
     if (!tpl) return res.status(400).json({ message: "Template not found" });
- 
+
     if (String(tpl.status || "").toUpperCase() !== "APPROVED") {
       return res.status(400).json({ message: "Template not approved" });
     }
@@ -518,7 +576,7 @@ router.post("/send-template", async (req, res) => {
     }
 
     validateTemplateParamsOrThrow(tpl, parameters);
- 
+
     const lang = String(tpl.language || "").trim();
     if (!lang) {
       return res.status(400).json({
@@ -527,8 +585,8 @@ router.post("/send-template", async (req, res) => {
       });
     }
 
-    const neededHeaderFmt = getHeaderMediaFormatFromTemplate(tpl); 
- 
+    const neededHeaderFmt = getHeaderMediaFormatFromTemplate(tpl);
+
     if (neededHeaderFmt) {
       const providedId = String(headerMedia?.id || "").trim();
       if (!providedId) {
@@ -540,7 +598,7 @@ router.post("/send-template", async (req, res) => {
     }
 
     const components = [];
- 
+
     if (neededHeaderFmt) {
       const headerComp = buildHeaderComponentFromMedia({
         format: neededHeaderFmt,
@@ -555,7 +613,7 @@ router.post("/send-template", async (req, res) => {
       }
       components.push(headerComp);
     }
- 
+
     if (Array.isArray(parameters) && parameters.length) {
       components.push({
         type: "body",
@@ -573,15 +631,14 @@ router.post("/send-template", async (req, res) => {
       type: "template",
       template: {
         name: tpl.name,
-        language: { code: lang },  
+        language: { code: lang },
         ...(components.length ? { components } : {}),
       },
     };
- 
+
     const r = await whatsappClient.post("/messages", payload);
     const now = new Date();
 
-    // build UI text
     const clientText = String(renderedText || "").trim();
     const serverBody = extractTemplateBodyText(tpl);
     const serverText = serverBody ? applyTemplateVars(serverBody, parameters) : "";
@@ -612,8 +669,7 @@ router.post("/send-template", async (req, res) => {
       raw: r.data,
     });
 
-    const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
+    // ✅ IMPORTANT: do NOT set windowExpiresAt here
     await WhatsAppConversation.findOneAndUpdate(
       { phone: new RegExp(`${p10}$`) },
       {
@@ -622,7 +678,6 @@ router.post("/send-template", async (req, res) => {
           lastMessageAt: now,
           lastMessageText: finalText.slice(0, 200),
           lastOutboundAt: now,
-          windowExpiresAt: windowExpiry,
         },
       },
       { upsert: true }
@@ -635,7 +690,6 @@ router.post("/send-template", async (req, res) => {
         lastMessageAt: now,
         lastMessageText: finalText.slice(0, 200),
         lastOutboundAt: now,
-        windowExpiresAt: windowExpiry,
       },
     });
 
@@ -669,7 +723,9 @@ router.post("/webhook", async (req, res) => {
     for (const entry of entries) {
       for (const change of entry.changes || []) {
         const value = change.value || {};
-        const businessPhone = normalizeWaId(value.metadata?.display_phone_number || "");
+        const businessPhone = normalizeWaId(
+          value.metadata?.display_phone_number || ""
+        );
 
         /* -------------------------
            1) STATUS UPDATES (ticks)
@@ -711,11 +767,16 @@ router.post("/webhook", async (req, res) => {
           if (already) continue;
 
           const from = normalizeWaId(msg.from); // customer
-          const to = businessPhone || normalizeWaId(value.metadata?.display_phone_number || "");
+          const to =
+            businessPhone ||
+            normalizeWaId(value.metadata?.display_phone_number || "");
           if (from && to && from === to) continue;
 
           const p10 = last10(from);
           const now = new Date();
+
+          // For legacy compatibility, keep windowExpiresAt updated,
+          // but your app should rely on lastInboundAt.
           const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
           const msgType = String(msg.type || "").toLowerCase();
@@ -732,43 +793,33 @@ router.post("/webhook", async (req, res) => {
             const it = msg?.interactive || {};
             const itType = String(it.type || "").toLowerCase();
             if (itType === "button_reply") {
-              text = String(it?.button_reply?.title || it?.button_reply?.id || "");
+              text = String(
+                it?.button_reply?.title || it?.button_reply?.id || ""
+              );
             } else if (itType === "list_reply") {
               text = String(it?.list_reply?.title || it?.list_reply?.id || "");
             } else {
-              // fallback
               text = JSON.stringify(it).slice(0, 500);
             }
           }
 
           // ---------- MEDIA ----------
-          // Meta message shapes: msg.image.id / msg.video.id / msg.audio.id / msg.document.id
-          const mediaObj =
-            msg?.image ||
-            msg?.video ||
-            msg?.audio ||
-            msg?.document ||
-            null;
-
+          const mediaObj = msg?.image || msg?.video || msg?.audio || msg?.document || null;
           const mediaId = mediaObj?.id ? String(mediaObj.id) : "";
           let media = null;
 
           if (mediaId) {
             try {
-              // 360dialog/Meta: GET /media/:id returns { url, mime_type, ... }
               const mediaInfo = await whatsappClient.get(`/media/${mediaId}`);
               const providerUrl = mediaInfo?.data?.url || "";
               const mime = mediaInfo?.data?.mime_type || mediaObj?.mime_type || "";
 
-              // download bytes
               const buffer = providerUrl ? await downloadMediaBuffer(providerUrl) : null;
 
-              // optional filename (document usually has filename)
               const filename =
                 String(mediaObj?.filename || mediaObj?.name || "").trim() ||
                 `${type || "media"}_${p10 || "unknown"}_${mediaId}.${extFromMime(mime)}`;
 
-              // upload to Wasabi for a stable public URL (recommended)
               const wasabiUrl =
                 buffer
                   ? await uploadInboundToWasabi({
@@ -788,7 +839,6 @@ router.post("/webhook", async (req, res) => {
                 filename,
               };
 
-              // if no text, set a nice preview label
               if (!text) {
                 const t = (type || msgType || "").toLowerCase();
                 text =
@@ -802,12 +852,10 @@ router.post("/webhook", async (req, res) => {
               }
             } catch (e) {
               console.error("Inbound media handling failed:", e.response?.data || e);
-              // keep message anyway (without media)
               if (!text) text = "📎 Attachment";
             }
           }
 
-          // Normalize type for your UI rendering
           if (mediaId) {
             if (msg.image) type = "image";
             else if (msg.video) type = "video";
@@ -815,14 +863,13 @@ router.post("/webhook", async (req, res) => {
             else if (msg.document) type = "document";
             else type = msgType || "document";
           } else {
-            // keep type as text/button/interactive
             type = msgType || "text";
           }
 
           const created = await WhatsAppMessage.create({
             waId: msg.id,
-            from, // customer
-            to,   // business
+            from,
+            to,
             direction: "INBOUND",
             type,
             text: String(text || "").slice(0, 4000),
@@ -832,32 +879,33 @@ router.post("/webhook", async (req, res) => {
             raw: msg,
           });
 
-          // Conversation upsert (+ unread, + window)
-          await WhatsAppConversation.findOneAndUpdate(
+          // ✅ Conversation upsert (+ unread + session open from inbound)
+          const updatedConv = await WhatsAppConversation.findOneAndUpdate(
             { phone: new RegExp(`${p10}$`) },
             {
               $set: {
-                phone: from, // store customer phone (with country code)
+                phone: from,
                 lastMessageAt: now,
                 lastMessageText: String(text || "").slice(0, 200),
                 lastInboundAt: now,
-                windowExpiresAt: windowExpiry,
+                windowExpiresAt: windowExpiry, // keep for old fallback
               },
               $inc: { unreadCount: 1 },
             },
-            { upsert: true }
-          );
+            { upsert: true, new: true }
+          ).lean();
 
-          // realtime UI updates
           emitMessage(req, created);
+
+          // ✅ emit real unreadCount (not delta)
           emitConversationPatch(req, {
             phone10: p10,
             patch: {
-              lastMessageAt: now,
-              lastMessageText: String(text || "").slice(0, 200),
-              lastInboundAt: now,
-              windowExpiresAt: windowExpiry,
-              unreadCountDelta: 1,
+              lastMessageAt: updatedConv?.lastMessageAt || now,
+              lastMessageText: updatedConv?.lastMessageText || String(text || "").slice(0, 200),
+              lastInboundAt: updatedConv?.lastInboundAt || now,
+              windowExpiresAt: updatedConv?.windowExpiresAt || windowExpiry,
+              unreadCount: updatedConv?.unreadCount ?? 1,
             },
           });
         }
@@ -867,7 +915,7 @@ router.post("/webhook", async (req, res) => {
     return res.sendStatus(200);
   } catch (e) {
     console.error("webhook error:", e.response?.data || e);
-    return res.sendStatus(200);  
+    return res.sendStatus(200);
   }
 });
 
