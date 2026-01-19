@@ -45,16 +45,16 @@ const WASABI_BUCKET = process.env.WASABI_BUCKET;
 
 const s3 =
   WASABI_ENDPOINT &&
-  process.env.WASABI_ACCESS_KEY_ID &&
-  process.env.WASABI_SECRET_ACCESS_KEY &&
-  WASABI_BUCKET
+    process.env.WASABI_ACCESS_KEY_ID &&
+    process.env.WASABI_SECRET_ACCESS_KEY &&
+    WASABI_BUCKET
     ? new AWS.S3({
-        endpoint: new AWS.Endpoint(WASABI_ENDPOINT),
-        region: WASABI_REGION,
-        accessKeyId: process.env.WASABI_ACCESS_KEY_ID,
-        secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY,
-        signatureVersion: "v4",
-      })
+      endpoint: new AWS.Endpoint(WASABI_ENDPOINT),
+      region: WASABI_REGION,
+      accessKeyId: process.env.WASABI_ACCESS_KEY_ID,
+      secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY,
+      signatureVersion: "v4",
+    })
     : null;
 
 /* ================================
@@ -191,6 +191,26 @@ function buildHeaderComponentFromMedia({ format, id, filename }) {
   }
   return null;
 }
+
+async function downloadMediaWithMeta(mediaUrl) {
+  const tryReq = async (withKey) => {
+    const r = await axios.get(mediaUrl, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      ...(withKey ? { headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY } } : {}),
+    });
+
+    const mime = String(r.headers?.["content-type"] || "").trim(); // ✅ REAL mime
+    return { buffer: Buffer.from(r.data), mime };
+  };
+
+  try {
+    return await tryReq(true);
+  } catch {
+    return await tryReq(false);
+  }
+}
+
 
 function validateTemplateParamsOrThrow(tpl, parameters) {
   const bodyText = extractTemplateBodyText(tpl) || "";
@@ -664,11 +684,11 @@ router.post("/send-template", async (req, res) => {
         parameters: (parameters || []).map((x) => String(x ?? "")),
         ...(neededHeaderFmt && headerMedia?.id
           ? {
-              headerMedia: {
-                format: neededHeaderFmt,
-                id: String(headerMedia.id),
-              },
-            }
+            headerMedia: {
+              format: neededHeaderFmt,
+              id: String(headerMedia.id),
+            },
+          }
           : {}),
       },
       timestamp: now,
@@ -818,9 +838,14 @@ router.post("/webhook", async (req, res) => {
             try {
               const mediaInfo = await whatsappClient.get(`/media/${mediaId}`);
               const providerUrl = mediaInfo?.data?.url || "";
-              const mime = mediaInfo?.data?.mime_type || mediaObj?.mime_type || "";
+              const mimeFromInfo = String(mediaInfo?.data?.mime_type || mediaObj?.mime_type || "").trim();
 
-              const buffer = providerUrl ? await downloadMediaBuffer(providerUrl) : null;
+              const dl = providerUrl ? await downloadMediaWithMeta(providerUrl) : null;
+              const buffer = dl?.buffer || null;
+
+              // ✅ BEST mime: download header > provider meta > fallback
+              const mime = String(dl?.mime || mimeFromInfo || "").trim() || "application/octet-stream";
+
 
               const filename =
                 String(mediaObj?.filename || mediaObj?.name || "").trim() ||
@@ -829,13 +854,13 @@ router.post("/webhook", async (req, res) => {
               const wasabiUrl =
                 buffer
                   ? await uploadInboundToWasabi({
-                      buffer,
-                      mime,
-                      filename,
-                      from10: p10,
-                      mediaId,
-                      msgType: type || msgType,
-                    })
+                    buffer,
+                    mime,
+                    filename,
+                    from10: p10,
+                    mediaId,
+                    msgType: type || msgType,
+                  })
                   : null;
 
               media = {
@@ -851,10 +876,10 @@ router.post("/webhook", async (req, res) => {
                   t === "image"
                     ? "📷 Photo"
                     : t === "video"
-                    ? "🎥 Video"
-                    : t === "audio"
-                    ? "🎙️ Audio"
-                    : "📎 Attachment";
+                      ? "🎥 Video"
+                      : t === "audio"
+                        ? "🎙️ Audio"
+                        : "📎 Attachment";
               }
             } catch (e) {
               console.error("Inbound media handling failed:", e.response?.data || e);
