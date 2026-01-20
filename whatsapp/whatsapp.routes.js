@@ -764,27 +764,48 @@ router.get("/media-proxy/:id", async (req, res) => {
 
   try {
     const base = String(WHATSAPP_MSG_BASE || "").replace(/\/+$/, "");
-    const metaUrl = `${base}/v1/media/${mediaId}`;
 
-    // 1) Get downloadable provider URL from 360dialog
-    const info = await axios.get(metaUrl, {
-      headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY },
-      timeout: 30000,
-      validateStatus: () => true,
-    });
+    // ✅ 1) Get downloadable provider URL from 360dialog
+    // 360dialog can be either /media/:id (waba-v2) or /v1/media/:id (older)
+    const tryMeta = async (path) =>
+      axios.get(`${base}${path}`, {
+        headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY },
+        timeout: 30000,
+        validateStatus: () => true,
+      });
 
-    if (info.status >= 400) {
-      console.error("media-proxy meta failed:", info.status, info.data);
+    const candidates = [`/media/${mediaId}`, `/v1/media/${mediaId}`];
+
+    let info = null;
+    let last = null;
+
+    for (const p of candidates) {
+      const r = await tryMeta(p);
+      last = { path: p, status: r.status, data: r.data };
+
+      if (r.status < 400) {
+        info = r;
+        break;
+      }
+
+      // if 404, try next candidate; otherwise stop (401/403/500 etc.)
+      if (r.status !== 404) break;
+    }
+
+    if (!info) {
+      console.error("media-proxy meta failed:", last);
       return res.status(502).json({
         message: "media meta failed",
-        status: info.status,
-        providerError: info.data,
+        status: last?.status || 500,
+        providerError: last?.data || null,
+        tried: candidates,
       });
     }
 
     const providerUrl = String(info.data?.url || "").trim();
     if (!providerUrl) return res.status(404).send("provider url missing");
 
+    // ✅ 2) Support Range requests (needed for audio/video streaming in browsers)
     const range = req.headers.range;
 
     const fetchStream = async (withKey) =>
@@ -798,20 +819,40 @@ router.get("/media-proxy/:id", async (req, res) => {
         validateStatus: () => true,
       });
 
-    // 2) Stream bytes (try with key, fallback without key)
+    // ✅ 3) Stream bytes (try with key, fallback without key)
     let r = await fetchStream(true);
     if ([401, 403].includes(r.status)) r = await fetchStream(false);
 
+    // If provider returns error, pass it through (helps debugging)
+    if (r.status >= 400) {
+      console.error("media-proxy download failed:", {
+        status: r.status,
+        headers: r.headers,
+      });
+      res.status(r.status);
+      // try to forward content-type if present
+      if (r.headers?.["content-type"]) {
+        res.setHeader("Content-Type", r.headers["content-type"]);
+      }
+      return r.data.pipe(res);
+    }
+
+    // ✅ 4) Forward important headers so browser can play audio/video
     res.status(r.status);
 
     const ct = r.headers["content-type"] || "application/octet-stream";
     res.setHeader("Content-Type", ct);
-    res.setHeader("Accept-Ranges", r.headers["accept-ranges"] || "bytes");
-    if (r.headers["content-length"]) res.setHeader("Content-Length", r.headers["content-length"]);
-    if (r.headers["content-range"]) res.setHeader("Content-Range", r.headers["content-range"]);
 
+    // Range support
+    res.setHeader("Accept-Ranges", r.headers["accept-ranges"] || "bytes");
+    if (range) res.setHeader("Content-Range", r.headers["content-range"] || "");
+    if (r.headers["content-length"])
+      res.setHeader("Content-Length", r.headers["content-length"]);
+
+    // Cache policy
     res.setHeader("Cache-Control", "no-store");
 
+    // ✅ Pipe stream
     r.data.pipe(res);
   } catch (e) {
     console.error("media-proxy error:", {
@@ -820,6 +861,7 @@ router.get("/media-proxy/:id", async (req, res) => {
       status: e.response?.status,
       data: e.response?.data,
     });
+
     return res.status(500).json({
       message: "proxy failed",
       error: e.message,
@@ -827,8 +869,7 @@ router.get("/media-proxy/:id", async (req, res) => {
       providerError: e.response?.data || null,
     });
   }
-});
-
+}); 
 
 /* ================================
    WEBHOOK
