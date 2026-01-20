@@ -48,14 +48,28 @@ function inferTypeAndMime({ mimetype = "", originalname = "" }) {
   const imgExts = ["png", "jpg", "jpeg", "webp", "gif"];
 
   const isAudio =
-    mime.startsWith("audio/") || mime.includes("ogg") || audioExts.includes(ext);
-
+    mime.startsWith("audio/") || mime.includes("ogg") || mime.includes("opus") || audioExts.includes(ext);
   const isVideo = mime.startsWith("video/") || videoExts.includes(ext);
-
   const isImage = mime.startsWith("image/") || imgExts.includes(ext);
 
   const type = isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : "document";
-  return { type, mime: mime || "" };
+
+  // ✅ best guess mime if multer gives octet-stream
+  let bestMime = mime;
+  if (!bestMime || bestMime === "application/octet-stream") {
+    if (type === "audio") {
+      if (ext === "mp3") bestMime = "audio/mpeg";
+      else if (ext === "wav") bestMime = "audio/wav";
+      else if (ext === "m4a" || ext === "aac") bestMime = "audio/mp4";
+      else bestMime = "audio/ogg"; // WhatsApp voice note default
+    } else if (type === "image") {
+      bestMime = ext === "png" ? "image/png" : "image/jpeg";
+    } else if (type === "video") {
+      bestMime = "video/mp4";
+    }
+  }
+
+  return { type, mime: bestMime };
 }
 
 function previewTextForType(type, filename = "") {
@@ -66,31 +80,58 @@ function previewTextForType(type, filename = "") {
   return filename ? `📎 ${filename}` : "📎 Attachment";
 }
 
-function shouldSendAsVoiceNote(type, mime, filename) {
-  if (String(type) !== "audio") return false;
-  const m = String(mime || "").toLowerCase();
-  const ext = extFromName(filename || "");
-  // ✅ WhatsApp "voice notes" are audio/ogg (opus)
-  return m.includes("audio/ogg") || ext === "ogg" || ext === "opus";
+// NOTE: WhatsApp "voice note" is determined by codec/container (ogg/opus).
+// Do NOT send `voice: true` in payload; many providers ignore or reject it.
+
+// ----------------------
+// WASABI S3 CONFIG (unified env names with other files)
+// ----------------------
+const WASABI_ENDPOINT = process.env.WASABI_ENDPOINT;
+const WASABI_REGION = process.env.WASABI_REGION || "ap-southeast-1";
+const WASABI_BUCKET = process.env.WASABI_BUCKET;
+
+const s3 =
+  WASABI_ENDPOINT &&
+  process.env.WASABI_ACCESS_KEY_ID &&
+  process.env.WASABI_SECRET_ACCESS_KEY &&
+  WASABI_BUCKET
+    ? new AWS.S3({
+        endpoint: new AWS.Endpoint(WASABI_ENDPOINT),
+        region: WASABI_REGION,
+        accessKeyId: process.env.WASABI_ACCESS_KEY_ID,
+        secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY,
+        signatureVersion: "v4",
+      })
+    : null;
+
+function buildPublicWasabiUrl({ endpoint, bucket, key }) {
+  const ep = String(endpoint || "").replace(/\/+$/, "");
+  if (!ep || !bucket || !key) return null;
+
+  // encode but keep slashes
+  const encodedKey = encodeURIComponent(key).replace(/%2F/g, "/");
+  return `${ep}/${bucket}/${encodedKey}`;
 }
 
 // ----------------------
-// WASABI S3 CONFIG
+// 360dialog client (reuse same base logic as whatsapp.routes.js if you want)
 // ----------------------
-const s3 = new AWS.S3({
-  endpoint: process.env.WASABI_ENDPOINT,
-  region: process.env.WASABI_REGION,
-  accessKeyId: process.env.WASABI_ACCESS_KEY,
-  secretAccessKey: process.env.WASABI_SECRET_KEY,
-  s3ForcePathStyle: true,
-});
+function normalizeMessagingBaseUrl(raw = "") {
+  let u = String(raw || "").trim().replace(/\/+$/, "");
+  if (!u) return "";
+  u = u.replace(/\/v1$/i, "");
+  return u;
+}
 
-// ----------------------
-// 360dialog client
-// ----------------------
+const WHATSAPP_MSG_BASE =
+  normalizeMessagingBaseUrl(process.env.WHATSAPP_BASE_URL) ||
+  "https://waba-v2.360dialog.io";
+
 const whatsappClient = axios.create({
-  baseURL: "https://waba-v2.360dialog.io",
-  headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY },
+  baseURL: WHATSAPP_MSG_BASE, // ✅ NO /v1 here
+  headers: {
+    "D360-API-KEY": process.env.WHATSAPP_API_KEY,
+  },
   timeout: 20000,
 });
 
@@ -107,9 +148,16 @@ const emitToPhone10 = (req, phone10, event, payload) => {
   io.to(roomForPhone10(p10)).emit(event, payload);
 };
 
+const customerPhoneFromMsg = (msgDoc) => {
+  const dir = String(msgDoc?.direction || "").toUpperCase();
+  if (dir === "INBOUND") return msgDoc?.from;
+  if (dir === "OUTBOUND") return msgDoc?.to;
+  return msgDoc?.to || msgDoc?.from;
+};
+
 const emitMessage = (req, msgDoc) => {
   if (!msgDoc) return;
-  const customerPhone = msgDoc?.direction === "INBOUND" ? msgDoc?.from : msgDoc?.to;
+  const customerPhone = customerPhoneFromMsg(msgDoc);
   const p10 = last10(customerPhone || "");
   if (!p10) return;
   emitToPhone10(req, p10, "wa:message", { phone10: p10, message: msgDoc });
@@ -125,27 +173,36 @@ const emitConversationPatch = (req, { phone10, patch }) => {
 // Wasabi upload
 // ----------------------
 async function uploadToWasabi({ buffer, mimetype, originalname }) {
-  const bucket = process.env.WASABI_BUCKET;
-  if (!bucket) throw new Error("WASABI_BUCKET missing");
+  if (!s3 || !WASABI_BUCKET) throw new Error("Wasabi S3 not configured");
 
   const ext = extFromName(originalname);
   const safe = safeFilename(
-    originalname || `file.${ext || (String(mimetype || "").includes("ogg") ? "ogg" : "bin")}`
+    originalname ||
+      `file.${
+        ext || (String(mimetype || "").toLowerCase().includes("ogg") ? "ogg" : "bin")
+      }`
   );
 
   const key = `whatsapp-media/${new Date().toISOString().slice(0, 10)}/${Date.now()}_${safe}`;
 
   const result = await s3
     .upload({
-      Bucket: bucket,
+      Bucket: WASABI_BUCKET,
       Key: key,
       Body: buffer,
       ContentType: mimetype || "application/octet-stream",
+      ContentDisposition: "inline", // ✅ helps playback in browser
+      CacheControl: "public, max-age=31536000",
       ACL: "public-read",
     })
     .promise();
 
-  return { url: result.Location, key };
+  // Wasabi sometimes returns empty/undefined Location; build URL fallback
+  const url =
+    result?.Location ||
+    buildPublicWasabiUrl({ endpoint: WASABI_ENDPOINT, bucket: WASABI_BUCKET, key });
+
+  return { url, key };
 }
 
 /**
@@ -173,27 +230,34 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     });
 
     const type = inferred.type;
-    const mime = inferred.mime || req.file.mimetype || "";
+    // prefer the real mimetype (NOT lower-cased) for upload headers
+    const mime = req.file.mimetype || inferred.mime || "application/octet-stream";
     const previewText = previewTextForType(type, req.file.originalname);
 
     // 1) Upload to Wasabi (store URL in DB)
     const wasabi = await uploadToWasabi({
       buffer: req.file.buffer,
-      mimetype: mime || req.file.mimetype,
+      mimetype: mime,
       originalname: req.file.originalname,
     });
+
+    if (!wasabi?.url) {
+      return res.status(500).json({
+        message: "Wasabi upload failed (no url returned)",
+      });
+    }
 
     // 2) Upload media to 360dialog to get mediaId (required to send)
     const fd = new FormData();
     fd.append("messaging_product", "whatsapp");
     fd.append("file", req.file.buffer, {
       filename: req.file.originalname || "file",
-      contentType: mime || req.file.mimetype || "application/octet-stream",
+      contentType: mime,
       knownLength: req.file.size,
     });
 
     const uploadRes = await whatsappClient.post("/media", fd, {
-      headers: { ...fd.getHeaders() },
+      headers: { ...fd.getHeaders(), "D360-API-KEY": process.env.WHATSAPP_API_KEY },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
     });
@@ -207,15 +271,15 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     }
 
     // 3) Send message with media id
+    // NOTE: Do NOT include `voice: true`. Voice note is determined by codec/container.
     const payload = {
       messaging_product: "whatsapp",
+      recipient_type: "individual",
       to,
       type,
       [type]: {
         id: mediaId,
         ...(type === "document" ? { filename: req.file.originalname } : {}),
-        // ✅ Voice note flag for ogg/opus
-        ...(shouldSendAsVoiceNote(type, mime, req.file.originalname) ? { voice: true } : {}),
       },
     };
 
@@ -232,7 +296,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       to,
       direction: "OUTBOUND",
       type, // ✅ audio/video/image/document
-      text: previewText, // ✅ so UI shows 🎙️ Audio (not empty/attachment)
+      text: previewText, // ✅ so UI shows 🎙️ Audio etc.
       status: "sent",
       media: {
         id: mediaId,
@@ -245,25 +309,28 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     });
 
     // ✅ Update conversation preview with correct label
-    await WhatsAppConversation.findOneAndUpdate(
-      { phone: to },
+    // Use last10 regex so it matches conversations stored as 91xxxxxxxxxx
+    const updatedConv = await WhatsAppConversation.findOneAndUpdate(
+      { phone: new RegExp(`${p10}$`) },
       {
         $set: {
           phone: to,
           lastMessageAt: now,
           lastMessageText: previewText.slice(0, 200),
+          lastOutboundAt: now,
         },
       },
-      { upsert: true }
-    );
+      { upsert: true, new: true }
+    ).lean();
 
     // ✅ realtime emits
     emitMessage(req, created);
     emitConversationPatch(req, {
       phone10: p10,
       patch: {
-        lastMessageAt: now,
-        lastMessageText: previewText.slice(0, 200),
+        lastMessageAt: updatedConv?.lastMessageAt || now,
+        lastMessageText: updatedConv?.lastMessageText || previewText.slice(0, 200),
+        lastOutboundAt: updatedConv?.lastOutboundAt || now,
       },
     });
 
@@ -275,6 +342,51 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       providerError: e.response?.data || null,
       error: e?.message || String(e),
     });
+  }
+});
+ 
+
+router.get("/media-proxy/:id", async (req, res) => {
+  try {
+    const mediaId = String(req.params.id || "").trim();
+    if (!mediaId) return res.status(400).send("mediaId required");
+
+    let info;
+    try { info = await whatsappClient.get(`/media/${mediaId}`); }
+    catch { info = await whatsappClient.get(`/v1/media/${mediaId}`); }
+
+    const providerUrl = String(info?.data?.url || "").trim();
+    if (!providerUrl) return res.status(404).send("provider url missing");
+
+    const range = req.headers.range;
+
+    const r = await axios.get(providerUrl, {
+      responseType: "stream",
+      timeout: 30000,
+      headers: {
+        "D360-API-KEY": process.env.WHATSAPP_API_KEY,
+        ...(range ? { Range: range } : {}),
+      },
+      validateStatus: () => true,
+    });
+
+    // Forward status (206 for partial content)
+    res.status(r.status);
+
+    // Forward key headers
+    const ct = r.headers["content-type"] || "application/octet-stream";
+    res.setHeader("Content-Type", ct);
+    if (r.headers["content-length"]) res.setHeader("Content-Length", r.headers["content-length"]);
+    if (r.headers["content-range"]) res.setHeader("Content-Range", r.headers["content-range"]);
+    if (r.headers["accept-ranges"]) res.setHeader("Accept-Ranges", r.headers["accept-ranges"]);
+    else res.setHeader("Accept-Ranges", "bytes");
+
+    res.setHeader("Cache-Control", "no-store");
+
+    r.data.pipe(res);
+  } catch (e) {
+    console.error("media-proxy error:", e.response?.data || e);
+    return res.status(500).send("proxy failed");
   }
 });
 

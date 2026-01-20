@@ -280,18 +280,27 @@ router.post("/upload-template-media", upload.single("file"), async (req, res) =>
 ================================ */
 function extFromMime(mime = "") {
   const m = String(mime || "").toLowerCase();
+
   if (m.includes("jpeg")) return "jpg";
   if (m.includes("jpg")) return "jpg";
   if (m.includes("png")) return "png";
   if (m.includes("webp")) return "webp";
   if (m.includes("gif")) return "gif";
+
   if (m.includes("mp4")) return "mp4";
   if (m.includes("pdf")) return "pdf";
-  if (m.includes("audio/ogg")) return "ogg";
-  if (m.includes("audio/mpeg")) return "mp3";
-  if (m.includes("audio/wav")) return "wav";
+
+  // ✅ voice notes
+  if (m.includes("audio/ogg") || m.includes("application/ogg") || m.includes("ogg")) return "ogg";
+  if (m.includes("opus")) return "ogg"; // WhatsApp usually wants ogg/opus container
+
+  if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("wav")) return "wav";
+  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac")) return "m4a";
+
   return "bin";
 }
+
 
 async function downloadMediaBuffer(mediaUrl) {
   try {
@@ -328,6 +337,7 @@ async function uploadInboundToWasabi({
   const base =
     safeName ||
     `${msgType || "media"}_${from10 || "unknown"}_${mediaId || Date.now()}.${ext}`;
+
   const key = `whatsapp-inbound/${day}/${base}`;
 
   const up = await s3
@@ -336,11 +346,22 @@ async function uploadInboundToWasabi({
       Key: key,
       Body: buffer,
       ContentType: mime || "application/octet-stream",
+      ContentDisposition: "inline",            // ✅ important for playback
+      CacheControl: "public, max-age=31536000",
       ACL: "public-read",
     })
     .promise();
 
-  return up?.Location || null;
+  // Wasabi sometimes doesn't return Location reliably → build URL
+  const loc = up?.Location || "";
+  if (loc) return loc;
+
+  // Build a public URL using endpoint
+  const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
+  if (!ep) return null;
+
+  // Standard public URL pattern for Wasabi endpoint style
+  return `${ep}/${WASABI_BUCKET}/${key}`;
 }
 
 /* ================================
@@ -886,9 +907,12 @@ router.post("/webhook", async (req, res) => {
                   const dl = await downloadMediaWithMeta(providerUrl); // { buffer, mime }
                   const buffer = dl?.buffer || null;
 
-                  const bestMime =
-                    String(dl?.mime || mimeFromInfo || "").trim() ||
-                    "application/octet-stream";
+                  let bestMime = String(dl?.mime || mimeFromInfo || "").trim();
+ 
+                  if (!bestMime && String(type).toLowerCase() === "audio") {
+                    bestMime = "audio/ogg";
+                  }
+                  if (!bestMime) bestMime = "application/octet-stream";
 
                   let wasabiUrl = null;
                   if (buffer) {
@@ -923,10 +947,10 @@ router.post("/webhook", async (req, res) => {
                   t === "image"
                     ? "📷 Photo"
                     : t === "video"
-                    ? "🎥 Video"
-                    : t === "audio"
-                    ? "🎙️ Audio"
-                    : "📎 Attachment";
+                      ? "🎥 Video"
+                      : t === "audio"
+                        ? "🎙️ Audio"
+                        : "📎 Attachment";
               }
             } catch (e) {
               console.error(
