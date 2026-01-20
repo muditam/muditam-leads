@@ -19,6 +19,9 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+/* ================================
+   Config / Clients
+================================ */
 function normalizeMessagingBaseUrl(raw = "") {
   let u = String(raw || "").trim().replace(/\/+$/, "");
   if (!u) return "";
@@ -45,16 +48,16 @@ const WASABI_BUCKET = process.env.WASABI_BUCKET;
 
 const s3 =
   WASABI_ENDPOINT &&
-    process.env.WASABI_ACCESS_KEY_ID &&
-    process.env.WASABI_SECRET_ACCESS_KEY &&
-    WASABI_BUCKET
+  process.env.WASABI_ACCESS_KEY_ID &&
+  process.env.WASABI_SECRET_ACCESS_KEY &&
+  WASABI_BUCKET
     ? new AWS.S3({
-      endpoint: new AWS.Endpoint(WASABI_ENDPOINT),
-      region: WASABI_REGION,
-      accessKeyId: process.env.WASABI_ACCESS_KEY_ID,
-      secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY,
-      signatureVersion: "v4",
-    })
+        endpoint: new AWS.Endpoint(WASABI_ENDPOINT),
+        region: WASABI_REGION,
+        accessKeyId: process.env.WASABI_ACCESS_KEY_ID,
+        secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY,
+        signatureVersion: "v4",
+      })
     : null;
 
 /* ================================
@@ -184,33 +187,19 @@ function buildHeaderComponentFromMedia({ format, id, filename }) {
   }
 
   if (fmt === "IMAGE") {
-    return { type: "header", parameters: [{ type: "image", image: { id: mediaId } }] };
+    return {
+      type: "header",
+      parameters: [{ type: "image", image: { id: mediaId } }],
+    };
   }
   if (fmt === "VIDEO") {
-    return { type: "header", parameters: [{ type: "video", video: { id: mediaId } }] };
+    return {
+      type: "header",
+      parameters: [{ type: "video", video: { id: mediaId } }],
+    };
   }
   return null;
 }
-
-async function downloadMediaWithMeta(mediaUrl) {
-  const tryReq = async (withKey) => {
-    const r = await axios.get(mediaUrl, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-      ...(withKey ? { headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY } } : {}),
-    });
-
-    const mime = String(r.headers?.["content-type"] || "").trim(); // ✅ REAL mime
-    return { buffer: Buffer.from(r.data), mime };
-  };
-
-  try {
-    return await tryReq(true);
-  } catch {
-    return await tryReq(false);
-  }
-}
-
 
 function validateTemplateParamsOrThrow(tpl, parameters) {
   const bodyText = extractTemplateBodyText(tpl) || "";
@@ -222,7 +211,9 @@ function validateTemplateParamsOrThrow(tpl, parameters) {
   const got = Array.isArray(parameters) ? parameters.length : 0;
 
   if (neededCount && got < neededCount) {
-    const err = new Error(`Template expects ${neededCount} parameters, got ${got}`);
+    const err = new Error(
+      `Template expects ${neededCount} parameters, got ${got}`
+    );
     err.code = "PARAM_MISMATCH";
     err.status = 400;
     throw err;
@@ -230,50 +221,144 @@ function validateTemplateParamsOrThrow(tpl, parameters) {
 }
 
 /* ================================
-   TEMPLATE HEADER MEDIA UPLOAD
+   360dialog Media helpers (IMPORTANT FIX)
+   - Media meta endpoint is GET https://waba-v2.360dialog.io/{media-id}
+   - Returned URL begins with lookaside.fbsbx.com and contains escaped slashes.
+   - For download, replace host with waba-v2.360dialog.io and remove backslashes.
 ================================ */
-router.post("/upload-template-media", upload.single("file"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ message: "file required" });
+function cleanMetaUrl(u = "") {
+  return String(u || "").trim().replace(/\\\//g, "/");
+}
 
-    const fd = new FormData();
-    fd.append("file", req.file.buffer, {
-      filename: req.file.originalname || "file",
-      contentType: req.file.mimetype || "application/octet-stream",
-      knownLength: req.file.size,
+function to360DownloadUrl(metaUrl) {
+  // metaUrl looks like:
+  // https://lookaside.fbsbx.com\/whatsapp_business\/attachments\/?mid=...&source=getMedia&ext=...&hash=...
+  const cleaned = cleanMetaUrl(metaUrl);
+  if (!cleaned) return "";
+
+  // If it already points to waba-v2, keep
+  if (cleaned.startsWith(WHATSAPP_MSG_BASE)) return cleaned;
+
+  // Replace lookaside host with waba-v2 host (per 360dialog docs)
+  if (cleaned.startsWith("https://lookaside.fbsbx.com")) {
+    return cleaned.replace("https://lookaside.fbsbx.com", WHATSAPP_MSG_BASE);
+  }
+
+  // If provider returns only the path
+  if (cleaned.startsWith("/whatsapp_business/attachments/")) {
+    return `${WHATSAPP_MSG_BASE}${cleaned}`;
+  }
+
+  return cleaned; // fallback (still might work in some cases)
+}
+
+async function fetchMediaMeta(mediaId) {
+  // ✅ Correct endpoint: GET /{media-id} (NOT /media/{id})
+  const id = String(mediaId || "").trim();
+  if (!id) throw new Error("mediaId missing");
+
+  const r = await whatsappClient.get(`/${id}`);
+  const url = String(r?.data?.url || "").trim();
+  const mime = String(r?.data?.mime_type || "").trim();
+  const fileSize = r?.data?.file_size ?? null;
+
+  return {
+    id,
+    metaUrl: url,
+    downloadUrl: to360DownloadUrl(url),
+    mime_type: mime,
+    file_size: fileSize,
+    raw: r?.data || null,
+  };
+}
+
+async function download360Attachment(downloadUrl) {
+  const url = String(downloadUrl || "").trim();
+  if (!url) throw new Error("downloadUrl missing");
+
+  const tryReq = async (withKey) => {
+    const r = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 60000,
+      ...(withKey
+        ? { headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY } }
+        : {}),
+      validateStatus: () => true,
     });
-    fd.append("messaging_product", "whatsapp");
 
-    const mediaUrl = `${String(WHATSAPP_MSG_BASE || "").replace(/\/+$/, "")}/media`;
-
-    const r = await axios.post(mediaUrl, fd, {
-      headers: {
-        ...fd.getHeaders(),
-        "D360-API-KEY": process.env.WHATSAPP_API_KEY,
-      },
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-      timeout: 30000,
-    });
-
-    const mediaId = r?.data?.id || r?.data?.media?.id || null;
-    if (!mediaId) {
-      return res.status(400).json({
-        message: "Upload succeeded but provider did not return media id",
-        providerError: r?.data || null,
-      });
+    if (r.status >= 400) {
+      const e = new Error(`download failed: ${r.status}`);
+      e.status = r.status;
+      e.provider = r.data;
+      throw e;
     }
 
-    return res.json({ success: true, mediaId });
-  } catch (e) {
-    console.error("upload-template-media error:", e.response?.data || e);
-    return res.status(e.response?.status || 400).json({
-      message:
-        e.response?.data?.message || e.message || "Upload template media failed",
-      providerError: e.response?.data || null,
-    });
+    const mime = String(r.headers?.["content-type"] || "").trim();
+    return { buffer: Buffer.from(r.data), mime };
+  };
+
+  try {
+    return await tryReq(true);
+  } catch {
+    return await tryReq(false);
   }
-});
+}
+
+/* ================================
+   TEMPLATE HEADER MEDIA UPLOAD
+================================ */
+router.post(
+  "/upload-template-media",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "file required" });
+
+      const fd = new FormData();
+      fd.append("file", req.file.buffer, {
+        filename: req.file.originalname || "file",
+        contentType: req.file.mimetype || "application/octet-stream",
+        knownLength: req.file.size,
+      });
+      fd.append("messaging_product", "whatsapp");
+
+      // ✅ Upload endpoint is POST /media
+      const mediaUrl = `${String(WHATSAPP_MSG_BASE || "").replace(
+        /\/+$/,
+        ""
+      )}/media`;
+
+      const r = await axios.post(mediaUrl, fd, {
+        headers: {
+          ...fd.getHeaders(),
+          "D360-API-KEY": process.env.WHATSAPP_API_KEY,
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        timeout: 30000,
+      });
+
+      const mediaId = r?.data?.id || r?.data?.media?.id || null;
+      if (!mediaId) {
+        return res.status(400).json({
+          message: "Upload succeeded but provider did not return media id",
+          providerError: r?.data || null,
+        });
+      }
+
+      return res.json({ success: true, mediaId });
+    } catch (e) {
+      console.error("upload-template-media error:", e.response?.data || e);
+      return res.status(e.response?.status || 400).json({
+        message:
+          e.response?.data?.message ||
+          e.message ||
+          "Upload template media failed",
+        providerError: e.response?.data || null,
+      });
+    }
+  }
+);
 
 /* ================================
    INBOUND MEDIA HELPERS
@@ -291,32 +376,15 @@ function extFromMime(mime = "") {
   if (m.includes("pdf")) return "pdf";
 
   // ✅ voice notes
-  if (m.includes("audio/ogg") || m.includes("application/ogg") || m.includes("ogg")) return "ogg";
-  if (m.includes("opus")) return "ogg"; // WhatsApp usually wants ogg/opus container
+  if (m.includes("audio/ogg") || m.includes("application/ogg") || m.includes("ogg"))
+    return "ogg";
+  if (m.includes("opus")) return "ogg";
 
   if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
   if (m.includes("wav")) return "wav";
   if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac")) return "m4a";
 
   return "bin";
-}
-
-
-async function downloadMediaBuffer(mediaUrl) {
-  try {
-    const r = await axios.get(mediaUrl, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-      headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY },
-    });
-    return Buffer.from(r.data);
-  } catch {
-    const r = await axios.get(mediaUrl, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-    });
-    return Buffer.from(r.data);
-  }
 }
 
 async function uploadInboundToWasabi({
@@ -346,7 +414,7 @@ async function uploadInboundToWasabi({
       Key: key,
       Body: buffer,
       ContentType: mime || "application/octet-stream",
-      ContentDisposition: "inline",            // ✅ important for playback
+      ContentDisposition: "inline", // ✅ important for playback
       CacheControl: "public, max-age=31536000",
       ACL: "public-read",
     })
@@ -356,13 +424,14 @@ async function uploadInboundToWasabi({
   const loc = up?.Location || "";
   if (loc) return loc;
 
-  // Build a public URL using endpoint
   const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
   if (!ep) return null;
 
-  // Standard public URL pattern for Wasabi endpoint style
   return `${ep}/${WASABI_BUCKET}/${key}`;
 }
+
+const proxyUrlForMediaId = (mediaId) =>
+  `/api/whatsapp/media-proxy/${encodeURIComponent(String(mediaId || "").trim())}`;
 
 /* ================================
    READ TRACKING
@@ -597,8 +666,13 @@ router.post("/send-text", async (req, res) => {
 ================================ */
 router.post("/send-template", async (req, res) => {
   try {
-    const { to, templateName, parameters = [], renderedText = "", headerMedia = null } =
-      req.body;
+    const {
+      to,
+      templateName,
+      parameters = [],
+      renderedText = "",
+      headerMedia = null,
+    } = req.body;
 
     if (!to || !templateName) {
       return res.status(400).json({ message: "to & templateName required" });
@@ -705,11 +779,11 @@ router.post("/send-template", async (req, res) => {
         parameters: (parameters || []).map((x) => String(x ?? "")),
         ...(neededHeaderFmt && headerMedia?.id
           ? {
-            headerMedia: {
-              format: neededHeaderFmt,
-              id: String(headerMedia.id),
-            },
-          }
+              headerMedia: {
+                format: neededHeaderFmt,
+                id: String(headerMedia.id),
+              },
+            }
           : {}),
       },
       timestamp: now,
@@ -758,58 +832,31 @@ router.post("/send-template", async (req, res) => {
   }
 });
 
+/* ================================
+   MEDIA PROXY (stable playback URL)
+   - Browser audio/video often needs Range
+   - We re-fetch fresh download URL each time (attachments URL expires quickly)
+================================ */
 router.get("/media-proxy/:id", async (req, res) => {
   const mediaId = String(req.params.id || "").trim();
   if (!mediaId) return res.status(400).send("mediaId required");
 
   try {
-    const base = String(WHATSAPP_MSG_BASE || "").replace(/\/+$/, "");
-
-    // ✅ 1) Get downloadable provider URL from 360dialog
-    // 360dialog can be either /media/:id (waba-v2) or /v1/media/:id (older)
-    const tryMeta = async (path) =>
-      axios.get(`${base}${path}`, {
-        headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY },
-        timeout: 30000,
-        validateStatus: () => true,
-      });
-
-    const candidates = [`/media/${mediaId}`, `/v1/media/${mediaId}`];
-
-    let info = null;
-    let last = null;
-
-    for (const p of candidates) {
-      const r = await tryMeta(p);
-      last = { path: p, status: r.status, data: r.data };
-
-      if (r.status < 400) {
-        info = r;
-        break;
-      }
-
-      // if 404, try next candidate; otherwise stop (401/403/500 etc.)
-      if (r.status !== 404) break;
-    }
-
-    if (!info) {
-      console.error("media-proxy meta failed:", last);
-      return res.status(502).json({
-        message: "media meta failed",
-        status: last?.status || 500,
-        providerError: last?.data || null,
-        tried: candidates,
+    // 1) Get meta (download URL)
+    const meta = await fetchMediaMeta(mediaId);
+    const downloadUrl = meta.downloadUrl;
+    if (!downloadUrl) {
+      return res.status(404).json({
+        message: "provider url missing",
+        providerError: meta.raw || null,
       });
     }
 
-    const providerUrl = String(info.data?.url || "").trim();
-    if (!providerUrl) return res.status(404).send("provider url missing");
-
-    // ✅ 2) Support Range requests (needed for audio/video streaming in browsers)
+    // 2) Range support
     const range = req.headers.range;
 
     const fetchStream = async (withKey) =>
-      axios.get(providerUrl, {
+      axios.get(downloadUrl, {
         responseType: "stream",
         timeout: 60000,
         headers: {
@@ -819,40 +866,42 @@ router.get("/media-proxy/:id", async (req, res) => {
         validateStatus: () => true,
       });
 
-    // ✅ 3) Stream bytes (try with key, fallback without key)
+    // 3) Stream bytes (try with key, fallback without key)
     let r = await fetchStream(true);
     if ([401, 403].includes(r.status)) r = await fetchStream(false);
 
-    // If provider returns error, pass it through (helps debugging)
     if (r.status >= 400) {
       console.error("media-proxy download failed:", {
         status: r.status,
         headers: r.headers,
       });
       res.status(r.status);
-      // try to forward content-type if present
       if (r.headers?.["content-type"]) {
         res.setHeader("Content-Type", r.headers["content-type"]);
       }
       return r.data.pipe(res);
     }
 
-    // ✅ 4) Forward important headers so browser can play audio/video
+    // 4) Forward important headers so browser can play audio/video
     res.status(r.status);
 
-    const ct = r.headers["content-type"] || "application/octet-stream";
+    const ct =
+      r.headers["content-type"] ||
+      meta.mime_type ||
+      "application/octet-stream";
     res.setHeader("Content-Type", ct);
 
-    // Range support
     res.setHeader("Accept-Ranges", r.headers["accept-ranges"] || "bytes");
-    if (range) res.setHeader("Content-Range", r.headers["content-range"] || "");
-    if (r.headers["content-length"])
+    if (range && r.headers["content-range"]) {
+      res.setHeader("Content-Range", r.headers["content-range"]);
+    }
+    if (r.headers["content-length"]) {
       res.setHeader("Content-Length", r.headers["content-length"]);
+    }
 
-    // Cache policy
+    // Cache policy (provider link expires quickly)
     res.setHeader("Cache-Control", "no-store");
 
-    // ✅ Pipe stream
     r.data.pipe(res);
   } catch (e) {
     console.error("media-proxy error:", {
@@ -869,7 +918,7 @@ router.get("/media-proxy/:id", async (req, res) => {
       providerError: e.response?.data || null,
     });
   }
-}); 
+});
 
 /* ================================
    WEBHOOK
@@ -935,8 +984,7 @@ router.post("/webhook", async (req, res) => {
           const p10 = last10(from);
           const now = new Date();
 
-          // For legacy compatibility, keep windowExpiresAt updated,
-          // but your app should rely on lastInboundAt.
+          // Legacy fallback field (keep updating for old clients)
           const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
           const msgType = String(msg.type || "").toLowerCase();
@@ -953,9 +1001,7 @@ router.post("/webhook", async (req, res) => {
             const it = msg?.interactive || {};
             const itType = String(it.type || "").toLowerCase();
             if (itType === "button_reply") {
-              text = String(
-                it?.button_reply?.title || it?.button_reply?.id || ""
-              );
+              text = String(it?.button_reply?.title || it?.button_reply?.id || "");
             } else if (itType === "list_reply") {
               text = String(it?.list_reply?.title || it?.list_reply?.id || "");
             } else {
@@ -969,7 +1015,7 @@ router.post("/webhook", async (req, res) => {
           const mediaId = mediaObj?.id ? String(mediaObj.id) : "";
           let media = null;
 
-          // ✅ Decide type early (important for audio/voice notes)
+          // ✅ Decide type early
           if (mediaId) {
             if (msg.image) type = "image";
             else if (msg.video) type = "video";
@@ -982,22 +1028,13 @@ router.post("/webhook", async (req, res) => {
 
           if (mediaId) {
             try {
-              // 1) Fetch provider media URL (try /media, then /v1/media for compatibility)
-              let mediaInfo;
-              try {
-                mediaInfo = await whatsappClient.get(`/media/${mediaId}`);
-              } catch (e1) {
-                mediaInfo = await whatsappClient.get(`/v1/media/${mediaId}`);
-              }
+              // ✅ 360dialog meta endpoint is GET /{media-id}
+              const meta = await fetchMediaMeta(mediaId);
 
-              const providerUrl = String(mediaInfo?.data?.url || "").trim();
-              const mimeFromInfo = String(
-                mediaInfo?.data?.mime_type || mediaObj?.mime_type || ""
-              ).trim();
-
-              // 2) Build minimal media object FIRST (so UI can render even if Wasabi fails)
+              const mimeFromMeta = String(meta?.mime_type || "").trim();
+              const mimeFromWebhook = String(mediaObj?.mime_type || "").trim();
               const baseMime =
-                (mimeFromInfo || "application/octet-stream").trim() ||
+                (mimeFromMeta || mimeFromWebhook || "application/octet-stream").trim() ||
                 "application/octet-stream";
 
               const filename =
@@ -1006,24 +1043,25 @@ router.post("/webhook", async (req, res) => {
                   baseMime
                 )}`;
 
+              // ✅ Stable fallback URL (NOT the short-lived lookaside link)
+              // If Wasabi upload succeeds, we will overwrite url with Wasabi public URL.
               media = {
                 id: mediaId,
-                url: providerUrl || "",
+                url: proxyUrlForMediaId(mediaId),
                 mime: baseMime,
                 filename,
               };
 
-              // 3) Optional: download + upload to Wasabi.
-              //    If this fails, KEEP providerUrl so audio still plays.
-              if (providerUrl) {
+              // Try to download + upload to Wasabi (optional)
+              if (meta.downloadUrl) {
                 try {
-                  const dl = await downloadMediaWithMeta(providerUrl); // { buffer, mime }
+                  const dl = await download360Attachment(meta.downloadUrl);
                   const buffer = dl?.buffer || null;
 
-                  let bestMime = String(dl?.mime || mimeFromInfo || "").trim();
- 
+                  // Use real response content-type if available (best)
+                  let bestMime = String(dl?.mime || baseMime || "").trim();
                   if (!bestMime && String(type).toLowerCase() === "audio") {
-                    bestMime = "audio/ogg";
+                    bestMime = "audio/ogg; codecs=opus";
                   }
                   if (!bestMime) bestMime = "application/octet-stream";
 
@@ -1041,49 +1079,44 @@ router.post("/webhook", async (req, res) => {
 
                   media = {
                     id: mediaId,
-                    url: wasabiUrl || providerUrl || "",
+                    url: wasabiUrl || proxyUrlForMediaId(mediaId),
                     mime: bestMime,
                     filename,
                   };
                 } catch (uploadErr) {
                   console.error(
-                    "Inbound Wasabi upload failed (keeping provider url):",
+                    "Inbound Wasabi upload failed (keeping proxy url):",
                     uploadErr?.response?.data || uploadErr
                   );
                 }
               }
 
-              // 4) Friendly text label (if missing)
+              // Friendly text label (if missing)
               if (!text) {
                 const t = String(type || msgType || "").toLowerCase();
                 text =
                   t === "image"
                     ? "📷 Photo"
                     : t === "video"
-                      ? "🎥 Video"
-                      : t === "audio"
-                        ? "🎙️ Audio"
-                        : "📎 Attachment";
+                    ? "🎥 Video"
+                    : t === "audio"
+                    ? "🎙️ Audio"
+                    : "📎 Attachment";
               }
             } catch (e) {
-              console.error(
-                "Inbound media handling failed:",
-                e.response?.data || e
-              );
+              console.error("Inbound media handling failed:", e.response?.data || e);
 
-              // ✅ still show correct label for audio
               if (!text) {
                 const t = String(type || msgType || "").toLowerCase();
                 text = t === "audio" ? "🎙️ Audio" : "📎 Attachment";
               }
 
-              // ✅ keep at least mediaId so you can debug later
               if (!media) {
                 media = {
                   id: mediaId,
-                  url: "",
-                  mime: "",
-                  filename: "",
+                  url: proxyUrlForMediaId(mediaId),
+                  mime: String(mediaObj?.mime_type || "").trim() || "",
+                  filename: String(mediaObj?.filename || mediaObj?.name || "").trim() || "",
                 };
               }
             }
@@ -1120,14 +1153,12 @@ router.post("/webhook", async (req, res) => {
 
           emitMessage(req, created);
 
-          // ✅ emit real unreadCount (not delta)
           emitConversationPatch(req, {
             phone10: p10,
             patch: {
               lastMessageAt: updatedConv?.lastMessageAt || now,
               lastMessageText:
-                updatedConv?.lastMessageText ||
-                String(text || "").slice(0, 200),
+                updatedConv?.lastMessageText || String(text || "").slice(0, 200),
               lastInboundAt: updatedConv?.lastInboundAt || now,
               windowExpiresAt: updatedConv?.windowExpiresAt || windowExpiry,
               unreadCount: updatedConv?.unreadCount ?? 1,
