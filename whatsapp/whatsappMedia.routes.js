@@ -344,51 +344,6 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     });
   }
 });
- 
-
-router.get("/media-proxy/:id", async (req, res) => {
-  try {
-    const mediaId = String(req.params.id || "").trim();
-    if (!mediaId) return res.status(400).send("mediaId required");
-
-    let info;
-    try { info = await whatsappClient.get(`/media/${mediaId}`); }
-    catch { info = await whatsappClient.get(`/v1/media/${mediaId}`); }
-
-    const providerUrl = String(info?.data?.url || "").trim();
-    if (!providerUrl) return res.status(404).send("provider url missing");
-
-    const range = req.headers.range;
-
-    const r = await axios.get(providerUrl, {
-      responseType: "stream",
-      timeout: 30000,
-      headers: {
-        "D360-API-KEY": process.env.WHATSAPP_API_KEY,
-        ...(range ? { Range: range } : {}),
-      },
-      validateStatus: () => true,
-    });
-
-    // Forward status (206 for partial content)
-    res.status(r.status);
-
-    // Forward key headers
-    const ct = r.headers["content-type"] || "application/octet-stream";
-    res.setHeader("Content-Type", ct);
-    if (r.headers["content-length"]) res.setHeader("Content-Length", r.headers["content-length"]);
-    if (r.headers["content-range"]) res.setHeader("Content-Range", r.headers["content-range"]);
-    if (r.headers["accept-ranges"]) res.setHeader("Accept-Ranges", r.headers["accept-ranges"]);
-    else res.setHeader("Accept-Ranges", "bytes");
-
-    res.setHeader("Cache-Control", "no-store");
-
-    r.data.pipe(res);
-  } catch (e) {
-    console.error("media-proxy error:", e.response?.data || e);
-    return res.status(500).send("proxy failed");
-  }
-});
 
 // multer error handler
 router.use((err, req, res, next) => {

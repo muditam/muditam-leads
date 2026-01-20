@@ -758,6 +758,78 @@ router.post("/send-template", async (req, res) => {
   }
 });
 
+router.get("/media-proxy/:id", async (req, res) => {
+  const mediaId = String(req.params.id || "").trim();
+  if (!mediaId) return res.status(400).send("mediaId required");
+
+  try {
+    const base = String(WHATSAPP_MSG_BASE || "").replace(/\/+$/, "");
+    const metaUrl = `${base}/v1/media/${mediaId}`;
+
+    // 1) Get downloadable provider URL from 360dialog
+    const info = await axios.get(metaUrl, {
+      headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY },
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+
+    if (info.status >= 400) {
+      console.error("media-proxy meta failed:", info.status, info.data);
+      return res.status(502).json({
+        message: "media meta failed",
+        status: info.status,
+        providerError: info.data,
+      });
+    }
+
+    const providerUrl = String(info.data?.url || "").trim();
+    if (!providerUrl) return res.status(404).send("provider url missing");
+
+    const range = req.headers.range;
+
+    const fetchStream = async (withKey) =>
+      axios.get(providerUrl, {
+        responseType: "stream",
+        timeout: 60000,
+        headers: {
+          ...(withKey ? { "D360-API-KEY": process.env.WHATSAPP_API_KEY } : {}),
+          ...(range ? { Range: range } : {}),
+        },
+        validateStatus: () => true,
+      });
+
+    // 2) Stream bytes (try with key, fallback without key)
+    let r = await fetchStream(true);
+    if ([401, 403].includes(r.status)) r = await fetchStream(false);
+
+    res.status(r.status);
+
+    const ct = r.headers["content-type"] || "application/octet-stream";
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Accept-Ranges", r.headers["accept-ranges"] || "bytes");
+    if (r.headers["content-length"]) res.setHeader("Content-Length", r.headers["content-length"]);
+    if (r.headers["content-range"]) res.setHeader("Content-Range", r.headers["content-range"]);
+
+    res.setHeader("Cache-Control", "no-store");
+
+    r.data.pipe(res);
+  } catch (e) {
+    console.error("media-proxy error:", {
+      code: e.code,
+      message: e.message,
+      status: e.response?.status,
+      data: e.response?.data,
+    });
+    return res.status(500).json({
+      message: "proxy failed",
+      error: e.message,
+      status: e.response?.status || null,
+      providerError: e.response?.data || null,
+    });
+  }
+});
+
+
 /* ================================
    WEBHOOK
 ================================ */

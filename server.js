@@ -248,6 +248,7 @@ app.options("*", cors({
     "Authorization",
     "x-agent-name",
     "x-user-json",
+    "Range",
   ],
 }));
 
