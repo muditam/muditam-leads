@@ -1,131 +1,116 @@
-// routes/dialerCampaignRoutes.js
+// routes/clickToCall.routes.js
 const express = require("express");
 const axios = require("axios");
+
 const router = express.Router();
-const Employee = require("../models/Employee");
 
-// ENV
 const SMARTFLO_BASE_URL =
-  process.env.SMARTFLO_BASE_URL || "https://api-smartflo.tatateleservices.com/v1";
-const SMARTFLO_TOKEN = process.env.SMARTFLO_TOKEN; // Put full value here; if your token requires the 'Bearer ' prefix, include it in the env itself.
-const SMARTFLO_DISPOSITION_LIST_ID = process.env.SMARTFLO_DISPOSITION_LIST_ID || "ANS"; // optional fallback to "ANS"
+  (process.env.SMARTFLO_BASE_URL || "https://api-smartflo.tatateleservices.com").replace(/\/+$/, "");
 
-// Helper: find the Employee doc by a hint from the frontend's session user
-async function findEmployeeForRequest(employeeId) {
-  try {
-    const employee = await Employee.findById(employeeId).lean();
-    return employee; // Returns the employee data (e.g., callerId, agentNumber)
-  } catch (err) {
-    console.error("Error fetching employee details:", err);
-    throw new Error("Employee details not found.");
-  }
+function digitsOnly(v = "") {
+  return String(v || "").replace(/\D/g, "");
 }
 
-/**
- * POST /api/dialer/campaign
- * Body:
- * {
- *   employeeId: string,   // employeeId passed from frontend
- *   contactNumber: string, // the contact number for the lead
- *   campaign: { ... } // campaign settings
- * }
- */
-router.post("/campaign", async (req, res) => {
-  console.log("[DialerAPI] /api/dialer/campaign hit. Body =", req.body);
+// Normalize to E.164-ish for India defaults (adjust if you call other countries)
+function toE164India(v) {
+  const d = digitsOnly(v);
+  if (!d) return "";
 
-  if (!SMARTFLO_TOKEN) {
-    return res.status(500).json({
-      status: "error",
-      message: "SMARTFLO_TOKEN is missing in environment.",
-    });
+  // If already has country code 91 (12 digits like 91XXXXXXXXXX)
+  if (d.length === 12 && d.startsWith("91")) return `+${d}`;
+
+  // If plain 10-digit Indian mobile
+  if (d.length === 10) return `+91${d}`;
+
+  // Fallback: if it already looks like a long international number, prefix +
+  if (d.length >= 11 && d.length <= 15) return `+${d}`;
+
+  return "";
+}
+
+// Decide which token to use.
+// You can improve this later based on caller_id / agent_number mapping.
+function pickSmartfloToken({ caller_id, agent_number }) {
+  const caller = toE164India(caller_id) || String(caller_id || "").trim();
+  const agent = digitsOnly(agent_number);
+
+  // Optional env mapping (recommended)
+  const caller2 = process.env.SMARTFLO_CALLER_ID_2 ? toE164India(process.env.SMARTFLO_CALLER_ID_2) : "";
+  const agent2 = process.env.SMARTFLO_AGENT_NUMBER_2 ? digitsOnly(process.env.SMARTFLO_AGENT_NUMBER_2) : "";
+
+  if ((caller2 && caller === caller2) || (agent2 && agent === agent2)) {
+    return process.env.SMARTFLO_TOKEN_2 || "";
   }
+  return process.env.SMARTFLO_TOKEN || "";
+}
 
+router.post("/click_to_call", async (req, res) => {
   try {
-    const { employeeId, contactNumber, campaign = {} } = req.body;
+    const destination_number = toE164India(req.body.destination_number);
+    const agent_number = digitsOnly(req.body.agent_number);
+    const caller_id = toE164India(req.body.caller_id);
 
-    // 1) Resolve employee (agent) from your DB
-    const employee = await findEmployeeForRequest(employeeId);
-    if (!employee) {
-      return res
-        .status(404)
-        .json({ status: "error", message: "Employee not found for current user." });
-    }
+    // Smartflo expects async flag (you are sending async: 1)
+    const asyncFlag = Number(req.body.async) === 1 ? 1 : 0;
 
-    // Required Smartflo fields + sensible defaults
-    const payload = {
-      name:
-        campaign.name ||
-        `LMS-${employee.fullName || "Agent"}-${Date.now()}`,
-      description:
-        campaign.description ||
-        `Auto-created from LMS (${contactNumber || "no number"}) by ${employee.fullName || "Agent"}`,
-      dial_method: String(campaign.dial_method || "1"), // default Preview mode
-      outbound_caller_id: [employee.callerId],           // from your Employee schema
-      disposition_list: String(
-        campaign.disposition_list || SMARTFLO_DISPOSITION_LIST_ID || ""
-      ),
-      number_of_retry: String(campaign.number_of_retry ?? 2),
-      retry_after_minutes: String(campaign.retry_after_minutes ?? 30),
-      auto_disposition_cancel_duration: String(
-        campaign.auto_disposition_cancel_duration ?? 30
-      ),
-      dial_status: campaign.dial_status || [1],  // Use numeric status ID (1 for "new")
-      ring_timeout: String(campaign.ring_timeout ?? 20),
-      hide_lead_details: Number(campaign.hide_lead_details ?? 0),
-      update_lead_details: Number(campaign.update_lead_details ?? 1),
-      dial_in_type: String(campaign.dial_in_type || "3"), // Dial Out (Session) by default
-      agent_only_callback: Number(campaign.agent_only_callback ?? 1),
-      agent: [Number(employee.agentNumber)], // <-- your 'agentNumber' is Smartflo Agent ID
-      connect_agent_through: String(campaign.connect_agent_through || "3"),
-    };
-
-    // method-specific requirement: preview needs auto_dial_duration, ratio needs dial_ratio
-    if (payload.dial_method === "1") {
-      payload.auto_dial_duration = String(campaign.auto_dial_duration ?? 10);
-    } else if (payload.dial_method === "2") {
-      payload.dial_ratio = String(campaign.dial_ratio ?? 1);
-    }
-
-    // optional: attach existing lead lists to the campaign
-    if (Array.isArray(campaign.lead_list_map) && campaign.lead_list_map.length) {
-      payload.lead_list_map = campaign.lead_list_map;
-    }
-
-    // Validate a few critical fields
-    const missing = [];
-    if (!payload.disposition_list) missing.push("disposition_list (or SMARTFLO_DISPOSITION_LIST_ID env)");
-    if (!payload.outbound_caller_id) missing.push("outbound_caller_id (from Employee.callerId)");
-    if (!payload.agent || !payload.agent.length) missing.push("agent (from Employee.agentNumber)"); 
-
-    if (missing.length) {
+    if (!destination_number || !agent_number || !caller_id) {
       return res.status(400).json({
         status: "error",
-        message: `Missing required Smartflo fields: ${missing.join(", ")}`,
+        message: "Missing/invalid call parameters",
+        missing: {
+          destination_number: !destination_number,
+          agent_number: !agent_number,
+          caller_id: !caller_id,
+        },
       });
     }
 
-    // 2) Call Smartflo Add Dialer Campaign API
-    const { data } = await axios.post(
-      `${SMARTFLO_BASE_URL}/dialer/campaign`,
-      payload,
-      {
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: SMARTFLO_TOKEN, // supply full token here (include Bearer if required by your token format)
-        },
-        timeout: 20000,
-      }
-    );
+    const token = pickSmartfloToken({ caller_id, agent_number });
+    if (!token) {
+      return res.status(500).json({
+        status: "error",
+        message: "Smartflo token not configured on server",
+      });
+    }
 
-    return res.json({ status: "success", smartflo: data, payloadUsed: payload });
+    const payload = {
+      destination_number, // customer
+      agent_number,       // agent
+      caller_id,          // DID / outbound identity
+      async: asyncFlag,   // 1 recommended for non-blocking
+    };
+
+    const url = `${SMARTFLO_BASE_URL}/v1/click_to_call`;  
+
+    const sfResp = await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      timeout: 30000,
+    });
+
+    // Return a consistent shape to frontend
+    return res.json({
+      status: "success",
+      message: "Call triggered",
+      smartflo: sfResp.data, // keep for debugging; remove if you want
+    });
   } catch (err) {
-    const apiMsg = err?.response?.data || err.message;
-    console.error("Smartflo create campaign error:", apiMsg);
-    return res.status(500).json({
+    const status = err.response?.status || 500;
+    const data = err.response?.data || null;
+
+    console.error("Smartflo click_to_call error:", {
+      status,
+      data,
+      message: err.message,
+    });
+
+    return res.status(status).json({
       status: "error",
-      message: err?.response?.data?.Message || err.message,
-      details: err?.response?.data || null,
+      message: "Failed to place the call",
+      smartflo: data,
     });
   }
 });
