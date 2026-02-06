@@ -998,7 +998,82 @@ function parseDateRange(req) {
  * Accepts: agentName, startDate, endDate
  * If startDate/endDate not provided, fallback to "today".
  */
-router.get('/api/today-summary', async (req, res) => {
+// router.get('/api/today-summary', async (req, res) => {
+//   try {
+//     const agentName = req.query.agentName;
+//     if (!agentName) {
+//       return res.status(400).json({ message: "agentName is required" });
+//     }
+
+//     // Parse date range from the query. RetentionSales stores date as string.
+//     const { sDate, eDate } = parseDateRange(req);
+
+//     // For MyOrder, convert these to Date objects.
+//     const startDateObj = new Date(sDate + "T00:00:00");
+//     const endDateObj = new Date(eDate + "T23:59:59.999");
+
+//     // 1. Query RetentionSales collection
+//     const retentionSales = await RetentionSales.find({
+//       orderCreatedBy: agentName,
+//       date: { $gte: sDate, $lte: eDate }
+//     });
+
+//     const retentionCount = retentionSales.length; 
+    
+//     const retentionTotalSales = retentionSales.reduce(
+//       (acc, sale) => {
+//         const paid = Number(sale.amountPaid) || 0;
+//         const partial = Number(sale.partialPayment) || 0; 
+//         return acc + paid + partial;
+//       },
+//       0
+//     );
+
+
+//     // 2. Query MyOrder collection
+//     const myOrders = await MyOrder.find({
+//       agentName,
+//       orderDate: { $gte: startDateObj, $lte: endDateObj } 
+//     });
+
+//     const myOrdersCount = myOrders.length;
+    
+//     const myOrdersTotalSales = myOrders.reduce((acc, order) => {
+//       const upsellAmount = Number(order.upsellAmount) || 0;
+//       const totalPrice = Number(order.totalPrice) || 0;
+//       const partialPayment = Number(order.partialPayment) || 0;
+//       const amountPaid = upsellAmount > 0 ? upsellAmount : totalPrice + partialPayment;
+//       return acc + amountPaid;
+//     }, 0);
+
+
+//     // 3. Compute combined metrics
+//     const combinedSalesDone = retentionCount + myOrdersCount;
+//     const combinedTotalSales = retentionTotalSales + myOrdersTotalSales;
+//     const combinedAvgOrderValue = combinedSalesDone > 0 ? combinedTotalSales / combinedSalesDone : 0;
+
+//     // 4. Compute Active Customers
+//     // For RetentionSales we assume the field is "contactNumber"
+//     // For MyOrder we assume the field is "phone"
+//     const retentionContacts = retentionSales.map(sale => sale.contactNumber);
+//     const myOrderContacts = myOrders.map(order => order.phone);
+//     // Combine and get unique values using a Set.
+//     const uniqueCustomers = new Set([...retentionContacts, ...myOrderContacts]);
+//     const activeCustomers = uniqueCustomers.size;
+
+//     res.json({
+//       activeCustomers,
+//       salesDone: combinedSalesDone,
+//       totalSales: Number(combinedTotalSales.toFixed(2)),
+//       avgOrderValue: Number(combinedAvgOrderValue.toFixed(2))
+//     });
+//   } catch (error) {
+//     console.error("Error in today-summary-agent:", error);
+//     res.status(500).json({ message: "Error fetching today summary", error: error.message });
+//   }
+// });
+
+router.get("/api/today-summary", async (req, res) => {
   try {
     const agentName = req.query.agentName;
     if (!agentName) {
@@ -1012,52 +1087,50 @@ router.get('/api/today-summary', async (req, res) => {
     const startDateObj = new Date(sDate + "T00:00:00");
     const endDateObj = new Date(eDate + "T23:59:59.999");
 
-    // 1. Query RetentionSales collection
+    // 1) RetentionSales collection
     const retentionSales = await RetentionSales.find({
       orderCreatedBy: agentName,
-      date: { $gte: sDate, $lte: eDate }
-    });
+      date: { $gte: sDate, $lte: eDate },
+    }).lean();
 
-    const retentionCount = retentionSales.length; 
-    
-    const retentionTotalSales = retentionSales.reduce(
-      (acc, sale) => {
-        const paid = Number(sale.amountPaid) || 0;
-        const partial = Number(sale.partialPayment) || 0; 
-        return acc + paid + partial;
-      },
-      0
-    );
+    const retentionCount = retentionSales.length;
 
+    // ✅ IGNORE partialPayment completely
+    const retentionTotalSales = retentionSales.reduce((acc, sale) => {
+      const paid = Number(sale.amountPaid) || 0;
+      return acc + paid;
+    }, 0);
 
-    // 2. Query MyOrder collection
+    // 2) MyOrder collection
     const myOrders = await MyOrder.find({
       agentName,
-      orderDate: { $gte: startDateObj, $lte: endDateObj } 
-    });
+      orderDate: { $gte: startDateObj, $lte: endDateObj },
+    }).lean();
 
     const myOrdersCount = myOrders.length;
-    
+
+    // ✅ IGNORE partialPayment completely
     const myOrdersTotalSales = myOrders.reduce((acc, order) => {
       const upsellAmount = Number(order.upsellAmount) || 0;
       const totalPrice = Number(order.totalPrice) || 0;
-      const partialPayment = Number(order.partialPayment) || 0;
-      const amountPaid = upsellAmount > 0 ? upsellAmount : totalPrice + partialPayment;
+
+      const amountPaid = upsellAmount > 0 ? upsellAmount : totalPrice;
       return acc + amountPaid;
     }, 0);
 
-
-    // 3. Compute combined metrics
+    // 3) Combined metrics
     const combinedSalesDone = retentionCount + myOrdersCount;
     const combinedTotalSales = retentionTotalSales + myOrdersTotalSales;
-    const combinedAvgOrderValue = combinedSalesDone > 0 ? combinedTotalSales / combinedSalesDone : 0;
+    const combinedAvgOrderValue =
+      combinedSalesDone > 0 ? combinedTotalSales / combinedSalesDone : 0;
 
-    // 4. Compute Active Customers
-    // For RetentionSales we assume the field is "contactNumber"
-    // For MyOrder we assume the field is "phone"
-    const retentionContacts = retentionSales.map(sale => sale.contactNumber);
-    const myOrderContacts = myOrders.map(order => order.phone);
-    // Combine and get unique values using a Set.
+    // 4) Active Customers (unique)
+    const retentionContacts = retentionSales
+      .map((sale) => sale.contactNumber)
+      .filter(Boolean);
+
+    const myOrderContacts = myOrders.map((order) => order.phone).filter(Boolean);
+
     const uniqueCustomers = new Set([...retentionContacts, ...myOrderContacts]);
     const activeCustomers = uniqueCustomers.size;
 
@@ -1065,13 +1138,17 @@ router.get('/api/today-summary', async (req, res) => {
       activeCustomers,
       salesDone: combinedSalesDone,
       totalSales: Number(combinedTotalSales.toFixed(2)),
-      avgOrderValue: Number(combinedAvgOrderValue.toFixed(2))
+      avgOrderValue: Number(combinedAvgOrderValue.toFixed(2)),
     });
   } catch (error) {
     console.error("Error in today-summary-agent:", error);
-    res.status(500).json({ message: "Error fetching today summary", error: error.message });
+    res.status(500).json({
+      message: "Error fetching today summary",
+      error: error.message,
+    });
   }
 });
+
 
 function parseDateOrToday(dateStr) {
   if (typeof dateStr === "string" && dateStr.length === 10) {
@@ -1319,69 +1396,152 @@ router.get("/api/shipment-summary", async (req, res) => {
 });
 
 
-router.get('/api/retention-sales/all', async (req, res) => {
+// router.get('/api/retention-sales/all', async (req, res) => {
+//   try {
+//     const { orderCreatedBy } = req.query;
+//     const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
+//     const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
+
+//     const retentionSales = await RetentionSales.find(retentionQuery).lean();
+//     const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+//     const transformedOrders = myOrders.map(order => {
+//       const upsellAmount = Number(order.upsellAmount);
+//       const partialPayment = Number(order.partialPayment);
+//       const totalPrice = Number(order.totalPrice);
+
+//       // Calculate the correct amountPaid (totalPrice + partialPayment)
+//       let amountPaid = totalPrice + partialPayment + upsellAmount;  // Updated calculation
+
+//       return { 
+//         _id: order._id, 
+//         date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
+//         name: order.customerName,
+//         contactNumber: order.phone,
+//         productsOrdered: order.productOrdered,
+//         dosageOrdered: order.dosageOrdered,
+//         upsellAmount: upsellAmount,  
+//         partialPayment: partialPayment,  
+//         amountPaid: amountPaid,  // Updated amountPaid calculation
+//         modeOfPayment: order.paymentMethod,  
+//         shipway_status: order.shipway_status || "",  
+//         orderId: order.orderId,
+//         orderCreatedBy: order.agentName,
+//         remarks: order.selfRemark || "", 
+//         source: "MyOrder"
+//       };
+//     });
+
+//     const combinedData = [...retentionSales, ...transformedOrders]; 
+
+//     // Update the shipway_status from the corresponding Order document if missing
+//     await Promise.all(
+//       combinedData.map(async (sale) => {
+//         if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
+//           const normalizedOrderId = sale.orderId.startsWith('#')
+//             ? sale.orderId.slice(1)
+//             : sale.orderId;
+//           const orderRecord = await Order.findOne({ order_id: normalizedOrderId }).lean();
+//           if (orderRecord) {
+//             sale.shipway_status = orderRecord.shipment_status;
+//           }
+//         }
+//       })
+//     );
+
+//     // Sort the combined data by date in descending order
+//     combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+//     // Return the combined and updated sales data
+//     res.status(200).json(combinedData);
+//   } catch (error) {
+//     console.error("Error fetching combined retention sales:", error);
+//     res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });  
+//   }
+// });
+
+router.get("/api/retention-sales/all", async (req, res) => {
   try {
     const { orderCreatedBy } = req.query;
+
     const retentionQuery = orderCreatedBy ? { orderCreatedBy } : {};
     const myOrderQuery = orderCreatedBy ? { agentName: orderCreatedBy } : {};
 
     const retentionSales = await RetentionSales.find(retentionQuery).lean();
     const myOrders = await MyOrder.find(myOrderQuery).lean();
 
-    const transformedOrders = myOrders.map(order => {
-      const upsellAmount = Number(order.upsellAmount);
-      const partialPayment = Number(order.partialPayment);
-      const totalPrice = Number(order.totalPrice);
+    // ✅ partialPayment = pending/due amount
+    // ✅ amountPaid = (totalPrice + upsellAmount) - partialPayment
+    const transformedOrders = myOrders.map((order) => {
+      const upsellAmount = Number(order.upsellAmount || 0);
+      const partialPayment = Number(order.partialPayment || 0); // pending/due
+      const totalPrice = Number(order.totalPrice || 0);
 
-      // Calculate the correct amountPaid (totalPrice + partialPayment)
-      let amountPaid = totalPrice + partialPayment + upsellAmount;  // Updated calculation
+      let amountPaid = totalPrice + upsellAmount - partialPayment;
+      if (amountPaid < 0) amountPaid = 0;
 
-      return { 
-        _id: order._id, 
-        date: order.orderDate ? new Date(order.orderDate).toISOString().split("T")[0] : "",
-        name: order.customerName,
-        contactNumber: order.phone,
-        productsOrdered: order.productOrdered,
-        dosageOrdered: order.dosageOrdered,
-        upsellAmount: upsellAmount,  
-        partialPayment: partialPayment,  
-        amountPaid: amountPaid,  // Updated amountPaid calculation
-        modeOfPayment: order.paymentMethod,  
-        shipway_status: order.shipway_status || "",  
-        orderId: order.orderId,
-        orderCreatedBy: order.agentName,
-        remarks: order.selfRemark || "", 
-        source: "MyOrder"
+      return {
+        _id: order._id,
+        date: order.orderDate
+          ? new Date(order.orderDate).toISOString().split("T")[0]
+          : "",
+        name: order.customerName || "",
+        contactNumber: order.phone || "",
+        productsOrdered: order.productOrdered || [],
+        dosageOrdered: order.dosageOrdered || "",
+        upsellAmount,
+        partialPayment, // pending shown separately
+        amountPaid, // paid after subtracting pending
+        modeOfPayment: order.paymentMethod || "",
+        shipway_status: order.shipway_status || "",
+        orderId: order.orderId || "",
+        orderCreatedBy: order.agentName || "",
+        remarks: order.selfRemark || "",
+        source: "MyOrder",
       };
     });
 
-    const combinedData = [...retentionSales, ...transformedOrders]; 
+    const combinedData = [...retentionSales, ...transformedOrders];
 
-    // Update the shipway_status from the corresponding Order document if missing
+    // Backfill shipway_status from Order collection if missing
     await Promise.all(
       combinedData.map(async (sale) => {
-        if (sale.orderId && (!sale.shipway_status || sale.shipway_status.trim() === "")) {
-          const normalizedOrderId = sale.orderId.startsWith('#')
-            ? sale.orderId.slice(1)
-            : sale.orderId;
-          const orderRecord = await Order.findOne({ order_id: normalizedOrderId }).lean();
+        if (
+          sale.orderId &&
+          (!sale.shipway_status || String(sale.shipway_status).trim() === "")
+        ) {
+          const normalizedOrderId = String(sale.orderId).startsWith("#")
+            ? String(sale.orderId).slice(1)
+            : String(sale.orderId);
+
+          const orderRecord = await Order.findOne({
+            order_id: normalizedOrderId,
+          }).lean();
+
           if (orderRecord) {
-            sale.shipway_status = orderRecord.shipment_status;
+            sale.shipway_status = orderRecord.shipment_status || "";
           }
         }
       })
     );
 
-    // Sort the combined data by date in descending order
-    combinedData.sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Sort by date desc (safe even if date is empty)
+    combinedData.sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const db = b.date ? new Date(b.date).getTime() : 0;
+      return db - da;
+    });
 
-    // Return the combined and updated sales data
-    res.status(200).json(combinedData);
+    return res.status(200).json(combinedData);
   } catch (error) {
     console.error("Error fetching combined retention sales:", error);
-    res.status(500).json({ message: "Error fetching combined retention sales", error: error.message });  
+    return res.status(500).json({
+      message: "Error fetching combined retention sales",
+      error: error.message,
+    });
   }
 });
+
  
 
 router.get('/api/retention-sales/allapi', async (req, res) => {
@@ -1577,9 +1737,104 @@ router.put('/api/retention-sales/all/:id', async (req, res) => {
   }
 });
 
-router.get('/api/retention-sales/progress', async (req, res) => {
+// router.get('/api/retention-sales/progress', async (req, res) => {
+//   const { name, from, to } = req.query;
+//   if (!name) return res.status(400).json({ message: "Name is required" }); 
+
+//   // Use custom from-to if available, otherwise default to current month
+//   let firstDay, lastDay;
+//   if (from && to) {
+//     firstDay = from;
+//     lastDay = to;
+//   } else {
+//     const now = new Date();
+//     const yyyy = now.getFullYear();
+//     const mm = String(now.getMonth() + 1).padStart(2, '0');
+//     firstDay = `${yyyy}-${mm}-01`;
+//     const lastDayNum = new Date(yyyy, now.getMonth() + 1, 0).getDate();
+//     lastDay = `${yyyy}-${mm}-${String(lastDayNum).padStart(2, '0')}`;
+//   }
+
+//   try {
+//     // 1. RetentionSales sum
+//     const rsData = await RetentionSales.aggregate([
+//       {
+//         $match: {
+//           orderCreatedBy: name,
+//           date: { $gte: firstDay, $lte: lastDay }
+//         }
+//       },
+//       {
+//         $group: {
+//           _id: null,
+//           total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } } 
+//         }
+//       }
+//     ]);
+//     const retentionTotal = rsData.length ? rsData[0].total : 0;
+
+//     // 2. MyOrder sum
+//     const startDateObj = new Date(firstDay + "T00:00:00");
+//     const endDateObj = new Date(lastDay + "T23:59:59.999");
+//     const moData = await MyOrder.aggregate([
+//       {
+//         $match: {
+//           agentName: name,
+//           orderDate: { $gte: startDateObj, $lte: endDateObj }
+//         }
+//       },
+//       {
+//         $project: {
+//           amountPaid: {
+//             $add: [
+//               { $toDouble: { $ifNull: ["$totalPrice", 0] } },
+//               { $toDouble: { $ifNull: ["$partialPayment", 0] } },
+//               { $toDouble: { $ifNull: ["$upsellAmount", 0] } }
+//             ]
+//           }
+//         }
+//       },
+//       {
+//         $group: {
+//           _id: null,
+//           total: { $sum: "$amountPaid" }
+//         }
+//       }
+//     ]);
+//     const myOrderTotal = moData.length ? moData[0].total : 0;
+
+//     const leadsData = await Lead.aggregate([
+//       {
+//         $match: {
+//           agentAssigned: name,
+//           salesStatus: "Sales Done",
+//           date: { $gte: firstDay, $lte: lastDay }
+//         }
+//       },
+//       {
+//         $group: {
+//           _id: null,
+//           total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
+//         }
+//       }
+//     ]);
+//     const leadsTotal = leadsData.length ? leadsData[0].total : 0;
+
+//     res.json({
+//       total: retentionTotal + myOrderTotal + leadsTotal,
+//       retentionSales: retentionTotal,
+//       myOrderSales: myOrderTotal,
+//       leadSales: leadsTotal
+//     });
+//   } catch (err) {
+//     console.error("Error in retention-sales/progress:", err);
+//     res.status(500).json({ message: "Error calculating progress" });
+//   }
+// });
+
+router.get("/api/retention-sales/progress", async (req, res) => {
   const { name, from, to } = req.query;
-  if (!name) return res.status(400).json({ message: "Name is required" }); 
+  if (!name) return res.status(400).json({ message: "Name is required" });
 
   // Use custom from-to if available, otherwise default to current month
   let firstDay, lastDay;
@@ -1589,74 +1844,83 @@ router.get('/api/retention-sales/progress', async (req, res) => {
   } else {
     const now = new Date();
     const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
     firstDay = `${yyyy}-${mm}-01`;
     const lastDayNum = new Date(yyyy, now.getMonth() + 1, 0).getDate();
-    lastDay = `${yyyy}-${mm}-${String(lastDayNum).padStart(2, '0')}`;
+    lastDay = `${yyyy}-${mm}-${String(lastDayNum).padStart(2, "0")}`;
   }
 
   try {
-    // 1. RetentionSales sum
+    // 1) RetentionSales sum (unchanged)
     const rsData = await RetentionSales.aggregate([
       {
         $match: {
           orderCreatedBy: name,
-          date: { $gte: firstDay, $lte: lastDay }
-        }
+          date: { $gte: firstDay, $lte: lastDay },
+        },
       },
       {
         $group: {
           _id: null,
-          total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } } 
-        }
-      }
+          total: {
+            $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } },
+          },
+        },
+      },
     ]);
     const retentionTotal = rsData.length ? rsData[0].total : 0;
 
-    // 2. MyOrder sum
+    // 2) MyOrder sum ✅ ignore partialPayment completely
     const startDateObj = new Date(firstDay + "T00:00:00");
     const endDateObj = new Date(lastDay + "T23:59:59.999");
+
     const moData = await MyOrder.aggregate([
       {
         $match: {
           agentName: name,
-          orderDate: { $gte: startDateObj, $lte: endDateObj }
-        }
+          orderDate: { $gte: startDateObj, $lte: endDateObj },
+        },
+      },
+      {
+        $project: {
+          _upsell: { $toDouble: { $ifNull: ["$upsellAmount", 0] } },
+          _total: { $toDouble: { $ifNull: ["$totalPrice", 0] } },
+        },
       },
       {
         $project: {
           amountPaid: {
-            $add: [
-              { $toDouble: { $ifNull: ["$totalPrice", 0] } },
-              { $toDouble: { $ifNull: ["$partialPayment", 0] } },
-              { $toDouble: { $ifNull: ["$upsellAmount", 0] } }
-            ]
-          }
-        }
+            $cond: [{ $gt: ["$_upsell", 0] }, "$_upsell", "$_total"],
+          },
+        },
       },
       {
         $group: {
           _id: null,
-          total: { $sum: "$amountPaid" }
-        }
-      }
+          total: { $sum: "$amountPaid" },
+        },
+      },
     ]);
+
     const myOrderTotal = moData.length ? moData[0].total : 0;
 
+    // 3) Lead sales (unchanged)
     const leadsData = await Lead.aggregate([
       {
         $match: {
           agentAssigned: name,
           salesStatus: "Sales Done",
-          date: { $gte: firstDay, $lte: lastDay }
-        }
+          date: { $gte: firstDay, $lte: lastDay },
+        },
       },
       {
         $group: {
           _id: null,
-          total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } }
-        }
-      }
+          total: {
+            $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } },
+          },
+        },
+      },
     ]);
     const leadsTotal = leadsData.length ? leadsData[0].total : 0;
 
@@ -1664,7 +1928,7 @@ router.get('/api/retention-sales/progress', async (req, res) => {
       total: retentionTotal + myOrderTotal + leadsTotal,
       retentionSales: retentionTotal,
       myOrderSales: myOrderTotal,
-      leadSales: leadsTotal
+      leadSales: leadsTotal,
     });
   } catch (err) {
     console.error("Error in retention-sales/progress:", err);
@@ -1878,13 +2142,182 @@ const normalizeDateRange = (startDate, endDate) => {
   return { start, end };
 };
  
+// router.get("/api/incentives", async (req, res) => {
+//   try {
+//     const { agentName, startDate, endDate } = req.query;
+//     if (!agentName) {
+//       return res.status(400).json({ message: "agentName is required" });
+//     }
+ 
+//     const employee = await Employee.findOne(
+//       { fullName: agentName },
+//       { role: 1 }
+//     ).lean();
+
+//     if (!employee) {
+//       return res.status(404).json({ message: "Agent not found" });
+//     }
+
+//     const role = employee.role;
+//     const { start, end } = normalizeDateRange(startDate, endDate);
+
+//     let rows = [];
+ 
+//     if (role === "Sales Agent") {
+//       // ---------- Leads ----------
+//       const leadQuery = { agentAssigned: agentName };
+//       if (startDate || endDate) {
+//         leadQuery.date = {};
+//         if (startDate) leadQuery.date.$gte = startDate;
+//         if (endDate) leadQuery.date.$lte = endDate;
+//       }
+
+//       const leads = await Lead.find(leadQuery).lean();
+
+//       // ---------- MyOrders ----------
+//       const myOrderQuery = { agentName };
+//       if (start || end) {
+//         myOrderQuery.orderDate = {};
+//         if (start) myOrderQuery.orderDate.$gte = start;
+//         if (end) myOrderQuery.orderDate.$lte = end;
+//       }
+
+//       const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+//       rows = [
+//         // 🔹 Lead → amountPaid
+//         ...leads.map((l) => ({
+//           date: l.date,
+//           name: l.name,
+//           orderId: l.orderId || "",
+//           phone: l.contactNumber || "",
+//           modeOfPayment: l.modeOfPayment || "",
+//           deliveryStatus: "",
+//           amount: Number(l.amountPaid || 0),
+//         })),
+
+//         // 🔹 MyOrder → totalPrice + partialPayment + upsellAmount
+//         ...myOrders.map((o) => ({
+//           date: o.orderDate
+//             ? o.orderDate.toISOString().slice(0, 10)
+//             : "",
+//           name: o.customerName,
+//           orderId: o.orderId || "",
+//           phone: o.phone || "",
+//           modeOfPayment: o.paymentMethod || "",
+//           deliveryStatus: "",
+//           amount:
+//             Number(o.totalPrice || 0) +
+//             Number(o.partialPayment || 0) +
+//             Number(o.upsellAmount || 0),
+//         })),
+//       ];
+//     }
+ 
+//     if (role === "Retention Agent") { 
+//       const retentionQuery = { orderCreatedBy: agentName };
+//       if (startDate || endDate) {
+//         retentionQuery.date = {};
+//         if (startDate) retentionQuery.date.$gte = startDate;
+//         if (endDate) retentionQuery.date.$lte = endDate;
+//       }
+
+//       const retentionSales = await RetentionSales.find(retentionQuery).lean();
+
+//       // ---------- MyOrders ----------
+//       const myOrderQuery = { agentName };
+//       if (start || end) {
+//         myOrderQuery.orderDate = {};
+//         if (start) myOrderQuery.orderDate.$gte = start;
+//         if (end) myOrderQuery.orderDate.$lte = end;
+//       }
+
+//       const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+//       rows = [
+//         // 🔹 RetentionSales → amountPaid
+//         ...retentionSales.map((r) => ({
+//           date: r.date,
+//           name: r.name || "",
+//           orderId: r.orderId || "",
+//           phone: r.contactNumber || "",
+//           modeOfPayment: r.modeOfPayment || "",
+//           deliveryStatus: r.shipway_status || "",
+//           amount: Number(r.amountPaid || 0),
+//         })),
+ 
+//         ...myOrders.map((o) => ({
+//           date: o.orderDate
+//             ? o.orderDate.toISOString().slice(0, 10)
+//             : "",
+//           name: o.customerName,
+//           orderId: o.orderId || "",
+//           phone: o.phone || "",
+//           modeOfPayment: o.paymentMethod || "",
+//           deliveryStatus: "",
+//           amount:
+//             Number(o.totalPrice || 0) +
+//             Number(o.partialPayment || 0) +
+//             Number(o.upsellAmount || 0),
+//         })),
+//       ];
+//     }
+ 
+//     const orderIdVariants = new Set();
+
+//     rows.forEach((r) => {
+//       if (!r.orderId) return;
+
+//       const raw = String(r.orderId).trim();
+//       const clean = normalizeOrderId(raw);
+
+//       orderIdVariants.add(raw);
+//       orderIdVariants.add(clean);
+//       orderIdVariants.add(`#${clean}`);
+//     });
+
+//     const orderIds = [...orderIdVariants];
+
+//     if (orderIds.length) {
+//       const orders = await Order.find(
+//         { order_id: { $in: orderIds } },
+//         { order_id: 1, shipment_status: 1 }
+//       ).lean();
+
+//       const shipwayMap = orders.reduce((acc, o) => {
+//         const clean = normalizeOrderId(o.order_id);
+//         acc[clean] = o.shipment_status || "";
+//         return acc;
+//       }, {});
+
+//       rows = rows.map((r) => {
+//         if (!r.deliveryStatus && r.orderId) {
+//           const clean = normalizeOrderId(r.orderId);
+//           r.deliveryStatus = shipwayMap[clean] || "";
+//         }
+//         return r;
+//       });
+//     }
+ 
+//     rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+//     res.json(rows);
+//   } catch (error) {
+//     console.error("Error in /api/incentives:", error);
+//     res.status(500).json({
+//       message: "Failed to fetch incentives",
+//       error: error.message,
+//     });
+//   }
+// });
+
 router.get("/api/incentives", async (req, res) => {
   try {
     const { agentName, startDate, endDate } = req.query;
     if (!agentName) {
       return res.status(400).json({ message: "agentName is required" });
     }
- 
+
     const employee = await Employee.findOne(
       { fullName: agentName },
       { role: 1 }
@@ -1898,7 +2331,7 @@ router.get("/api/incentives", async (req, res) => {
     const { start, end } = normalizeDateRange(startDate, endDate);
 
     let rows = [];
- 
+
     if (role === "Sales Agent") {
       // ---------- Leads ----------
       const leadQuery = { agentAssigned: agentName };
@@ -1932,25 +2365,25 @@ router.get("/api/incentives", async (req, res) => {
           amount: Number(l.amountPaid || 0),
         })),
 
-        // 🔹 MyOrder → totalPrice + partialPayment + upsellAmount
-        ...myOrders.map((o) => ({
-          date: o.orderDate
-            ? o.orderDate.toISOString().slice(0, 10)
-            : "",
-          name: o.customerName,
-          orderId: o.orderId || "",
-          phone: o.phone || "",
-          modeOfPayment: o.paymentMethod || "",
-          deliveryStatus: "",
-          amount:
-            Number(o.totalPrice || 0) +
-            Number(o.partialPayment || 0) +
-            Number(o.upsellAmount || 0),
-        })),
+        // 🔹 MyOrder → IGNORE partialPayment
+        ...myOrders.map((o) => {
+          const upsell = Number(o.upsellAmount || 0);
+          const total = Number(o.totalPrice || 0);
+
+          return {
+            date: o.orderDate ? o.orderDate.toISOString().slice(0, 10) : "",
+            name: o.customerName,
+            orderId: o.orderId || "",
+            phone: o.phone || "",
+            modeOfPayment: o.paymentMethod || "",
+            deliveryStatus: "",
+            amount: upsell > 0 ? upsell : total, // ✅ no partialPayment
+          };
+        }),
       ];
     }
- 
-    if (role === "Retention Agent") { 
+
+    if (role === "Retention Agent") {
       const retentionQuery = { orderCreatedBy: agentName };
       if (startDate || endDate) {
         retentionQuery.date = {};
@@ -1971,7 +2404,7 @@ router.get("/api/incentives", async (req, res) => {
       const myOrders = await MyOrder.find(myOrderQuery).lean();
 
       rows = [
-        // 🔹 RetentionSales → amountPaid
+        // 🔹 RetentionSales → amountPaid (your stored value)
         ...retentionSales.map((r) => ({
           date: r.date,
           name: r.name || "",
@@ -1981,24 +2414,25 @@ router.get("/api/incentives", async (req, res) => {
           deliveryStatus: r.shipway_status || "",
           amount: Number(r.amountPaid || 0),
         })),
- 
-        ...myOrders.map((o) => ({
-          date: o.orderDate
-            ? o.orderDate.toISOString().slice(0, 10)
-            : "",
-          name: o.customerName,
-          orderId: o.orderId || "",
-          phone: o.phone || "",
-          modeOfPayment: o.paymentMethod || "",
-          deliveryStatus: "",
-          amount:
-            Number(o.totalPrice || 0) +
-            Number(o.partialPayment || 0) +
-            Number(o.upsellAmount || 0),
-        })),
+
+        // 🔹 MyOrder → IGNORE partialPayment
+        ...myOrders.map((o) => {
+          const upsell = Number(o.upsellAmount || 0);
+          const total = Number(o.totalPrice || 0);
+
+          return {
+            date: o.orderDate ? o.orderDate.toISOString().slice(0, 10) : "",
+            name: o.customerName,
+            orderId: o.orderId || "",
+            phone: o.phone || "",
+            modeOfPayment: o.paymentMethod || "",
+            deliveryStatus: "",
+            amount: upsell > 0 ? upsell : total, // ✅ no partialPayment
+          };
+        }),
       ];
     }
- 
+
     const orderIdVariants = new Set();
 
     rows.forEach((r) => {
@@ -2034,7 +2468,7 @@ router.get("/api/incentives", async (req, res) => {
         return r;
       });
     }
- 
+
     rows.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     res.json(rows);
@@ -2046,5 +2480,6 @@ router.get("/api/incentives", async (req, res) => {
     });
   }
 });
+
 
 module.exports = router;

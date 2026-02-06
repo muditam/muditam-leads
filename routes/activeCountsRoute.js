@@ -17,16 +17,16 @@ router.get("/active-counts", async (req, res) => {
 
     const results = await Lead.aggregate([
       { $match: matchQuery },
-      {
+      { 
         $group: {
           _id: { $ifNull: ["$healthExpertAssigned", "Unassigned"] },
           activeCount: { $sum: 1 },
         },
       },
-      { $sort: { activeCount: -1 } },
+      { $sort: { activeCount: -1 } }, 
     ]);
 
-    res.status(200).json(results);
+    res.status(200).json(results); 
   } catch (error) {
     console.error("Error in /active-counts:", error.message);
     res.status(500).json({ message: "Internal Server Error" });
