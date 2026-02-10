@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 
+
 const EXCLUDED_STATUSES = ['Delivered', 'RTO Delivered'];
+
 
 router.get('/undelivered-orders', async (req, res) => {
   try {
@@ -14,34 +16,41 @@ router.get('/undelivered-orders', async (req, res) => {
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
 
+
     const filter = {
       shipment_status: { $nin: EXCLUDED_STATUSES },
     };
+
 
     if (statusFilter && !EXCLUDED_STATUSES.includes(statusFilter)) {
       filter.shipment_status = statusFilter;
     }
 
+
     if (carrierFilter) {
       filter.carrier_title = carrierFilter;
     }
 
+
     if (startDate || endDate) {
       filter.order_date = {};
       if (startDate) {
-        filter.order_date.$gte = new Date(startDate); 
+        filter.order_date.$gte = new Date(startDate);
       }
       if (endDate) {
         filter.order_date.$lte = new Date(endDate);
       }
     }
 
+
     const orders = await Order.find(filter)
       .sort({ order_date: -1 })
       .skip(skip)
       .limit(limit);
 
+
     const totalCount = await Order.countDocuments(filter);
+
 
     const statusCounts = await Order.aggregate([
       { $match: filter },
@@ -60,7 +69,9 @@ router.get('/undelivered-orders', async (req, res) => {
       }
     ]);
 
+
     const carrierList = await Order.distinct("carrier_title");
+
 
     res.json({
       orders,
@@ -74,4 +85,8 @@ router.get('/undelivered-orders', async (req, res) => {
   }
 });
 
+
 module.exports = router;
+
+
+
