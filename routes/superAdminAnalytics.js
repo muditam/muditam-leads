@@ -393,56 +393,6 @@
     }
   });
 
-
-  // router.get("/rto", async (req, res) => {
-  //   try {
-  //     const { start, end } = req.query;
-  //     if (!start || !end) {
-  //       return res.status(400).json({ error: "start and end required" });
-  //     }
-
-  //     const startDate = new Date(`${start}T00:00:00.000Z`);
-  //     const endDate = new Date(`${end}T23:59:59.999Z`);
-
-  //     // ✅ Count RTO orders from Order model (order.js)
-  //     const rto = await Order.countDocuments({
-  //       order_date: { 
-  //         $gte: startDate, 
-  //         $lte: endDate 
-  //       },
-  //       shipment_status: "RTO"  // Exact match
-  //     });
-
-  //     // ✅ Count RTO Delivered orders from Order model (order.js)
-  //     const rtoDelivered = await Order.countDocuments({
-  //       order_date: { 
-  //         $gte: startDate, 
-  //         $lte: endDate 
-  //       },
-  //       shipment_status: "RTO Delivered"  // Exact match
-  //     });
-
-  //     // ✅ Total RTO (RTO + RTO Delivered)
-  //     const totalRto = rto + rtoDelivered;
-
-  //     console.log(`📊 RTO [${start} to ${end}]:`, { 
-  //       rto, 
-  //       rtoDelivered, 
-  //       totalRto,
-  //       source: 'Order model (order.js)'
-  //     });
-
-  //     return res.json({ 
-  //       rto, 
-  //       rtoDelivered, 
-  //       totalRto 
-  //     });
-
-  //   } catch (err) {
-  //     console.error("RTO ANALYTICS ERROR:", err);
-  //     return res.status(500).json({ error: "Failed to fetch RTO analytics" });
-  //   }
-  // });
   router.get("/aov", async (req, res) => {
     try {
       const { start, end } = req.query;
@@ -1058,11 +1008,6 @@ router.get("/rto", async (req, res) => {
     // Total RTO = both combined
     const totalRto = rtoOnly + rtoDelivered;
 
-    console.log(`\n📊 RTO [${start} to ${end}]:`);
-    console.log(`   RTO: ${rtoOnly}`);
-    console.log(`   RTO Delivered: ${rtoDelivered}`);
-    console.log(`   Total RTO: ${totalRto}\n`);
-
     return res.json({
       dateRange: { start, end },
       rto: rtoOnly,
@@ -1090,8 +1035,6 @@ router.get("/orders-vs-fulfilled", async (req, res) => {
 
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
-
-    console.log(`\n📊 ORDERS FUNNEL [${start} to ${end}]`);
 
     // 1️⃣ TOTAL ORDERS
     const totalOrders = await ShopifyOrder.countDocuments({
@@ -1124,13 +1067,6 @@ router.get("/orders-vs-fulfilled", async (req, res) => {
     const fulfilledPct = totalOrders > 0 ? ((fulfilled / totalOrders) * 100).toFixed(1) : "0.0";
     const deliveredPct = totalOrders > 0 ? ((delivered / totalOrders) * 100).toFixed(1) : "0.0";
     const rtoPct = totalOrders > 0 ? ((rto / totalOrders) * 100).toFixed(1) : "0.0";
-
-    // Console logs
-    console.log(`   ✅ Total Orders: ${totalOrders} (100.0%)`);
-    console.log(`   ✅ Fulfilled: ${fulfilled} (${fulfilledPct}%)`);
-    console.log(`   ✅ Delivered: ${delivered} (${deliveredPct}%)`);
-    console.log(`   ✅ RTO: ${rto} (${rtoPct}%)`);
-    console.log(`   ⏱️  Calculation: Fulfilled → Delivered → RTO\n`);
 
     // Response - UPDATED STRUCTURE for funnel
     return res.json({
@@ -1177,8 +1113,6 @@ router.get("/find-status-values", async (req, res) => {
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
 
-    console.log(`\n🔍 FINDING EXACT VALUES [${start} to ${end}]\n`);
-
     // Get ALL unique fulfillment_status values
     const fulfillmentValues = await ShopifyOrder.aggregate([
       {
@@ -1221,17 +1155,14 @@ router.get("/find-status-values", async (req, res) => {
       .limit(5)
       .lean();
 
-    console.log(`\n📊 FULFILLMENT_STATUS values found:`);
     fulfillmentValues.forEach(v => {
       console.log(`   "${v._id}": ${v.count} orders`);
     });
 
-    console.log(`\n📊 SHIPMENT_STATUS values found:`);
     shipmentValues.forEach(v => {
       console.log(`   "${v._id}": ${v.count} orders`);
     });
 
-    console.log(`\n📋 SAMPLE ORDERS:`);
     samples.forEach((o, i) => {
       console.log(`   ${i + 1}. fulfillment: "${o.fulfillment_status}" | shipment: "${o.shipment_status}"`);
     });
@@ -1707,8 +1638,7 @@ router.get("/customer-trends", async (req, res) => {
     // COMPARISON PERIOD (IF PROVIDED)
     // ===========================
     if (!compareStart || !compareEnd) {
-      console.timeEnd("⏱️ CUSTOMER_TRENDS");
-      console.log(`✅ Generated ${currentTrends.length} trend points\n`);
+      console.timeEnd("⏱️ CUSTOMER_TRENDS"); 
       
       setCustomerTrendsCache(cacheKey, currentTrends);
       return res.json(currentTrends);
@@ -1821,8 +1751,7 @@ router.get("/customer-trends", async (req, res) => {
     const mergedTrends = Array.from(timeMap.values());
     mergedTrends.sort((a, b) => a.date.localeCompare(b.date));
 
-    console.timeEnd("⏱️ CUSTOMER_TRENDS");
-    console.log(`✅ Merged ${mergedTrends.length} comparison points\n`);
+    console.timeEnd("⏱️ CUSTOMER_TRENDS"); 
 
     setCustomerTrendsCache(cacheKey, mergedTrends);
     return res.json(mergedTrends);
