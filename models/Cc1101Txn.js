@@ -11,6 +11,7 @@ const Cc1101TxnSchema = new mongoose.Schema(
     credit: { type: Number, default: 0 }, // Credit
     balance: { type: Number, default: 0 },// Balance
     remarks: { type: String },            // Remarks (from last Remarks col)
+    rowColor: { type: String, default: "" },
   },
   { timestamps: true }
 );

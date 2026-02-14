@@ -40,24 +40,6 @@ function parseNumQuery(v) {
   return Number.isNaN(n) ? null : n;
 }
 
-// dd/mm/yyyy or dd-mm-yyyy -> Date; ISO/other -> Date; Excel serial -> Date
-function parseDate(v) {
-  if (!v && v !== 0) return null;
-  if (typeof v === "number") return excelSerialToDate(v);
-  const s = String(v).trim();
-  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if (m) {
-    let [_, dd, mm, yyyy] = m;
-    dd = Number(dd);
-    mm = Number(mm);
-    yyyy = Number(yyyy.length === 2 ? (yyyy >= 70 ? "19" + yyyy : "20" + yyyy) : yyyy);
-    const d = new Date(yyyy, mm - 1, dd);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  const d2 = new Date(s);
-  return Number.isNaN(d2.getTime()) ? null : d2;
-}
-
 // Excel serial date -> JS Date
 function excelSerialToDate(serial) {
   try {
@@ -83,10 +65,57 @@ function excelSerialToDate(serial) {
   }
 }
 
+// dd/mm/yyyy or dd-mm-yyyy -> Date; dd-MMM-yy -> Date; ISO/other -> Date; Excel serial -> Date
+function parseDate(v) {
+  if (!v && v !== 0) return null;
+
+  if (v instanceof Date) {
+    return Number.isNaN(v.getTime()) ? null : v;
+  }
+
+  if (typeof v === "number") return excelSerialToDate(v);
+
+  const s = String(v).trim();
+  if (!s) return null;
+
+  // dd/mm/yyyy or dd-mm-yyyy
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let [_, dd, mm, yyyy] = m;
+    dd = Number(dd);
+    mm = Number(mm);
+    yyyy = Number(yyyy.length === 2 ? (yyyy >= 70 ? "19" + yyyy : "20" + yyyy) : yyyy);
+    const d = new Date(yyyy, mm - 1, dd);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // dd-MMM-yy or dd-MMM-yyyy  (e.g., 01-Apr-23)
+  const m2 = s.match(/^(\d{1,2})[\/\- ]([A-Za-z]{3,})[\/\- ](\d{2,4})$/);
+  if (m2) {
+    let [_, dd, mon, yyyy] = m2;
+    dd = Number(dd);
+    const monKey = String(mon).slice(0, 3).toLowerCase();
+    const months = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    };
+    const mmIdx = months[monKey];
+    if (mmIdx === undefined) return null;
+
+    yyyy = String(yyyy);
+    const yNum = Number(yyyy.length === 2 ? (Number(yyyy) >= 70 ? "19" + yyyy : "20" + yyyy) : yyyy);
+    const d = new Date(yNum, mmIdx, dd);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // ISO/other
+  const d2 = new Date(s);
+  return Number.isNaN(d2.getTime()) ? null : d2;
+}
+
 // Keep empty strings for strings; null for numeric empties; preserve rowColor
 function sanitizePayload(b) {
   const trim = (x) => (x == null ? "" : String(x).trim());
-  // If client sends "" for numbers, convert to null so clearing a cell persists
   const numOrNull = (v) => (v === "" || v === undefined ? null : parseNum(v));
 
   return {
@@ -129,7 +158,6 @@ router.get("/api/bank-entries", async (req, res) => {
 
     const query = {};
 
-    // Basic search over description, refNoChequeNo, orderIds, remarks
     if (q && String(q).trim()) {
       const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       query.$or = [
@@ -155,13 +183,12 @@ router.get("/api/bank-entries", async (req, res) => {
       if (!Object.keys(query.valueDate).length) delete query.valueDate;
     }
 
-    // NEW: Amount range filter applies to either debit or credit
+    // Amount range applies to either debit or credit
     if (amountMin != null || amountMax != null) {
       const range = {};
       if (amountMin != null) range.$gte = amountMin;
       if (amountMax != null) range.$lte = amountMax;
 
-      // At least one of debit or credit matches range
       query.$and = (query.$and || []).concat([
         {
           $or: [
@@ -248,35 +275,61 @@ router.post("/api/bank-entries/upload", upload.single("file"), async (req, res) 
     const wb = xlsx.read(req.file.buffer, { type: "buffer" });
     const ws = wb.Sheets[wb.SheetNames[0]];
 
-    // Get header row as first row; normalize headers
     const rows = xlsx.utils.sheet_to_json(ws, { header: 1, defval: "" });
     if (!rows.length) return res.json({ ok: true, inserted: 0, skipped: 0 });
 
     const rawHeaders = rows[0].map((h) => String(h || "").trim());
-    const norm = (s) => s.toLowerCase().replace(/\s+/g, " ").replace(/\s/g, "");
+    const norm = (s) => String(s).toLowerCase().replace(/\s+/g, " ").replace(/\s/g, "");
     const H = rawHeaders.map(norm);
 
-    // Build header->index map (case/space-insensitive)
+    // IMPORTANT: store ALL indices for duplicate headers
     const headerIdx = {};
-    H.forEach((h, i) => (headerIdx[h] = i));
+    H.forEach((h, i) => {
+      if (!headerIdx[h]) headerIdx[h] = [];
+      headerIdx[h].push(i);
+    });
 
-    // Accepted aliases -> normalized key we want to read
-    const pick = (rowArr, alts) => {
+    // pick supports choosing occurrence (0 = first, 1 = second...)
+    const pick = (rowArr, alts, occurrence = 0) => {
       for (const a of alts) {
-        const i = headerIdx[norm(a)];
-        if (i != null && rowArr[i] !== undefined) return rowArr[i];
+        const key = norm(a);
+        const arr = headerIdx[key];
+        if (arr && arr.length) {
+          const idx = arr[Math.min(occurrence, arr.length - 1)];
+          if (idx != null && rowArr[idx] !== undefined) return rowArr[idx];
+        }
       }
       return "";
     };
+
+    // Special-case: if file has two "Value Date" columns and no explicit txn column,
+    // map 1st Value Date -> txnDate, 2nd Value Date -> valueDate (ledger)
+    const valueDateIdxs = headerIdx[norm("Value Date")] || [];
+    const hasTxnHeader =
+      (headerIdx[norm("Transaction Date")] && headerIdx[norm("Transaction Date")].length) ||
+      (headerIdx[norm("Txn Date")] && headerIdx[norm("Txn Date")].length) ||
+      (headerIdx[norm("TransactionDate")] && headerIdx[norm("TransactionDate")].length) ||
+      (headerIdx[norm("Value Date 2")] && headerIdx[norm("Value Date 2")].length) ||
+      (headerIdx[norm("Second Value Date")] && headerIdx[norm("Second Value Date")].length);
 
     const docs = [];
     for (let r = 1; r < rows.length; r++) {
       const arr = rows[r];
       if (!arr || arr.length === 0) continue;
 
+      const valueDateRaw = pick(arr, ["Value Date", "ValueDate", "Posting Date", "PostingDate"], 1); // default to 2nd if present
+      const txnDateRaw =
+        hasTxnHeader
+          ? pick(arr, ["Value Date 2", "Txn Date", "Transaction Date", "TransactionDate", "Second Value Date"], 0)
+          : (valueDateIdxs.length >= 2
+              ? pick(arr, ["Value Date", "ValueDate"], 0) // 1st Value Date
+              : pick(arr, ["Value Date 2", "Txn Date", "Transaction Date", "TransactionDate", "Second Value Date"], 0));
+
       const candidate = sanitizePayload({
-        valueDate: pick(arr, ["Value Date", "ValueDate", "Posting Date", "PostingDate"]),
-        txnDate: pick(arr, ["Value Date 2", "Txn Date", "Transaction Date", "TransactionDate", "Second Value Date"]),
+        // If only one Value Date exists, valueDateRaw will just fall back to that column (occurrence clamps)
+        valueDate: valueDateIdxs.length >= 2 ? valueDateRaw : pick(arr, ["Value Date", "ValueDate", "Posting Date", "PostingDate"], 0),
+        txnDate: txnDateRaw,
+
         description: pick(arr, ["Description", "Narration"]),
         refNoChequeNo: pick(arr, ["Ref No./Cheque No.", "Ref No", "Cheque No.", "Ref", "Reference"]),
         branchCode: pick(arr, ["Branch Code", "BranchCode"]),
@@ -286,14 +339,14 @@ router.post("/api/bank-entries/upload", upload.single("file"), async (req, res) 
         remark: pick(arr, ["Remark", "Remarks"]),
         orderIds: pick(arr, ["Order Ids", "OrderIds"]),
         remarks3: pick(arr, ["Remarks -3", "Remarks-3", "Remarks3"]),
-        rowColor: "", // uploads default to no color
+        rowColor: "",
       });
 
-      // Skip completely empty lines
-      const hasAny =
-        Object.values(candidate).some(
-          (v) => v !== null && v !== undefined && String(v).trim() !== ""
-        );
+      const hasAny = Object.values(candidate).some((v) => {
+        if (v === null || v === undefined) return false;
+        if (v instanceof Date) return !Number.isNaN(v.getTime());
+        return String(v).trim() !== "";
+      });
       if (hasAny) docs.push(candidate);
     }
 
@@ -310,10 +363,7 @@ router.post("/api/bank-entries/upload", upload.single("file"), async (req, res) 
 });
 
 /**
- * POST /api/bank-entries/bulk
- * Accepts frontend row-shape and persists in bulk.
- * Body: { rows: [{ valueDate1, valueDate2, description, refNo, ... }] }
- * (Kept for compatibility; front-end now saves row-by-row.)
+ * POST /api/bank-entries/bulk (compat)
  */
 router.post("/api/bank-entries/bulk", async (req, res) => {
   try {
@@ -321,7 +371,6 @@ router.post("/api/bank-entries/bulk", async (req, res) => {
       return res.status(400).json({ ok: false, error: "rows[] required" });
     }
 
-    // Map FE keys -> BE expected keys then sanitize
     const mapped = req.body.rows.map((r) =>
       sanitizePayload({
         valueDate: r.valueDate1 ?? null,
@@ -348,4 +397,3 @@ router.post("/api/bank-entries/bulk", async (req, res) => {
 });
 
 module.exports = router;
-

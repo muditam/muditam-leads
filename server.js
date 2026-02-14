@@ -136,19 +136,17 @@ const superAdminAnalytics = require("./routes/superAdminAnalytics");
 const vendorsRoute = require("./routes/vendorsname");
 const purchaseRoute = require("./routes/PurchaseRcrds");
 const paymentRoute = require("./routes/paymentRcrds");
-const shopifyExport = require("./routes/shopifyExport");
-const utmShopifyRoutes = require("./routes/utmShopifyRoutes");
+const shopifyExport = require("./routes/shopifyExport"); 
 const notificationsRoutes = require("./routes/notifications");
 
 const WhatsAppRoutes = require("./whatsapp/whatsapp.routes");
 const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes");
 const whatsappMediaRoutes = require("./whatsapp/whatsappMedia.routes");
 const whatsappAiRoutes = require("./whatsapp/whatsapp.ai.routes");
+const bankReconciliationKotak = require("./PaymentGateway/bankReconciliationKotak");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
-
-
 
 app.use(
   compression({
@@ -162,7 +160,6 @@ app.use(
     },
   })
 );
-
 
 const allowedOrigins = ['https://www.60brands.com', 'https://60brands.com', 'http://localhost:3000'];
 
@@ -689,14 +686,14 @@ app.use("/api/vendors", vendorsRoute);
 app.use("/api/purchase-records", purchaseRoute);
 app.use("/api/payment-records", paymentRoute);
 
-app.use("/api/shopify", shopifyExport);
-app.use("/api/utm", utmShopifyRoutes);
+app.use("/api/shopify", shopifyExport); 
 app.use("/api/notifications", notificationsRoutes);
 
 app.use("/api/whatsapp", WhatsAppRoutes);
 app.use("/api/whatsapp/templates", whatsappTemplatesRoutes);
 app.use("/api/whatsapp", whatsappMediaRoutes);
 app.use("/api/whatsapp", whatsappAiRoutes);
+app.use("/api/bank-reconciliation", bankReconciliationKotak);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

@@ -14,7 +14,7 @@ const BankEntrySchema = new mongoose.Schema(
     debit: { type: Number, default: null },
     credit: { type: Number, default: null },
     balance: { type: Number, default: null },
-
+ 
     remark: { type: String, default: "" },
     orderIds: { type: String, default: "" },
     remarks3: { type: String, default: "" },

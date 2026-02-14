@@ -10,6 +10,7 @@ const Capital6389TxnSchema = new mongoose.Schema(
     debit: { type: Number, default: 0 },
     credit: { type: Number, default: 0 },
     balance: { type: Number, default: 0 },
+    rowColor: { type: String, default: "" },
     remarks: { type: String },
   },
   { timestamps: true }

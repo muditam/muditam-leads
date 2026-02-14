@@ -11,6 +11,7 @@ const Axis3361TxnSchema = new mongoose.Schema(
     balance: { type: Number, default: 0 }, // Balance(INR)
     branchName: { type: String },          // Branch Name
     remark: { type: String },              // Remark
+    rowColor: { type: String, default: "" },
   },
   { timestamps: true }
 );

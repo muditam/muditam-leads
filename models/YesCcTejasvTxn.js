@@ -6,7 +6,8 @@ const YesCcTejasvTxnSchema = new mongoose.Schema(
     type: { type: String },              // Type
     amount: { type: Number, default: 0 },// Amount
     dr: { type: String },                // Dr (e.g. DR/CR or flag)
-    remarks: { type: String },           // Remarks
+    remarks: { type: String },           // Remarks 
+    rowColor: { type: String, default: "" },
   },
   { timestamps: true }
 );

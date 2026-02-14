@@ -4,9 +4,43 @@ const Order = require('../models/Order');
 
 
 const EXCLUDED_STATUSES = ['Delivered', 'RTO Delivered'];
+ 
+router.get('/order-counts', async (req, res) => {
+  try {
+    const counts = await Order.aggregate([
+      {
+        $match: {
+          contact_number: { $exists: true, $ne: null, $ne: "" }
+        }
+      },
+      {
+        $group: {
+          _id: "$contact_number",
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          contact_number: "$_id",
+          count: 1
+        }
+      }
+    ]);
+ 
+    const countMap = {};
+    counts.forEach(item => {
+      countMap[item.contact_number] = item.count;
+    });
 
 
-// ✅ NEW: PATCH endpoint to update opsRemark and assignedAgentId
+    res.json(countMap);
+  } catch (err) {
+    console.error('Error fetching order counts:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+ 
 router.patch('/ops-meta/by-order-id', async (req, res) => {
   try {
     const { order_id, opsRemark, assignedAgentId } = req.body;
@@ -15,21 +49,15 @@ router.patch('/ops-meta/by-order-id', async (req, res) => {
     if (!order_id) {
       return res.status(400).json({ message: 'order_id is required' });
     }
-
-
-    // Build update object
+ 
     const updateData = {
       last_updated_at: new Date(),
     };
-
-
-    // Handle opsRemark (can be empty string to clear)
+ 
     if (opsRemark !== undefined) {
       updateData.opsRemark = opsRemark.trim();
     }
-
-
-    // Handle assignedAgentId (can be null to clear)
+ 
     if (assignedAgentId !== undefined) {
       updateData.assignedAgentId = assignedAgentId || null;
     }
@@ -59,7 +87,7 @@ router.patch('/ops-meta/by-order-id', async (req, res) => {
 });
 
 
-// ✅ IMPROVED: GET endpoint with server-side filtering
+// ✅ GET endpoint with server-side filtering
 router.get('/undelivered-orders', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -80,7 +108,7 @@ router.get('/undelivered-orders', async (req, res) => {
     };
 
 
-    // ✅ FIX: Apply date filter to prevent yesterday's data appearing
+    // Date filter
     if (startDate || endDate) {
       filter.order_date = {};
       if (startDate) {
@@ -94,34 +122,24 @@ router.get('/undelivered-orders', async (req, res) => {
         filter.order_date.$lte = end;
       }
     }
-
-
-    // Status filter
+ 
     if (statusFilter && !EXCLUDED_STATUSES.includes(statusFilter)) {
       filter.shipment_status = statusFilter;
     }
-
-
-    // Carrier filter
+ 
     if (carrierFilter) {
       filter.carrier_title = carrierFilter;
     }
-
-
-    // ✅ FIX: Server-side filtering for viewTab (Pending vs Processed)
-    if (viewTab === 'pending') {
-      // Pending = no opsRemark or empty opsRemark
+ 
+    if (viewTab === 'pending') { 
       filter.$or = [
         { opsRemark: { $exists: false } },
         { opsRemark: '' },
         { opsRemark: null }
       ];
-    } else if (viewTab === 'processed') {
-      // Processed = has opsRemark (non-empty)
+    } else if (viewTab === 'processed') { 
       filter.opsRemark = { $exists: true, $ne: '', $ne: null };
-
-
-      // ✅ FIX: Agent filter (only in processed tab)
+ 
       if (selectedAgent) {
         if (selectedAgent === 'unassigned') {
           filter.$or = [
@@ -133,22 +151,16 @@ router.get('/undelivered-orders', async (req, res) => {
         }
       }
     }
-
-
-    // Fetch orders with proper sorting
+ 
     const orders = await Order.find(filter)
       .select('order_id contact_number full_name shipment_status order_date tracking_number carrier_title opsRemark assignedAgentId last_updated_at')
       .sort({ last_updated_at: -1, order_date: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
-
-
-    // ✅ FIX: Count only filtered results
+ 
     const totalCount = await Order.countDocuments(filter);
-
-
-    // Get status counts (for filter chips) - without viewTab filter
+ 
     const statusFilter_base = {
       shipment_status: { $nin: EXCLUDED_STATUSES },
     };
@@ -179,9 +191,7 @@ router.get('/undelivered-orders', async (req, res) => {
       },
       { $sort: { count: -1 } }
     ]);
-
-
-    // Get distinct carriers
+ 
     const carrierList = await Order.distinct("carrier_title", statusFilter_base);
 
 
