@@ -1,18 +1,24 @@
+// routes/bluedart.routes.js
 const express = require("express");
 const multer = require("multer");
 const csv = require("csv-parser");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const BluedartSettlement = require("../models/BluedartSettlement");
 
 const router = express.Router();
 
+// ✅ ensure upload dir exists
+const uploadDir = path.join(__dirname, "..", "uploads", "bluedart");
+fs.mkdirSync(uploadDir, { recursive: true });
+
 const upload = multer({
-  dest: path.join(__dirname, "..", "uploads", "bluedart"),
+  dest: uploadDir,
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
-// ---------- tiny helper to read from variant header names ----------
+// ---------- helpers ----------
 const pick = (row, keys) => {
   for (const k of keys) {
     if (row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
@@ -29,7 +35,6 @@ function parseNum(value) {
   let s = String(value).trim();
   if (!s || s === "-" || s.toUpperCase() === "NA") return 0;
 
-  // remove commas, currency symbol, spaces
   s = s.replace(/[,₹\s]/g, "");
   const n = Number(s);
   return Number.isNaN(n) ? 0 : n;
@@ -40,11 +45,9 @@ function parseDate(value) {
   const s = String(value).trim();
   if (!s) return null;
 
-  // try native
   const d1 = new Date(s);
   if (!Number.isNaN(d1.getTime())) return d1;
 
-  // dd/mm/yyyy or dd-mm-yyyy
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (m) {
     const dd = parseInt(m[1], 10);
@@ -74,11 +77,42 @@ function detectSeparator(filePath) {
   });
 }
 
+function parseDateOnlyToYMD(input) {
+  if (!input) return null;
+  const s = String(input).trim();
+
+  // Accept: YYYY-MM-DD
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) {
+    const yyyy = m[1];
+    const mm = String(m[2]).padStart(2, "0");
+    const dd = String(m[3]).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  // Accept: DD/MM/YYYY or DD-MM-YYYY
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (m) {
+    const dd = String(m[1]).padStart(2, "0");
+    const mm = String(m[2]).padStart(2, "0");
+    const yyyy = m[3];
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  return null;
+}
+
+function istDayRange(dateOnlyStr) {
+  // dateOnlyStr must be YYYY-MM-DD
+  const start = new Date(`${dateOnlyStr}T00:00:00.000+05:30`);
+  const end = new Date(`${dateOnlyStr}T23:59:59.999+05:30`);
+  return { start, end };
+}
+
 async function readCsvFile(filePath) {
   const separator = await detectSeparator(filePath);
   const rows = [];
 
-  // normalize headers
   const mapHeaders = ({ header }) =>
     String(header || "")
       .replace(/\uFEFF/g, "")
@@ -96,6 +130,46 @@ async function readCsvFile(filePath) {
   return rows;
 }
 
+function safeUnlink(p) {
+  fs.unlink(p, () => {});
+}
+
+function makeBatchId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
+}
+
+// ------------------- GET /sample -------------------
+router.get("/sample", (req, res) => {
+  const header = [
+    "AWB NO",
+    "DPUDATE",
+    "PROCESS_DT",
+    "ORDER ID",
+    "PORTAL NAME",
+    "NCUSTPAYAMT",
+    "UTR",
+    "SETTLED DATE",
+  ].join(",");
+
+  const sampleRow = [
+    "1234567890",
+    "15/02/2026",
+    "15/02/2026",
+    "MA123456",
+    "Shopify",
+    "999",
+    "UTR12345",
+    "16/02/2026",
+  ].join(",");
+
+  const csvContent = `${header}\n${sampleRow}\n`;
+
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", 'attachment; filename="bluedart_upload_sample.csv"');
+  return res.send(csvContent);
+});
+
 // ------------------- POST /upload -------------------
 router.post("/upload", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file is required" });
@@ -106,12 +180,13 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     const rows = await readCsvFile(filePath);
 
     if (!rows.length) {
-      fs.unlink(filePath, () => {});
+      safeUnlink(filePath);
       return res.status(400).json({ error: "No rows parsed from CSV." });
     }
 
+    const batchId = makeBatchId(); // ✅ one batch id per upload/file
+
     const records = rows.map((row) => {
-      // Expecting: AWB NO, DPUDATE, PROCESS_DT, ORDER ID, PORTAL NAME, NCUSTPAYAMT, UTR, SETTLED DATE
       const awbNo = pick(row, ["AWB NO", "CRTOAWBNO", "AWB"]);
       const dpuDateRaw = pick(row, ["DPUDATE", "DPU DATE"]);
       const processDateRaw = pick(row, ["PROCESS_DT", "PROCESS DT"]);
@@ -123,31 +198,51 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
       return {
         uploadDate: new Date(),
+        uploadBatchId: batchId, // ✅
 
         awbNo: awbNo || "",
-        dpuDate: parseDate(dpuDateRaw),          // Date (recommended)
-        processDate: parseDate(processDateRaw),  // Date (recommended)
+        dpuDate: parseDate(dpuDateRaw),
+        processDate: parseDate(processDateRaw),
         orderId: orderId || "",
         portalName: portalName || "",
         customerPayAmt: parseNum(amountRaw),
         utr: utr || "",
-        settledDate: parseDate(settledDateRaw),  // Date (recommended)
-
-        // optional raw values if you want to keep:
-        // dpuDateRaw: dpuDateRaw || "",
-        // processDateRaw: processDateRaw || "",
-        // settledDateRaw: settledDateRaw || "",
+        settledDate: parseDate(settledDateRaw),
       };
     });
 
     await BluedartSettlement.insertMany(records, { ordered: false });
 
-    fs.unlink(filePath, () => {});
-    return res.json({ message: "Upload successful", inserted: records.length });
+    safeUnlink(filePath);
+    return res.json({ message: "Upload successful", inserted: records.length, batchId });
   } catch (err) {
     console.error("Bluedart upload error:", err);
-    fs.unlink(filePath, () => {});
+    safeUnlink(filePath);
     return res.status(500).json({ error: "Failed to upload data" });
+  }
+});
+
+// ------------------- DELETE /delete-last-upload -------------------
+router.delete("/delete-last-upload", async (req, res) => {
+  try {
+    const latest = await BluedartSettlement.findOne({})
+      .sort({ uploadDate: -1, createdAt: -1 })
+      .select({ _id: 1, uploadBatchId: 1 })
+      .lean();
+
+    if (!latest) return res.json({ ok: true, deleted: 0, message: "No data to delete" });
+
+    if (latest.uploadBatchId) {
+      const r = await BluedartSettlement.deleteMany({ uploadBatchId: latest.uploadBatchId });
+      return res.json({ ok: true, deleted: r.deletedCount || 0, batchId: latest.uploadBatchId });
+    }
+
+    // fallback (shouldn’t be needed after batchId rollout)
+    const r = await BluedartSettlement.deleteOne({ _id: latest._id });
+    return res.json({ ok: true, deleted: r.deletedCount || 0, message: "Deleted latest row (no batchId found)" });
+  } catch (err) {
+    console.error("delete-last-upload error:", err);
+    return res.status(500).json({ error: "Failed to delete last upload" });
   }
 });
 
@@ -238,3 +333,5 @@ router.get("/data", async (req, res) => {
 });
 
 module.exports = router;
+
+ 

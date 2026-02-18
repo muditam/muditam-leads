@@ -1,3 +1,4 @@
+// routes/delhivery.routes.js
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -52,9 +53,12 @@ function parseDate(value) {
   return null;
 }
 
-function parseDateParam(v) {
+function parseDateParam(v, endOfDay = false) {
   const d = parseDate(v);
-  return d && !Number.isNaN(d.getTime()) ? d : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  if (endOfDay) d.setHours(23, 59, 59, 999);
+  else d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 function detectSeparator(filePath) {
@@ -92,6 +96,17 @@ async function readCsvFile(filePath) {
   return rows;
 }
 
+// ------------------- GET /sample -------------------
+router.get("/sample", (req, res) => {
+  const sample =
+    "AWB NO,ORDER ID,AMOUNT,UTR NO,SETTLED DATE\n" +
+    "1234567890,MA12345,15200,R22026012113984136,21-Jan-26\n";
+
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", 'attachment; filename="delhivery_sample.csv"');
+  return res.status(200).send(sample);
+});
+
 // ------------------- POST /upload -------------------
 router.post("/upload", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file is required" });
@@ -106,7 +121,6 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     }
 
     const records = rows.map((row) => {
-      // common headers
       const awbNo = pick(row, ["AWB NO", "AWB No", "AWB", "Waybill", "Waybill No"]);
       const utrNo = pick(row, ["UTR NO", "UTR No", "UTR"]);
       const orderId = pick(row, ["ORDER ID", "Order ID", "Order"]);
@@ -119,7 +133,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         utrNo: utrNo || "",
         orderId: orderId || "",
         amount: parseNum(amountRaw),
-        settledDate: parseDate(settledRaw), // store as Date for filtering
+        settledDate: parseDate(settledRaw),
       };
     });
 
@@ -134,6 +148,55 @@ router.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
+// ------------------- DELETE /delete-last-upload -------------------
+router.delete("/delete-last-upload", async (req, res) => {
+  try {
+    // find the latest uploadDate present
+    const latest = await DelhiverySettlement.findOne({}, { uploadDate: 1 })
+      .sort({ uploadDate: -1, createdAt: -1 })
+      .lean();
+
+    if (!latest?.uploadDate) return res.json({ deleted: 0 });
+
+    // delete all rows for that same upload day (by time window)
+    const start = new Date(latest.uploadDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(latest.uploadDate);
+    end.setHours(23, 59, 59, 999);
+
+    const result = await DelhiverySettlement.deleteMany({
+      uploadDate: { $gte: start, $lte: end },
+    });
+
+    return res.json({ deleted: result.deletedCount || 0 });
+  } catch (err) {
+    console.error("Delhivery delete-last-upload error:", err);
+    return res.status(500).json({ error: "Failed to delete last upload" });
+  }
+});
+
+// ------------------- DELETE /delete-by-upload-date -------------------
+// ✅ Example: /api/delhivery/delete-by-upload-date?date=2026-02-16
+router.delete("/delete-by-upload-date", async (req, res) => {
+  try {
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ error: "date (YYYY-MM-DD) is required" });
+
+    const start = parseDateParam(date, false);
+    const end = parseDateParam(date, true);
+    if (!start || !end) return res.status(400).json({ error: "Invalid date format" });
+
+    const result = await DelhiverySettlement.deleteMany({
+      uploadDate: { $gte: start, $lte: end },
+    });
+
+    return res.json({ deleted: result.deletedCount || 0 });
+  } catch (err) {
+    console.error("Delhivery delete-by-upload-date error:", err);
+    return res.status(500).json({ error: "Failed to delete by upload date" });
+  }
+});
+
 // ------------------- GET /data (with filters) -------------------
 router.get("/data", async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
@@ -145,45 +208,33 @@ router.get("/data", async (req, res) => {
   const skip = (page - 1) * limit;
 
   try {
-    const {
-      q,
-      uploadMin,
-      uploadMax,
-      settledMin,
-      settledMax,
-      amountMin,
-      amountMax,
-    } = req.query;
+    const { q, uploadMin, uploadMax, settledMin, settledMax, amountMin, amountMax } = req.query;
 
     const query = {};
 
-    // search
     if (q && String(q).trim()) {
       const rx = new RegExp(escapeRegex(String(q).trim()), "i");
       query.$or = [{ awbNo: rx }, { orderId: rx }, { utrNo: rx }];
     }
 
-    // upload date range
     if (uploadMin || uploadMax) {
       query.uploadDate = {};
-      const dMin = parseDateParam(uploadMin);
-      const dMax = parseDateParam(uploadMax);
+      const dMin = parseDateParam(uploadMin, false);
+      const dMax = parseDateParam(uploadMax, true);
       if (dMin) query.uploadDate.$gte = dMin;
       if (dMax) query.uploadDate.$lte = dMax;
       if (!Object.keys(query.uploadDate).length) delete query.uploadDate;
     }
 
-    // settled date range
     if (settledMin || settledMax) {
       query.settledDate = {};
-      const sMin = parseDateParam(settledMin);
-      const sMax = parseDateParam(settledMax);
+      const sMin = parseDateParam(settledMin, false);
+      const sMax = parseDateParam(settledMax, true);
       if (sMin) query.settledDate.$gte = sMin;
       if (sMax) query.settledDate.$lte = sMax;
       if (!Object.keys(query.settledDate).length) delete query.settledDate;
     }
 
-    // amount range
     const aMin = amountMin !== undefined && amountMin !== "" ? Number(amountMin) : null;
     const aMax = amountMax !== undefined && amountMax !== "" ? Number(amountMax) : null;
     if (aMin !== null || aMax !== null) {
@@ -202,13 +253,7 @@ router.get("/data", async (req, res) => {
         .lean(),
     ]);
 
-    return res.json({
-      data,
-      page,
-      limit,
-      totalCount,
-      pages: Math.ceil(totalCount / limit),
-    });
+    return res.json({ data, page, limit, totalCount, pages: Math.ceil(totalCount / limit) });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to fetch Delhivery data" });
