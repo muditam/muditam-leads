@@ -7,8 +7,12 @@ const fs = require("fs");
 const path = require("path");
 const DelhiverySettlement = require("../models/DelhiverySettlement");
 
+// ✅ ensure upload dir exists
+const uploadDir = path.join(__dirname, "..", "uploads", "delhivery");
+fs.mkdirSync(uploadDir, { recursive: true });
+
 const upload = multer({
-  dest: path.join(__dirname, "..", "uploads", "delhivery"),
+  dest: uploadDir,
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
@@ -96,6 +100,68 @@ async function readCsvFile(filePath) {
   return rows;
 }
 
+function safeUnlink(p) {
+  fs.unlink(p, () => {});
+}
+
+// ✅ shared query builder (used in /data and /export)
+function buildQueryFromReq(qs = {}) {
+  const { q, uploadMin, uploadMax, settledMin, settledMax, amountMin, amountMax } = qs;
+
+  const query = {};
+
+  if (q && String(q).trim()) {
+    const rx = new RegExp(escapeRegex(String(q).trim()), "i");
+    query.$or = [{ awbNo: rx }, { orderId: rx }, { utrNo: rx }];
+  }
+
+  if (uploadMin || uploadMax) {
+    query.uploadDate = {};
+    const dMin = parseDateParam(uploadMin, false);
+    const dMax = parseDateParam(uploadMax, true);
+    if (dMin) query.uploadDate.$gte = dMin;
+    if (dMax) query.uploadDate.$lte = dMax;
+    if (!Object.keys(query.uploadDate).length) delete query.uploadDate;
+  }
+
+  if (settledMin || settledMax) {
+    query.settledDate = {};
+    const sMin = parseDateParam(settledMin, false);
+    const sMax = parseDateParam(settledMax, true);
+    if (sMin) query.settledDate.$gte = sMin;
+    if (sMax) query.settledDate.$lte = sMax;
+    if (!Object.keys(query.settledDate).length) delete query.settledDate;
+  }
+
+  const aMin = amountMin !== undefined && amountMin !== "" ? Number(amountMin) : null;
+  const aMax = amountMax !== undefined && amountMax !== "" ? Number(amountMax) : null;
+  if (aMin !== null || aMax !== null) {
+    query.amount = {};
+    if (aMin !== null && !Number.isNaN(aMin)) query.amount.$gte = aMin;
+    if (aMax !== null && !Number.isNaN(aMax)) query.amount.$lte = aMax;
+    if (!Object.keys(query.amount).length) delete query.amount;
+  }
+
+  return query;
+}
+
+function csvEscape(v) {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function fmtDateYMD(d) {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "";
+  const yyyy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // ------------------- GET /sample -------------------
 router.get("/sample", (req, res) => {
   const sample =
@@ -116,7 +182,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
   try {
     const rows = await readCsvFile(filePath);
     if (!rows.length) {
-      fs.unlink(filePath, () => {});
+      safeUnlink(filePath);
       return res.status(400).json({ error: "No rows parsed from CSV." });
     }
 
@@ -132,18 +198,18 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         awbNo: awbNo || "",
         utrNo: utrNo || "",
         orderId: orderId || "",
-        amount: parseNum(amountRaw),
+        amount: parseNum(amountRaw), // ✅ Amount considered
         settledDate: parseDate(settledRaw),
       };
     });
 
     await DelhiverySettlement.insertMany(records, { ordered: false });
 
-    fs.unlink(filePath, () => {});
+    safeUnlink(filePath);
     return res.json({ message: "Upload successful", inserted: records.length });
   } catch (err) {
     console.error("Delhivery upload error:", err);
-    fs.unlink(filePath, () => {});
+    safeUnlink(filePath);
     return res.status(500).json({ error: "Upload failed" });
   }
 });
@@ -151,14 +217,12 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 // ------------------- DELETE /delete-last-upload -------------------
 router.delete("/delete-last-upload", async (req, res) => {
   try {
-    // find the latest uploadDate present
     const latest = await DelhiverySettlement.findOne({}, { uploadDate: 1 })
       .sort({ uploadDate: -1, createdAt: -1 })
       .lean();
 
     if (!latest?.uploadDate) return res.json({ deleted: 0 });
 
-    // delete all rows for that same upload day (by time window)
     const start = new Date(latest.uploadDate);
     start.setHours(0, 0, 0, 0);
     const end = new Date(latest.uploadDate);
@@ -176,7 +240,6 @@ router.delete("/delete-last-upload", async (req, res) => {
 });
 
 // ------------------- DELETE /delete-by-upload-date -------------------
-// ✅ Example: /api/delhivery/delete-by-upload-date?date=2026-02-16
 router.delete("/delete-by-upload-date", async (req, res) => {
   try {
     const { date } = req.query;
@@ -197,7 +260,7 @@ router.delete("/delete-by-upload-date", async (req, res) => {
   }
 });
 
-// ------------------- GET /data (with filters) -------------------
+// ------------------- GET /data (with filters + totalAmount SUM) -------------------
 router.get("/data", async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
@@ -208,55 +271,73 @@ router.get("/data", async (req, res) => {
   const skip = (page - 1) * limit;
 
   try {
-    const { q, uploadMin, uploadMax, settledMin, settledMax, amountMin, amountMax } = req.query;
+    const query = buildQueryFromReq(req.query);
 
-    const query = {};
-
-    if (q && String(q).trim()) {
-      const rx = new RegExp(escapeRegex(String(q).trim()), "i");
-      query.$or = [{ awbNo: rx }, { orderId: rx }, { utrNo: rx }];
-    }
-
-    if (uploadMin || uploadMax) {
-      query.uploadDate = {};
-      const dMin = parseDateParam(uploadMin, false);
-      const dMax = parseDateParam(uploadMax, true);
-      if (dMin) query.uploadDate.$gte = dMin;
-      if (dMax) query.uploadDate.$lte = dMax;
-      if (!Object.keys(query.uploadDate).length) delete query.uploadDate;
-    }
-
-    if (settledMin || settledMax) {
-      query.settledDate = {};
-      const sMin = parseDateParam(settledMin, false);
-      const sMax = parseDateParam(settledMax, true);
-      if (sMin) query.settledDate.$gte = sMin;
-      if (sMax) query.settledDate.$lte = sMax;
-      if (!Object.keys(query.settledDate).length) delete query.settledDate;
-    }
-
-    const aMin = amountMin !== undefined && amountMin !== "" ? Number(amountMin) : null;
-    const aMax = amountMax !== undefined && amountMax !== "" ? Number(amountMax) : null;
-    if (aMin !== null || aMax !== null) {
-      query.amount = {};
-      if (aMin !== null && !Number.isNaN(aMin)) query.amount.$gte = aMin;
-      if (aMax !== null && !Number.isNaN(aMax)) query.amount.$lte = aMax;
-      if (!Object.keys(query.amount).length) delete query.amount;
-    }
-
-    const [totalCount, data] = await Promise.all([
+    const [totalCount, data, sumAgg] = await Promise.all([
       DelhiverySettlement.countDocuments(query),
       DelhiverySettlement.find(query)
         .sort({ uploadDate: -1, createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
+      DelhiverySettlement.aggregate([
+        { $match: query },
+        { $group: { _id: null, total: { $sum: "$amount" } } }, // ✅ Amount total
+      ]),
     ]);
 
-    return res.json({ data, page, limit, totalCount, pages: Math.ceil(totalCount / limit) });
+    const totalAmount = sumAgg?.[0]?.total || 0;
+
+    return res.json({
+      data,
+      page,
+      limit,
+      totalCount,
+      pages: Math.ceil(totalCount / limit),
+      totalAmount, // ✅ NEW
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to fetch Delhivery data" });
+  }
+});
+
+// ------------------- GET /export (all / filtered) -------------------
+router.get("/export", async (req, res) => {
+  try {
+    const query = buildQueryFromReq(req.query);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="delhivery_export.csv"');
+
+    // header
+    res.write(["Upload Date", "AWB No", "Order ID", "Amount", "UTR No", "Settled Date"].join(",") + "\n");
+
+    const cursor = DelhiverySettlement.find(query)
+      .sort({ uploadDate: -1, createdAt: -1 })
+      .lean()
+      .cursor();
+
+    for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
+      const line =
+        [
+          csvEscape(fmtDateYMD(doc.uploadDate)),
+          csvEscape(doc.awbNo || ""),
+          csvEscape(doc.orderId || ""),
+          csvEscape(doc.amount ?? 0),
+          csvEscape(doc.utrNo || ""),
+          csvEscape(fmtDateYMD(doc.settledDate)),
+        ].join(",") + "\n";
+
+      if (!res.write(line)) {
+        await new Promise((resolve) => res.once("drain", resolve));
+      }
+    }
+
+    res.end();
+  } catch (err) {
+    console.error("Delhivery export error:", err);
+    return res.status(500).json({ error: "Failed to export Delhivery data" });
   }
 });
 

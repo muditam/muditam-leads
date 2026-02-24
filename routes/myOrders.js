@@ -7,22 +7,22 @@ router.post("/", async (req, res) => {
     const {
       customerName,
       phone,
-      shippingAddress, 
+      shippingAddress,
       paymentStatus,
-      productOrdered, 
+      productOrdered,
       orderDate,
       orderId,
       totalPrice,
       agentName,
-      partialPayment, 
-      dosageOrdered, 
-      selfRemark, 
-      paymentMethod, 
+      partialPayment,
+      dosageOrdered,
+      selfRemark,
+      paymentMethod,
       upsellAmount,
       transactionId,
     } = req.body;
 
-    // Validate required fields
+    // ✅ Validate required fields (partialPayment NOT required for all)
     if (
       !customerName ||
       !phone ||
@@ -31,38 +31,41 @@ router.post("/", async (req, res) => {
       !productOrdered ||
       !orderDate ||
       !orderId ||
-      !totalPrice ||
+      totalPrice == null || // allow 0 check safely
       !agentName ||
-      partialPayment == null ||
       !dosageOrdered ||
       !paymentMethod
     ) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Convert values to the appropriate types
     const newOrder = new MyOrder({
-      customerName, 
-      phone, 
+      customerName,
+      phone,
       shippingAddress,
-      paymentStatus, 
+      paymentStatus,
       productOrdered,
       orderDate: new Date(orderDate),
       orderId,
       totalPrice: Number(totalPrice),
       agentName,
-      partialPayment: Number(partialPayment),
+
+      // ✅ Default partialPayment to 0
+      partialPayment: Number(partialPayment || 0),
+
       dosageOrdered,
       selfRemark,
       paymentMethod,
       upsellAmount: upsellAmount ? Number(upsellAmount) : 0,
-      transactionId: transactionId || "", 
+      transactionId: transactionId || "",
     });
 
     await newOrder.save();
-    return res
-      .status(201)
-      .json({ message: "Order added to My Orders successfully", order: newOrder });
+
+    return res.status(201).json({
+      message: "Order added to My Orders successfully",
+      order: newOrder,
+    });
   } catch (error) {
     console.error("Error adding to My Orders:", error);
     return res.status(500).json({ error: "Failed to add order to My Orders" });

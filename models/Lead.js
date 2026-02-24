@@ -108,6 +108,13 @@ const LeadSchema = new mongoose.Schema({
       status: { type: String }, 
     },
   ],
+  firstCallConnected: {
+    type: Boolean,
+    default: false
+  },
+  firstCallConnectedAt: {
+    type: Date
+  },
 });
 
 

@@ -148,8 +148,7 @@ router.get("/condition-cards", async (req, res) => {
 
 
     const result = { diabetes, liver, cholesterol, noCondition };
-    cacheSet(cacheKey, result);
-    console.log("condition-cards:", result);
+    cacheSet(cacheKey, result); 
     return res.json(result);
   } catch (err) {
     console.error("condition-cards ERROR:", err.message);
@@ -323,8 +322,7 @@ router.get("/health-expert-activity-summary", async (req, res) => {
     firstCallAgg.forEach((item) => {
       const k = agentKey(item._id);
       if (k && activeAgentMap.has(k)) {
-        firstCallByKey[k] = item.connected || 0;
-        console.log(`Matched to active agent, stored ${item.connected}`);
+        firstCallByKey[k] = item.connected || 0; 
       } else {
         console.log(`NOT in activeAgentMap. Available keys:`, Array.from(activeAgentMap.keys()));
       }
@@ -401,7 +399,7 @@ router.get("/health-expert-activity-summary", async (req, res) => {
 
 
     cacheSet(cacheKey, response);
-    return res.json(response);
+    return res.json(response); 
   } catch (err) {
     console.error("activity-summary ERROR:", err.message);
     console.error(err.stack);

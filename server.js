@@ -67,6 +67,8 @@ const financeRoutes = require("./routes/financeRoutes");
 const razorpaySettlementRoutes = require("./PaymentGateway/razorpaySettlements");
 const GokwikSettlementRoutes = require("./PaymentGateway/easebuzz");
 const phonepeFinance = require("./PaymentGateway/phonepeFinance");
+const Cashfree = require("./PaymentGateway/cashfree");
+ 
 const Bluedart = require("./PaymentGateway/bluedart");
 const Delhivery = require("./PaymentGateway/delhivery");
 const DTDC = require("./PaymentGateway/DTDC");
@@ -611,6 +613,7 @@ app.use("/api/razorpay", razorpaySettlementRoutes);
 app.use("/api/easebuzz", GokwikSettlementRoutes);
 
 app.use("/api/phonepe", phonepeFinance);
+app.use("/api/cashfree", Cashfree); 
 
 app.use("/api/bluedart", Bluedart);
 
@@ -2339,7 +2342,73 @@ app.get('/api/consultation-history', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+app.post('/api/leads/:id/first-call-connected', async (req, res) => {
+  try {
+    const { id } = req.params;
  
-httpServer.listen(PORT, () => {
+    const lead = await Lead.findById(id);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+ 
+    // Only allow marking once
+    if (lead.firstCallConnected) {
+      return res.status(400).json({
+        message: "First call already marked as connected",
+        firstCallConnectedAt: lead.firstCallConnectedAt
+      });
+    }
+ 
+    lead.firstCallConnected = true;
+    lead.firstCallConnectedAt = new Date();
+ 
+    await lead.save();
+ 
+    res.status(200).json({
+      message: "First call marked as connected successfully",
+      lead: {
+        firstCallConnected: lead.firstCallConnected,
+        firstCallConnectedAt: lead.firstCallConnectedAt
+      }
+    });
+  } catch (err) {
+    console.error("First Call Connected Error:", err);
+    res.status(500).json({ message: "Internal server error", error: err.message });
+  }
+});
+
+app.get('/api/leads/first-call-stats', async (req, res) => {
+  try {
+    const { healthExpertAssigned } = req.query;
+ 
+    if (!healthExpertAssigned) {
+      return res.status(400).json({ message: "Health expert name required" });
+    }
+ 
+    const total = await Lead.countDocuments({
+      healthExpertAssigned: { $in: [healthExpertAssigned, `${healthExpertAssigned} (${req.query.email})`] },
+      salesStatus: 'Sales Done'
+    });
+ 
+    const connected = await Lead.countDocuments({
+      healthExpertAssigned: { $in: [healthExpertAssigned, `${healthExpertAssigned} (${req.query.email})`] },
+      salesStatus: 'Sales Done',
+      firstCallConnected: true
+    });
+ 
+    res.status(200).json({
+      total,
+      connected,
+      notConnected: total - connected, 
+      percentage: total > 0 ? Math.round((connected / total) * 100) : 0
+    });
+  } catch (error) {
+    console.error("Error fetching first call stats:", error);
+    res.status(500).json({ message: "Error fetching stats", error: error.message });
+  }
+});
+ 
+httpServer.listen(PORT, () => { 
   console.log(`Server running on port ${PORT}`);
 });

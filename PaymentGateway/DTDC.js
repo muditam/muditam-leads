@@ -57,11 +57,6 @@ function parseDate(value) {
   return null;
 }
 
-function parseDateParam(v) {
-  const d = parseDate(v);
-  return d && !Number.isNaN(d.getTime()) ? d : null;
-}
-
 function detectSeparator(filePath) {
   return new Promise((resolve, reject) => {
     const rs = fs.createReadStream(filePath, { encoding: "utf8" });
@@ -138,6 +133,112 @@ function makeBatchId() {
   return `${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
 }
 
+// ✅ shared query builder (used in /data and /export)
+function buildQueryFromReq(qs = {}) {
+  const {
+    q,
+    status,
+    uploadMin,
+    uploadMax,
+    bookingMin,
+    bookingMax,
+    deliveryMin,
+    deliveryMax,
+    remitMin,
+    remitMax,
+    codMin,
+    codMax,
+    remittedMin,
+    remittedMax,
+  } = qs;
+
+  const query = {};
+
+  // search (CN / CustomerRef / UTR / Status)
+  if (q && String(q).trim()) {
+    const rx = new RegExp(escapeRegex(String(q).trim()), "i");
+    query.$or = [
+      { cnNumber: rx },
+      { customerReferenceNumber: rx },
+      { utrNumber: rx },
+      { remittanceStatus: rx },
+    ];
+  }
+
+  // status contains
+  if (status && String(status).trim()) {
+    query.remittanceStatus = new RegExp(escapeRegex(String(status).trim()), "i");
+  }
+
+  // helper to apply IST day range if input is date-only (YYYY-MM-DD or DD/MM/YYYY)
+  const applyDateRange = (field, minV, maxV) => {
+    if (!minV && !maxV) return;
+
+    query[field] = {};
+
+    const minYmd = parseDateOnlyToYMD(minV);
+    const maxYmd = parseDateOnlyToYMD(maxV);
+
+    if (minYmd) query[field].$gte = istDayRange(minYmd).start;
+    else if (minV) {
+      const d = parseDate(minV);
+      if (d) query[field].$gte = d;
+    }
+
+    if (maxYmd) query[field].$lte = istDayRange(maxYmd).end;
+    else if (maxV) {
+      const d = parseDate(maxV);
+      if (d) query[field].$lte = d;
+    }
+
+    if (!Object.keys(query[field]).length) delete query[field];
+  };
+
+  applyDateRange("uploadDate", uploadMin, uploadMax);
+  applyDateRange("bookingDate", bookingMin, bookingMax);
+  applyDateRange("deliveryDate", deliveryMin, deliveryMax);
+  applyDateRange("remittanceDate", remitMin, remitMax);
+
+  // COD range
+  const cMin = codMin !== undefined && codMin !== "" ? Number(codMin) : null;
+  const cMax = codMax !== undefined && codMax !== "" ? Number(codMax) : null;
+  if (cMin !== null || cMax !== null) {
+    query.codAmount = {};
+    if (cMin !== null && !Number.isNaN(cMin)) query.codAmount.$gte = cMin;
+    if (cMax !== null && !Number.isNaN(cMax)) query.codAmount.$lte = cMax;
+    if (!Object.keys(query.codAmount).length) delete query.codAmount;
+  }
+
+  // Remitted range
+  const rmMin = remittedMin !== undefined && remittedMin !== "" ? Number(remittedMin) : null;
+  const rmMax = remittedMax !== undefined && remittedMax !== "" ? Number(remittedMax) : null;
+  if (rmMin !== null || rmMax !== null) {
+    query.remittedAmount = {};
+    if (rmMin !== null && !Number.isNaN(rmMin)) query.remittedAmount.$gte = rmMin;
+    if (rmMax !== null && !Number.isNaN(rmMax)) query.remittedAmount.$lte = rmMax;
+    if (!Object.keys(query.remittedAmount).length) delete query.remittedAmount;
+  }
+
+  return query;
+}
+
+function csvEscape(v) {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function fmtDateYMD(d) {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "";
+  const yyyy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // ✅ GET /sample (download sample CSV)
 router.get("/sample", (req, res) => {
   const header = [
@@ -159,7 +260,7 @@ router.get("/sample", (req, res) => {
     "18/02/2026",
     "999",
     "999",
-    "REMitted",
+    "Remitted",
     "UTR12345",
     "19/02/2026",
   ].join(",");
@@ -207,7 +308,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
       return {
         uploadDate: new Date(),
-        uploadBatchId: batchId, // ✅
+        uploadBatchId: batchId,
 
         cnNumber: cnNumber || "",
         customerReferenceNumber: customerReferenceNumber || "",
@@ -251,16 +352,19 @@ router.delete("/delete-last-upload", async (req, res) => {
       return res.json({ ok: true, deleted: r.deletedCount || 0, batchId: latest.uploadBatchId });
     }
 
-    // fallback (old rows without batch id)
     const r = await DtdcSettlement.deleteOne({ _id: latest._id });
-    return res.json({ ok: true, deleted: r.deletedCount || 0, message: "Deleted latest row (no batchId found)" });
+    return res.json({
+      ok: true,
+      deleted: r.deletedCount || 0,
+      message: "Deleted latest row (no batchId found)",
+    });
   } catch (err) {
     console.error("DTDC delete-last-upload error:", err);
     return res.status(500).json({ error: "Failed to delete last upload" });
   }
 });
 
-// ------------------- GET /data (with filters) -------------------
+// ------------------- GET /data (with filters + total sum of remitted) -------------------
 router.get("/data", async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
@@ -271,109 +375,22 @@ router.get("/data", async (req, res) => {
   const skip = (page - 1) * limit;
 
   try {
-    const {
-      q,
-      uploadMin,
-      uploadMax,
-      bookingMin,
-      bookingMax,
-      deliveryMin,
-      deliveryMax,
-      remitMin,
-      remitMax,
-      codMin,
-      codMax,
-      remittedMin,
-      remittedMax,
-      status,
-    } = req.query;
+    const query = buildQueryFromReq(req.query);
 
-    const query = {};
-
-    // search (CN / CustomerRef / UTR / Status)
-    if (q && String(q).trim()) {
-      const rx = new RegExp(escapeRegex(String(q).trim()), "i");
-      query.$or = [
-        { cnNumber: rx },
-        { customerReferenceNumber: rx },
-        { utrNumber: rx },
-        { remittanceStatus: rx },
-      ];
-    }
-
-    // status contains
-    if (status && String(status).trim()) {
-      query.remittanceStatus = new RegExp(escapeRegex(String(status).trim()), "i");
-    }
-
-    // upload date range
-    if (uploadMin || uploadMax) {
-      query.uploadDate = {};
-      const dMin = parseDateParam(uploadMin);
-      const dMax = parseDateParam(uploadMax);
-      if (dMin) query.uploadDate.$gte = dMin;
-      if (dMax) query.uploadDate.$lte = dMax;
-      if (!Object.keys(query.uploadDate).length) delete query.uploadDate;
-    }
-
-    // booking date range
-    if (bookingMin || bookingMax) {
-      query.bookingDate = {};
-      const bMin = parseDateParam(bookingMin);
-      const bMax = parseDateParam(bookingMax);
-      if (bMin) query.bookingDate.$gte = bMin;
-      if (bMax) query.bookingDate.$lte = bMax;
-      if (!Object.keys(query.bookingDate).length) delete query.bookingDate;
-    }
-
-    // delivery date range
-    if (deliveryMin || deliveryMax) {
-      query.deliveryDate = {};
-      const dMin = parseDateParam(deliveryMin);
-      const dMax = parseDateParam(deliveryMax);
-      if (dMin) query.deliveryDate.$gte = dMin;
-      if (dMax) query.deliveryDate.$lte = dMax;
-      if (!Object.keys(query.deliveryDate).length) delete query.deliveryDate;
-    }
-
-    // remittance date range
-    if (remitMin || remitMax) {
-      query.remittanceDate = {};
-      const rMin = parseDateParam(remitMin);
-      const rMax = parseDateParam(remitMax);
-      if (rMin) query.remittanceDate.$gte = rMin;
-      if (rMax) query.remittanceDate.$lte = rMax;
-      if (!Object.keys(query.remittanceDate).length) delete query.remittanceDate;
-    }
-
-    // COD range
-    const cMin = codMin !== undefined && codMin !== "" ? Number(codMin) : null;
-    const cMax = codMax !== undefined && codMax !== "" ? Number(codMax) : null;
-    if (cMin !== null || cMax !== null) {
-      query.codAmount = {};
-      if (cMin !== null && !Number.isNaN(cMin)) query.codAmount.$gte = cMin;
-      if (cMax !== null && !Number.isNaN(cMax)) query.codAmount.$lte = cMax;
-      if (!Object.keys(query.codAmount).length) delete query.codAmount;
-    }
-
-    // Remitted range
-    const rmMin = remittedMin !== undefined && remittedMin !== "" ? Number(remittedMin) : null;
-    const rmMax = remittedMax !== undefined && remittedMax !== "" ? Number(remittedMax) : null;
-    if (rmMin !== null || rmMax !== null) {
-      query.remittedAmount = {};
-      if (rmMin !== null && !Number.isNaN(rmMin)) query.remittedAmount.$gte = rmMin;
-      if (rmMax !== null && !Number.isNaN(rmMax)) query.remittedAmount.$lte = rmMax;
-      if (!Object.keys(query.remittedAmount).length) delete query.remittedAmount;
-    }
-
-    const [totalCount, data] = await Promise.all([
+    const [totalCount, data, sumAgg] = await Promise.all([
       DtdcSettlement.countDocuments(query),
       DtdcSettlement.find(query)
         .sort({ uploadDate: -1, createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
+      DtdcSettlement.aggregate([
+        { $match: query },
+        { $group: { _id: null, total: { $sum: "$remittedAmount" } } },
+      ]),
     ]);
+
+    const totalRemittedAmount = sumAgg?.[0]?.total || 0;
 
     return res.json({
       data,
@@ -381,10 +398,67 @@ router.get("/data", async (req, res) => {
       limit,
       totalCount,
       pages: Math.ceil(totalCount / limit),
+      totalRemittedAmount, // ✅ NEW
     });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to fetch DTDC data" });
+  }
+});
+
+// ------------------- GET /export (all / filtered) -------------------
+router.get("/export", async (req, res) => {
+  try {
+    const query = buildQueryFromReq(req.query);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="dtdc_export.csv"');
+
+    // header
+    res.write(
+      [
+        "Upload Date",
+        "CN Number",
+        "Customer Reference Number",
+        "Booking Date",
+        "Delivery Date",
+        "COD Amount",
+        "Remitted Amount",
+        "Remittance Status",
+        "UTR Number",
+        "Remittance Date",
+      ].join(",") + "\n"
+    );
+
+    const cursor = DtdcSettlement.find(query)
+      .sort({ uploadDate: -1, createdAt: -1 })
+      .lean()
+      .cursor();
+
+    for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
+      const line =
+        [
+          csvEscape(fmtDateYMD(doc.uploadDate)),
+          csvEscape(doc.cnNumber || ""),
+          csvEscape(doc.customerReferenceNumber || ""),
+          csvEscape(fmtDateYMD(doc.bookingDate)),
+          csvEscape(fmtDateYMD(doc.deliveryDate)),
+          csvEscape(doc.codAmount ?? 0),
+          csvEscape(doc.remittedAmount ?? 0),
+          csvEscape(doc.remittanceStatus || ""),
+          csvEscape(doc.utrNumber || ""),
+          csvEscape(fmtDateYMD(doc.remittanceDate)),
+        ].join(",") + "\n";
+
+      if (!res.write(line)) {
+        await new Promise((resolve) => res.once("drain", resolve));
+      }
+    }
+
+    res.end();
+  } catch (err) {
+    console.error("DTDC export error:", err);
+    return res.status(500).json({ error: "Failed to export DTDC data" });
   }
 });
 
@@ -436,6 +510,6 @@ router.delete("/delete-upload-date", async (req, res) => {
     console.error("DTDC delete-upload-date error:", err);
     return res.status(500).json({ error: "Failed to delete DTDC records" });
   }
-}); 
+});
 
 module.exports = router;

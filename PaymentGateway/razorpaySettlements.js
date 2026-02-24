@@ -8,8 +8,12 @@ const RazorpaySettlement = require("../models/RazorpaySettlement");
 
 const router = express.Router();
 
+// ✅ ensure upload dir exists
+const uploadDir = path.join(__dirname, "..", "uploads", "razorpay");
+fs.mkdirSync(uploadDir, { recursive: true });
+
 const upload = multer({
-  dest: path.join(__dirname, "..", "uploads", "razorpay"),
+  dest: uploadDir,
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
@@ -34,13 +38,16 @@ function toNumber(v) {
   return Number.isNaN(n) ? 0 : n;
 }
 
+function safeUnlink(p) {
+  fs.unlink(p, () => {});
+}
+
 // For filters: accept YYYY-MM-DD (from input[type=date]) and coerce to day start/end
 function parseDateParam(v, endOfDay = false) {
   if (!v) return null;
   const s = String(v).trim();
   if (!s) return null;
 
-  // handle YYYY-MM-DD
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) {
     const yyyy = parseInt(m[1], 10);
@@ -52,7 +59,6 @@ function parseDateParam(v, endOfDay = false) {
     return d;
   }
 
-  // fallback
   const d2 = new Date(s);
   if (Number.isNaN(d2.getTime())) return null;
   if (endOfDay) d2.setHours(23, 59, 59, 999);
@@ -60,16 +66,115 @@ function parseDateParam(v, endOfDay = false) {
   return d2;
 }
 
-// Razorpay CSV dates are often ISO strings in "Created At"/"Settled At".
-// We keep them as strings in DB, but for filtering we parse these strings in query using regex (best effort)
-// If your CSV is always ISO (YYYY-MM-DD...), we can filter with prefix match.
-function buildIsoPrefixRange(fieldValue, min, max) {
-  // For string dates like "2025-11-13T10:00:00Z"
-  // min/max from YYYY-MM-DD
-  const out = {};
-  if (min) out.$gte = String(min); // not used
-  if (max) out.$lte = String(max); // not used
-  return out;
+function csvEscape(v) {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function buildQueryFromReq(qs = {}) {
+  const {
+    q,
+    uploadMin,
+    uploadMax,
+    createdMin,
+    createdMax,
+    settledMin,
+    settledMax,
+    amountMin,
+    amountMax,
+    feeMin,
+    feeMax,
+    taxMin,
+    taxMax,
+    paymentMethod,
+    cardType,
+    currency,
+  } = qs;
+
+  const query = {};
+
+  // text search
+  if (q && String(q).trim()) {
+    const rx = new RegExp(escapeRegex(String(q).trim()), "i");
+    query.$or = [
+      { entity_id: rx },
+      { order_id: rx },
+      { settlement_id: rx },
+      { settlement_utr: rx },
+      { issuer_name: rx },
+      { payment_method: rx },
+      { transaction_entity: rx },
+    ];
+  }
+
+  // upload date range
+  if (uploadMin || uploadMax) {
+    query.uploadDate = {};
+    const dMin = parseDateParam(uploadMin, false);
+    const dMax = parseDateParam(uploadMax, true);
+    if (dMin) query.uploadDate.$gte = dMin;
+    if (dMax) query.uploadDate.$lte = dMax;
+    if (!Object.keys(query.uploadDate).length) delete query.uploadDate;
+  }
+
+  // created_at range (stored as string, prefix match)
+  if (createdMin || createdMax) {
+    const parts = [];
+    if (createdMin)
+      parts.push({
+        entity_created_at: new RegExp(`^${escapeRegex(createdMin)}`, "i"),
+      });
+    if (createdMax)
+      parts.push({
+        entity_created_at: new RegExp(`^${escapeRegex(createdMax)}`, "i"),
+      });
+
+    if (parts.length === 1) Object.assign(query, parts[0]);
+    if (parts.length === 2) query.$and = (query.$and || []).concat(parts);
+  }
+
+  // settled_at range (stored as string, prefix match)
+  if (settledMin || settledMax) {
+    const parts = [];
+    if (settledMin)
+      parts.push({ settled_at: new RegExp(`^${escapeRegex(settledMin)}`, "i") });
+    if (settledMax)
+      parts.push({ settled_at: new RegExp(`^${escapeRegex(settledMax)}`, "i") });
+
+    if (parts.length === 1) Object.assign(query, parts[0]);
+    if (parts.length === 2) query.$and = (query.$and || []).concat(parts);
+  }
+
+  // numeric ranges helper
+  const numRange = (field, minV, maxV) => {
+    const mn = minV !== undefined && minV !== "" ? Number(minV) : null;
+    const mx = maxV !== undefined && maxV !== "" ? Number(maxV) : null;
+    if (mn === null && mx === null) return;
+
+    query[field] = {};
+    if (mn !== null && !Number.isNaN(mn)) query[field].$gte = mn;
+    if (mx !== null && !Number.isNaN(mx)) query[field].$lte = mx;
+    if (!Object.keys(query[field]).length) delete query[field];
+  };
+
+  numRange("amount", amountMin, amountMax);
+  numRange("fee", feeMin, feeMax);
+  numRange("tax", taxMin, taxMax);
+
+  // contains filters
+  if (paymentMethod && String(paymentMethod).trim()) {
+    query.payment_method = new RegExp(escapeRegex(String(paymentMethod).trim()), "i");
+  }
+  if (cardType && String(cardType).trim()) {
+    query.card_type = new RegExp(escapeRegex(String(cardType).trim()), "i");
+  }
+  if (currency && String(currency).trim()) {
+    query.currency = new RegExp(`^${escapeRegex(String(currency).trim())}$`, "i");
+  }
+
+  return query;
 }
 
 // ===================== UPLOAD CSV =====================
@@ -93,14 +198,11 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       const mapped = {
         uploadDate: new Date(),
 
-        transaction_entity: pick(row, [
-          "Transaction Entity",
-          "Transaction entity",
-          "transaction_entity",
-        ]) || "",
+        transaction_entity:
+          pick(row, ["Transaction Entity", "Transaction entity", "transaction_entity"]) || "",
         entity_id: pick(row, ["Entity ID", "Entity Id", "entity_id"]) || "",
 
-        amount: toNumber(pick(row, ["Amount", "amount"])),
+        amount: toNumber(pick(row, ["Amount", "amount"])), // ✅ Amount is numeric
         currency: pick(row, ["Currency", "currency"]) || "",
 
         fee: toNumber(pick(row, ["Fee", "fee"])),
@@ -113,8 +215,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         card_type: pick(row, ["Card Type", "card_type"]) || "",
         issuer_name: pick(row, ["Issuer Name", "issuer_name"]) || "",
 
-        entity_created_at:
-          pick(row, ["Created At", "Created at", "entity_created_at"]) || "",
+        entity_created_at: pick(row, ["Created At", "Created at", "entity_created_at"]) || "",
 
         order_id: pick(row, ["Order ID", "Order Id", "order_id"]) || "",
 
@@ -134,27 +235,27 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     .on("end", async () => {
       try {
         if (!results.length) {
-          fs.unlink(filePath, () => {});
+          safeUnlink(filePath);
           return res.status(400).json({ error: "CSV seems empty or invalid" });
         }
 
         await RazorpaySettlement.insertMany(results, { ordered: false });
-        fs.unlink(filePath, () => {});
+        safeUnlink(filePath);
         return res.json({ message: "Upload successful", inserted: results.length });
       } catch (error) {
         console.error("DB Save Error:", error);
-        fs.unlink(filePath, () => {});
+        safeUnlink(filePath);
         return res.status(500).json({ error: "Failed to save data" });
       }
     })
     .on("error", (err) => {
       console.error("CSV Parse Error:", err);
-      fs.unlink(filePath, () => {});
+      safeUnlink(filePath);
       return res.status(500).json({ error: "Failed to parse CSV" });
     });
 });
 
-// ===================== GET PAGINATED DATA + FILTERS =====================
+// ===================== GET PAGINATED DATA + FILTERS + totalAmount =====================
 router.get("/data", async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
@@ -164,112 +265,104 @@ router.get("/data", async (req, res) => {
   const skip = (page - 1) * limit;
 
   try {
-    const {
-      q,
-      uploadMin,
-      uploadMax,
-      createdMin,
-      createdMax,
-      settledMin,
-      settledMax,
-      amountMin,
-      amountMax,
-      feeMin,
-      feeMax,
-      taxMin,
-      taxMax,
-      paymentMethod,
-      cardType,
-      currency,
-    } = req.query;
+    const query = buildQueryFromReq(req.query);
 
-    const query = {};
-
-    // text search
-    if (q && String(q).trim()) {
-      const rx = new RegExp(escapeRegex(String(q).trim()), "i");
-      query.$or = [
-        { entity_id: rx },
-        { order_id: rx },
-        { settlement_id: rx },
-        { settlement_utr: rx },
-        { issuer_name: rx },
-        { payment_method: rx },
-        { transaction_entity: rx },
-      ];
-    }
-
-    // upload date range
-    if (uploadMin || uploadMax) {
-      query.uploadDate = {};
-      const dMin = parseDateParam(uploadMin, false);
-      const dMax = parseDateParam(uploadMax, true);
-      if (dMin) query.uploadDate.$gte = dMin;
-      if (dMax) query.uploadDate.$lte = dMax;
-      if (!Object.keys(query.uploadDate).length) delete query.uploadDate;
-    }
-
-    // created_at range (stored as string, so use ISO prefix matching if YYYY-MM-DD)
-    // if your values are ISO, prefix filter is reliable.
-    if (createdMin || createdMax) {
-      const parts = [];
-      if (createdMin) parts.push({ entity_created_at: new RegExp(`^${escapeRegex(createdMin)}`, "i") });
-      if (createdMax) parts.push({ entity_created_at: new RegExp(`^${escapeRegex(createdMax)}`, "i") });
-      // NOTE: This isn't true range; it's "starts with date".
-      // If you want true range, store entity_created_at as Date in schema.
-      if (parts.length === 1) Object.assign(query, parts[0]);
-      if (parts.length === 2) query.$and = (query.$and || []).concat(parts);
-    }
-
-    // settled_at range (stored as string, same approach)
-    if (settledMin || settledMax) {
-      const parts = [];
-      if (settledMin) parts.push({ settled_at: new RegExp(`^${escapeRegex(settledMin)}`, "i") });
-      if (settledMax) parts.push({ settled_at: new RegExp(`^${escapeRegex(settledMax)}`, "i") });
-      if (parts.length === 1) Object.assign(query, parts[0]);
-      if (parts.length === 2) query.$and = (query.$and || []).concat(parts);
-    }
-
-    // numeric ranges
-    const numRange = (field, minV, maxV) => {
-      const mn = minV !== undefined && minV !== "" ? Number(minV) : null;
-      const mx = maxV !== undefined && maxV !== "" ? Number(maxV) : null;
-      if (mn === null && mx === null) return;
-      query[field] = {};
-      if (mn !== null && !Number.isNaN(mn)) query[field].$gte = mn;
-      if (mx !== null && !Number.isNaN(mx)) query[field].$lte = mx;
-      if (!Object.keys(query[field]).length) delete query[field];
-    };
-
-    numRange("amount", amountMin, amountMax);
-    numRange("fee", feeMin, feeMax);
-    numRange("tax", taxMin, taxMax);
-
-    // contains filters
-    if (paymentMethod && String(paymentMethod).trim()) {
-      query.payment_method = new RegExp(escapeRegex(String(paymentMethod).trim()), "i");
-    }
-    if (cardType && String(cardType).trim()) {
-      query.card_type = new RegExp(escapeRegex(String(cardType).trim()), "i");
-    }
-    if (currency && String(currency).trim()) {
-      query.currency = new RegExp(`^${escapeRegex(String(currency).trim())}$`, "i");
-    }
-
-    const [data, total] = await Promise.all([
-      RazorpaySettlement.find(query).skip(skip).limit(limit).sort({ uploadDate: -1, createdAt: -1 }).lean(),
+    const [data, total, sumAgg] = await Promise.all([
+      RazorpaySettlement.find(query)
+        .skip(skip)
+        .limit(limit)
+        .sort({ uploadDate: -1, createdAt: -1 })
+        .lean(),
       RazorpaySettlement.countDocuments(query),
+      RazorpaySettlement.aggregate([
+        { $match: query },
+        { $group: { _id: null, total: { $sum: "$amount" } } }, // ✅ SUM(amount)
+      ]),
     ]);
+
+    const totalAmount = sumAgg?.[0]?.total || 0;
 
     return res.json({
       data,
       page,
       totalPages: Math.ceil(total / limit),
       totalRecords: total,
+      totalAmount, // ✅ NEW
     });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to fetch records" });
+  }
+});
+
+// ===================== EXPORT CSV (ALL or FILTERED) =====================
+router.get("/export", async (req, res) => {
+  try {
+    const query = buildQueryFromReq(req.query);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="razorpay_export.csv"');
+
+    const header = [
+      "Upload Date",
+      "Transaction Entity",
+      "Entity ID",
+      "Amount",
+      "Currency",
+      "Fee",
+      "Tax",
+      "Debit",
+      "Credit",
+      "Payment Method",
+      "Card Type",
+      "Issuer Name",
+      "Created At",
+      "Order ID",
+      "Settlement ID",
+      "Settlement UTR",
+      "Settled At",
+      "Settled By",
+    ].join(",");
+
+    res.write(header + "\n");
+
+    const cursor = RazorpaySettlement.find(query)
+      .sort({ uploadDate: -1, createdAt: -1 })
+      .lean()
+      .cursor();
+
+    for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
+      const line =
+        [
+          csvEscape(doc.uploadDate ? new Date(doc.uploadDate).toISOString() : ""),
+          csvEscape(doc.transaction_entity || ""),
+          csvEscape(doc.entity_id || ""),
+          csvEscape(doc.amount ?? 0),
+          csvEscape(doc.currency || ""),
+          csvEscape(doc.fee ?? 0),
+          csvEscape(doc.tax ?? 0),
+          csvEscape(doc.debit ?? 0),
+          csvEscape(doc.credit ?? 0),
+          csvEscape(doc.payment_method || ""),
+          csvEscape(doc.card_type || ""),
+          csvEscape(doc.issuer_name || ""),
+          csvEscape(doc.entity_created_at || ""),
+          csvEscape(doc.order_id || ""),
+          csvEscape(doc.settlement_id || ""),
+          csvEscape(doc.settlement_utr || ""),
+          csvEscape(doc.settled_at || ""),
+          csvEscape(doc.settled_by || ""),
+        ].join(",") + "\n";
+
+      if (!res.write(line)) {
+        await new Promise((resolve) => res.once("drain", resolve));
+      }
+    }
+
+    res.end();
+  } catch (err) {
+    console.error("Razorpay export error:", err);
+    return res.status(500).json({ error: "Failed to export Razorpay data" });
   }
 });
 
