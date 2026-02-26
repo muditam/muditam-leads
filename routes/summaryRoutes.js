@@ -497,22 +497,14 @@ router.get("/cod-prepaid-summary", async (req, res) => {
     const { startDate, endDate, agentAssignedName } = req.query;
 
     if (!startDate || !endDate) {
-      return res.status(400).json({
-        message: "startDate and endDate are required (YYYY-MM-DD)",
-      });
+      return res.status(400).json({ message: "startDate and endDate are required" });
     }
 
-    // Convert to full-day date range
     const sDate = new Date(startDate);
     const eDate = new Date(endDate);
     eDate.setHours(23, 59, 59, 999);
 
-    // 1️⃣ Get Active Sales Agents
-    const salesAgents = await Employee.find(
-      { role: "Sales Agent", status: "active" },
-      "fullName"
-    );
-
+    const salesAgents = await Employee.find({ role: "Sales Agent", status: "active" }, "fullName");
     const agentNames = salesAgents.map((a) => a.fullName);
 
     let agentFilter = agentNames;
@@ -520,87 +512,62 @@ router.get("/cod-prepaid-summary", async (req, res) => {
       agentFilter = [agentAssignedName];
     }
 
-    // ==========================================================
-    // 2️⃣ GET ORDERS FROM MYORDER
-    // ==========================================================
+    // 2️⃣ GET ORDERS FROM MYORDER (Checking partialPayment field)
     const myOrderData = await MyOrder.find(
-      {
-        orderDate: { $gte: sDate, $lte: eDate },
-        agentName: { $in: agentFilter }
-      },
-      "agentName paymentMethod"
+      { orderDate: { $gte: sDate, $lte: eDate }, agentName: { $in: agentFilter } },
+      "agentName paymentMethod partialPayment"
     ).lean();
 
-    // ==========================================================
     // 3️⃣ GET ORDERS FROM LEADS (Sales Done only)
-    // ==========================================================
     const leadData = await Lead.find(
-      {
-        lastOrderDate: { $gte: startDate, $lte: endDate },
-        agentAssigned: { $in: agentFilter },
-        salesStatus: "Sales Done"
-      },
-      "agentAssigned modeOfPayment"
+      { lastOrderDate: { $gte: startDate, $lte: endDate }, agentAssigned: { $in: agentFilter }, salesStatus: "Sales Done" },
+      "agentAssigned modeOfPayment partialPayment"
     ).lean();
 
-    // ==========================================================
-    // 4️⃣ Combine Both Sources
-    // ==========================================================
     const combined = [];
 
-    // MyOrder mapped records
     myOrderData.forEach((o) => {
       combined.push({
         agentName: o.agentName,
-        method: o.paymentMethod?.toUpperCase?.() || "",
+        method: (o.paymentMethod || "").toUpperCase(),
+        isPartial: Number(o.partialPayment || 0) > 0 // Logic for Partial
       });
     });
 
-    // Lead mapped records
     leadData.forEach((l) => {
       combined.push({
         agentName: l.agentAssigned,
-        method: l.modeOfPayment?.toUpperCase?.() || "",
+        method: (l.modeOfPayment || "").toUpperCase(),
+        isPartial: Number(l.partialPayment || 0) > 0 // Logic for Partial
       });
     });
 
-    // ==========================================================
-    // 5️⃣ Build per-agent stats
-    // ==========================================================
-    const results = [];
-
-    agentFilter.forEach((agent) => {
+    const results = agentFilter.map((agent) => {
       const rows = combined.filter((c) => c.agentName === agent);
-
       const totalOrders = rows.length;
-      const codOrders = rows.filter((r) => r.method === "COD").length;
-      const prepaidOrders = totalOrders - codOrders;
+      
+      // Categorization Priority: Partial > COD > Prepaid
+      const partialOrders = rows.filter(r => r.isPartial).length;
+      const codOrders = rows.filter(r => !r.isPartial && r.method === "COD").length;
+      const prepaidOrders = totalOrders - (partialOrders + codOrders);
 
-      const codPercentage = totalOrders > 0 
-        ? Number(((codOrders / totalOrders) * 100).toFixed(2))
-        : 0;
+      const getPct = (val) => (totalOrders > 0 ? Number(((val / totalOrders) * 100).toFixed(2)) : 0);
 
-      const prepaidPercentage = totalOrders > 0 
-        ? Number(((prepaidOrders / totalOrders) * 100).toFixed(2))
-        : 0;
-
-      results.push({
+      return {
         agentName: agent,
         totalOrders,
         codOrders,
         prepaidOrders,
-        codPercentage,
-        prepaidPercentage,
-      });
+        partialOrders, // New
+        codPercentage: getPct(codOrders),
+        prepaidPercentage: getPct(prepaidOrders),
+        partialPercentage: getPct(partialOrders), // New
+      };
     });
 
     res.json(results);
   } catch (err) {
-    console.error("Error fetching COD vs Prepaid summary:", err);
-    res.status(500).json({
-      message: "Error fetching COD vs Prepaid summary",
-      error: err.message,
-    });
+    res.status(500).json({ message: "Error", error: err.message });
   }
 });
 

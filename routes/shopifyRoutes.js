@@ -248,7 +248,7 @@ router.get("/order-details", async (req, res) => {
       // ✅ NEW fields for Partial Paid UI
       paymentMode,
       transactionId: txnIdFromNote,
-      partialPaidAmount: partialPaidFromNote,
+      partialPaidAmount: partialPaidFromNote ? Math.round(Number(partialPaidFromNote)) : "",
       remainingCODAmount: remainingFromNote,
     };
 

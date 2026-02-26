@@ -898,90 +898,43 @@ const normalizeDate = (d) => {
   date.setHours(0, 0, 0, 0);
   return date;
 };
-
+ 
 router.get("/api/retention-sales/cod-prepaid-summary", async (req, res) => {
   try {
     let { startDate, endDate } = req.query;
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({ message: "startDate & endDate are required" });
-    }
+    if (!startDate || !endDate) return res.status(400).json({ message: "Dates required" });
 
     const start = normalizeDate(startDate);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
-    // =========================
-    // 1) Fetch Active Retention Agents
-    // =========================
-    const retentionAgents = await Employee.find({
-      role: "Retention Agent",
-      status: "active",
-    }).select("fullName");
-
-    // Build agent list
-    const agentNames = retentionAgents.map((a) => a.fullName);
-
-    // Prepare empty summary
+    const agents = await Employee.find({ role: "Retention Agent", status: "active" }).select("fullName");
     const summary = {};
-    agentNames.forEach((name) => {
-      summary[name] = {
-        agentName: name,
-        totalOrders: 0,
-        codOrders: 0,
-        prepaidOrders: 0,
-      };
+    agents.forEach(a => {
+      summary[a.fullName] = { agentName: a.fullName, totalOrders: 0, codOrders: 0, prepaidOrders: 0, partialOrders: 0 };
     });
 
-    // =========================
-    // 2) Fetch MyOrder orders within date range
-    // =========================
-    const myOrders = await MyOrder.find({
-      agentName: { $in: agentNames },
-      orderDate: { $gte: start, $lte: end },
+    // 1. MyOrder Processing
+    const myOrders = await MyOrder.find({ agentName: { $in: Object.keys(summary) }, orderDate: { $gte: start, $lte: end } });
+    myOrders.forEach(o => {
+      summary[o.agentName].totalOrders++;
+      if (Number(o.partialPayment) > 0) summary[o.agentName].partialOrders++;
+      else if ((o.paymentMethod || "").toUpperCase() === "COD") summary[o.agentName].codOrders++;
+      else summary[o.agentName].prepaidOrders++;
     });
 
-    myOrders.forEach((order) => {
-      const agent = order.agentName;
-      if (!summary[agent]) return;
-
-      summary[agent].totalOrders += 1;
-
-      if ((order.paymentMethod || "").toUpperCase() === "COD") {
-        summary[agent].codOrders += 1;
-      } else {
-        summary[agent].prepaidOrders += 1;
-      }
+    // 2. RetentionSales Processing
+    const rs = await RetentionSales.find({ orderCreatedBy: { $in: Object.keys(summary) }, date: { $gte: startDate, $lte: endDate } });
+    rs.forEach(s => {
+      summary[s.orderCreatedBy].totalOrders++;
+      if (Number(s.partialPayment) > 0) summary[s.orderCreatedBy].partialOrders++;
+      else if ((s.modeOfPayment || "").toUpperCase() === "COD") summary[s.orderCreatedBy].codOrders++;
+      else summary[s.orderCreatedBy].prepaidOrders++;
     });
 
-    // =========================
-    // 3) Fetch RetentionSales within date range
-    // =========================
-    const retentionSales = await RetentionSales.find({
-      agentName: { $in: agentNames },
-      createdAt: { $gte: start, $lte: end },
-    });
-
-    retentionSales.forEach((rs) => {
-      const agent = rs.agentName;
-      if (!summary[agent]) return;
-
-      summary[agent].totalOrders += 1;
-
-      if ((rs.modeOfPayment || "").toUpperCase() === "COD") {
-        summary[agent].codOrders += 1;
-      } else {
-        summary[agent].prepaidOrders += 1;
-      }
-    });
-
-    // Convert summary object to array
-    const result = Object.values(summary);
-
-    res.json(result);
+    res.json(Object.values(summary));
   } catch (err) {
-    console.error("Error in COD vs Prepaid Summary:", err);
-    res.status(500).json({ message: "Internal server error", error: err.message });
+    res.status(500).json({ message: "Error", error: err.message });
   }
 });
 

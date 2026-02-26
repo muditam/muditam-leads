@@ -25,6 +25,7 @@ const WhatsAppMessageSchema = new mongoose.Schema(
       name: { type: String, default: "" },
       language: { type: String, default: "" },
       parameters: { type: [String], default: [] },
+      headerMedia: { type: Object, default: null }
     },
 
     status: String,

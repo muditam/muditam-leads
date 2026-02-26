@@ -782,6 +782,7 @@ router.post("/send-template", async (req, res) => {
               headerMedia: {
                 format: neededHeaderFmt,
                 id: String(headerMedia.id),
+                filename: String(headerMedia.filename || ""), 
               },
             }
           : {}),
@@ -790,7 +791,6 @@ router.post("/send-template", async (req, res) => {
       raw: r.data,
     });
 
-    // ✅ IMPORTANT: do NOT set windowExpiresAt here
     await WhatsAppConversation.findOneAndUpdate(
       { phone: new RegExp(`${p10}$`) },
       {
