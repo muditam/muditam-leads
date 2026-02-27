@@ -12,7 +12,7 @@ const router = express.Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // ✅ 5MB
+  limits: { fileSize: 15 * 1024 * 1024 }, // ✅ 15MB
 });
 
 // ----------------------
@@ -218,9 +218,9 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     const to = normalizeWaId(toRaw);
     const p10 = last10(to);
 
-    // multer already enforces 5MB, but keep this for safety
-    if (req.file.size > 5 * 1024 * 1024) {
-      return res.status(400).json({ message: "Max attachment size is 5MB" });
+    // multer already enforces 15MB, but keep this for safety
+    if (req.file.size > 15 * 1024 * 1024) {
+      return res.status(400).json({ message: "Max attachment size is 15MB" });
     }
 
     // ✅ Decide type reliably (mime + extension)

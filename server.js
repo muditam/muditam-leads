@@ -148,6 +148,7 @@ const whatsappAiRoutes = require("./whatsapp/whatsapp.ai.routes");
 const bankReconciliationKotak = require("./PaymentGateway/bankReconciliationKotak");
 
 const retentionActivityRoutes = require("./routes/retentionActivityRoutes");
+const scriptroutes = require("./routes/ScriptRoute");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -700,6 +701,7 @@ app.use("/api/whatsapp", whatsappMediaRoutes);
 app.use("/api/whatsapp", whatsappAiRoutes);
 app.use("/api/bank-reconciliation", bankReconciliationKotak);
 app.use("/api/retention-activity", retentionActivityRoutes);
+app.use("/api/scripts", scriptroutes); 
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -2408,7 +2410,7 @@ app.get('/api/leads/first-call-stats', async (req, res) => {
     res.status(500).json({ message: "Error fetching stats", error: error.message });
   }
 });
- 
+
 httpServer.listen(PORT, () => { 
   console.log(`Server running on port ${PORT}`);
 });
