@@ -8,71 +8,76 @@ const { v4: uuidv4 } = require("uuid");
 const Script   = require("../models/scriptSchema");
 
 
-
-
 const s3 = new AWS.S3({
-  accessKeyId:     process.env.WASABI_ACCESS_KEY,
-  secretAccessKey: process.env.WASABI_SECRET_KEY,
-  region:          process.env.WASABI_REGION,
-  endpoint:        process.env.WASABI_ENDPOINT, // e.g. https://s3.ap-southeast-1.wasabisys.com
+  accessKeyId:      process.env.WASABI_ACCESS_KEY,
+  secretAccessKey:  process.env.WASABI_SECRET_KEY,
+  region:           process.env.WASABI_REGION,
+  endpoint:         process.env.WASABI_ENDPOINT,
   s3ForcePathStyle: true,
 });
 
 
-// Multer: memory storage only — no temp files on disk
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB per file
+  limits: { fileSize: 500 * 1024 * 1024 },
 });
 
 
-
-
-
-
 const requireSession = (req, res, next) => {
-  // 1️⃣  Header wins — frontend always sends the current logged-in user
   try {
     const headerUser = req.headers["x-session-user"];
     if (headerUser) {
       const parsed = JSON.parse(headerUser);
-      // Accept as long as we have a fullName (email is optional)
       if (parsed?.fullName) {
-        req.sessionUser = parsed;   // request-scoped only, never touches req.session
+        req.sessionUser = parsed;
         return next();
       }
     }
   } catch (_) {}
-
-
-  // 2️⃣  Fallback: server-side session (for requests that don't send the header)
   if (req.session?.user?.fullName) {
     req.sessionUser = req.session.user;
     return next();
   }
-
-
   return res.status(401).json({ message: "Unauthorized" });
 };
 
 
-// Role is stored as "Manager" in DB — toLowerCase() handles any casing
 const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];
-const isManager = (role = "") => MANAGER_ROLES.includes(role.toLowerCase());
-
-
-// ── Full access = manager role  OR  hasTeam:true employee ──
-const hasFullAccess = (user = {}) =>
-  isManager(user.role) || user.hasTeam === true;
-
-
+const isManager     = (role = "") => MANAGER_ROLES.includes(role.toLowerCase());
+const hasFullAccess = (user = {}) => isManager(user.role) || user.hasTeam === true;
 
 
 // ─────────────────────────────────────────────────────────────
-// PRESIGN ROUTE — browser uploads directly to Wasabi
-// Heroku is only asked for a signed URL (takes <1s, no timeout risk)
+// 🗓️  DATE FILTER HELPER
+// Accepts:  ?dateField=cutDoneAt&dateFrom=2025-01-01&dateTo=2025-01-31
+// dateField can be any timestamp field on the Script document.
+// Both dateFrom and dateTo are OPTIONAL independently.
 // ─────────────────────────────────────────────────────────────
-// GET /api/scripts/presign?filename=myvideo.mp4&contentType=video/mp4
+function buildDateFilter(query) {
+  const { dateField, dateFrom, dateTo } = query;
+  if (!dateField || (!dateFrom && !dateTo)) return {};
+
+
+  const range = {};
+  if (dateFrom) {
+    // Start of the selected day  (00:00:00 UTC)
+    const d = new Date(dateFrom);
+    if (!isNaN(d)) range.$gte = new Date(d.toISOString().split("T")[0] + "T00:00:00.000Z");
+  }
+  if (dateTo) {
+    // End of the selected day (23:59:59.999 UTC)
+    const d = new Date(dateTo);
+    if (!isNaN(d)) range.$lte = new Date(d.toISOString().split("T")[0] + "T23:59:59.999Z");
+  }
+
+
+  if (!Object.keys(range).length) return {};
+  return { [dateField]: range };
+}
+
+
+
+
 router.get("/presign", requireSession, async (req, res) => {
   try {
     const { filename, contentType } = req.query;
@@ -84,18 +89,21 @@ router.get("/presign", requireSession, async (req, res) => {
     const key = `scripts/${uuidv4()}${ext}`;
 
 
-    // Heroku only generates this URL — it never touches the file bytes
+    // ✅  ACL removed from presign params — Wasabi rejects presigned PUTs
+    //     that include ACL in the signed params unless the bucket is
+    //     configured to allow ACL overrides.  Public access should be
+    //     handled by a bucket policy instead (cleaner & more reliable).
     const presignedUrl = s3.getSignedUrl("putObject", {
       Bucket:      process.env.WASABI_BUCKET,
       Key:         key,
       ContentType: contentType,
-      ACL:         "public-read",
-      Expires:     3600, // URL valid for 1 hour — enough for any file size
+      // ACL: "public-read"  ← REMOVED. Use bucket policy for public reads.
+      Expires:     3600,
     });
 
 
     const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
-    const finalUrl = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
+    const finalUrl  = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
 
 
     res.json({ presignedUrl, finalUrl, key });
@@ -104,8 +112,27 @@ router.get("/presign", requireSession, async (req, res) => {
     res.status(500).json({ message: "Could not generate upload URL", error: err.message });
   }
 });
+router.get("/presign-download", requireSession, async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) {
+      return res.status(400).json({ message: "Key required" });
+    }
 
 
+    const url = s3.getSignedUrl("getObject", {
+      Bucket: process.env.WASABI_BUCKET,
+      Key: key,
+      Expires: 60 * 5, // 5 minutes
+    });
+
+
+    res.json({ url });
+  } catch (err) {
+    console.error("Presign download error:", err);
+    res.status(500).json({ message: "Could not generate download URL" });
+  }
+});
 
 
 router.post(
@@ -124,27 +151,20 @@ router.post(
           const key = `scripts/${uuidv4()}${ext}`;
 
 
-          await s3
-            .putObject({
-              Bucket:      process.env.WASABI_BUCKET,
-              Key:         key,
-              Body:        file.buffer,
-              ContentType: file.mimetype,
-              ACL:         "public-read",
-            })
-            .promise();
+          await s3.putObject({
+            Bucket:      process.env.WASABI_BUCKET,
+            Key:         key,
+            Body:        file.buffer,
+            ContentType: file.mimetype,
+            ACL:         "public-read",
+          }).promise();
 
 
-          // Build public URL from endpoint + bucket + key
           const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
           const url = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
-
-
           return { originalName: file.originalname, url, key };
         })
       );
-
-
       res.json({ urls: results });
     } catch (err) {
       console.error("Wasabi upload error:", err);
@@ -154,18 +174,15 @@ router.post(
 );
 
 
-// ─────────────────────────────────────────────────────────────
-// SCRIPT ROUTES
-// ─────────────────────────────────────────────────────────────
 
 
-/** GET /api/scripts  — list with optional filters */
 router.get("/", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
     const { stage, scriptType, scriptStatus } = req.query;
 
 
+    // ── access filter ──
     let baseFilter = {};
     if (!hasFullAccess(user)) {
       if (!user.fullName) return res.json({ scripts: [], user: {} });
@@ -173,18 +190,30 @@ router.get("/", requireSession, async (req, res) => {
     }
 
 
+    // ── stage / type / status extras ──
     const extras = {};
     if (stage)        extras.stage        = stage;
     if (scriptType)   extras.scriptType   = scriptType;
     if (scriptStatus) extras.scriptStatus = scriptStatus;
 
 
-    let query = baseFilter;
-    if (Object.keys(extras).length > 0) {
-      query = Object.keys(baseFilter).length > 0
-        ? { $and: [baseFilter, extras] }
-        : extras;
-    }
+    // ── 🗓️ date filter (NEW) ──
+    const dateFilter = buildDateFilter(req.query);
+
+
+    // ── merge everything ──
+    const conditions = [
+      ...(Object.keys(baseFilter).length  ? [baseFilter]  : []),
+      ...(Object.keys(extras).length      ? [extras]      : []),
+      ...(Object.keys(dateFilter).length  ? [dateFilter]  : []),
+    ];
+
+
+    const query = conditions.length === 0
+      ? {}
+      : conditions.length === 1
+        ? conditions[0]
+        : { $and: conditions };
 
 
     const scripts = await Script.find(query).sort({ createdAt: -1 });
@@ -198,12 +227,11 @@ router.get("/", requireSession, async (req, res) => {
 });
 
 
-/** GET /api/scripts/stages-summary — per-stage counts */
+/** GET /api/scripts/stages-summary */
 router.get("/stages-summary", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
-    if (!hasFullAccess(user) && !user.fullName)
-      return res.json({});
+    if (!hasFullAccess(user) && !user.fullName) return res.json({});
     const base = hasFullAccess(user) ? {} : { createdBy: user.fullName };
     const agg  = await Script.aggregate([
       { $match: base },
@@ -222,10 +250,7 @@ router.get("/stages-summary", requireSession, async (req, res) => {
 router.get("/designers", requireSession, async (req, res) => {
   try {
     const Employee = mongoose.model("Employee");
-    const list = await Employee.find({
-      role:   { $regex: /design/i },
-      status: "active",
-    }).select("fullName email");
+    const list = await Employee.find({ role: { $regex: /design/i }, status: "active" }).select("fullName email");
     res.json(list);
   } catch {
     res.json([]);
@@ -245,15 +270,13 @@ router.get("/:id", requireSession, async (req, res) => {
 });
 
 
-/** POST /api/scripts — create */
+/** POST /api/scripts */
 router.post("/", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
     const { scriptType, scriptText, referenceLink } = req.body;
     if (!scriptType || !scriptText)
-      return res
-        .status(400)
-        .json({ message: "scriptType and scriptText required" });
+      return res.status(400).json({ message: "scriptType and scriptText required" });
 
 
     const script = new Script({
@@ -271,10 +294,10 @@ router.post("/", requireSession, async (req, res) => {
 });
 
 
-/** PUT /api/scripts/:id — update editable fields */
+/** PUT /api/scripts/:id */
 router.put("/:id", requireSession, async (req, res) => {
   try {
-    const user = req.sessionUser;
+    const user   = req.sessionUser;
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
     if (!hasFullAccess(user) && script.createdBy !== user.fullName)
@@ -282,13 +305,11 @@ router.put("/:id", requireSession, async (req, res) => {
 
 
     const allowed = [
-      "scriptType", "scriptText", "referenceLink",
-      "scriptStatus", "approverComment", "holdReason",
-      "cutComment", "editAssignedTo", "editComment", "postComment",
+      "scriptType","scriptText","referenceLink",
+      "scriptStatus","approverComment","holdReason",
+      "cutComment","editAssignedTo","editComment","postComment",
     ];
-    allowed.forEach((f) => {
-      if (req.body[f] !== undefined) script[f] = req.body[f];
-    });
+    allowed.forEach((f) => { if (req.body[f] !== undefined) script[f] = req.body[f]; });
     await script.save();
     res.json({ message: "Updated", script });
   } catch (err) {
@@ -300,7 +321,7 @@ router.put("/:id", requireSession, async (req, res) => {
 /** DELETE /api/scripts/:id */
 router.delete("/:id", requireSession, async (req, res) => {
   try {
-    const user = req.sessionUser;
+    const user   = req.sessionUser;
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
     if (!hasFullAccess(user) && script.createdBy !== user.fullName)
@@ -313,19 +334,12 @@ router.delete("/:id", requireSession, async (req, res) => {
 });
 
 
-
-
-
-
-/** POST /api/scripts/:id/proceed-to-shoot */
 router.post("/:id/proceed-to-shoot", requireSession, async (req, res) => {
   try {
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
     if (script.scriptStatus !== "Approved")
-      return res
-        .status(400)
-        .json({ message: "Script must be Approved first" });
+      return res.status(400).json({ message: "Script must be Approved first" });
     script.stage            = "Shoot Pending";
     script.proceedToShootAt = new Date();
     await script.save();
@@ -336,10 +350,9 @@ router.post("/:id/proceed-to-shoot", requireSession, async (req, res) => {
 });
 
 
-/** POST /api/scripts/:id/shoot-done */
 router.post("/:id/shoot-done", requireSession, async (req, res) => {
   try {
-    const user = req.sessionUser;
+    const user   = req.sessionUser;
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
     script.stage       = "Shoot Done";
@@ -353,11 +366,6 @@ router.post("/:id/shoot-done", requireSession, async (req, res) => {
 });
 
 
-/**
- * POST /api/scripts/:id/save-cut-file
- * Saves the uploaded file URL to the script WITHOUT changing the stage.
- * Stage stays "Shoot Done" — user must click "Yes, Cut Done" separately.
- */
 router.post("/:id/save-cut-file", requireSession, async (req, res) => {
   try {
     const { cutVideoUrl, cutVideoName, cutComment } = req.body;
@@ -371,7 +379,6 @@ router.post("/:id/save-cut-file", requireSession, async (req, res) => {
     script.cutVideoUrl  = cutVideoUrl;
     script.cutVideoName = cutVideoName || cutVideoUrl.split("/").pop();
     if (cutComment !== undefined) script.cutComment = cutComment;
-    // Stage NOT changed here — stays as-is (Shoot Done)
     await script.save();
     res.json({ message: "Cut file saved", script });
   } catch (err) {
@@ -380,13 +387,11 @@ router.post("/:id/save-cut-file", requireSession, async (req, res) => {
 });
 
 
-/** POST /api/scripts/:id/cut-upload */
 router.post("/:id/cut-upload", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
     const { cutVideoUrl, cutVideoName, cutComment } = req.body;
-    if (!cutVideoUrl)
-      return res.status(400).json({ message: "cutVideoUrl required" });
+    if (!cutVideoUrl) return res.status(400).json({ message: "cutVideoUrl required" });
 
 
     const script = await Script.findById(req.params.id);
@@ -407,7 +412,6 @@ router.post("/:id/cut-upload", requireSession, async (req, res) => {
 });
 
 
-/** POST /api/scripts/:id/edit-assign */
 router.post("/:id/edit-assign", requireSession, async (req, res) => {
   try {
     const { editAssignedTo } = req.body;
@@ -423,14 +427,10 @@ router.post("/:id/edit-assign", requireSession, async (req, res) => {
 });
 
 
-/** POST /api/scripts/:id/edit-upload */
 router.post("/:id/edit-upload", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
-    const {
-      editFileUrl, editFileName,
-      editComment, editStatus, editHoldReason,
-    } = req.body;
+    const { editFileUrl, editFileName, editComment, editStatus, editHoldReason } = req.body;
 
 
     const script = await Script.findById(req.params.id);
@@ -459,19 +459,10 @@ router.post("/:id/edit-upload", requireSession, async (req, res) => {
 });
 
 
-
-
 router.post("/:id/post-update", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
-    const {
-      postStatus,
-      postHoldReason,
-      postPublishStatus,
-      postFileUrl,
-      postFileName,
-      postComment,
-    } = req.body;
+    const { postStatus, postHoldReason, postPublishStatus, postFileUrl, postFileName, postComment } = req.body;
 
 
     const script = await Script.findById(req.params.id);
@@ -481,37 +472,21 @@ router.post("/:id/post-update", requireSession, async (req, res) => {
     const now = new Date();
 
 
-    // ── postStatus ──────────────────────────────────────────
     if (postStatus !== undefined && postStatus !== script.postStatus) {
       script.postStatus          = postStatus;
       script.postStatusUpdatedAt = now;
       script.postStatusUpdatedBy = user.fullName;
     }
-
-
-    // ── hold / rejection reason ─────────────────────────────
     if (postHoldReason !== undefined) script.postHoldReason = postHoldReason;
-
-
-    // ── postPublishStatus ───────────────────────────────────
-    if (
-      postPublishStatus !== undefined &&
-      postPublishStatus !== script.postPublishStatus
-    ) {
+    if (postPublishStatus !== undefined && postPublishStatus !== script.postPublishStatus) {
       script.postPublishStatus          = postPublishStatus;
       script.postPublishStatusUpdatedAt = now;
-
-
-      // postedAt + postedBy only on the first non-empty publish status
       if (postPublishStatus && !script.postedAt) {
         script.postedAt = now;
         script.postedBy = user.fullName;
         if (script.stage !== "Post") script.stage = "Post";
       }
     }
-
-
-    // ── file ────────────────────────────────────────────────
     if (postFileUrl) {
       script.postFileUrl  = postFileUrl;
       script.postFileName = postFileName || postFileUrl.split("/").pop();
@@ -521,9 +496,6 @@ router.post("/:id/post-update", requireSession, async (req, res) => {
         script.postedBy = script.postedBy || user.fullName;
       }
     }
-
-
-    // ── comment ─────────────────────────────────────────────
     if (postComment !== undefined) script.postComment = postComment;
 
 
@@ -535,14 +507,10 @@ router.post("/:id/post-update", requireSession, async (req, res) => {
 });
 
 
-// Keep the old /post route for backwards compat — delegates to /post-update
 router.post("/:id/post", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
-    const {
-      postStatus, postHoldReason,
-      postFileUrl, postFileName, postComment,
-    } = req.body;
+    const { postStatus, postHoldReason, postFileUrl, postFileName, postComment } = req.body;
 
 
     const script = await Script.findById(req.params.id);
