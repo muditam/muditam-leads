@@ -7,7 +7,6 @@ const path     = require("path");
 const { v4: uuidv4 } = require("uuid");
 const Script   = require("../models/scriptSchema");
 
-
 const s3 = new AWS.S3({
   accessKeyId:      process.env.WASABI_ACCESS_KEY,
   secretAccessKey:  process.env.WASABI_SECRET_KEY,
@@ -16,12 +15,10 @@ const s3 = new AWS.S3({
   s3ForcePathStyle: true,
 });
 
-
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 500 * 1024 * 1024 },
 });
-
 
 const requireSession = (req, res, next) => {
   try {
@@ -41,42 +38,27 @@ const requireSession = (req, res, next) => {
   return res.status(401).json({ message: "Unauthorized" });
 };
 
-
 const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];
 const isManager     = (role = "") => MANAGER_ROLES.includes(role.toLowerCase());
 const hasFullAccess = (user = {}) => isManager(user.role) || user.hasTeam === true;
 
-
-// ─────────────────────────────────────────────────────────────
-// 🗓️  DATE FILTER HELPER
-// Accepts:  ?dateField=cutDoneAt&dateFrom=2025-01-01&dateTo=2025-01-31
-// dateField can be any timestamp field on the Script document.
-// Both dateFrom and dateTo are OPTIONAL independently.
-// ─────────────────────────────────────────────────────────────
 function buildDateFilter(query) {
   const { dateField, dateFrom, dateTo } = query;
   if (!dateField || (!dateFrom && !dateTo)) return {};
 
-
   const range = {};
-  if (dateFrom) {
-    // Start of the selected day  (00:00:00 UTC)
+  if (dateFrom) { 
     const d = new Date(dateFrom);
     if (!isNaN(d)) range.$gte = new Date(d.toISOString().split("T")[0] + "T00:00:00.000Z");
   }
-  if (dateTo) {
-    // End of the selected day (23:59:59.999 UTC)
+  if (dateTo) { 
     const d = new Date(dateTo);
     if (!isNaN(d)) range.$lte = new Date(d.toISOString().split("T")[0] + "T23:59:59.999Z");
   }
 
-
   if (!Object.keys(range).length) return {};
   return { [dateField]: range };
 }
-
-
-
 
 router.get("/presign", requireSession, async (req, res) => {
   try {
@@ -84,15 +66,9 @@ router.get("/presign", requireSession, async (req, res) => {
     if (!filename || !contentType)
       return res.status(400).json({ message: "filename and contentType required" });
 
-
     const ext = path.extname(filename) || "";
     const key = `scripts/${uuidv4()}${ext}`;
 
-
-    // ✅  ACL removed from presign params — Wasabi rejects presigned PUTs
-    //     that include ACL in the signed params unless the bucket is
-    //     configured to allow ACL overrides.  Public access should be
-    //     handled by a bucket policy instead (cleaner & more reliable).
     const presignedUrl = s3.getSignedUrl("putObject", {
       Bucket:      process.env.WASABI_BUCKET,
       Key:         key,
@@ -101,10 +77,8 @@ router.get("/presign", requireSession, async (req, res) => {
       Expires:     3600,
     });
 
-
     const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
     const finalUrl  = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
-
 
     res.json({ presignedUrl, finalUrl, key });
   } catch (err) {
@@ -112,6 +86,7 @@ router.get("/presign", requireSession, async (req, res) => {
     res.status(500).json({ message: "Could not generate upload URL", error: err.message });
   }
 });
+
 router.get("/presign-download", requireSession, async (req, res) => {
   try {
     const { key } = req.query;
