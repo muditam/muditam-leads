@@ -75,7 +75,6 @@ router.get("/presign", requireSession, async (req, res) => {
       Bucket: process.env.WASABI_BUCKET,
       Key: key,
       ContentType: contentType,
-      // ACL removed — use bucket policy for public reads.
       Expires: 3600,
     });
 
@@ -97,7 +96,7 @@ router.get("/presign-download", requireSession, async (req, res) => {
     const url = s3.getSignedUrl("getObject", {
       Bucket: process.env.WASABI_BUCKET,
       Key: key,
-      Expires: 60 * 5, // 5 minutes
+      Expires: 60 * 5,
     });
 
     res.json({ url });
@@ -123,8 +122,6 @@ router.post("/upload/wasabi", requireSession, upload.array("files", 10), async (
             Key: key,
             Body: file.buffer,
             ContentType: file.mimetype,
-            // ✅ recommended: remove ACL if using bucket policy
-            // ACL: "public-read",
           })
           .promise();
 
@@ -162,6 +159,43 @@ function ciExactRegex(value) {
 }
 
 /**
+ * ✅ NEW (for creator dropdown):
+ * GET /api/scripts/creators
+ * Returns distinct creators visible to the current user (respects access filter)
+ * Optional query: stage=...  (comma-separated)
+ */
+router.get("/creators", requireSession, async (req, res) => {
+  try {
+    const user = req.sessionUser;
+
+    let baseFilter = {};
+    if (!hasFullAccess(user)) {
+      if (!user.fullName) return res.json({ creators: [] });
+      baseFilter = { $or: [{ createdBy: user.fullName }, { editAssignedTo: user.fullName }] };
+    }
+
+    const extras = {};
+    if (req.query.stage) {
+      const stages = toStrArray(req.query.stage);
+      extras.stage = stages.length > 1 ? { $in: stages } : stages[0];
+    }
+
+    const match = Object.keys(extras).length ? { $and: [baseFilter, extras] } : baseFilter;
+
+    const agg = await Script.aggregate([
+      { $match: match },
+      { $group: { _id: "$createdBy", count: { $sum: 1 } } },
+      { $project: { _id: 0, fullName: "$_id", count: 1 } },
+      { $sort: { fullName: 1 } },
+    ]);
+
+    res.json({ creators: agg.filter((x) => x.fullName) });
+  } catch (e) {
+    res.json({ creators: [] });
+  }
+});
+
+/**
  * GET /api/scripts
  * ✅ Backend pagination
  * ✅ Reverse chronological (default createdAt desc)
@@ -172,10 +206,8 @@ router.get("/", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
 
-    // Existing filters
     const { stage, scriptType, scriptStatus } = req.query;
 
-    // Top filters
     const assignedTo = req.query.assignedTo ?? req.query.editAssignedTo;
     const creator = req.query.creator ?? req.query.createdBy;
     const scriptIdQ = req.query.scriptId;
@@ -183,21 +215,27 @@ router.get("/", requireSession, async (req, res) => {
     const scriptIdExact =
       String(req.query.scriptIdExact || "").toLowerCase() === "true" || String(req.query.scriptIdExact || "") === "1";
 
-    // ✅ Search
     const qRaw = (req.query.q ?? req.query.search ?? req.query.scriptSearch ?? "").toString().trim();
 
-    // Pagination
     const page = clampInt(req.query.page, 1, 1, 1000000);
     const limit = clampInt(req.query.limit, 50, 1, 200);
     const skip = (page - 1) * limit;
 
-    // Sorting (reverse chronological default)
-    const ALLOWED_SORT_FIELDS = ["createdAt", "updatedAt", "cutDoneAt", "editDoneAt", "shootDoneAt", "postedAt"];
+    // ✅ FIX: add proceedToShootAt because frontend sorts by it in ShootPage
+    const ALLOWED_SORT_FIELDS = [
+      "createdAt",
+      "updatedAt",
+      "proceedToShootAt",
+      "cutDoneAt",
+      "editDoneAt",
+      "shootDoneAt",
+      "postedAt",
+    ];
+
     const sortBy = ALLOWED_SORT_FIELDS.includes(req.query.sortBy) ? req.query.sortBy : "createdAt";
     const sortDir = String(req.query.sortDir || "desc").toLowerCase() === "asc" ? 1 : -1;
     const sort = { [sortBy]: sortDir, _id: sortDir };
 
-    // Access filter
     let baseFilter = {};
     if (!hasFullAccess(user)) {
       if (!user.fullName) {
@@ -210,7 +248,6 @@ router.get("/", requireSession, async (req, res) => {
       baseFilter = { $or: [{ createdBy: user.fullName }, { editAssignedTo: user.fullName }] };
     }
 
-    // stage / type / status / creator / assignedTo / scriptId
     const extras = {};
 
     if (stage) {
@@ -240,17 +277,14 @@ router.get("/", requireSession, async (req, res) => {
 
     if (scriptIdQ) {
       const q = String(scriptIdQ).trim();
-      if (q) {
-        extras.scriptId = scriptIdExact ? ciExactRegex(q) : new RegExp(escapeRegex(q), "i");
-      }
+      if (q) extras.scriptId = scriptIdExact ? ciExactRegex(q) : new RegExp(escapeRegex(q), "i");
     }
 
-    // ✅ Search across multiple fields (including scriptText)
     if (qRaw) {
       const re = new RegExp(escapeRegex(qRaw), "i");
       extras.$or = [
         { scriptId: re },
-        { scriptText: re }, // note: this searches HTML too, but works for normal words
+        { scriptText: re },
         { referenceLink: re },
         { createdBy: re },
         { editAssignedTo: re },
@@ -258,18 +292,15 @@ router.get("/", requireSession, async (req, res) => {
       ];
     }
 
-    // Date filter
     const dateFilter = buildDateFilter(req.query);
 
-    // Merge
     const conditions = [
       ...(Object.keys(baseFilter).length ? [baseFilter] : []),
       ...(Object.keys(extras).length ? [extras] : []),
       ...(Object.keys(dateFilter).length ? [dateFilter] : []),
     ];
 
-    const query =
-      conditions.length === 0 ? {} : conditions.length === 1 ? conditions[0] : { $and: conditions };
+    const query = conditions.length === 0 ? {} : conditions.length === 1 ? conditions[0] : { $and: conditions };
 
     const [total, scripts] = await Promise.all([
       Script.countDocuments(query),
@@ -323,9 +354,7 @@ router.get("/stages-summary", requireSession, async (req, res) => {
 router.get("/designers", requireSession, async (req, res) => {
   try {
     const Employee = mongoose.model("Employee");
-    const list = await Employee
-      .find({ role: { $regex: /design/i }, status: "active" })
-      .select("fullName email");
+    const list = await Employee.find({ role: { $regex: /design/i }, status: "active" }).select("fullName email");
     res.json(list);
   } catch {
     res.json([]);
@@ -508,6 +537,11 @@ router.post("/:id/edit-assign", requireSession, async (req, res) => {
   }
 });
 
+/**
+ * ✅ IMPORTANT: Reupload works via SAME endpoint.
+ * ✅ FIX: If script is already in "Post", uploading a new edited file should NOT pull it back to "Edit Done".
+ *    (unless editStatus = Reshoot / Re-edit forces moving back)
+ */
 router.post("/:id/edit-upload", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
@@ -516,20 +550,31 @@ router.post("/:id/edit-upload", requireSession, async (req, res) => {
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
 
+    // If a file is uploaded (first-time or reupload)
     if (editFileUrl) {
       script.editFileUrl = editFileUrl;
       script.editFileName = editFileName || editFileUrl.split("/").pop();
-      script.stage = "Edit Done";
+
+      // update audit
       script.editDoneAt = new Date();
       script.editDoneBy = user.fullName;
+
+      // ✅ keep Post stage if already posted
+      if (script.stage !== "Post") {
+        script.stage = "Edit Done";
+      }
     }
+
     if (editComment !== undefined) script.editComment = editComment;
     if (editHoldReason !== undefined) script.editHoldReason = editHoldReason;
 
-    if (editStatus) {
+    // editStatus logic (can still move stage backwards)
+    if (editStatus !== undefined) {
       script.editStatus = editStatus;
+
       if (editStatus === "Reshoot") script.stage = "Shoot Pending";
       if (editStatus === "Re-edit") script.stage = "Cut Done";
+      // if "Done" and no file uploaded, we keep stage unchanged (your old behavior)
     }
 
     await script.save();
