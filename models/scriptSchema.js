@@ -82,8 +82,10 @@ const scriptSchema = new mongoose.Schema(
     editDoneAt:     { type: Date },
     editDoneBy:     { type: String, default: "" },
 
-
-
+    editThumbUrl:  { type: String, default: "" },
+    editThumbName: { type: String, default: "" },
+    editThumbUpdatedAt: { type: Date },
+    editThumbUpdatedBy: { type: String, default: "" },
 
     postStatus: {
       type: String,

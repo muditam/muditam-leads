@@ -665,4 +665,26 @@ router.post("/:id/post", requireSession, async (req, res) => {
   }
 });
 
+router.post("/:id/edit-thumbnail", requireSession, async (req, res) => {
+  try {
+    const user = req.sessionUser;
+    const { editThumbUrl, editThumbName } = req.body;
+
+    if (!editThumbUrl) return res.status(400).json({ message: "editThumbUrl required" });
+
+    const script = await Script.findById(req.params.id);
+    if (!script) return res.status(404).json({ message: "Not found" });
+
+    script.editThumbUrl = editThumbUrl;
+    script.editThumbName = editThumbName || editThumbUrl.split("/").pop();
+    script.editThumbUpdatedAt = new Date();
+    script.editThumbUpdatedBy = user.fullName || "";
+
+    await script.save();
+    res.json({ message: "Thumbnail updated", script });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
