@@ -1,20 +1,23 @@
 const mongoose = require("mongoose");
-
-
-// ─────────────────────────────────────────────────────────────
-// SCHEMA
-// ─────────────────────────────────────────────────────────────
+ 
+const counterSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  seq: { type: Number, default: 0 },
+});
+const Counter = mongoose.models.Counter || mongoose.model("Counter", counterSchema);
+ 
+ 
 const scriptSchema = new mongoose.Schema(
   {
-    scriptId: { type: String, unique: true }, // SCR0001, SCR0002 …
-
-
-    // ── CORE CONTENT ─────────────────────────────────────────
+    scriptId: { type: String, unique: true },
+ 
     scriptType: {
       type: String,
       enum: [
         "Muditam Instagram",
         "Muditam Snooze Well",
+        "Muditam infographic",
+        "Snooze Well infographic",
         "YouTube",
         "Meta Ads",
         "Google Ads",
@@ -24,30 +27,25 @@ const scriptSchema = new mongoose.Schema(
     },
     scriptText:    { type: String, required: true },
     referenceLink: { type: String, default: "" },
-
-
-    // ── CREATOR ───────────────────────────────────────────────
+ 
     createdBy:      { type: String, required: true },
     createdByEmail: { type: String, required: true },
-
-
-    // ── SCRIPT REVIEW STATUS ─────────────────────────────────
+ 
     scriptStatus: {
       type: String,
       enum: ["Pending", "Approved", "Rewrite", "On Hold", "Rejected"],
       default: "Pending",
     },
     approverComment: { type: String, default: "" },
-    holdReason:      { type: String, default: "" }, // used for script-level hold
-
-
+    holdReason:      { type: String, default: "" },
+ 
     stage: {
       type: String,
       enum: [
         "Script",
         "Shoot Pending",
         "Shoot Done",
-        "Cut Pending",  
+        "Cut Pending",
         "Cut Done",
         "Edit Pending",
         "Edit Done",
@@ -55,20 +53,17 @@ const scriptSchema = new mongoose.Schema(
       ],
       default: "Script",
     },
-
-
+ 
     proceedToShootAt: { type: Date },
     shootDoneAt:      { type: Date },
     shootDoneBy:      { type: String, default: "" },
-
-
+ 
     cutVideoUrl:  { type: String, default: "" },
     cutVideoName: { type: String, default: "" },
     cutComment:   { type: String, default: "" },
     cutDoneAt:    { type: Date },
     cutDoneBy:    { type: String, default: "" },
-
-
+ 
     editAssignedTo: { type: String, default: "" },
     editStatus: {
       type: String,
@@ -86,53 +81,53 @@ const scriptSchema = new mongoose.Schema(
     editThumbName: { type: String, default: "" },
     editThumbUpdatedAt: { type: Date },
     editThumbUpdatedBy: { type: String, default: "" },
-
+ 
     postStatus: {
       type: String,
-
-
       enum: ["", "Approved", "Rewrite", "Reshoot", "Re-edit", "On Hold", "Rejected"],
       default: "",
     },
     postStatusUpdatedAt: { type: Date },
     postStatusUpdatedBy: { type: String, default: "" },
-
-
+ 
     postHoldReason: { type: String, default: "" },
-
-
-    postPublishStatus: {          
+ 
+    postPublishStatus: {
       type: String,
       enum: ["", "Posted", "Used in Ads"],
       default: "",
     },
     postPublishStatusUpdatedAt: { type: Date },
-
-
+ 
     postFileUrl:  { type: String, default: "" },
     postFileName: { type: String, default: "" },
     postComment:  { type: String, default: "" },
-
-
+ 
     postedAt: { type: Date },
     postedBy: { type: String, default: "" },
   },
   { timestamps: true }
 );
-
-
+ 
+ 
 scriptSchema.pre("save", async function (next) {
-  if (this.isNew && !this.scriptId) {
-    const Script = mongoose.model("Script");
-    const count  = await Script.countDocuments();
-    this.scriptId = `SCR${String(count + 1).padStart(4, "0")}`;
+  if (!this.isNew || this.scriptId) return next();
+ 
+  try {
+ 
+    const counter = await Counter.findByIdAndUpdate(
+      "scriptId",                
+      { $inc: { seq: 1 } },        
+      { new: true, upsert: true }  
+    );
+ 
+    this.scriptId = `SCR${String(counter.seq).padStart(4, "0")}`;
+    return next();
+  } catch (err) {
+    return next(err);
   }
-  next();
 });
-
-
+ 
 const Script = mongoose.models.Script || mongoose.model("Script", scriptSchema);
-
-
+ 
 module.exports = Script;
-
