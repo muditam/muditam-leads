@@ -298,7 +298,7 @@ router.get("/list", async (req, res) => {
       channel = "",
       assigned = "",
       startDate = "",
-      allCnpDate = "", // NEW
+      dateFilter = "",
     } = req.query;
 
     const role = getRoleFromReq(req);
@@ -370,9 +370,9 @@ router.get("/list", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-                { contactNumber: { $regex: numericQ } },
-                { normalizedPhone: { $regex: numericQ } },
-              ]
+              { contactNumber: { $regex: numericQ } },
+              { normalizedPhone: { $regex: numericQ } },
+            ]
             : []),
         ],
       });
@@ -419,19 +419,9 @@ router.get("/list", async (req, res) => {
     }
 
     // DATE LOGIC
-    if (tabUpper === "ALL_CNPS") {
-      // SPECIAL for All CNPs
-      const baseNov = new Date("2025-11-01T00:00:00.000Z"); // after 1 Nov
-
-      if (allCnpDate) {
-        // single-day filter
-        let dayStart = new Date(`${allCnpDate}T00:00:00.000Z`);
-        if (isNaN(dayStart.getTime())) {
-          dayStart = baseNov;
-        }
-        if (dayStart < baseNov) {
-          dayStart = baseNov;
-        }
+    if (dateFilter) {
+      const dayStart = new Date(`${dateFilter}T00:00:00.000Z`);
+      if (!isNaN(dayStart.getTime())) {
         const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
         clauses.push({
@@ -440,15 +430,16 @@ router.get("/list", async (req, res) => {
             { createdAt: { $gte: dayStart, $lt: dayEnd } },
           ],
         });
-      } else {
-        // Default: everything >= 1 Nov
-        clauses.push({
-          $or: [
-            { orderDate: { $gte: baseNov } },
-            { createdAt: { $gte: baseNov } },
-          ],
-        });
       }
+    } else if (tabUpper === "ALL_CNPS") {
+      // keep existing default behaviour for ALL_CNPS when no date is selected
+      const baseNov = new Date("2025-11-01T00:00:00.000Z");
+      clauses.push({
+        $or: [
+          { orderDate: { $gte: baseNov } },
+          { createdAt: { $gte: baseNov } },
+        ],
+      });
     } else if (startDate) {
       const sd = new Date(startDate);
       if (!isNaN(sd.getTime())) {
@@ -929,7 +920,7 @@ router.get("/counts", async (req, res) => {
       assigned = "",
       startDate = "",
       tab = "",
-      allCnpDate = "",
+      dateFilter = "",
     } = req.query;
 
     const role = getRoleFromReq(req);
@@ -954,9 +945,9 @@ router.get("/counts", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-                { contactNumber: { $regex: numericQ } },
-                { normalizedPhone: { $regex: numericQ } },
-              ]
+              { contactNumber: { $regex: numericQ } },
+              { normalizedPhone: { $regex: numericQ } },
+            ]
             : []),
         ],
       });
@@ -1001,7 +992,18 @@ router.get("/counts", async (req, res) => {
     }
 
     // startDate filter (mirror of /list)
-    if (startDate) {
+    if (dateFilter) {
+      const dayStart = new Date(`${dateFilter}T00:00:00.000Z`);
+      if (!isNaN(dayStart.getTime())) {
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+        clauses.push({
+          $or: [
+            { orderDate: { $gte: dayStart, $lt: dayEnd } },
+            { createdAt: { $gte: dayStart, $lt: dayEnd } },
+          ],
+        });
+      }
+    } else if (startDate) {
       const sd = new Date(startDate);
       if (!isNaN(sd.getTime())) {
         clauses.push({
@@ -1053,9 +1055,9 @@ router.get("/counts", async (req, res) => {
             { customerName: { $regex: q, $options: "i" } },
             ...(numericQ
               ? [
-                  { contactNumber: { $regex: numericQ } },
-                  { normalizedPhone: { $regex: numericQ } },
-                ]
+                { contactNumber: { $regex: numericQ } },
+                { normalizedPhone: { $regex: numericQ } },
+              ]
               : []),
           ],
         });
@@ -1078,22 +1080,25 @@ router.get("/counts", async (req, res) => {
       // date: after 1 Nov by default, or single-day filter if allCnpDate provided
       const baseNov = new Date("2025-11-01T00:00:00.000Z");
 
-      if (allCnpDate) {
-        let dayStart = new Date(`${allCnpDate}T00:00:00.000Z`);
-        if (isNaN(dayStart.getTime())) {
-          dayStart = baseNov;
-        }
-        if (dayStart < baseNov) {
-          dayStart = baseNov;
-        }
-        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      if (dateFilter) {
+        const dayStart = new Date(`${dateFilter}T00:00:00.000Z`);
+        if (!isNaN(dayStart.getTime())) {
+          const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
-        c.push({
-          $or: [
-            { orderDate: { $gte: dayStart, $lt: dayEnd } },
-            { createdAt: { $gte: dayStart, $lt: dayEnd } },
-          ],
-        });
+          c.push({
+            $or: [
+              { orderDate: { $gte: dayStart, $lt: dayEnd } },
+              { createdAt: { $gte: dayStart, $lt: dayEnd } },
+            ],
+          });
+        } else {
+          c.push({
+            $or: [
+              { orderDate: { $gte: baseNov } },
+              { createdAt: { $gte: baseNov } },
+            ],
+          });
+        }
       } else {
         c.push({
           $or: [
@@ -1150,8 +1155,8 @@ router.get("/today-confirmed-count", async (req, res) => {
     const agentId = isValidObjectId(maybeAgentId)
       ? new mongoose.Types.ObjectId(maybeAgentId)
       : isValidObjectId(userId)
-      ? new mongoose.Types.ObjectId(userId)
-      : null;
+        ? new mongoose.Types.ObjectId(userId)
+        : null;
 
     // Build IST "today" boundaries -> as UTC instants
     const now = new Date();
@@ -1340,8 +1345,7 @@ cron.schedule("*/59 * * * *", async () => {
     // 1) Round-robin assignment
     const rr = await assignRoundRobin({});
     console.log(
-      `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${
-        rr.agents || 0
+      `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${rr.agents || 0
       })`
     );
 
