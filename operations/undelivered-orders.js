@@ -3,13 +3,6 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 
-// NOTE: For best performance, create these indexes (run once in your setup):
-// db.orders.createIndex({ shipment_status: 1, order_date: -1, last_updated_at: -1 })
-// db.orders.createIndex({ order_id: 1 })
-// db.escalations.createIndex({ orderId: 1 })
-// db.shopifyorders.createIndex({ orderName: 1 })
-// db.myorders.createIndex({ orderId: 1 })   // <— NEW: needed for agentName lookup
-
 router.get('/undelivered', async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page || '1', 10), 1);

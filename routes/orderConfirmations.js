@@ -50,23 +50,76 @@ function normalizePhone(phone) {
   const d = String(phone).replace(/\D/g, "");
   return d.length >= 10 ? d.slice(-10) : d;
 }
+
 function ensureHashOrderName(name) {
   const n = String(name || "").trim();
   if (!n) return "";
   return n.startsWith("#") ? n : `#${n}`;
 }
+
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(String(id));
+
 const stripHash = (n) =>
   String(n || "").startsWith("#") ? String(n).slice(1) : String(n || "");
 
 const getRoleFromReq = (req) =>
   (req.user?.role || req.query.role || "").toString();
+
 const getUserIdFromReq = (req) =>
   (req.user?._id || req.user?.id || req.query.userId || "").toString();
+
+/**
+ * Parse yyyy-mm-dd as IST day start and convert to UTC instant.
+ * Example: 2026-03-06 => 2026-03-05T18:30:00.000Z
+ */
+function parseISTDateStart(dateStr) {
+  const s = String(dateStr || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+
+  const [y, m, d] = s.split("-").map(Number);
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - istOffsetMs);
+}
+
+function addDaysUTC(date, days) {
+  const d = new Date(date.getTime());
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+}
+
+/**
+ * Builds one common date range clause for all tabs.
+ * Matches orderDate OR createdAt in IST date boundaries.
+ */
+function buildISTDateRangeClause(startDate, endDate) {
+  const from = parseISTDateStart(startDate);
+  const endStart = parseISTDateStart(endDate);
+  const toExclusive = endStart ? addDaysUTC(endStart, 1) : null;
+
+  if (!from && !toExclusive) return null;
+
+  const orderDateRange = {};
+  const createdAtRange = {};
+
+  if (from) {
+    orderDateRange.$gte = from;
+    createdAtRange.$gte = from;
+  }
+
+  if (toExclusive) {
+    orderDateRange.$lt = toExclusive;
+    createdAtRange.$lt = toExclusive;
+  }
+
+  return {
+    $or: [{ orderDate: orderDateRange }, { createdAt: createdAtRange }],
+  };
+}
 
 async function assignRoundRobin({ batchSize = 5000 } = {}) {
   const session = await mongoose.startSession();
   session.startTransaction();
+
   try {
     const agents = await Employee.find(
       {
@@ -92,13 +145,6 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
       };
     }
 
-    const CallStatusEnumLocal = {
-      CNP: "CNP",
-      ORDER_CONFIRMED: "ORDER_CONFIRMED",
-      CALL_BACK_LATER: "CALL_BACK_LATER",
-      CANCEL_ORDER: "CANCEL_ORDER",
-    };
-
     const baseMatch = {
       $and: [
         { financial_status: /^pending$/i },
@@ -113,7 +159,7 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
             { "orderConfirmOps.callStatus": { $exists: false } },
             {
               "orderConfirmOps.callStatus": {
-                $ne: CallStatusEnumLocal.ORDER_CONFIRMED,
+                $ne: CallStatusEnum.ORDER_CONFIRMED,
               },
             },
           ],
@@ -131,6 +177,7 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
       1000,
       Math.min(20000, Number(batchSize) || 5000)
     );
+
     let totalAssigned = 0;
     const details = agents.map((a) => ({
       agentId: String(a._id),
@@ -149,8 +196,10 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
 
     for await (const doc of cursor) {
       buffer.push(doc._id);
+
       if (buffer.length >= BATCH_SIZE) {
         const bulk = [];
+
         for (const id of buffer) {
           const agent = agents[i % agents.length];
           bulk.push({
@@ -169,13 +218,18 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
           totalAssigned += 1;
           i++;
         }
-        if (bulk.length) await ShopifyOrder.bulkWrite(bulk, { session });
+
+        if (bulk.length) {
+          await ShopifyOrder.bulkWrite(bulk, { session });
+        }
+
         buffer = [];
       }
     }
 
     if (buffer.length) {
       const bulk = [];
+
       for (const id of buffer) {
         const agent = agents[i % agents.length];
         bulk.push({
@@ -194,12 +248,21 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
         totalAssigned += 1;
         i++;
       }
-      if (bulk.length) await ShopifyOrder.bulkWrite(bulk, { session });
+
+      if (bulk.length) {
+        await ShopifyOrder.bulkWrite(bulk, { session });
+      }
     }
 
     await session.commitTransaction();
     session.endSession();
-    return { ok: true, assigned: totalAssigned, agents: agents.length, details };
+
+    return {
+      ok: true,
+      assigned: totalAssigned,
+      agents: agents.length,
+      details,
+    };
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -229,16 +292,24 @@ router.get("/agents/active", async (_req, res) => {
 router.post("/agents/toggle", async (req, res) => {
   try {
     const { agentId, active } = req.body || {};
+
     if (!isValidObjectId(agentId)) {
       return res.status(400).json({ error: "Invalid agentId" });
     }
+
     const updated = await Employee.findByIdAndUpdate(
       agentId,
       { $set: { orderConfirmActive: !!active } },
-      { new: true, projection: { _id: 1, fullName: 1, orderConfirmActive: 1 } }
+      {
+        new: true,
+        projection: { _id: 1, fullName: 1, orderConfirmActive: 1 },
+      }
     ).lean();
 
-    if (!updated) return res.status(404).json({ error: "Agent not found" });
+    if (!updated) {
+      return res.status(404).json({ error: "Agent not found" });
+    }
+
     res.json({ ok: true, agent: updated });
   } catch (err) {
     console.error("POST /agents/toggle error:", err);
@@ -249,9 +320,11 @@ router.post("/agents/toggle", async (req, res) => {
 router.get("/agents/:id/status", async (req, res) => {
   try {
     const { id } = req.params;
+
     if (!isValidObjectId(id)) {
       return res.status(400).json({ error: "Invalid agent id" });
     }
+
     const emp = await Employee.findById(id, {
       _id: 1,
       fullName: 1,
@@ -259,7 +332,11 @@ router.get("/agents/:id/status", async (req, res) => {
       role: 1,
       orderConfirmActive: 1,
     }).lean();
-    if (!emp) return res.status(404).json({ error: "Agent not found" });
+
+    if (!emp) {
+      return res.status(404).json({ error: "Agent not found" });
+    }
+
     res.json({ ok: true, agent: emp });
   } catch (err) {
     console.error("GET /agents/:id/status error:", err);
@@ -270,22 +347,22 @@ router.get("/agents/:id/status", async (req, res) => {
 router.post("/assign/round-robin", async (req, res) => {
   try {
     const result = await assignRoundRobin({ batchSize: req.body?.batchSize });
+
     if (!result.ok) {
       return res
         .status(400)
         .json({ error: result.error || "Round-robin assignment failed" });
     }
+
     return res.json(result);
   } catch (err) {
     console.error("POST /assign/round-robin error:", err);
-    res
-      .status(500)
-      .json({ error: "Round-robin assignment failed" });
+    res.status(500).json({ error: "Round-robin assignment failed" });
   }
 });
 
 /* ============================================
-   LIST (with All CNPs support)
+   LIST (common Start Date / End Date for all tabs)
    ============================================ */
 router.get("/list", async (req, res) => {
   try {
@@ -298,27 +375,28 @@ router.get("/list", async (req, res) => {
       channel = "",
       assigned = "",
       startDate = "",
-      dateFilter = "",
+      endDate = "",
     } = req.query;
 
     const role = getRoleFromReq(req);
     const authedUserId = getUserIdFromReq(req);
 
-    const numericPage = Math.max(1, parseInt(page, 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
-
-    const clauses = [];
-
     const rawTab = typeof tab === "string" ? tab.trim() : "";
     const tabUpper = rawTab.toUpperCase().replace(/\s+/g, "_");
+
+    const numericPage = Math.max(1, parseInt(page, 10) || 1);
+
+    // Allow confirmed tab to fetch up to 5000 rows for client-side filtering
+    const maxLimit = tabUpper === "ORDER_CONFIRMED" ? 5000 : 100;
+    const pageSize = Math.min(maxLimit, Math.max(1, parseInt(limit, 10) || 20));
+
+    const clauses = [];
 
     // --- TAB / CALL STATUS LOGIC ---
     if (rawTab) {
       if (Object.values(CallStatusEnum).includes(tabUpper)) {
-        // exact enum tab (CNP, ORDER_CONFIRMED, etc.)
         clauses.push({ "orderConfirmOps.callStatus": tabUpper });
       } else if (tabUpper === "PENDING") {
-        // Pending = no shopifyNotes
         clauses.push({
           $or: [
             { "orderConfirmOps.shopifyNotes": { $exists: false } },
@@ -326,14 +404,11 @@ router.get("/list", async (req, res) => {
           ],
         });
       } else if (tabUpper === "ALL_CNPS") {
-        // All CNPs -> CNP status
         clauses.push({ "orderConfirmOps.callStatus": CallStatusEnum.CNP });
       } else if (tabUpper !== "ALL") {
-        // fallback for unknown tab => treat as CNP
         clauses.push({ "orderConfirmOps.callStatus": CallStatusEnum.CNP });
       }
     } else {
-      // Old section logic when no tab passed
       if (section === "confirmed") {
         clauses.push({
           "orderConfirmOps.callStatus": CallStatusEnum.ORDER_CONFIRMED,
@@ -370,9 +445,9 @@ router.get("/list", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-              { contactNumber: { $regex: numericQ } },
-              { normalizedPhone: { $regex: numericQ } },
-            ]
+                { contactNumber: { $regex: numericQ } },
+                { normalizedPhone: { $regex: numericQ } },
+              ]
             : []),
         ],
       });
@@ -393,7 +468,7 @@ router.get("/list", async (req, res) => {
     }
 
     // ASSIGNED FILTER
-    // For All CNPs, IGNORE assigned filter (show all agents)
+    // For ALL_CNPS, keep current behavior: ignore assigned filter and show all agents
     if (tabUpper !== "ALL_CNPS") {
       if (assigned === "unassigned") {
         clauses.push({
@@ -411,51 +486,25 @@ router.get("/list", async (req, res) => {
       } else {
         if (/^operations$/i.test(role) && isValidObjectId(authedUserId)) {
           clauses.push({
-            "orderConfirmOps.assignedAgentId":
-              new mongoose.Types.ObjectId(String(authedUserId)),
+            "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(
+              String(authedUserId)
+            ),
           });
         }
       }
     }
 
-    // DATE LOGIC
-    if (dateFilter) {
-      const dayStart = new Date(`${dateFilter}T00:00:00.000Z`);
-      if (!isNaN(dayStart.getTime())) {
-        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-
-        clauses.push({
-          $or: [
-            { orderDate: { $gte: dayStart, $lt: dayEnd } },
-            { createdAt: { $gte: dayStart, $lt: dayEnd } },
-          ],
-        });
-      }
-    } else if (tabUpper === "ALL_CNPS") {
-      // keep existing default behaviour for ALL_CNPS when no date is selected
-      const baseNov = new Date("2025-11-01T00:00:00.000Z");
-      clauses.push({
-        $or: [
-          { orderDate: { $gte: baseNov } },
-          { createdAt: { $gte: baseNov } },
-        ],
-      });
-    } else if (startDate) {
-      const sd = new Date(startDate);
-      if (!isNaN(sd.getTime())) {
-        clauses.push({
-          $or: [
-            { orderDate: { $gte: sd } },
-            { createdAt: { $gte: sd } },
-          ],
-        });
-      }
+    // DATE RANGE (works for all tabs)
+    const dateClause = buildISTDateRangeClause(startDate, endDate);
+    if (dateClause) {
+      clauses.push(dateClause);
     }
 
     const filter = clauses.length ? { $and: clauses } : {};
 
     const projection = {
       orderDate: 1,
+      createdAt: 1,
       orderId: 1,
       orderName: 1,
       customerName: 1,
@@ -490,6 +539,7 @@ router.get("/list", async (req, res) => {
       "orderConfirmOps.assignedAgentId": 1,
       "orderConfirmOps.assignedAgentName": 1,
       "orderConfirmOps.assignedAt": 1,
+      "orderConfirmOps.ocCancelReason": 1,
     };
 
     const [rawItems, total] = await Promise.all([
@@ -505,6 +555,7 @@ router.get("/list", async (req, res) => {
     const orderIds = rawItems
       .map((it) => stripHash(it.orderName))
       .filter(Boolean);
+
     let shippingMap = {};
     if (orderIds.length) {
       const orders = await Order.find(
@@ -537,17 +588,20 @@ router.get("/list", async (req, res) => {
     const phonesOnPage = Array.from(
       new Set(items.map((it) => it.normalizedPhone).filter(Boolean))
     );
+
     let phoneCountsMap = {};
     if (phonesOnPage.length) {
       const phoneCounts = await ShopifyOrder.aggregate([
         { $match: { normalizedPhone: { $in: phonesOnPage } } },
         { $group: { _id: "$normalizedPhone", total: { $sum: 1 } } },
       ]);
+
       phoneCountsMap = phoneCounts.reduce((acc, row) => {
         acc[row._id] = row.total;
         return acc;
       }, {});
     }
+
     for (const it of items) {
       it.totalOrdersForPhone = it.normalizedPhone
         ? phoneCountsMap[it.normalizedPhone] || 0
@@ -565,9 +619,11 @@ router.post("/create-payment-link", async (req, res) => {
   try {
     const { amount, currency = "INR", customer = {} } = req.body || {};
     const amt = Number(amount);
+
     if (!amt || amt <= 0) {
       return res.status(400).json({ error: "Invalid amount" });
     }
+
     const amountPaise = Math.round(amt * 100);
 
     const payload = {
@@ -587,17 +643,18 @@ router.post("/create-payment-link", async (req, res) => {
 
     const link = await razorpay.paymentLink.create(payload);
     const shortUrl = link?.short_url || link?.url;
+
     if (!shortUrl) {
-      return res
-        .status(502)
-        .json({ error: "Failed to create payment link" });
+      return res.status(502).json({ error: "Failed to create payment link" });
     }
+
     return res.json({ paymentLink: shortUrl, id: link.id });
   } catch (err) {
     console.error(
       "POST /create-payment-link error:",
       err?.response?.data || err.message
     );
+
     const status = err?.response?.status || 500;
     res.status(status).json({
       error: "Payment link creation failed",
@@ -612,6 +669,7 @@ router.post("/create-payment-link", async (req, res) => {
 router.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     if (!isValidObjectId(id)) {
       return res.status(400).json({ error: "Invalid order id" });
     }
@@ -628,17 +686,17 @@ router.patch("/:id", async (req, res) => {
           { new: true, projection: { orderConfirmOps: 1 } }
         ).lean();
 
-        if (!updated)
+        if (!updated) {
           return res.status(404).json({ error: "Order not found" });
+        }
+
         return res.json({ ok: true, orderConfirmOps: updated.orderConfirmOps });
       } catch (err) {
         console.error(
           "PATCH /order-confirmations/:id incPlusCount error:",
           err
         );
-        return res
-          .status(500)
-          .json({ error: "Failed to increment count" });
+        return res.status(500).json({ error: "Failed to increment count" });
       }
     }
 
@@ -688,17 +746,19 @@ router.patch("/:id", async (req, res) => {
       const order = await ShopifyOrder.findById(id, {
         "orderConfirmOps.codToPrepaid": 1,
       }).lean();
+
       const cod =
         typeof ops.codToPrepaid === "boolean"
           ? !!ops.codToPrepaid
           : order?.orderConfirmOps?.codToPrepaid;
+
       if (!cod) {
         return res.status(400).json({
           error: "Enable COD to prepaid before setting a payment link",
         });
       }
-      allowed["orderConfirmOps.paymentLink"] =
-        ops.paymentLink.trim();
+
+      allowed["orderConfirmOps.paymentLink"] = ops.paymentLink.trim();
     }
 
     // Manual assignment/unassignment
@@ -706,11 +766,13 @@ router.patch("/:id", async (req, res) => {
       const agentId = ops.assignedAgentId
         ? new mongoose.Types.ObjectId(String(ops.assignedAgentId))
         : null;
+
       let agentName = "";
       if (agentId) {
         const emp = await Employee.findById(agentId, { fullName: 1 }).lean();
         agentName = emp?.fullName || "";
       }
+
       allowed["orderConfirmOps.assignedAgentId"] = agentId;
       allowed["orderConfirmOps.assignedAgentName"] = agentName;
       allowed["orderConfirmOps.assignedAt"] = agentId ? new Date() : null;
@@ -734,7 +796,10 @@ router.patch("/:id", async (req, res) => {
       throw err;
     }
 
-    if (!updated) return res.status(404).json({ error: "Order not found" });
+    if (!updated) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
     res.json({ ok: true, orderConfirmOps: updated.orderConfirmOps });
   } catch (err) {
     console.error("PATCH /order-confirmations/:id error:", err);
@@ -743,13 +808,16 @@ router.patch("/:id", async (req, res) => {
 });
 
 /* ============================================
-   History by phone (unchanged)
+   History by phone
    ============================================ */
 router.get("/history-by-phone", async (req, res) => {
   try {
     const raw = String(req.query.phone || "");
     const phone = normalizePhone(raw);
-    if (!phone) return res.status(400).json({ error: "phone is required" });
+
+    if (!phone) {
+      return res.status(400).json({ error: "phone is required" });
+    }
 
     const items = await Order.find(
       { contact_number: phone },
@@ -773,15 +841,14 @@ router.get("/history-by-phone", async (req, res) => {
 });
 
 /* ============================================
-   Shopify notes (unchanged)
+   Shopify notes
    ============================================ */
 router.post("/shopify-notes", async (req, res) => {
   try {
     const { orderName, note, userFullName: fromBody } = req.body || {};
+
     if (!orderName || typeof note !== "string") {
-      return res
-        .status(400)
-        .json({ error: "orderName and note are required" });
+      return res.status(400).json({ error: "orderName and note are required" });
     }
 
     if (!SHOPIFY_STORE_NAME || !SHOPIFY_ACCESS_TOKEN) {
@@ -804,6 +871,7 @@ router.post("/shopify-notes", async (req, res) => {
 
     const raw = String(note).trim();
     const up = raw.toUpperCase().replace(/\s+/g, "_");
+
     let label;
     if (STATUS_LABELS[up]) {
       label = STATUS_LABELS[up];
@@ -821,9 +889,11 @@ router.post("/shopify-notes", async (req, res) => {
     const theFind = await shopifyApi.get(
       `/orders.json?name=${encName}&status=any&limit=1`
     );
+
     const shopifyOrder = Array.isArray(theFind.data?.orders)
       ? theFind.data.orders[0]
       : null;
+
     if (!shopifyOrder?.id) {
       return res.status(404).json({
         error: `Shopify order not found for name ${nameWithHash}`,
@@ -831,12 +901,15 @@ router.post("/shopify-notes", async (req, res) => {
     }
 
     const shopifyId = shopifyOrder.id;
+
     await shopifyApi.put(`/orders/${shopifyId}.json`, {
       order: { id: shopifyId, note: finalNote },
     });
 
     const possibleNames = [nameWithHash];
-    if (nameWithHash.startsWith("#")) possibleNames.push(nameWithHash.slice(1));
+    if (nameWithHash.startsWith("#")) {
+      possibleNames.push(nameWithHash.slice(1));
+    }
 
     const mongoUpdate = await ShopifyOrder.findOneAndUpdate(
       {
@@ -864,6 +937,7 @@ router.post("/shopify-notes", async (req, res) => {
       "POST /shopify-notes error:",
       err?.response?.data || err.message
     );
+
     const status = err?.response?.status || 500;
     res.status(status).json({
       error: "Failed to update Shopify notes",
@@ -875,13 +949,16 @@ router.post("/shopify-notes", async (req, res) => {
 router.post("/bulk-call-status", async (req, res) => {
   try {
     const { ids = [], callStatus } = req.body || {};
+
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: "ids array required" });
     }
+
     const up = String(callStatus || "")
       .trim()
       .toUpperCase()
       .replace(/\s+/g, "_");
+
     if (!Object.values(CallStatusEnum).includes(up)) {
       return res.status(400).json({ error: "Invalid callStatus value" });
     }
@@ -910,7 +987,8 @@ router.post("/bulk-call-status", async (req, res) => {
 });
 
 /* ============================================
-   Counts (role-aware + All CNPs global count)
+   Counts (role-aware + ALL_CNPS global count)
+   Common Start Date / End Date filter for all tabs
    ============================================ */
 router.get("/counts", async (req, res) => {
   try {
@@ -919,15 +997,15 @@ router.get("/counts", async (req, res) => {
       channel = "",
       assigned = "",
       startDate = "",
-      tab = "",
-      dateFilter = "",
+      endDate = "",
     } = req.query;
 
     const role = getRoleFromReq(req);
     const authedUserId = getUserIdFromReq(req);
 
     const clauses = [];
-    // scope to pending + not-fulfilled (same as /list)
+
+    // pending + not fulfilled
     clauses.push({ financial_status: /^pending$/i });
     clauses.push({
       $or: [
@@ -936,7 +1014,7 @@ router.get("/counts", async (req, res) => {
       ],
     });
 
-    // text / phone search (same as /list)
+    // search
     if (q) {
       const numericQ = q.replace(/\D/g, "");
       clauses.push({
@@ -945,15 +1023,15 @@ router.get("/counts", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-              { contactNumber: { $regex: numericQ } },
-              { normalizedPhone: { $regex: numericQ } },
-            ]
+                { contactNumber: { $regex: numericQ } },
+                { normalizedPhone: { $regex: numericQ } },
+              ]
             : []),
         ],
       });
     }
 
-    // channel filter (same as /list)
+    // channel
     if (channel && CHANNEL_MAP[channel]) {
       const id = CHANNEL_MAP[channel];
       const idNum = Number(id);
@@ -967,7 +1045,7 @@ router.get("/counts", async (req, res) => {
       });
     }
 
-    // assignment scoping for normal tabs (not All CNPs global)
+    // assignment scoping for normal tabs
     if (assigned === "unassigned") {
       clauses.push({
         $or: [
@@ -991,33 +1069,15 @@ router.get("/counts", async (req, res) => {
       }
     }
 
-    // startDate filter (mirror of /list)
-    if (dateFilter) {
-      const dayStart = new Date(`${dateFilter}T00:00:00.000Z`);
-      if (!isNaN(dayStart.getTime())) {
-        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-        clauses.push({
-          $or: [
-            { orderDate: { $gte: dayStart, $lt: dayEnd } },
-            { createdAt: { $gte: dayStart, $lt: dayEnd } },
-          ],
-        });
-      }
-    } else if (startDate) {
-      const sd = new Date(startDate);
-      if (!isNaN(sd.getTime())) {
-        clauses.push({
-          $or: [
-            { orderDate: { $gte: sd } },
-            { createdAt: { $gte: sd } },
-          ],
-        });
-      }
+    // common date range
+    const dateClause = buildISTDateRangeClause(startDate, endDate);
+    if (dateClause) {
+      clauses.push(dateClause);
     }
 
     const baseMatch = clauses.length ? { $and: clauses } : {};
 
-    // "Pending" = no shopifyNotes (same as /list’s pending logic)
+    // Pending = no shopifyNotes
     const pendingNotesMatch = {
       $and: [
         ...(Array.isArray(baseMatch.$and) ? baseMatch.$and : [baseMatch]),
@@ -1030,11 +1090,10 @@ router.get("/counts", async (req, res) => {
       ],
     };
 
-    // All CNPs global count (ignores assignment) with 1 Nov + optional day filter
+    // ALL_CNPS global count ignores assignment, but still respects search/channel/date
     const allCnpCountPromise = (async () => {
       const c = [];
 
-      // core pending + not fulfilled
       c.push({ financial_status: /^pending$/i });
       c.push({
         $or: [
@@ -1043,10 +1102,8 @@ router.get("/counts", async (req, res) => {
         ],
       });
 
-      // CNP only
       c.push({ "orderConfirmOps.callStatus": CallStatusEnum.CNP });
 
-      // search
       if (q) {
         const numericQ = q.replace(/\D/g, "");
         c.push({
@@ -1055,15 +1112,14 @@ router.get("/counts", async (req, res) => {
             { customerName: { $regex: q, $options: "i" } },
             ...(numericQ
               ? [
-                { contactNumber: { $regex: numericQ } },
-                { normalizedPhone: { $regex: numericQ } },
-              ]
+                  { contactNumber: { $regex: numericQ } },
+                  { normalizedPhone: { $regex: numericQ } },
+                ]
               : []),
           ],
         });
       }
 
-      // channel
       if (channel && CHANNEL_MAP[channel]) {
         const id = CHANNEL_MAP[channel];
         const idNum = Number(id);
@@ -1077,35 +1133,9 @@ router.get("/counts", async (req, res) => {
         });
       }
 
-      // date: after 1 Nov by default, or single-day filter if allCnpDate provided
-      const baseNov = new Date("2025-11-01T00:00:00.000Z");
-
-      if (dateFilter) {
-        const dayStart = new Date(`${dateFilter}T00:00:00.000Z`);
-        if (!isNaN(dayStart.getTime())) {
-          const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-
-          c.push({
-            $or: [
-              { orderDate: { $gte: dayStart, $lt: dayEnd } },
-              { createdAt: { $gte: dayStart, $lt: dayEnd } },
-            ],
-          });
-        } else {
-          c.push({
-            $or: [
-              { orderDate: { $gte: baseNov } },
-              { createdAt: { $gte: baseNov } },
-            ],
-          });
-        }
-      } else {
-        c.push({
-          $or: [
-            { orderDate: { $gte: baseNov } },
-            { createdAt: { $gte: baseNov } },
-          ],
-        });
+      const globalCnpDateClause = buildISTDateRangeClause(startDate, endDate);
+      if (globalCnpDateClause) {
+        c.push(globalCnpDateClause);
       }
 
       const match = c.length ? { $and: c } : {};
@@ -1151,14 +1181,13 @@ router.get("/today-confirmed-count", async (req, res) => {
     const maybeAgentId = String(req.query.agentId || "");
     const userId = getUserIdFromReq(req);
 
-    // Determine agent filter
     const agentId = isValidObjectId(maybeAgentId)
       ? new mongoose.Types.ObjectId(maybeAgentId)
       : isValidObjectId(userId)
-        ? new mongoose.Types.ObjectId(userId)
-        : null;
+      ? new mongoose.Types.ObjectId(userId)
+      : null;
 
-    // Build IST "today" boundaries -> as UTC instants
+    // IST day boundaries as UTC instants
     const now = new Date();
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Kolkata",
@@ -1173,8 +1202,7 @@ router.get("/today-confirmed-count", async (req, res) => {
 
     const istOffsetMs = 5.5 * 60 * 60 * 1000;
     const startUtcMs = Date.UTC(y, m - 1, d, 0, 0, 0, 0) - istOffsetMs;
-    const endUtcMs =
-      Date.UTC(y, m - 1, d, 23, 59, 59, 999) - istOffsetMs;
+    const endUtcMs = Date.UTC(y, m - 1, d, 23, 59, 59, 999) - istOffsetMs;
 
     const start = new Date(startUtcMs);
     const end = new Date(endUtcMs);
@@ -1212,13 +1240,11 @@ router.post("/cancel", async (req, res) => {
       email = true,
       restock = true,
       note = "Cancelled via Order Confirmations UI",
-      ocCancelReason = "", // local-only reason from UI
+      ocCancelReason = "",
     } = req.body || {};
 
     if (!orderName && !orderId) {
-      return res
-        .status(400)
-        .json({ error: "Provide orderName or orderId" });
+      return res.status(400).json({ error: "Provide orderName or orderId" });
     }
 
     if (!SHOPIFY_STORE_NAME || !SHOPIFY_ACCESS_TOKEN) {
@@ -1233,12 +1259,15 @@ router.post("/cancel", async (req, res) => {
     if (orderId) {
       shopifyId = String(orderId).replace(/\D/g, "");
       const { data } = await shopifyApi.get(`/orders/${shopifyId}.json`);
+
       if (!data?.order?.id) {
         return res.status(404).json({
           error: `Shopify order not found for id ${orderId}`,
         });
       }
+
       shopifyName = data.order.name;
+
       if (String(data.order.cancelled_at || "")) {
         return res.json({
           ok: true,
@@ -1249,18 +1278,21 @@ router.post("/cancel", async (req, res) => {
     } else {
       const nameWithHash = ensureHashOrderName(orderName);
       const encName = encodeURIComponent(nameWithHash);
+
       const findResp = await shopifyApi.get(
         `/orders.json?name=${encName}&status=any&limit=1`
       );
+
       const order = Array.isArray(findResp.data?.orders)
         ? findResp.data.orders[0]
         : null;
+
       if (!order?.id) {
         return res.status(404).json({
           error: `Shopify order not found for name ${nameWithHash}`,
         });
       }
-      // if already cancelled, short-circuit
+
       if (String(order.cancelled_at || "")) {
         return res.json({
           ok: true,
@@ -1268,11 +1300,11 @@ router.post("/cancel", async (req, res) => {
           shopify: { id: order.id, name: order.name },
         });
       }
+
       shopifyId = order.id;
       shopifyName = order.name;
     }
 
-    // 2) Cancel on Shopify
     const cancelResp = await shopifyApi.post(
       `/orders/${shopifyId}/cancel.json`,
       {
@@ -1284,13 +1316,13 @@ router.post("/cancel", async (req, res) => {
     );
 
     const cancelled = cancelResp?.data?.order;
+
     if (!cancelled?.id || !cancelled?.cancelled_at) {
       return res.status(500).json({
         error: "Shopify cancel failed (unexpected response)",
       });
     }
 
-    // 3) Mirror note to Mongo (and set callStatus)
     const possibleNames = [
       shopifyName || "",
       stripHash(shopifyName || ""),
@@ -1329,9 +1361,7 @@ router.post("/cancel", async (req, res) => {
     const code = err?.response?.status || 500;
     const details = err?.response?.data || err.message;
     console.error("POST /order-confirmations/cancel error:", details);
-    return res
-      .status(code)
-      .json({ error: "Cancel operation failed", details });
+    return res.status(code).json({ error: "Cancel operation failed", details });
   }
 });
 
@@ -1341,27 +1371,23 @@ cron.schedule("*/59 * * * *", async () => {
   if (__ocBusy) return;
   __ocBusy = true;
   const started = Date.now();
+
   try {
-    // 1) Round-robin assignment
     const rr = await assignRoundRobin({});
     console.log(
-      `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${rr.agents || 0
+      `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${
+        rr.agents || 0
       })`
     );
 
     await axios.get(
       "https://muditamleads-14f32a10d7f7.herokuapp.com/api/orders-shopify/sync-new",
-      {
-        timeout: 120000,
-      }
+      { timeout: 120000 }
     );
 
     console.log(`[OC CRON] done in ${(Date.now() - started) / 1000}s`);
   } catch (e) {
-    console.error(
-      "[OC CRON] error:",
-      e?.response?.data || e.message || e
-    );
+    console.error("[OC CRON] error:", e?.response?.data || e.message || e);
   } finally {
     __ocBusy = false;
   }
