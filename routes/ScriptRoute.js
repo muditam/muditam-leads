@@ -1,18 +1,22 @@
-// routes/scriptRoutes.js
-const express = require("express");
-const router = express.Router();
+const express  = require("express");
+const router   = express.Router();
+router.use(express.json({ limit: "10mb" }));
+router.use(express.urlencoded({ limit: "10mb", extended: true }));
 const mongoose = require("mongoose");
-const multer = require("multer");
-const AWS = require("aws-sdk");
-const path = require("path");
+const multer   = require("multer");
+const AWS      = require("aws-sdk");
+const path     = require("path");
 const { v4: uuidv4 } = require("uuid");
-const Script = require("../models/scriptSchema");
+const Script   = require("../models/scriptSchema");
 
+// ─────────────────────────────────────────────────────────────
+// S3 / Wasabi
+// ─────────────────────────────────────────────────────────────
 const s3 = new AWS.S3({
-  accessKeyId: process.env.WASABI_ACCESS_KEY,
-  secretAccessKey: process.env.WASABI_SECRET_KEY,
-  region: process.env.WASABI_REGION,
-  endpoint: process.env.WASABI_ENDPOINT,
+  accessKeyId:      process.env.WASABI_ACCESS_KEY,
+  secretAccessKey:  process.env.WASABI_SECRET_KEY,
+  region:           process.env.WASABI_REGION,
+  endpoint:         process.env.WASABI_ENDPOINT,
   s3ForcePathStyle: true,
 });
 
@@ -21,6 +25,9 @@ const upload = multer({
   limits: { fileSize: 500 * 1024 * 1024 },
 });
 
+// ─────────────────────────────────────────────────────────────
+// Auth helpers
+// ─────────────────────────────────────────────────────────────
 const requireSession = (req, res, next) => {
   try {
     const headerUser = req.headers["x-session-user"];
@@ -40,13 +47,28 @@ const requireSession = (req, res, next) => {
 };
 
 const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];
-const isManager = (role = "") => MANAGER_ROLES.includes(String(role || "").toLowerCase());
+const isManager     = (role = "") => MANAGER_ROLES.includes(String(role || "").toLowerCase());
 const hasFullAccess = (user = {}) => isManager(user.role) || user.hasTeam === true;
 
+// ─────────────────────────────────────────────────────────────
+// Stages visible to ALL logged-in users (full production queue)
+// ─────────────────────────────────────────────────────────────
+const PUBLIC_STAGES = new Set([
+  "Shoot Pending",
+  "Shoot Done",
+  "Cut Pending",
+  "Cut Done",
+  "Edit Pending",
+  "Edit Done",
+  "Post",
+]);
+
+// ─────────────────────────────────────────────────────────────
+// Utility helpers
+// ─────────────────────────────────────────────────────────────
 function buildDateFilter(query) {
   const { dateField, dateFrom, dateTo } = query;
   if (!dateField || (!dateFrom && !dateTo)) return {};
-
   const range = {};
   if (dateFrom) {
     const d = new Date(dateFrom);
@@ -56,87 +78,9 @@ function buildDateFilter(query) {
     const d = new Date(dateTo);
     if (!isNaN(d)) range.$lte = new Date(d.toISOString().split("T")[0] + "T23:59:59.999Z");
   }
-
   if (!Object.keys(range).length) return {};
   return { [dateField]: range };
 }
-
-router.get("/presign", requireSession, async (req, res) => {
-  try {
-    const { filename, contentType } = req.query;
-    if (!filename || !contentType) {
-      return res.status(400).json({ message: "filename and contentType required" });
-    }
-
-    const ext = path.extname(filename) || "";
-    const key = `scripts/${uuidv4()}${ext}`;
-
-    const presignedUrl = s3.getSignedUrl("putObject", {
-      Bucket: process.env.WASABI_BUCKET,
-      Key: key,
-      ContentType: contentType,
-      Expires: 3600,
-    });
-
-    const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
-    const finalUrl = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
-
-    res.json({ presignedUrl, finalUrl, key });
-  } catch (err) {
-    console.error("Presign error:", err);
-    res.status(500).json({ message: "Could not generate upload URL", error: err.message });
-  }
-});
-
-router.get("/presign-download", requireSession, async (req, res) => {
-  try {
-    const { key } = req.query;
-    if (!key) return res.status(400).json({ message: "Key required" });
-
-    const url = s3.getSignedUrl("getObject", {
-      Bucket: process.env.WASABI_BUCKET,
-      Key: key,
-      Expires: 60 * 5,
-    });
-
-    res.json({ url });
-  } catch (err) {
-    console.error("Presign download error:", err);
-    res.status(500).json({ message: "Could not generate download URL" });
-  }
-});
-
-// Legacy upload route (kept). Note: memoryStorage + big files can crash RAM.
-router.post("/upload/wasabi", requireSession, upload.array("files", 10), async (req, res) => {
-  if (!req.files || req.files.length === 0) return res.status(400).json({ message: "No files uploaded" });
-
-  try {
-    const results = await Promise.all(
-      req.files.map(async (file) => {
-        const ext = path.extname(file.originalname) || "";
-        const key = `scripts/${uuidv4()}${ext}`;
-
-        await s3
-          .putObject({
-            Bucket: process.env.WASABI_BUCKET,
-            Key: key,
-            Body: file.buffer,
-            ContentType: file.mimetype,
-          })
-          .promise();
-
-        const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
-        const url = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
-        return { originalName: file.originalname, url, key };
-      })
-    );
-
-    res.json({ urls: results });
-  } catch (err) {
-    console.error("Wasabi upload error:", err);
-    res.status(500).json({ message: "Upload failed", error: err.message });
-  }
-});
 
 function clampInt(v, def, min, max) {
   const n = parseInt(v, 10);
@@ -158,12 +102,91 @@ function ciExactRegex(value) {
   return new RegExp(`^${escapeRegex(value)}$`, "i");
 }
 
-/**
- * ✅ NEW (for creator dropdown):
- * GET /api/scripts/creators
- * Returns distinct creators visible to the current user (respects access filter)
- * Optional query: stage=...  (comma-separated)
- */
+// ─────────────────────────────────────────────────────────────
+// Presign upload URL
+// ─────────────────────────────────────────────────────────────
+router.get("/presign", requireSession, async (req, res) => {
+  try {
+    const { filename, contentType } = req.query;
+    if (!filename || !contentType)
+      return res.status(400).json({ message: "filename and contentType required" });
+
+    const ext = path.extname(filename) || "";
+    const key = `scripts/${uuidv4()}${ext}`;
+
+    const presignedUrl = s3.getSignedUrl("putObject", {
+      Bucket:      process.env.WASABI_BUCKET,
+      Key:         key,
+      ContentType: contentType,
+      Expires:     3600,
+    });
+
+    const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
+    const finalUrl  = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
+
+    res.json({ presignedUrl, finalUrl, key });
+  } catch (err) {
+    console.error("Presign error:", err);
+    res.status(500).json({ message: "Could not generate upload URL", error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Presign download URL
+// ─────────────────────────────────────────────────────────────
+router.get("/presign-download", requireSession, async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ message: "Key required" });
+
+    const url = s3.getSignedUrl("getObject", {
+      Bucket:  process.env.WASABI_BUCKET,
+      Key:     key,
+      Expires: 60 * 5,
+    });
+
+    res.json({ url });
+  } catch (err) {
+    console.error("Presign download error:", err);
+    res.status(500).json({ message: "Could not generate download URL" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Legacy upload route (kept for compatibility)
+// ─────────────────────────────────────────────────────────────
+router.post("/upload/wasabi", requireSession, upload.array("files", 10), async (req, res) => {
+  if (!req.files || req.files.length === 0)
+    return res.status(400).json({ message: "No files uploaded" });
+
+  try {
+    const results = await Promise.all(
+      req.files.map(async (file) => {
+        const ext = path.extname(file.originalname) || "";
+        const key = `scripts/${uuidv4()}${ext}`;
+
+        await s3.putObject({
+          Bucket:      process.env.WASABI_BUCKET,
+          Key:         key,
+          Body:        file.buffer,
+          ContentType: file.mimetype,
+        }).promise();
+
+        const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
+        const url = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
+        return { originalName: file.originalname, url, key };
+      })
+    );
+    res.json({ urls: results });
+  } catch (err) {
+    console.error("Wasabi upload error:", err);
+    res.status(500).json({ message: "Upload failed", error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /creators — distinct creator list (respects access)
+// ─────────────────────────────────────────────────────────────
 router.get("/creators", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
@@ -180,7 +203,9 @@ router.get("/creators", requireSession, async (req, res) => {
       extras.stage = stages.length > 1 ? { $in: stages } : stages[0];
     }
 
-    const match = Object.keys(extras).length ? { $and: [baseFilter, extras] } : baseFilter;
+    const match = Object.keys(extras).length
+      ? { $and: [baseFilter, extras] }
+      : baseFilter;
 
     const agg = await Script.aggregate([
       { $match: match },
@@ -195,48 +220,41 @@ router.get("/creators", requireSession, async (req, res) => {
   }
 });
 
-/**
- * GET /api/scripts
- * ✅ Backend pagination
- * ✅ Reverse chronological (default createdAt desc)
- * ✅ Filters: stage, scriptType, scriptStatus, assignedTo, creator, scriptId
- * ✅ Search: q / search / scriptSearch (searches across scriptText + scriptId + etc.)
- */
+// ─────────────────────────────────────────────────────────────
+// GET / — main list with pagination, search, filters
+// ✅ PUBLIC_STAGES: non-managers see full production queue
+// ✅ Script Library: non-managers only see their own scripts
+// ─────────────────────────────────────────────────────────────
 router.get("/", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
 
     const { stage, scriptType, scriptStatus } = req.query;
 
-    const assignedTo = req.query.assignedTo ?? req.query.editAssignedTo;
-    const creator = req.query.creator ?? req.query.createdBy;
-    const scriptIdQ = req.query.scriptId;
-
+    const assignedTo  = req.query.assignedTo  ?? req.query.editAssignedTo;
+    const creator     = req.query.creator     ?? req.query.createdBy;
+    const scriptIdQ   = req.query.scriptId;
     const scriptIdExact =
-      String(req.query.scriptIdExact || "").toLowerCase() === "true" || String(req.query.scriptIdExact || "") === "1";
+      String(req.query.scriptIdExact || "").toLowerCase() === "true" ||
+      String(req.query.scriptIdExact || "") === "1";
 
     const qRaw = (req.query.q ?? req.query.search ?? req.query.scriptSearch ?? "").toString().trim();
 
-    const page = clampInt(req.query.page, 1, 1, 1000000);
+    const page  = clampInt(req.query.page, 1, 1, 1000000);
     const limit = clampInt(req.query.limit, 50, 1, 200);
-    const skip = (page - 1) * limit;
+    const skip  = (page - 1) * limit;
 
-    // ✅ FIX: add proceedToShootAt because frontend sorts by it in ShootPage
     const ALLOWED_SORT_FIELDS = [
-      "createdAt",
-      "updatedAt",
-      "proceedToShootAt",
-      "cutDoneAt",
-      "editDoneAt",
-      "shootDoneAt",
-      "postedAt",
+      "createdAt", "updatedAt", "proceedToShootAt",
+      "cutDoneAt", "editDoneAt", "shootDoneAt", "postedAt",
     ];
-
-    const sortBy = ALLOWED_SORT_FIELDS.includes(req.query.sortBy) ? req.query.sortBy : "createdAt";
+    const sortBy  = ALLOWED_SORT_FIELDS.includes(req.query.sortBy) ? req.query.sortBy : "createdAt";
     const sortDir = String(req.query.sortDir || "desc").toLowerCase() === "asc" ? 1 : -1;
-    const sort = { [sortBy]: sortDir, _id: sortDir };
+    const sort    = { [sortBy]: sortDir, _id: sortDir };
 
+    // ── Access filter ──────────────────────────────────────────
     let baseFilter = {};
+
     if (!hasFullAccess(user)) {
       if (!user.fullName) {
         return res.json({
@@ -245,9 +263,27 @@ router.get("/", requireSession, async (req, res) => {
           user: {},
         });
       }
-      baseFilter = { $or: [{ createdBy: user.fullName }, { editAssignedTo: user.fullName }] };
+
+      // If ALL requested stages are public production stages → no ownership filter
+      const requestedStages = toStrArray(stage);
+      const allPublic =
+        requestedStages.length > 0 &&
+        requestedStages.every((s) => PUBLIC_STAGES.has(s));
+
+      if (allPublic) {
+        baseFilter = {}; // everyone sees the full production queue
+      } else {
+        // Script Library → only own scripts
+        baseFilter = {
+          $or: [
+            { createdBy: user.fullName },
+            { editAssignedTo: user.fullName },
+          ],
+        };
+      }
     }
 
+    // ── Extra filters ──────────────────────────────────────────
     const extras = {};
 
     if (stage) {
@@ -283,24 +319,27 @@ router.get("/", requireSession, async (req, res) => {
     if (qRaw) {
       const re = new RegExp(escapeRegex(qRaw), "i");
       extras.$or = [
-        { scriptId: re },
-        { scriptText: re },
-        { referenceLink: re },
-        { createdBy: re },
+        { scriptId:       re },
+        { scriptText:     re },
+        { referenceLink:  re },
+        { createdBy:      re },
         { editAssignedTo: re },
-        { scriptType: re },
+        { scriptType:     re },
       ];
     }
 
     const dateFilter = buildDateFilter(req.query);
 
     const conditions = [
-      ...(Object.keys(baseFilter).length ? [baseFilter] : []),
-      ...(Object.keys(extras).length ? [extras] : []),
-      ...(Object.keys(dateFilter).length ? [dateFilter] : []),
+      ...(Object.keys(baseFilter).length  ? [baseFilter]  : []),
+      ...(Object.keys(extras).length      ? [extras]      : []),
+      ...(Object.keys(dateFilter).length  ? [dateFilter]  : []),
     ];
 
-    const query = conditions.length === 0 ? {} : conditions.length === 1 ? conditions[0] : { $and: conditions };
+    const query =
+      conditions.length === 0 ? {} :
+      conditions.length === 1 ? conditions[0] :
+      { $and: conditions };
 
     const [total, scripts] = await Promise.all([
       Script.countDocuments(query),
@@ -316,16 +355,16 @@ router.get("/", requireSession, async (req, res) => {
         limit,
         total,
         totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1,
+        hasNext:  page < totalPages,
+        hasPrev:  page > 1,
         sortBy,
         sortDir: sortDir === 1 ? "asc" : "desc",
       },
       user: {
         fullName: user.fullName,
-        email: user.email,
-        role: user.role,
-        hasTeam: user.hasTeam,
+        email:    user.email,
+        role:     user.role,
+        hasTeam:  user.hasTeam,
       },
     });
   } catch (err) {
@@ -333,14 +372,19 @@ router.get("/", requireSession, async (req, res) => {
   }
 });
 
-/** GET /api/scripts/stages-summary */
+// ─────────────────────────────────────────────────────────────
+// GET /stages-summary
+// ─────────────────────────────────────────────────────────────
 router.get("/stages-summary", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
     if (!hasFullAccess(user) && !user.fullName) return res.json({});
     const base = hasFullAccess(user) ? {} : { createdBy: user.fullName };
 
-    const agg = await Script.aggregate([{ $match: base }, { $group: { _id: "$stage", count: { $sum: 1 } } }]);
+    const agg = await Script.aggregate([
+      { $match: base },
+      { $group: { _id: "$stage", count: { $sum: 1 } } },
+    ]);
 
     const summary = {};
     agg.forEach((r) => (summary[r._id] = r.count));
@@ -350,7 +394,9 @@ router.get("/stages-summary", requireSession, async (req, res) => {
   }
 });
 
-/** GET /api/scripts/designers */
+// ─────────────────────────────────────────────────────────────
+// GET /designers
+// ─────────────────────────────────────────────────────────────
 router.get("/designers", requireSession, async (req, res) => {
   try {
     const Employee = mongoose.model("Employee");
@@ -361,7 +407,9 @@ router.get("/designers", requireSession, async (req, res) => {
   }
 });
 
-/** GET /api/scripts/:id */
+// ─────────────────────────────────────────────────────────────
+// GET /:id
+// ─────────────────────────────────────────────────────────────
 router.get("/:id", requireSession, async (req, res) => {
   try {
     const script = await Script.findById(req.params.id);
@@ -372,23 +420,23 @@ router.get("/:id", requireSession, async (req, res) => {
   }
 });
 
-/** POST /api/scripts */
+// ─────────────────────────────────────────────────────────────
+// POST / — create script
+// ─────────────────────────────────────────────────────────────
 router.post("/", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
     const { scriptType, scriptText, referenceLink } = req.body;
-    if (!scriptType || !scriptText) {
+    if (!scriptType || !scriptText)
       return res.status(400).json({ message: "scriptType and scriptText required" });
-    }
 
     const script = new Script({
       scriptType,
       scriptText,
-      referenceLink: referenceLink || "",
-      createdBy: user.fullName,
+      referenceLink:  referenceLink || "",
+      createdBy:      user.fullName,
       createdByEmail: user.email,
     });
-
     await script.save();
     res.status(201).json({ message: "Created", script });
   } catch (err) {
@@ -396,31 +444,39 @@ router.post("/", requireSession, async (req, res) => {
   }
 });
 
-/** PUT /api/scripts/:id */
+// ─────────────────────────────────────────────────────────────
+// PUT /:id — general update
+// ✅ Captures approvedBy + approvedAt when status → Approved
+// ✅ Clears approvedBy when status reverts away from Approved
+// ─────────────────────────────────────────────────────────────
 router.put("/:id", requireSession, async (req, res) => {
   try {
-    const user = req.sessionUser;
+    const user   = req.sessionUser;
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
-    if (!hasFullAccess(user) && script.createdBy !== user.fullName) {
+    if (!hasFullAccess(user) && script.createdBy !== user.fullName)
       return res.status(403).json({ message: "Forbidden" });
-    }
 
     const allowed = [
-      "scriptType",
-      "scriptText",
-      "referenceLink",
-      "scriptStatus",
-      "approverComment",
-      "holdReason",
-      "cutComment",
-      "editAssignedTo",
-      "editComment",
-      "postComment",
+      "scriptType", "scriptText", "referenceLink",
+      "scriptStatus", "approverComment", "holdReason",
+      "cutComment", "editAssignedTo", "editComment", "postComment",
     ];
-    allowed.forEach((f) => {
-      if (req.body[f] !== undefined) script[f] = req.body[f];
-    });
+    allowed.forEach((f) => { if (req.body[f] !== undefined) script[f] = req.body[f]; });
+
+    // Capture approver info when status → Approved (set only once)
+    if (req.body.scriptStatus === "Approved") {
+      if (!script.approvedBy) {
+        script.approvedBy = user.fullName;
+        script.approvedAt = new Date();
+      }
+    }
+
+    // Clear approver info if status reverts away from Approved
+    if (req.body.scriptStatus && req.body.scriptStatus !== "Approved") {
+      script.approvedBy = "";
+      script.approvedAt = undefined;
+    }
 
     await script.save();
     res.json({ message: "Updated", script });
@@ -429,16 +485,16 @@ router.put("/:id", requireSession, async (req, res) => {
   }
 });
 
-/** DELETE /api/scripts/:id */
+// ─────────────────────────────────────────────────────────────
+// DELETE /:id
+// ─────────────────────────────────────────────────────────────
 router.delete("/:id", requireSession, async (req, res) => {
   try {
-    const user = req.sessionUser;
+    const user   = req.sessionUser;
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
-    if (!hasFullAccess(user) && script.createdBy !== user.fullName) {
+    if (!hasFullAccess(user) && script.createdBy !== user.fullName)
       return res.status(403).json({ message: "Forbidden" });
-    }
-
     await Script.findByIdAndDelete(req.params.id);
     res.json({ message: "Deleted" });
   } catch (err) {
@@ -446,14 +502,16 @@ router.delete("/:id", requireSession, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /:id/proceed-to-shoot
+// ─────────────────────────────────────────────────────────────
 router.post("/:id/proceed-to-shoot", requireSession, async (req, res) => {
   try {
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
-    if (script.scriptStatus !== "Approved") {
+    if (script.scriptStatus !== "Approved")
       return res.status(400).json({ message: "Script must be Approved first" });
-    }
-    script.stage = "Shoot Pending";
+    script.stage            = "Shoot Pending";
     script.proceedToShootAt = new Date();
     await script.save();
     res.json({ message: "Moved to Shoot Pending", script });
@@ -462,16 +520,17 @@ router.post("/:id/proceed-to-shoot", requireSession, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /:id/shoot-done
+// ─────────────────────────────────────────────────────────────
 router.post("/:id/shoot-done", requireSession, async (req, res) => {
   try {
-    const user = req.sessionUser;
+    const user   = req.sessionUser;
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
-
-    script.stage = "Shoot Done";
+    script.stage       = "Shoot Done";
     script.shootDoneAt = new Date();
     script.shootDoneBy = user.fullName;
-
     await script.save();
     res.json({ message: "Shoot done", script });
   } catch (err) {
@@ -479,6 +538,9 @@ router.post("/:id/shoot-done", requireSession, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /:id/save-cut-file — save cut file URL without marking done
+// ─────────────────────────────────────────────────────────────
 router.post("/:id/save-cut-file", requireSession, async (req, res) => {
   try {
     const { cutVideoUrl, cutVideoName, cutComment } = req.body;
@@ -487,7 +549,7 @@ router.post("/:id/save-cut-file", requireSession, async (req, res) => {
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
 
-    script.cutVideoUrl = cutVideoUrl;
+    script.cutVideoUrl  = cutVideoUrl;
     script.cutVideoName = cutVideoName || cutVideoUrl.split("/").pop();
     if (cutComment !== undefined) script.cutComment = cutComment;
 
@@ -498,6 +560,10 @@ router.post("/:id/save-cut-file", requireSession, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /:id/cut-upload — upload cut file AND mark Cut Done
+// ✅ cutUploadedBy tracked separately from cutDoneBy
+// ─────────────────────────────────────────────────────────────
 router.post("/:id/cut-upload", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
@@ -507,12 +573,13 @@ router.post("/:id/cut-upload", requireSession, async (req, res) => {
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
 
-    script.cutVideoUrl = cutVideoUrl;
-    script.cutVideoName = cutVideoName || cutVideoUrl.split("/").pop();
-    script.cutComment = cutComment || "";
-    script.stage = "Cut Done";
-    script.cutDoneAt = new Date();
-    script.cutDoneBy = user.fullName;
+    script.cutVideoUrl   = cutVideoUrl;
+    script.cutVideoName  = cutVideoName || cutVideoUrl.split("/").pop();
+    script.cutComment    = cutComment || "";
+    script.stage         = "Cut Done";
+    script.cutDoneAt     = new Date();
+    script.cutDoneBy     = user.fullName;
+    script.cutUploadedBy = user.fullName; // ✅ track uploader separately
 
     await script.save();
     res.json({ message: "Cut uploaded", script });
@@ -521,27 +588,23 @@ router.post("/:id/cut-upload", requireSession, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /:id/edit-assign
+// ─────────────────────────────────────────────────────────────
 router.post("/:id/edit-assign", requireSession, async (req, res) => {
   try {
     const { editAssignedTo } = req.body;
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
-
     script.editAssignedTo = editAssignedTo || "";
     if (script.stage === "Cut Done") script.stage = "Edit Pending";
-
     await script.save();
     res.json({ message: "Assigned", script });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
-
-/**
- * ✅ IMPORTANT: Reupload works via SAME endpoint.
- * ✅ FIX: If script is already in "Post", uploading a new edited file should NOT pull it back to "Edit Done".
- *    (unless editStatus = Reshoot / Re-edit forces moving back)
- */
+ 
 router.post("/:id/edit-upload", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
@@ -550,31 +613,24 @@ router.post("/:id/edit-upload", requireSession, async (req, res) => {
     const script = await Script.findById(req.params.id);
     if (!script) return res.status(404).json({ message: "Not found" });
 
-    // If a file is uploaded (first-time or reupload)
     if (editFileUrl) {
-      script.editFileUrl = editFileUrl;
+      script.editFileUrl  = editFileUrl;
       script.editFileName = editFileName || editFileUrl.split("/").pop();
-
-      // update audit
-      script.editDoneAt = new Date();
-      script.editDoneBy = user.fullName;
-
+      script.editDoneAt   = new Date();
+      script.editDoneBy   = user.fullName;
       // ✅ keep Post stage if already posted
       if (script.stage !== "Post") {
         script.stage = "Edit Done";
       }
     }
 
-    if (editComment !== undefined) script.editComment = editComment;
+    if (editComment    !== undefined) script.editComment    = editComment;
     if (editHoldReason !== undefined) script.editHoldReason = editHoldReason;
 
-    // editStatus logic (can still move stage backwards)
     if (editStatus !== undefined) {
       script.editStatus = editStatus;
-
       if (editStatus === "Reshoot") script.stage = "Shoot Pending";
       if (editStatus === "Re-edit") script.stage = "Cut Done";
-      // if "Done" and no file uploaded, we keep stage unchanged (your old behavior)
     }
 
     await script.save();
@@ -583,7 +639,29 @@ router.post("/:id/edit-upload", requireSession, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+ 
+router.post("/:id/edit-thumbnail", requireSession, async (req, res) => {
+  try {
+    const user = req.sessionUser;
+    const { editThumbUrl, editThumbName } = req.body;
 
+    if (!editThumbUrl) return res.status(400).json({ message: "editThumbUrl required" });
+
+    const script = await Script.findById(req.params.id);
+    if (!script) return res.status(404).json({ message: "Not found" });
+
+    script.editThumbUrl       = editThumbUrl;
+    script.editThumbName      = editThumbName || editThumbUrl.split("/").pop();
+    script.editThumbUpdatedAt = new Date();
+    script.editThumbUpdatedBy = user.fullName || "";
+
+    await script.save();
+    res.json({ message: "Thumbnail updated", script });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+ 
 router.post("/:id/post-update", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
@@ -595,16 +673,15 @@ router.post("/:id/post-update", requireSession, async (req, res) => {
     const now = new Date();
 
     if (postStatus !== undefined && postStatus !== script.postStatus) {
-      script.postStatus = postStatus;
+      script.postStatus          = postStatus;
       script.postStatusUpdatedAt = now;
       script.postStatusUpdatedBy = user.fullName;
     }
     if (postHoldReason !== undefined) script.postHoldReason = postHoldReason;
 
     if (postPublishStatus !== undefined && postPublishStatus !== script.postPublishStatus) {
-      script.postPublishStatus = postPublishStatus;
+      script.postPublishStatus          = postPublishStatus;
       script.postPublishStatusUpdatedAt = now;
-
       if (postPublishStatus && !script.postedAt) {
         script.postedAt = now;
         script.postedBy = user.fullName;
@@ -613,10 +690,10 @@ router.post("/:id/post-update", requireSession, async (req, res) => {
     }
 
     if (postFileUrl) {
-      script.postFileUrl = postFileUrl;
+      script.postFileUrl  = postFileUrl;
       script.postFileName = postFileName || postFileUrl.split("/").pop();
       if (script.stage !== "Post") {
-        script.stage = "Post";
+        script.stage    = "Post";
         script.postedAt = script.postedAt || now;
         script.postedBy = script.postedBy || user.fullName;
       }
@@ -631,6 +708,9 @@ router.post("/:id/post-update", requireSession, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /:id/post (legacy / simpler post route)
+// ─────────────────────────────────────────────────────────────
 router.post("/:id/post", requireSession, async (req, res) => {
   try {
     const user = req.sessionUser;
@@ -642,20 +722,19 @@ router.post("/:id/post", requireSession, async (req, res) => {
     const now = new Date();
 
     if (postStatus && postStatus !== script.postStatus) {
-      script.postStatus = postStatus;
+      script.postStatus          = postStatus;
       script.postStatusUpdatedAt = now;
       script.postStatusUpdatedBy = user.fullName;
     }
-
     if (postHoldReason !== undefined) script.postHoldReason = postHoldReason;
-    if (postComment !== undefined) script.postComment = postComment;
+    if (postComment    !== undefined) script.postComment    = postComment;
 
     if (postFileUrl) {
-      script.postFileUrl = postFileUrl;
+      script.postFileUrl  = postFileUrl;
       script.postFileName = postFileName || postFileUrl.split("/").pop();
-      script.stage = "Post";
-      script.postedAt = script.postedAt || now;
-      script.postedBy = script.postedBy || user.fullName;
+      script.stage        = "Post";
+      script.postedAt     = script.postedAt || now;
+      script.postedBy     = script.postedBy || user.fullName;
     }
 
     await script.save();
@@ -665,26 +744,5 @@ router.post("/:id/post", requireSession, async (req, res) => {
   }
 });
 
-router.post("/:id/edit-thumbnail", requireSession, async (req, res) => {
-  try {
-    const user = req.sessionUser;
-    const { editThumbUrl, editThumbName } = req.body;
-
-    if (!editThumbUrl) return res.status(400).json({ message: "editThumbUrl required" });
-
-    const script = await Script.findById(req.params.id);
-    if (!script) return res.status(404).json({ message: "Not found" });
-
-    script.editThumbUrl = editThumbUrl;
-    script.editThumbName = editThumbName || editThumbUrl.split("/").pop();
-    script.editThumbUpdatedAt = new Date();
-    script.editThumbUpdatedBy = user.fullName || "";
-
-    await script.save();
-    res.json({ message: "Thumbnail updated", script });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 module.exports = router;
+
