@@ -7,7 +7,7 @@ const multer   = require("multer");
 const AWS      = require("aws-sdk");
 const path     = require("path");
 const { v4: uuidv4 } = require("uuid");
-const Script   = require("../models/scriptSchema");
+const Script   = require("../marketingschema/scriptSchema");
 
 // ─────────────────────────────────────────────────────────────
 // S3 / Wasabi
@@ -262,25 +262,8 @@ router.get("/", requireSession, async (req, res) => {
           pagination: { page, limit, total: 0, totalPages: 0, hasNext: false, hasPrev: false },
           user: {},
         });
-      }
-
-      // If ALL requested stages are public production stages → no ownership filter
-      const requestedStages = toStrArray(stage);
-      const allPublic =
-        requestedStages.length > 0 &&
-        requestedStages.every((s) => PUBLIC_STAGES.has(s));
-
-      if (allPublic) {
-        baseFilter = {}; // everyone sees the full production queue
-      } else {
-        // Script Library → only own scripts
-        baseFilter = {
-          $or: [
-            { createdBy: user.fullName },
-            { editAssignedTo: user.fullName },
-          ],
-        };
-      }
+      } 
+      baseFilter = {};
     }
 
     // ── Extra filters ──────────────────────────────────────────

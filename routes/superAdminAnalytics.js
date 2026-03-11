@@ -275,7 +275,9 @@ router.get("/delivered", async (req, res) => {
         $regex: /^delivered$/i,
         $not: /rto/i
       }
-    }); 
+    });
+
+
 
     return res.json({ delivered });
   } catch (err) {
@@ -331,8 +333,6 @@ router.get("/delivered", async (req, res) => {
   });
 
 
-
-
   router.get("/leads-contacted", async (req, res) => {
     try {
       const { start, end } = req.query;
@@ -355,40 +355,40 @@ router.get("/delivered", async (req, res) => {
     }
   });
 
-  // router.get("/calls", async (req, res) => {
-  //   try {
-  //     let { start, end } = req.query;
+  router.get("/calls", async (req, res) => {
+    try {
+      let { start, end } = req.query;
 
-  //     if (!start || !end) {
-  //       return res.status(400).json({ error: "start and end required" });
-  //     }
+      if (!start || !end) {
+        return res.status(400).json({ error: "start and end required" });
+      }
 
-  //     // Do NOT convert to UTC — DB stores plain IST strings
-  //     // Example: “2025-01-30”
-  //     const s = start.trim();
-  //     const e = end.trim();
+      // Do NOT convert to UTC — DB stores plain IST strings
+      // Example: “2025-01-30”
+      const s = start.trim();
+      const e = end.trim();
 
-  //     // Query SmartfloDaily by STRING date (exact match)
-  //     const docs = await SmartfloDaily.find({
-  //       date: { $gte: s, $lte: e }
-  //     }).lean();
+      // Query SmartfloDaily by STRING date (exact match)
+      const docs = await SmartfloDaily.find({
+        date: { $gte: s, $lte: e }
+      }).lean();
 
-  //     let incoming = 0;
-  //     let outgoing = 0;
+      let incoming = 0;
+      let outgoing = 0;
 
-  //     docs.forEach((d) => {
-  //       const sum = d.summary || {};
-  //       incoming += sum.incomingCalls || 0;
-  //       outgoing += sum.dialledCalls || 0;
-  //     });
+      docs.forEach((d) => {
+        const sum = d.summary || {};
+        incoming += sum.incomingCalls || 0;
+        outgoing += sum.dialledCalls || 0;
+      });
 
-  //     return res.json({ incoming, outgoing });
+      return res.json({ incoming, outgoing });
 
-  //   } catch (err) {
-  //     console.error("CALL ANALYTICS ERROR:", err);
-  //     res.status(500).json({ error: "Failed to fetch call analytics" });
-  //   }
-  // });
+    } catch (err) {
+      console.error("CALL ANALYTICS ERROR:", err);
+      res.status(500).json({ error: "Failed to fetch call analytics" });
+    }
+  });
 
 
   router.get("/delivered", async (req, res) => {
@@ -408,7 +408,9 @@ router.get("/delivered", async (req, res) => {
           $lte: endDate 
         },
         shipment_status: "Delivered"
-      }); 
+      });
+
+    
 
       return res.json({ delivered });
     } catch (err) {
@@ -417,6 +419,50 @@ router.get("/delivered", async (req, res) => {
     }
   });
 
+
+  //   try {
+  //     const { start, end } = req.query;
+  //     if (!start || !end) {
+  //       return res.status(400).json({ error: "start and end required" });
+  //     }
+
+  //     const startDate = new Date(`${start}T00:00:00.000Z`);
+  //     const endDate = new Date(`${end}T23:59:59.999Z`);
+
+  //     // ✅ Count RTO orders from Order model (order.js)
+  //     const rto = await Order.countDocuments({
+  //       order_date: { 
+  //         $gte: startDate, 
+  //         $lte: endDate 
+  //       },
+  //       shipment_status: "RTO"  // Exact match
+  //     });
+
+  //     // ✅ Count RTO Delivered orders from Order model (order.js)
+  //     const rtoDelivered = await Order.countDocuments({
+  //       order_date: { 
+  //         $gte: startDate, 
+  //         $lte: endDate 
+  //       },
+  //       shipment_status: "RTO Delivered"  // Exact match
+  //     });
+
+  //     // ✅ Total RTO (RTO + RTO Delivered)
+  //     const totalRto = rto + rtoDelivered;
+
+  
+
+  //     return res.json({ 
+  //       rto, 
+  //       rtoDelivered, 
+  //       totalRto 
+  //     });
+
+  //   } catch (err) {
+  //     console.error("RTO ANALYTICS ERROR:", err);
+  //     return res.status(500).json({ error: "Failed to fetch RTO analytics" });
+  //   }
+  // });
 router.get("/aov", async (req, res) => {
   try {
     const { start, end } = req.query;
@@ -429,7 +475,8 @@ router.get("/aov", async (req, res) => {
 
     const ONLINE_ID = "252664381441";
     const TEAM_ID = "205650526209";
- 
+
+  
 
     // Single aggregation to get all AOV stats
     const [result] = await ShopifyOrder.aggregate([
@@ -505,7 +552,8 @@ router.get("/aov", async (req, res) => {
       online: calcAOV(result.online),
       team: calcAOV(result.team),
       combined: calcAOV(result.combined),
-    }; 
+    };
+
 
     return res.json(response);
   } catch (err) {
@@ -525,7 +573,6 @@ router.get("/aov", async (req, res) => {
         return res.status(400).json({ error: "start and end required" });
       }
 
-      // rtNextFollowupDate is STRING in format YYYY-MM-DD (as per your UI)
       const follows = await Lead.countDocuments({
         rtNextFollowupDate: { $gte: start, $lte: end }
       });
@@ -546,10 +593,9 @@ router.get("/aov", async (req, res) => {
         return res.status(400).json({ error: "start and end required" });
       }
 
-      // Leads created inside range (using date STRING)
+
       const dateMatch = { date: { $gte: start, $lte: end } };
 
-      // rtNextFollowupDate missing OR empty
       const noConsultMatch = {
         $or: [
           { rtNextFollowupDate: { $exists: false } },
@@ -640,6 +686,7 @@ router.get("/escalations", async (req, res) => {
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate   = new Date(`${end}T23:59:59.999Z`);
 
+    // ✅ ONLY COUNT - NO DETAILS
     const OPEN_STATUSES = ["Open", "In Progress"];
 
     const open = await Escalation.countDocuments({
@@ -652,10 +699,11 @@ router.get("/escalations", async (req, res) => {
       createdAt: { $gte: startDate, $lte: endDate }
     });
 
+
     return res.json({ open, closed });
 
   } catch (err) {
-    console.error("ESCALATION ERROR:", err);
+    console.error("❌ ESCALATION ERROR:", err);
     return res.status(500).json({ error: "Failed to fetch escalation stats" });
   }
 });
@@ -672,6 +720,7 @@ router.get("/escalations", async (req, res) => {
       const startDate = new Date(`${start}T00:00:00.000Z`);
       const endDate = new Date(`${end}T23:59:59.999Z`);
 
+      // Count by createdAt (diet plan created date)
       const count = await DietPlan.countDocuments({
         createdAt: { $gte: startDate, $lte: endDate }
       });
@@ -683,12 +732,10 @@ router.get("/escalations", async (req, res) => {
       res.status(500).json({ error: "Failed to fetch diet plan count" });
     }
   });
-
   router.get("/delivered-sales-per-agent", async (req, res) => {
     try {
       let { start, end } = req.query;
 
-      // If no dates → default last 30 days
       let startDate, endDate;
 
       if (!start || !end) {
@@ -729,6 +776,7 @@ router.get("/escalations", async (req, res) => {
       const e = new Date(end);
       e.setHours(23, 59, 59);
 
+      // 1️⃣ Delivered orders from Order schema
       const deliveredOrders = await Order.find(
         {
           shipment_status: "Delivered",
@@ -743,10 +791,11 @@ router.get("/escalations", async (req, res) => {
         return res.json({ totalCount: 0, totalAmount: 0, orders: [] });
       }
 
+      // 2️⃣ Match Shopify Orders using orderName
       const shopifyMatches = await ShopifyOrder.find(
         {
           orderName: { $in: orderNames },
-          modeOfPayment: { $regex: /cod/i }  
+          modeOfPayment: { $regex: /cod/i }   // FIXED HERE 🎉
         },
         { amount: 1, orderName: 1 }
       ).lean();
@@ -894,9 +943,13 @@ router.get("/aov-over-time", async (req, res) => {
 
       return { map, overallAOV, totalOrders };
     };
- 
+
+    // -----------------------------------------------------
+    // CASE 1 — NO COMPARISON
+    // -----------------------------------------------------
     if (!customCompareStart || !customCompareEnd) {
-       if (isSingleDay) {
+      // A) Single day → hourly
+      if (isSingleDay) {
         const data = await aggregateHourly(startDate, endDate);
 
         const points = Array.from({ length: 24 }, (_, h) => {
@@ -921,7 +974,8 @@ router.get("/aov-over-time", async (req, res) => {
           isSingleDay: true
         });
       }
- 
+
+      // B) Multi-day → daily AOV points
       const data = await aggregateDaily(startDate, endDate);
 
       const points = [];
@@ -949,11 +1003,15 @@ router.get("/aov-over-time", async (req, res) => {
         isSingleDay: false
       });
     }
- 
-    const currentStart = parseStart(end);     
+
+    // -----------------------------------------------------
+    // CASE 2 — WITH COMPARISON (ALWAYS SINGLE-DAY HOURLY)
+    // -----------------------------------------------------
+
+    const currentStart = parseStart(end);     // last day of main range
     const currentEnd = parseEnd(end);
 
-    const compareStartDate = parseStart(customCompareStart);  
+    const compareStartDate = parseStart(customCompareStart); // first day of compare range
     const compareEndDate = parseEnd(customCompareStart);
 
     const curr = await aggregateHourly(currentStart, currentEnd);
@@ -995,8 +1053,6 @@ router.get("/aov-over-time", async (req, res) => {
   }
 });
 
-
-
 router.get("/rto", async (req, res) => {
   try {
     const { start, end } = req.query;
@@ -1006,7 +1062,8 @@ router.get("/rto", async (req, res) => {
 
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
- 
+
+    // Get order IDs from ShopifyOrder in date range
     const shopifyOrderIds = await ShopifyOrder.aggregate([
       {
         $match: {
@@ -1030,7 +1087,8 @@ router.get("/rto", async (req, res) => {
     ]);
 
     const orderKeys = shopifyOrderIds.map(o => o.orderKey).filter(Boolean);
- 
+
+    // Count RTO from Order.js
     const [rtoStats] = await Order.aggregate([
       {
         $match: {
@@ -1073,6 +1131,8 @@ router.get("/rto", async (req, res) => {
     const rtoDelivered = rtoStats?.rtoDelivered || 0;
     const totalRto = rtoOnly + rtoDelivered;
 
+ 
+
     return res.json({
       dateRange: { start, end },
       rto: rtoOnly,
@@ -1081,7 +1141,7 @@ router.get("/rto", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("RTO ERROR:", err);
+    console.error("❌ RTO ERROR:", err);
     return res.status(500).json({ 
       error: "Failed to fetch RTO analytics",
       details: err.message 
@@ -1100,7 +1160,10 @@ router.get("/find-status-values", async (req, res) => {
 
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
- 
+
+
+
+    // Get ALL unique fulfillment_status values
     const fulfillmentValues = await ShopifyOrder.aggregate([
       {
         $match: {
@@ -1116,7 +1179,8 @@ router.get("/find-status-values", async (req, res) => {
       },
       { $sort: { count: -1 } }
     ]);
- 
+
+    // Get ALL unique shipment_status values
     const shipmentValues = await ShopifyOrder.aggregate([
       {
         $match: {
@@ -1139,14 +1203,19 @@ router.get("/find-status-values", async (req, res) => {
       .select('orderName fulfillment_status shipment_status cancelled_at')
       .limit(5)
       .lean();
+
+
+    fulfillmentValues.forEach(v => {
  
-    fulfillmentValues.forEach(v => { 
     });
- 
-    shipmentValues.forEach(v => { 
+
+
+    shipmentValues.forEach(v => {
+
     });
- 
-    samples.forEach((o, i) => { 
+
+
+    samples.forEach((o, i) => {
     });
 
     return res.json({
@@ -1158,12 +1227,10 @@ router.get("/find-status-values", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("ERROR:", err);
+    console.error("❌ ERROR:", err);
     res.status(500).json({ error: "Failed", details: err.message });
   }
 });
-
-
   router.get("/customer-stats", async (req, res) => {
     try {
       const { start, end } = req.query;
@@ -1174,9 +1241,8 @@ router.get("/find-status-values", async (req, res) => {
 
       const startDate = new Date(start);
       const endDate = new Date(end);
-      endDate.setHours(23, 59, 59, 999); // Include full end day
+      endDate.setHours(23, 59, 59, 999); 
 
-      // 1️⃣ Get all leads with valid phone number
       const leads = await Lead.find(
         { contactNumber: { $exists: true, $ne: "" } },
         { contactNumber: 1, retentionStatus: 1, lastOrderDate: 1, createdAt: 1 }
@@ -1201,9 +1267,7 @@ router.get("/find-status-values", async (req, res) => {
       while (currentDate <= endDate) {
         const pointDate = new Date(currentDate);
         const cutoffDate = new Date(pointDate);
-        cutoffDate.setDate(cutoffDate.getDate() - 60); // 60 days active window
-
-        // Count customers at this point in time
+        cutoffDate.setDate(cutoffDate.getDate() - 60); 
         let total = 0;
         let active = 0;
         let lost = 0;
@@ -1299,11 +1363,10 @@ router.get("/cohort-analysis", async (req, res) => {
       .slice(0, 10)}_${endDate.toISOString().slice(0, 10)}`;
 
     const cached = getCohortCache(cacheKey);
-    if (cached) return res.json(cached); 
+    if (cached) return res.json(cached);
 
-    /* ======================================================
-       STEP 1 — FIRST ORDER PER CUSTOMER
-    ====================================================== */
+
+
     const firstOrders = await ShopifyOrder.aggregate(
       [
         {
@@ -1339,7 +1402,9 @@ router.get("/cohort-analysis", async (req, res) => {
     if (!firstOrders.length) {
       setCohortCache(cacheKey, { cohorts: [] });
       return res.json({ cohorts: [] });
-    } 
+    }
+
+
 
     const phoneList = firstOrders.map((c) => c._id);
     const firstOrderMap = new Map(firstOrders.map((c) => [c._id, c]));
@@ -1357,9 +1422,7 @@ router.get("/cohort-analysis", async (req, res) => {
       }
     ).lean();
 
-    /* ======================================================
-       STEP 3 — BUILD COHORT STRUCTURE
-    ====================================================== */
+
     const cohortMap = new Map();
 
     for (const { cohortKey } of firstOrders) {
@@ -1486,9 +1549,11 @@ router.get("/cohort-analysis", async (req, res) => {
       const [by, bm] = b.cohort.split("-");
       return new Date(ay, am - 1) - new Date(by, bm - 1);
     });
- 
+
+
     
-    if (results.length > 0) { 
+    if (results.length > 0) {
+
     }
 
     setCohortCache(cacheKey, { cohorts: results });
@@ -1503,7 +1568,6 @@ router.get("/cohort-analysis", async (req, res) => {
     });
   }
 });
-
 const customerTrendsCache = new Map();
 function getCustomerTrendsCache(key) {
   const entry = customerTrendsCache.get(key);
@@ -1518,7 +1582,6 @@ function getCustomerTrendsCache(key) {
 function setCustomerTrendsCache(key, data, ttl = 300000) { 
   customerTrendsCache.set(key, { data, expires: Date.now() + ttl });
 }
-
 router.get("/customer-trends", async (req, res) => {
   try {
     let { start, end, compareStart, compareEnd } = req.query;
@@ -1529,368 +1592,197 @@ router.get("/customer-trends", async (req, res) => {
 
     const cacheKey = `cust_trends_${start}_${end}_${compareStart || ""}_${compareEnd || ""}`;
     const cached = getCustomerTrendsCache(cacheKey);
-    if (cached) { 
-      return res.json(cached);
-    }
-
-    console.time("⏱️ CUSTOMER_TRENDS");
+    if (cached) return res.json(cached);
 
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
     const isSingle = start === end;
- 
-    const lookbackDate = new Date(startDate);
-    lookbackDate.setDate(lookbackDate.getDate() - 60); 
+    const MS_DAY = 86400000;
 
-    // Get customers who had orders in this window
-    const relevantCustomerPhones = await ShopifyOrder.aggregate([
-      {
-        $match: {
-          normalizedPhone: { $exists: true, $ne: "" },
-          shopifyCreatedAt: { $gte: lookbackDate, $lte: endDate }
-        }
-      },
-      {
-        $group: {
-          _id: "$normalizedPhone"
-        }
-      }
-    ]).allowDiskUse(true);
+    const salesStatusValues = await Lead.distinct("salesStatus");
+    const retentionStatusValues = await Lead.distinct("retentionStatus");
+    console.log("📊 salesStatus values:", salesStatusValues);
+    console.log("📊 retentionStatus values:", retentionStatusValues);
 
-    const relevantPhones = new Set(relevantCustomerPhones.map(doc => doc._id)); 
+    const [activeCount, lostCount] = await Promise.all([
+      Lead.countDocuments({ salesStatus: "Sales Done", retentionStatus: "Active" }),
+      Lead.countDocuments({ retentionStatus: "Lost" }),
+    ]);
 
-    // Now get complete order history ONLY for these customers
-    const customerOrderHistory = await ShopifyOrder.aggregate([
-      {
-        $match: {
-          normalizedPhone: { $in: Array.from(relevantPhones) },
-          shopifyCreatedAt: { $exists: true }
-        }
-      },
-      {
-        $sort: { normalizedPhone: 1, shopifyCreatedAt: 1 }
-      },
-      {
-        $group: {
-          _id: "$normalizedPhone",
-          allOrders: { 
-            $push: "$shopifyCreatedAt"
+    console.log("✅ activeCount:", activeCount, "lostCount:", lostCount);
+
+    const getNewCustomers = async (phones, rangeStart, rangeEnd) => {
+      if (!phones.length) return new Set();
+
+      const firstOrders = await ShopifyOrder.aggregate([
+        { $match: { normalizedPhone: { $in: phones } } },
+        {
+          $group: {
+            _id: "$normalizedPhone",
+            firstOrderDate: { $min: "$shopifyCreatedAt" },
           },
-          firstOrderEver: { $first: "$shopifyCreatedAt" },
-          lastOrderEver: { $last: "$shopifyCreatedAt" }
-        }
-      }
-    ]).allowDiskUse(true);
+        },
+      ]);
 
-    // Create customer map
-    const customerMap = new Map();
-    customerOrderHistory.forEach(customer => {
-      customerMap.set(customer._id, {
-        orders: customer.allOrders.map(d => new Date(d)),
-        firstOrderEver: new Date(customer.firstOrderEver),
-        lastOrderEver: new Date(customer.lastOrderEver)
-      });
-    }); 
-
-    // ============================================
-    // 🔥 CALCULATE STATS FOR EACH SPECIFIC DATE
-    // ============================================
-    const calculateStatsForDate = (targetDate) => {
-      const activeWindowDays = 60;
-      const cutoffDate = new Date(targetDate);
-      cutoffDate.setDate(cutoffDate.getDate() - activeWindowDays);
-
-      let newCustomers = 0;
-      let activeCustomers = 0;
-      let lostCustomers = 0;
-
-      const targetDateStr = new Date(targetDate).toISOString().slice(0, 10);
-
-      customerMap.forEach((history, phone) => {
-        const { orders, firstOrderEver } = history;
-
-        // Count NEW customers (first order on this date)
-        const firstOrderStr = firstOrderEver.toISOString().slice(0, 10);
-        if (firstOrderStr === targetDateStr) {
-          newCustomers++;
-        }
-
-        // Only evaluate customers who existed by this date
-        if (firstOrderEver > targetDate) {
-          return;
-        }
-
-        // Find most recent order ON OR BEFORE target date
-        let lastOrderBeforeTarget = null;
-        for (let i = orders.length - 1; i >= 0; i--) {
-          if (orders[i] <= targetDate) {
-            lastOrderBeforeTarget = orders[i];
-            break;
-          }
-        }
-
-        if (!lastOrderBeforeTarget) {
-          return;
-        }
-
-        // Determine if ACTIVE or LOST on this specific date
-        if (lastOrderBeforeTarget >= cutoffDate && lastOrderBeforeTarget <= targetDate) {
-          activeCustomers++;
-        } else if (lastOrderBeforeTarget < cutoffDate) {
-          lostCustomers++;
-        }
-      });
-
-      return {
-        newCustomers,
-        active: activeCustomers,
-        lost: lostCustomers
-      };
+      return new Set(
+        firstOrders
+          .filter((p) => {
+            const d = new Date(p.firstOrderDate);
+            return d >= rangeStart && d <= rangeEnd;
+          })
+          .map((p) => p._id)
+      );
     };
 
-    // ============================================
-    // 🔥 PROCESS CURRENT PERIOD DAY-BY-DAY
-    // ============================================
-    let currentTrends = [];
-
     if (isSingle) {
-      // HOURLY for single day
-      const dayStats = calculateStatsForDate(endDate);
-      
-      // Count new customers per hour
-      const hourMap = {};
-      customerMap.forEach((history) => {
-        const firstOrder = history.firstOrderEver;
-        const firstOrderDate = firstOrder.toISOString().slice(0, 10);
-        const targetDateStr = endDate.toISOString().slice(0, 10);
-        
-        if (firstOrderDate === targetDateStr) {
-          const hour = firstOrder.getUTCHours();
-          hourMap[hour] = (hourMap[hour] || 0) + 1;
+      const todayOrders = await ShopifyOrder.find(
+        {
+          shopifyCreatedAt: { $gte: startDate, $lte: endDate },
+          normalizedPhone: { $exists: true, $ne: "" },
+        },
+        { normalizedPhone: 1, shopifyCreatedAt: 1 }
+      ).lean();
+
+      const phones = [...new Set(todayOrders.map((o) => o.normalizedPhone))];
+      const newPhones = await getNewCustomers(phones, startDate, endDate);
+
+      console.log("📱 Total phones today:", phones.length, "New phones:", newPhones.size);
+
+      const newMap = {};
+      todayOrders.forEach((o) => {
+        if (newPhones.has(o.normalizedPhone)) {
+          const hour = new Date(o.shopifyCreatedAt).getUTCHours();
+          newMap[hour] = (newMap[hour] || 0) + 1;
         }
       });
 
-      currentTrends = Array.from({ length: 24 }, (_, hour) => ({
-        date: `${String(hour).padStart(2, '0')}:00`,
-        newCustomers: hourMap[hour] || 0,
-        active: dayStats.active,
-        lost: dayStats.lost
+      const trend = Array.from({ length: 24 }, (_, h) => ({
+        date: `${String(h).padStart(2, "0")}:00`,
+        newCustomers: newMap[h] || 0,
+        active: activeCount,
+        lost: lostCount,
       }));
- 
 
-    } else {
-      // DAILY for date range
-      const MS_DAY = 86400000;
-      let currentDate = new Date(startDate);
-
-      while (currentDate <= endDate) {
-        const dateStr = currentDate.toISOString().slice(0, 10);
-        
-        const endOfDay = new Date(currentDate);
-        endOfDay.setUTCHours(23, 59, 59, 999);
-        
-        const stats = calculateStatsForDate(endOfDay);
-
-        currentTrends.push({
-          date: dateStr,
-          newCustomers: stats.newCustomers,
-          active: stats.active,
-          lost: stats.lost
-        });
-
-        currentDate = new Date(currentDate.getTime() + MS_DAY);
+      if (!compareStart || !compareEnd) {
+        setCustomerTrendsCache(cacheKey, trend);
+        return res.json(trend);
       }
- 
+
+      // Single day comparison
+      const compareStartDate = new Date(`${compareStart}T00:00:00.000Z`);
+      const compareEndDate = new Date(`${compareEnd}T23:59:59.999Z`);
+
+      const compareOrders = await ShopifyOrder.find(
+        {
+          shopifyCreatedAt: { $gte: compareStartDate, $lte: compareEndDate },
+          normalizedPhone: { $exists: true, $ne: "" },
+        },
+        { normalizedPhone: 1, shopifyCreatedAt: 1 }
+      ).lean();
+
+      const comparePhones = [...new Set(compareOrders.map((o) => o.normalizedPhone))];
+      const compareNewPhones = await getNewCustomers(comparePhones, compareStartDate, compareEndDate);
+
+      const compareNewMap = {};
+      compareOrders.forEach((o) => {
+        if (compareNewPhones.has(o.normalizedPhone)) {
+          const hour = new Date(o.shopifyCreatedAt).getUTCHours();
+          compareNewMap[hour] = (compareNewMap[hour] || 0) + 1;
+        }
+      });
+
+      const merged = trend.map((t, h) => ({
+        ...t,
+        compareNewCustomers: compareNewMap[h] || 0,
+        compareActive: activeCount,
+        compareLost: lostCount,
+      }));
+
+      setCustomerTrendsCache(cacheKey, merged);
+      return res.json(merged);
     }
 
-    // ============================================
-    // 🔥 COMPARISON PERIOD (if provided)
-    // ============================================
+    const rangeOrders = await ShopifyOrder.find(
+      {
+        shopifyCreatedAt: { $gte: startDate, $lte: endDate },
+        normalizedPhone: { $exists: true, $ne: "" },
+      },
+      { normalizedPhone: 1, shopifyCreatedAt: 1 }
+    ).lean();
+
+    const phones = [...new Set(rangeOrders.map((o) => o.normalizedPhone))];
+    const newPhones = await getNewCustomers(phones, startDate, endDate);
+
+    console.log("📱 Total phones in range:", phones.length, "New phones:", newPhones.size);
+
+    const newMap = {};
+    rangeOrders.forEach((o) => {
+      if (newPhones.has(o.normalizedPhone)) {
+        const day = new Date(o.shopifyCreatedAt).toISOString().slice(0, 10);
+        newMap[day] = (newMap[day] || 0) + 1;
+      }
+    });
+
+    const trend = [];
+    let cursor = new Date(startDate);
+    while (cursor <= endDate) {
+      const key = cursor.toISOString().slice(0, 10);
+      trend.push({
+        date: key,
+        newCustomers: newMap[key] || 0,
+        active: activeCount,
+        lost: lostCount,
+      });
+      cursor = new Date(cursor.getTime() + MS_DAY);
+    }
+
     if (!compareStart || !compareEnd) {
-      console.timeEnd("⏱️ CUSTOMER_TRENDS");
-      setCustomerTrendsCache(cacheKey, currentTrends);
-      return res.json(currentTrends);
+      setCustomerTrendsCache(cacheKey, trend);
+      return res.json(trend);
     }
 
     const compareStartDate = new Date(`${compareStart}T00:00:00.000Z`);
     const compareEndDate = new Date(`${compareEnd}T23:59:59.999Z`);
 
-    const compareLookbackDate = new Date(compareStartDate);
-    compareLookbackDate.setDate(compareLookbackDate.getDate() - 60);
-
-    // Get relevant customers for comparison period
-    const compareRelevantPhones = await ShopifyOrder.aggregate([
+    const compareOrders = await ShopifyOrder.find(
       {
-        $match: {
-          normalizedPhone: { $exists: true, $ne: "" },
-          shopifyCreatedAt: { $gte: compareLookbackDate, $lte: compareEndDate }
-        }
+        shopifyCreatedAt: { $gte: compareStartDate, $lte: compareEndDate },
+        normalizedPhone: { $exists: true, $ne: "" },
       },
-      {
-        $group: { _id: "$normalizedPhone" }
+      { normalizedPhone: 1, shopifyCreatedAt: 1 }
+    ).lean();
+
+    const comparePhones = [...new Set(compareOrders.map((o) => o.normalizedPhone))];
+    const compareNewPhones = await getNewCustomers(comparePhones, compareStartDate, compareEndDate);
+
+    const compareNewMap = {};
+    compareOrders.forEach((o) => {
+      if (compareNewPhones.has(o.normalizedPhone)) {
+        const day = new Date(o.shopifyCreatedAt).toISOString().slice(0, 10);
+        compareNewMap[day] = (compareNewMap[day] || 0) + 1;
       }
-    ]).allowDiskUse(true);
-
-    const comparePhones = new Set(compareRelevantPhones.map(doc => doc._id));
-
-    const compareOrderHistory = await ShopifyOrder.aggregate([
-      {
-        $match: {
-          normalizedPhone: { $in: Array.from(comparePhones) },
-          shopifyCreatedAt: { $exists: true }
-        }
-      },
-      {
-        $sort: { normalizedPhone: 1, shopifyCreatedAt: 1 }
-      },
-      {
-        $group: {
-          _id: "$normalizedPhone",
-          allOrders: { $push: "$shopifyCreatedAt" },
-          firstOrderEver: { $first: "$shopifyCreatedAt" },
-          lastOrderEver: { $last: "$shopifyCreatedAt" }
-        }
-      }
-    ]).allowDiskUse(true);
-
-    const compareCustomerMap = new Map();
-    compareOrderHistory.forEach(customer => {
-      compareCustomerMap.set(customer._id, {
-        orders: customer.allOrders.map(d => new Date(d)),
-        firstOrderEver: new Date(customer.firstOrderEver),
-        lastOrderEver: new Date(customer.lastOrderEver)
-      });
     });
 
-    const calculateCompareStats = (targetDate) => {
-      const cutoffDate = new Date(targetDate);
-      cutoffDate.setDate(cutoffDate.getDate() - 60);
-
-      let newCustomers = 0;
-      let activeCustomers = 0;
-      let lostCustomers = 0;
-
-      const targetDateStr = new Date(targetDate).toISOString().slice(0, 10);
-
-      compareCustomerMap.forEach((history) => {
-        const { orders, firstOrderEver } = history;
-
-        const firstOrderStr = firstOrderEver.toISOString().slice(0, 10);
-        if (firstOrderStr === targetDateStr) {
-          newCustomers++;
-        }
-
-        if (firstOrderEver > targetDate) return;
-
-        let lastOrderBeforeTarget = null;
-        for (let i = orders.length - 1; i >= 0; i--) {
-          if (orders[i] <= targetDate) {
-            lastOrderBeforeTarget = orders[i];
-            break;
-          }
-        }
-
-        if (!lastOrderBeforeTarget) return;
-
-        if (lastOrderBeforeTarget >= cutoffDate && lastOrderBeforeTarget <= targetDate) {
-          activeCustomers++;
-        } else if (lastOrderBeforeTarget < cutoffDate) {
-          lostCustomers++;
-        }
-      });
-
-      return { newCustomers, active: activeCustomers, lost: lostCustomers };
-    };
-
-    let compareTrends = [];
-
-    if (isSingle) {
-      const compareStats = calculateCompareStats(compareEndDate);
-      
-      const hourMap = {};
-      compareCustomerMap.forEach((history) => {
-        const firstOrder = history.firstOrderEver;
-        const firstOrderDate = firstOrder.toISOString().slice(0, 10);
-        const targetDateStr = compareEndDate.toISOString().slice(0, 10);
-        
-        if (firstOrderDate === targetDateStr) {
-          const hour = firstOrder.getUTCHours();
-          hourMap[hour] = (hourMap[hour] || 0) + 1;
-        }
-      });
-
-      compareTrends = Array.from({ length: 24 }, (_, hour) => ({
-        date: `${String(hour).padStart(2, '0')}:00`,
-        compareNewCustomers: hourMap[hour] || 0,
-        compareActive: compareStats.active,
-        compareLost: compareStats.lost
-      }));
-
-    } else {
-      const MS_DAY = 86400000;
-      let currentDate = new Date(compareStartDate);
-
-      while (currentDate <= compareEndDate) {
-        const dateStr = currentDate.toISOString().slice(0, 10);
-        
-        const endOfDay = new Date(currentDate);
-        endOfDay.setUTCHours(23, 59, 59, 999);
-        
-        const stats = calculateCompareStats(endOfDay);
-
-        compareTrends.push({
-          date: dateStr,
-          compareNewCustomers: stats.newCustomers,
-          compareActive: stats.active,
-          compareLost: stats.lost
-        });
-
-        currentDate = new Date(currentDate.getTime() + MS_DAY);
-      }
+    const compareDates = [];
+    let compareCursor = new Date(compareStartDate);
+    while (compareCursor <= compareEndDate) {
+      compareDates.push(compareCursor.toISOString().slice(0, 10));
+      compareCursor = new Date(compareCursor.getTime() + MS_DAY);
     }
 
-    // MERGE both periods
-    const timeMap = new Map();
-    
-    currentTrends.forEach(t => {
-      timeMap.set(t.date, { ...t });
-    });
+    const merged = trend.map((t, idx) => ({
+      ...t,
+      compareNewCustomers: compareNewMap[compareDates[idx]] || 0,
+      compareActive: activeCount,
+      compareLost: lostCount,
+    }));
 
-    compareTrends.forEach(t => {
-      if (timeMap.has(t.date)) {
-        Object.assign(timeMap.get(t.date), {
-          compareNewCustomers: t.compareNewCustomers,
-          compareActive: t.compareActive,
-          compareLost: t.compareLost
-        });
-      } else {
-        timeMap.set(t.date, {
-          date: t.date,
-          newCustomers: 0,
-          active: 0,
-          lost: 0,
-          compareNewCustomers: t.compareNewCustomers,
-          compareActive: t.compareActive,
-          compareLost: t.compareLost
-        });
-      }
-    });
-
-    const mergedTrends = Array.from(timeMap.values());
-    mergedTrends.sort((a, b) => a.date.localeCompare(b.date));
-
-    console.timeEnd("⏱️ CUSTOMER_TRENDS"); 
-
-    setCustomerTrendsCache(cacheKey, mergedTrends);
-    return res.json(mergedTrends);
+    setCustomerTrendsCache(cacheKey, merged);
+    return res.json(merged);
 
   } catch (err) {
-    console.error("❌ CUSTOMER TRENDS ERROR:", err);
-    console.error("Stack trace:", err.stack);
-    return res.status(500).json({ 
-      error: "Failed to load customer trends",
-      details: err.message 
-    });
+    console.error("CUSTOMER TRENDS ERROR:", err);
+    return res.status(500).json({ error: "Failed to load customer trends", details: err.message });
   }
 });
 
@@ -1902,7 +1794,6 @@ router.get("/customer-trends", async (req, res) => {
         return res.status(400).json({ error: "start & end required" });
       }
 
-      // 🔥 CACHE
       const cacheKey = `payment_${start}_${end}`;
       const cached = getCache(cacheKey);
       if (cached) return res.json(cached);
@@ -1910,7 +1801,6 @@ router.get("/customer-trends", async (req, res) => {
       const startDate = new Date(`${start}T00:00:00.000Z`);
       const endDate   = new Date(`${end}T23:59:59.999Z`);
 
-      // ✅ Use financial_status as single source of truth
       const orders = await ShopifyOrder.find(
         { shopifyCreatedAt: { $gte: startDate, $lte: endDate } },
         { amount: 1, financial_status: 1 }
@@ -1928,18 +1818,18 @@ router.get("/customer-trends", async (req, res) => {
         const amt = o.amount || 0;
 
         if (isPrepaid(o.financial_status)) {
-          // PREPAID = financial_status === "paid"
+ 
           prepaidCount++;
           prepaidAmount += amt;
         } else {
-          // everything else = COD
+
           codCount++;
           codAmount += amt;
         }
       });
 
       const totalOrders = orders.length;
-      const safeTotal = totalOrders || 1; // avoid divide-by-zero
+      const safeTotal = totalOrders || 1; 
 
       const response = {
         dateRange: { start, end },
@@ -1956,7 +1846,6 @@ router.get("/customer-trends", async (req, res) => {
         },
       };
 
-      // 🔥 SAVE TO CACHE
       setCache(cacheKey, response);
 
       return res.json(response);
@@ -2115,17 +2004,10 @@ router.get("/orders-over-time", async (req, res) => {
         hasComparison: false,
       });
     }
-
-    // ------------------------------------------------------
-    // CASE 2: COMPARISON MODE (Always Single-Day Hourly)
-    // ------------------------------------------------------
-
     const currentDayStart = new Date(`${end}T00:00:00.000Z`);
     const currentDayEnd = new Date(`${end}T23:59:59.999Z`);
-
     const compareDayStart = new Date(`${compareStart}T00:00:00.000Z`);
     const compareDayEnd = new Date(`${compareStart}T23:59:59.999Z`);
-
     const hourlyPipeline = (from, to) => [
       {
         $match: {
@@ -2189,7 +2071,6 @@ router.get("/orders-over-time", async (req, res) => {
     return res.status(500).json({ error: "Failed to compute order trend" });
   }
 });
-
   router.get("/dashboard-summary", async (req, res) => {
     try {
       const { start, end } = req.query;
@@ -2268,336 +2149,387 @@ router.get("/orders-vs-fulfilled", async (req, res) => {
     if (!start || !end) return res.status(400).json({ error: "start & end required" });
 
     const startDate = new Date(`${start}T00:00:00.000Z`);
-    const endDate = new Date(`${end}T23:59:59.999Z`); 
+    const endDate   = new Date(`${end}T23:59:59.999Z`);
+    const ONLINE_ID = CHANNEL_MAP["Online Order"]; // "252664381441"
 
-    // ============================================
-    // STEP 1: Get orders placed in date range
-    // ============================================
-    const shopifyOrders = await ShopifyOrder.aggregate([
+    const shopifyOrdersRaw = await ShopifyOrder.find(
+      { shopifyCreatedAt: { $gte: startDate, $lte: endDate } },
       {
-        $match: {
-          $or: [
-            { orderDate: { $gte: startDate, $lte: endDate } },
-            { shopifyCreatedAt: { $gte: startDate, $lte: endDate } },
-          ],
-        },
-      },
-      {
-        $project: {
-          orderKey: {
-            $replaceAll: {
-              input: { $ifNull: ["$orderName", ""] },
-              find: "#",
-              replacement: "",
-            },
-          },
-          fulfillment_status: 1,
-          financial_status: 1,
-          channelName: 1,
-        },
-      },
-    ]).allowDiskUse(true);
-
-    const totalOrders = shopifyOrders.length;
-    const orderKeys = shopifyOrders.map(o => o.orderKey).filter(Boolean); 
- 
-    const orderStatuses = await Order.aggregate([
-      {
-        $match: {
-          order_id: { $in: orderKeys }
-        }
-      },
-      {
-        $project: {
-          order_id: 1,
-          shipment_status: { 
-            $toLower: { 
-              $trim: { 
-                input: { $ifNull: ["$shipment_status", ""] } 
-              } 
-            } 
-          }
-        }
+        orderName: 1,
+        financial_status: 1,
+        channelName: 1,
+        "orderConfirmOps.assignedAgentName": 1,
       }
-    ]);
+    ).lean();
 
-    // Create lookup map
-    const statusMap = new Map(
-      orderStatuses.map(o => [o.order_id, o.shipment_status])
-    );
- 
-    let fulfilledCount = 0;
-    let deliveredCount = 0;
-    let rtoCount = 0;
+    const totalOrders = shopifyOrdersRaw.length;
 
-    shopifyOrders.forEach(order => {
-      const shipmentStatus = statusMap.get(order.orderKey) || "";
-      const fulfillStatus = (order.fulfillment_status || "").toLowerCase().trim();
-      const financialStatus = (order.financial_status || "").toLowerCase().trim();
-      const channelName = (order.channelName || "").toLowerCase().trim();
-
-      // ✅ DELIVERED (exact match "delivered" only, NOT "rto delivered")
-      if (shipmentStatus === "delivered") {
-        deliveredCount++;
-      }
-
-      // ✅ RTO (includes both "rto" AND "rto delivered")
-      if (shipmentStatus === "rto" || shipmentStatus === "rto delivered") {
-        rtoCount++;
-      }
-
-      // ✅ FULFILLED (from ShopifyOrder logic)
-      if (
-        channelName === "205650526209" ||
-        channelName.includes("shopify_draft_order") ||
-        financialStatus === "paid" ||
-        (financialStatus !== "paid" && fulfillStatus === "fulfilled")
-      ) {
-        fulfilledCount++;
-      }
-    });
-
-    const pct = (count) => totalOrders ? Number(((count * 100) / totalOrders).toFixed(1)) : 0;
-
-    return res.json({
-      version: "funnel-v2",
-      dateRange: { start, end },
-      totalOrders,
-      fulfilled: { 
-        count: fulfilledCount, 
-        percentage: pct(fulfilledCount) 
-      },
-      delivered: { 
-        count: deliveredCount, 
-        percentage: pct(deliveredCount) 
-      },
-      rto: { 
-        count: rtoCount, 
-        percentage: pct(rtoCount) 
-      },
-    });
-    
-  } catch (err) {
-    console.error("❌ FUNNEL ERROR:", err);
-    return res.status(500).json({ 
-      error: "Failed to compute funnel", 
-      details: err.message 
-    });
-  }
-}); 
- router.get("/comprehensive-summary", async (req, res) => {
-    try {
-      const { start, end } = req.query;
-
-      if (!start || !end) {
-        return res.status(400).json({ error: "start & end required" });
-      }
-
-      const cacheKey = `comprehensive_${start}_${end}`;
-      const cached = getCache(cacheKey);
-      if (cached) return res.json(cached);
-
-      const startDate = new Date(`${start}T00:00:00.000Z`);
-      const endDate = new Date(`${end}T23:59:59.999Z`);
-
-      const ONLINE_ID = CHANNEL_MAP["Online Order"];
-      const TEAM_ID = CHANNEL_MAP.Team;
-
-      // ============================================
-      // STEP 1: Get all ShopifyOrders with required fields
-      // ============================================
-      const shopifyOrders = await ShopifyOrder.aggregate([
-        {
-          $match: {
-            $or: [
-              { orderDate: { $gte: startDate, $lte: endDate } },
-              { shopifyCreatedAt: { $gte: startDate, $lte: endDate } },
-            ],
-          },
-        },
-        {
-          $project: {
-            orderKey: {
-              $replaceAll: {
-                input: { $ifNull: ["$orderName", ""] },
-                find: "#",
-                replacement: "",
-              },
-            },
-            amount: 1,
-            financial_status: 1,
-            channelName: 1,
-            assignedAgentName: "$orderConfirmOps.assignedAgentName",
-          },
-        },
-      ]).allowDiskUse(true);
-
-      const orderKeys = shopifyOrders.map((o) => o.orderKey).filter(Boolean);
-
-      // ============================================
-      // STEP 2: Get shipment statuses from Order.js
-      // ============================================
-      const orderStatuses = await Order.aggregate([
-        {
-          $match: {
-            order_id: { $in: orderKeys },
-          },
-        },
-        {
-          $project: {
-            order_id: 1,
-            shipment_status: {
-              $toLower: {
-                $trim: {
-                  input: { $ifNull: ["$shipment_status", ""] },
-                },
-              },
-            },
-          },
-        },
-      ]);
-
-      const statusMap = new Map(
-        orderStatuses.map((o) => [o.order_id, o.shipment_status])
-      );
-
-      // ============================================
-      // STEP 3: Calculate metrics for each category
-      // ============================================
-      const calculateMetrics = (orders) => {
-        let totalOrders = 0;
-        let totalAmount = 0;
-
-        let prepaidCount = 0,
-          prepaidAmount = 0;
-        let codCount = 0,
-          codAmount = 0;
-
-        let deliveredCount = 0,
-          deliveredAmount = 0;
-        let undeliveredCount = 0,
-          undeliveredAmount = 0;
-        let rtoCount = 0,
-          rtoAmount = 0;
-
-        orders.forEach((order) => {
-          const amt = order.amount || 0;
-          totalOrders++;
-          totalAmount += amt;
-
-          const isPrepaid = order.financial_status === "paid";
-          const status = statusMap.get(order.orderKey) || "";
-
-          // Payment Mode
-          if (isPrepaid) {
-            prepaidCount++;
-            prepaidAmount += amt;
-          } else {
-            codCount++;
-            codAmount += amt;
-          }
-
-          // Delivery Status
-          if (status === "delivered") {
-            deliveredCount++;
-            deliveredAmount += amt;
-          } else if (status === "rto" || status === "rto delivered") {
-            rtoCount++;
-            rtoAmount += amt;
-          } else {
-            undeliveredCount++;
-            undeliveredAmount += amt;
-          }
-        });
-
-        const safePercent = (count, total) =>
-          total > 0 ? Number(((count / total) * 100).toFixed(1)) : 0;
-
-        const safeAmountPercent = (amount, totalAmt) =>
-          totalAmt > 0 ? Number(((amount / totalAmt) * 100).toFixed(1)) : 0;
-
-        return {
-          totalOrders,
-          totalAmount,
-          aov: totalOrders > 0 ? Number((totalAmount / totalOrders).toFixed(2)) : 0,
-
-          prepaid: {
-            count: prepaidCount,
-            orderPercent: safePercent(prepaidCount, totalOrders),
-            amount: prepaidAmount,
-            amountPercent: safeAmountPercent(prepaidAmount, totalAmount),
-          },
-
-          cod: {
-            count: codCount,
-            orderPercent: safePercent(codCount, totalOrders),
-            amount: codAmount,
-            amountPercent: safeAmountPercent(codAmount, totalAmount),
-          },
-
-          delivered: {
-            count: deliveredCount,
-            orderPercent: safePercent(deliveredCount, totalOrders),
-            amount: deliveredAmount,
-            amountPercent: safeAmountPercent(deliveredAmount, totalAmount),
-          },
-
-          undelivered: {
-            count: undeliveredCount,
-            orderPercent: safePercent(undeliveredCount, totalOrders),
-            amount: undeliveredAmount,
-            amountPercent: safeAmountPercent(undeliveredAmount, totalAmount),
-          },
-
-          rto: {
-            count: rtoCount,
-            orderPercent: safePercent(rtoCount, totalOrders),
-            amount: rtoAmount,
-            amountPercent: safeAmountPercent(rtoAmount, totalAmount),
-          },
-        };
-      };
-
-      // ============================================
-      // STEP 4: Filter orders by category
-      // ============================================
-      const teamOrders = shopifyOrders.filter((o) => {
-        const hasAgent =
-          o.assignedAgentName && o.assignedAgentName.trim() !== "";
-        return hasAgent || o.channelName === TEAM_ID;
-      });
-
-      const shopifyOnlyOrders = shopifyOrders.filter((o) => {
-        const hasAgent =
-          o.assignedAgentName && o.assignedAgentName.trim() !== "";
-        return o.channelName === ONLINE_ID && !hasAgent;
-      });
-
-      // ============================================
-      // STEP 5: Calculate all metrics
-      // ============================================
-      const totalMetrics = calculateMetrics(shopifyOrders);
-      const teamMetrics = calculateMetrics(teamOrders);
-      const shopifyMetrics = calculateMetrics(shopifyOnlyOrders);
-
-      const response = {
+    if (!totalOrders) {
+      return res.json({
         dateRange: { start, end },
-        total: totalMetrics,
-        team: teamMetrics,
-        shopify: shopifyMetrics,
-      };
- 
-      setCache(cacheKey, response, 30000);
-
-      return res.json(response);
-    } catch (err) {
-      console.error("❌ COMPREHENSIVE SUMMARY ERROR:", err);
-      return res.status(500).json({
-        error: "Failed to fetch comprehensive summary",
-        details: err.message,
+        totalOrders: 0,
+        fulfilled:     { count: 0, percentage: 0 },
+        delivered:     { count: 0, percentage: 0 },
+        undelivered:   { count: 0, percentage: 0 },
+        rto:           { count: 0, percentage: 0, breakdown: { rto: 0, rtoDelivered: 0 } },
+        inTransit:     { count: 0, percentage: 0 },
+        notDispatched: { count: 0, percentage: 0 },
       });
     }
-  });
+
+    // Build orderKey: strip "#", trim
+    const shopifyOrders = shopifyOrdersRaw.map((o) => ({
+      ...o,
+      orderKey: (o.orderName || "").replace(/#/g, "").trim(),
+    }));
+
+    const validKeys = [
+      ...new Set(shopifyOrders.map((o) => o.orderKey).filter(Boolean)),
+    ];
+
+    const orderDocs = await Order.find(
+      { order_id: { $in: validKeys } },
+      { order_id: 1, shipment_status: 1 }
+    ).lean();
+
+    // Map: order_id → normalized status
+    const statusMap = new Map(
+      orderDocs.map((o) => [
+        o.order_id,
+        (o.shipment_status || "").toLowerCase().trim(),
+      ])
+    );
+
+    // ── STEP 3: Count ─────────────────────────────────────────────────────
+    let fulfilledCount   = 0; // exists in Order.js = dispatched = fulfilled
+    let deliveredCount   = 0;
+    let rtoOnly          = 0;
+    let rtoDelivered     = 0;
+    let rtoCount         = 0;
+    let undeliveredCount = 0; // in Order.js but not delivered/rto
+    let notDispatchedCount = 0; // NOT in Order.js at all
+
+    shopifyOrders.forEach((o) => {
+      if (!o.orderKey) {
+        // orderName was null/empty — count as not dispatched
+        notDispatchedCount++;
+        return;
+      }
+
+      if (!statusMap.has(o.orderKey)) {
+        // Not in Order.js → not dispatched yet
+        notDispatchedCount++;
+        return;
+      }
+
+      // If it's in Order.js → it was fulfilled (dispatched to courier)
+      fulfilledCount++;
+
+      const status = statusMap.get(o.orderKey);
+
+      if (status === "delivered") {
+        deliveredCount++;
+      } else if (status === "rto") {
+        rtoOnly++;
+        rtoCount++;
+      } else if (status === "rto delivered") {
+        rtoDelivered++;
+        rtoCount++;
+      } else {
+        // In Order.js but not delivered/rto
+        // e.g. "in transit", "out for delivery", "ndr", "pending pickup" etc.
+        undeliveredCount++;
+      }
+    });
+
+    // inTransit = fulfilled - delivered - rto (same as undeliveredCount above)
+    // keeping both for clarity
+    const inTransitCount = undeliveredCount;
+
+    const pct = (count) =>
+      totalOrders ? +((count / totalOrders) * 100).toFixed(1) : 0;
+
+    return res.json({
+      dateRange: { start, end },
+      totalOrders,
+      fulfilled: {
+        count: fulfilledCount,
+        percentage: pct(fulfilledCount),
+      },
+      delivered: {
+        count: deliveredCount,
+        percentage: pct(deliveredCount),
+      },
+      // undelivered = in Order.js but not delivered and not rto
+      undelivered: {
+        count: undeliveredCount,
+        percentage: pct(undeliveredCount),
+      },
+      rto: {
+        count: rtoCount,
+        percentage: pct(rtoCount),
+        breakdown: { rto: rtoOnly, rtoDelivered },
+      },
+      inTransit: {
+        count: inTransitCount,
+        percentage: pct(inTransitCount),
+      },
+      // not in Order.js at all — not dispatched yet
+      notDispatched: {
+        count: notDispatchedCount,
+        percentage: pct(notDispatchedCount),
+      },
+      debug: {
+        totalShopifyOrders:  totalOrders,
+        validOrderKeys:      validKeys.length,
+        matchedInOrderDb:    orderDocs.length,
+        notMatchedInOrderDb: validKeys.length - orderDocs.length,
+        note: [
+          "fulfilled = exists in Order.js (dispatched to courier)",
+          "undelivered = in Order.js, status NOT delivered/rto/rto-delivered",
+          "notDispatched = not in Order.js at all (today's fresh orders)",
+          "shopifyCreatedAt used for date filter",
+        ],
+      },
+    });
+  } catch (err) {
+    console.error("❌ FUNNEL ERROR:", err);
+    return res.status(500).json({
+      error: "Failed to compute funnel",
+      details: err.message,
+    });
+  }
+});
+router.get("/comprehensive-summary", async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end)
+      return res.status(400).json({ error: "start & end required" });
+
+    const cacheKey = `comprehensive_${start}_${end}`;
+    const cached = getCache(cacheKey);
+    if (cached) return res.json(cached);
+
+    const startDate = new Date(`${start}T00:00:00.000Z`);
+    const endDate   = new Date(`${end}T23:59:59.999Z`);
+    const ONLINE_ID = CHANNEL_MAP["Online Order"]; // "252664381441"
+
+    // ── Rule ─────────────────────────────────────────────────────────────────
+    // Shopify (Online) = channelName === ONLINE_ID  AND  no assignedAgentName
+    // Team             = EVERYTHING ELSE
+    //                    (205650526209, 3128379, web, shopify_draft_order,
+    //                     140470648833, any future unknown channel, + has agent)
+    // This guarantees: total = team + shopify, always, zero gap
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const shopifyOrders = await ShopifyOrder.find(
+      { shopifyCreatedAt: { $gte: startDate, $lte: endDate } },
+      {
+        orderName: 1,
+        amount: 1,
+        financial_status: 1,
+        channelName: 1,
+        "orderConfirmOps.assignedAgentName": 1,
+      }
+    ).lean();
+
+    if (!shopifyOrders.length) {
+      const empty = emptyMetrics();
+      return res.json({
+        dateRange: { start, end },
+        total:   empty,
+        team:    empty,
+        shopify: empty,
+        debug: { totalShopifyOrders: 0, validOrders: 0, matchedInOrderDb: 0 },
+      });
+    }
+
+    // Build orderKey: strip "#", trim
+    const withKeys = shopifyOrders.map((o) => ({
+      ...o,
+      orderKey: (o.orderName || "").replace(/#/g, "").trim(),
+    }));
+
+    const validOrders = withKeys.filter((o) => o.orderKey !== "");
+
+    // Get shipment statuses from Order.js
+    const orderKeys = [...new Set(validOrders.map((o) => o.orderKey))];
+
+    const orderDocs = await Order.find(
+      { order_id: { $in: orderKeys } },
+      { order_id: 1, shipment_status: 1 }
+    ).lean();
+
+    const statusMap = new Map(
+      orderDocs.map((o) => [
+        o.order_id,
+        (o.shipment_status || "").toLowerCase().trim(),
+      ])
+    );
+
+    // ── Segmentation ─────────────────────────────────────────────────────────
+    // isOnlineShopify = ONLINE_ID channel AND no agent assigned
+    // isTeam          = everything else (any other channel OR has agent)
+    const isOnlineShopify = (o) => {
+      const hasAgent =
+        o.orderConfirmOps?.assignedAgentName != null &&
+        o.orderConfirmOps.assignedAgentName.trim() !== "";
+      return o.channelName === ONLINE_ID && !hasAgent;
+    };
+
+    const shopifyOnlyOrders = validOrders.filter((o) => isOnlineShopify(o));
+    const teamOrders        = validOrders.filter((o) => !isOnlineShopify(o));
+
+    // ── Metrics calculator ───────────────────────────────────────────────────
+    const calculateMetrics = (orders) => {
+      let totalOrders = 0,      totalAmount = 0;
+      let prepaidCount = 0,     prepaidAmount = 0;
+      let codCount = 0,         codAmount = 0;
+      let deliveredCount = 0,   deliveredAmount = 0;
+      let rtoCount = 0,         rtoAmount = 0;
+      let undeliveredCount = 0, undeliveredAmount = 0;
+      let notDispatchedCount = 0, notDispatchedAmount = 0;
+
+      orders.forEach((order) => {
+        const amt = order.amount || 0;
+        totalOrders++;
+        totalAmount += amt;
+
+        // Payment split
+        const isPrepaid =
+          (order.financial_status || "").toLowerCase() === "paid";
+        if (isPrepaid) {
+          prepaidCount++;
+          prepaidAmount += amt;
+        } else {
+          codCount++;
+          codAmount += amt;
+        }
+
+        // Shipment classification
+        if (!statusMap.has(order.orderKey)) {
+          notDispatchedCount++;
+          notDispatchedAmount += amt;
+          return;
+        }
+
+        const status = statusMap.get(order.orderKey);
+
+        if (status === "delivered") {
+          deliveredCount++;
+          deliveredAmount += amt;
+        } else if (status === "rto" || status === "rto delivered") {
+          rtoCount++;
+          rtoAmount += amt;
+        } else {
+          undeliveredCount++;
+          undeliveredAmount += amt;
+        }
+      });
+
+      const safeP  = (n, t) => (t > 0 ? +((n / t) * 100).toFixed(1) : 0);
+      const safeAP = (a, t) => (t > 0 ? +((a / t) * 100).toFixed(1) : 0);
+
+      return {
+        totalOrders,
+        totalAmount,
+        aov: totalOrders > 0 ? +(totalAmount / totalOrders).toFixed(2) : 0,
+        prepaid: {
+          count: prepaidCount,
+          orderPercent: safeP(prepaidCount, totalOrders),
+          amount: prepaidAmount,
+          amountPercent: safeAP(prepaidAmount, totalAmount),
+        },
+        cod: {
+          count: codCount,
+          orderPercent: safeP(codCount, totalOrders),
+          amount: codAmount,
+          amountPercent: safeAP(codAmount, totalAmount),
+        },
+        delivered: {
+          count: deliveredCount,
+          orderPercent: safeP(deliveredCount, totalOrders),
+          amount: deliveredAmount,
+          amountPercent: safeAP(deliveredAmount, totalAmount),
+        },
+        undelivered: {
+          count: undeliveredCount,
+          orderPercent: safeP(undeliveredCount, totalOrders),
+          amount: undeliveredAmount,
+          amountPercent: safeAP(undeliveredAmount, totalAmount),
+        },
+        rto: {
+          count: rtoCount,
+          orderPercent: safeP(rtoCount, totalOrders),
+          amount: rtoAmount,
+          amountPercent: safeAP(rtoAmount, totalAmount),
+        },
+        _notDispatched: {
+          count: notDispatchedCount,
+          amount: notDispatchedAmount,
+        },
+      };
+    };
+
+    const totalMetrics   = calculateMetrics(validOrders);
+    const teamMetrics    = calculateMetrics(teamOrders);
+    const shopifyMetrics = calculateMetrics(shopifyOnlyOrders);
+
+    // Must always be 0
+    const gap = totalMetrics.totalOrders
+      - teamMetrics.totalOrders
+      - shopifyMetrics.totalOrders;
+
+    const response = {
+      dateRange: { start, end },
+      total:   totalMetrics,
+      team:    teamMetrics,
+      shopify: shopifyMetrics,
+      debug: {
+        totalShopifyOrders:  shopifyOrders.length,
+        validOrders:         validOrders.length,
+        teamOrders:          teamOrders.length,
+        shopifyOnlyOrders:   shopifyOnlyOrders.length,
+        gap,                 // must always be 0
+        uniqueOrderKeys:     orderKeys.length,
+        matchedInOrderDb:    orderDocs.length,
+        notMatchedInOrderDb: orderKeys.length - orderDocs.length,
+        notDispatchedTotal:  totalMetrics._notDispatched.count,
+        notes: [
+          "Shopify = channelName===ONLINE_ID(252664381441) AND no assignedAgent",
+          "Team    = everything else (any other channel + has agent)",
+          "total   = team + shopify, gap must be 0",
+          "RTO     = rto + rto delivered combined",
+        ],
+      },
+    };
+
+    setCache(cacheKey, response, 30000);
+    return res.json(response);
+  } catch (err) {
+    console.error("COMPREHENSIVE SUMMARY ERROR:", err);
+    return res.status(500).json({
+      error: "Failed to fetch comprehensive summary",
+      details: err.message,
+    });
+  }
+});
+
+function emptyMetrics() {
+  const z = { count: 0, orderPercent: 0, amount: 0, amountPercent: 0 };
+  return {
+    totalOrders: 0,
+    totalAmount: 0,
+    aov: 0,
+    prepaid:        { ...z },
+    cod:            { ...z },
+    delivered:      { ...z },
+    undelivered:    { ...z },
+    rto:            { ...z },
+    _notDispatched: { count: 0, amount: 0 },
+  };
+}
+
 
 router.get("/escalation-priority-stats", async (req, res) => {
   try {
@@ -2609,9 +2541,9 @@ router.get("/escalation-priority-stats", async (req, res) => {
 
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
- 
 
-    // ✅ ONLY GET OPEN ESCALATIONS - Just createdAt for counting
+
+  
     const OPEN_STATUSES = ["Open", "In Progress"];
 
     const escalations = await Escalation.find({
@@ -2654,16 +2586,113 @@ router.get("/escalation-priority-stats", async (req, res) => {
       }
       // ✅ NO DETAILED ESCALATION DATA - just counts
     };
- 
+
+  
 
     return res.json(response);
 
   } catch (err) {
-    console.error("ESCALATION PRIORITY ERROR:", err);
+    console.error("❌ ESCALATION PRIORITY ERROR:", err);
     return res.status(500).json({ 
       error: "Failed to fetch escalation priorities",
       details: err.message 
     });
+  }
+});
+router.get("/rto-delivered-count", async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end)
+      return res.status(400).json({ error: "start & end required" });
+
+    const startDate = new Date(`${start}T00:00:00.000Z`);
+    const endDate   = new Date(`${end}T23:59:59.999Z`);
+
+    // Step 1: Get orderKeys from ShopifyOrder in date range
+    const shopifyOrders = await ShopifyOrder.find(
+      { shopifyCreatedAt: { $gte: startDate, $lte: endDate } },
+      { orderName: 1 }
+    ).lean();
+
+    const orderKeys = [
+      ...new Set(
+        shopifyOrders
+          .map((o) => (o.orderName || "").replace(/#/g, "").trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    // Step 2: Count only "rto delivered" in Order.js
+    const rtoDeliveredCount = await Order.countDocuments({
+      order_id: { $in: orderKeys },
+      shipment_status: { $regex: /^rto delivered$/i }, // case-insensitive exact match
+    });
+
+    return res.json({
+      dateRange: { start, end },
+      rtoDeliveredCount,
+    });
+  } catch (err) {
+    console.error("RTO DELIVERED COUNT ERROR:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+router.get("/cancelled-orders", async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end) return res.status(400).json({ error: "start & end required" });
+
+    const startDate = new Date(`${start}T00:00:00.000Z`);
+    const endDate = new Date(`${end}T23:59:59.999Z`);
+
+    const cancelled = await ShopifyOrder.countDocuments({
+      shopifyCreatedAt: { $gte: startDate, $lte: endDate },
+      cancelled_at: { $ne: null }
+    });
+
+    return res.json({ cancelled });
+  } catch (err) {
+    console.error("CANCELLED ORDERS ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch cancelled orders" });
+  }
+});
+router.get("/unfulfilled", async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end) return res.status(400).json({ error: "start & end required" });
+
+    const startDate = new Date(`${start}T00:00:00.000Z`);
+    const endDate = new Date(`${end}T23:59:59.999Z`);
+
+    // Step 1: Get all shopify orders in range
+    const shopifyOrders = await ShopifyOrder.find(
+      { shopifyCreatedAt: { $gte: startDate, $lte: endDate } },
+      { orderName: 1 }
+    ).lean();
+
+    const orderKeys = shopifyOrders
+      .map(o => (o.orderName || "").replace(/#/g, "").trim())
+      .filter(Boolean);
+
+    // Step 2: Find which ones exist in MyOrder (have tracking)
+    const MyOrder = require("../models/MyOrder");
+    const fulfilledKeys = await MyOrder.distinct("order_id", {
+      order_id: { $in: orderKeys }
+    });
+
+    const fulfilledSet = new Set(fulfilledKeys);
+
+    const unfulfilledCount = orderKeys.filter(k => !fulfilledSet.has(k)).length;
+
+    return res.json({
+      total: shopifyOrders.length,
+      unfulfilledCount,
+      fulfilledCount: fulfilledKeys.length,
+    });
+
+  } catch (err) {
+    console.error("UNFULFILLED ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
   module.exports = router;   

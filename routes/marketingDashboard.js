@@ -1,7 +1,7 @@
 // routes/marketingDashboard.js
 const express  = require("express");
 const router   = express.Router();
-const Script   = require("../models/scriptSchema");
+const Script   = require("../marketing/marketingschema/scriptSchema");
 
 
 const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];

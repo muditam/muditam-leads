@@ -148,8 +148,11 @@ const whatsappAiRoutes = require("./whatsapp/whatsapp.ai.routes");
 const bankReconciliationKotak = require("./PaymentGateway/bankReconciliationKotak");
 
 const retentionActivityRoutes = require("./routes/retentionActivityRoutes");
-const scriptroutes = require("./routes/ScriptRoute");
+const scriptroutes = require("./marketing/marketingroutes/ScriptRoute");
+const otherVideosRouter = require("./marketing/marketingroutes/otherVideos");
 const marketingDashboard = require("./routes/marketingDashboard");
+const staticCarouselRoutes = require("./marketing/marketingroutes/staticCarouselRoutes");
+const adsVideoRoutes = require("./marketing/marketingroutes/adsVideoRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -703,7 +706,10 @@ app.use("/api/whatsapp", whatsappAiRoutes);
 app.use("/api/bank-reconciliation", bankReconciliationKotak);
 app.use("/api/retention-activity", retentionActivityRoutes);
 app.use("/api/scripts", scriptroutes);
+app.use("/api/other-videos", otherVideosRouter);
 app.use("/api/marketing-dashboard", marketingDashboard);
+app.use("/api/static-carousel", staticCarouselRoutes);
+app.use("/api/ads-videos", adsVideoRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
