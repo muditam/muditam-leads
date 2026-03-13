@@ -22,12 +22,7 @@ const assetSchema = new mongoose.Schema(
 const contentItemSchema = new mongoose.Schema(
   {
     itemNo: { type: Number, required: true },
-    headline: { type: String, default: "" },
-    subHeadline: { type: String, default: "" },
-    caption: { type: String, default: "" },
     description: { type: String, default: "" },
-    cta: { type: String, default: "" },
-    notes: { type: String, default: "" },
   },
   { _id: false }
 );
@@ -76,8 +71,8 @@ const staticCarouselSchema = new mongoose.Schema(
 
     title: { type: String, default: "" },
 
-    // Static = 1 item
-    // Carousel = multiple items
+    // Static = 1 image
+    // Carousel = multiple images
     contentItems: {
       type: [contentItemSchema],
       default: [],
@@ -123,7 +118,6 @@ const staticCarouselSchema = new mongoose.Schema(
     shootDoneAt: { type: Date },
     shootDoneBy: { type: String, default: "" },
 
-    // Raw / selected images after shoot
     cutAssets: {
       type: [assetSchema],
       default: [],
@@ -141,7 +135,6 @@ const staticCarouselSchema = new mongoose.Schema(
     },
     editHoldReason: { type: String, default: "" },
 
-    // Final edited images
     editAssets: {
       type: [assetSchema],
       default: [],
@@ -166,7 +159,6 @@ const staticCarouselSchema = new mongoose.Schema(
     },
     postPublishStatusUpdatedAt: { type: Date },
 
-    // Optional post-ready images
     postAssets: {
       type: [assetSchema],
       default: [],

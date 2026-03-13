@@ -1600,16 +1600,12 @@ router.get("/customer-trends", async (req, res) => {
     const MS_DAY = 86400000;
 
     const salesStatusValues = await Lead.distinct("salesStatus");
-    const retentionStatusValues = await Lead.distinct("retentionStatus");
-    console.log("📊 salesStatus values:", salesStatusValues);
-    console.log("📊 retentionStatus values:", retentionStatusValues);
+    const retentionStatusValues = await Lead.distinct("retentionStatus"); 
 
     const [activeCount, lostCount] = await Promise.all([
       Lead.countDocuments({ salesStatus: "Sales Done", retentionStatus: "Active" }),
       Lead.countDocuments({ retentionStatus: "Lost" }),
     ]);
-
-    console.log("✅ activeCount:", activeCount, "lostCount:", lostCount);
 
     const getNewCustomers = async (phones, rangeStart, rangeEnd) => {
       if (!phones.length) return new Set();
@@ -1645,8 +1641,6 @@ router.get("/customer-trends", async (req, res) => {
 
       const phones = [...new Set(todayOrders.map((o) => o.normalizedPhone))];
       const newPhones = await getNewCustomers(phones, startDate, endDate);
-
-      console.log("📱 Total phones today:", phones.length, "New phones:", newPhones.size);
 
       const newMap = {};
       todayOrders.forEach((o) => {
@@ -1711,9 +1705,7 @@ router.get("/customer-trends", async (req, res) => {
     ).lean();
 
     const phones = [...new Set(rangeOrders.map((o) => o.normalizedPhone))];
-    const newPhones = await getNewCustomers(phones, startDate, endDate);
-
-    console.log("📱 Total phones in range:", phones.length, "New phones:", newPhones.size);
+    const newPhones = await getNewCustomers(phones, startDate, endDate); 
 
     const newMap = {};
     rangeOrders.forEach((o) => {
@@ -2583,8 +2575,7 @@ router.get("/escalation-priority-stats", async (req, res) => {
         lowPriority,      // 0-2 days
         mediumPriority,   // 3-4 days
         highPriority      // 5+ days
-      }
-      // ✅ NO DETAILED ESCALATION DATA - just counts
+      } 
     };
 
   

@@ -8,7 +8,6 @@ const multer = require("multer");
 const AWS = require("aws-sdk");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
-const mongoose = require("mongoose");
 const StaticCarousel = require("../marketingschema/staticCarouselSchema");
 
 // ─────────────────────────────────────────────────────────────
@@ -118,34 +117,16 @@ function normalizeContentItems(items = []) {
       if (typeof item === "string") {
         return {
           itemNo: idx + 1,
-          headline: "",
-          subHeadline: "",
-          caption: item.trim(),
-          description: "",
-          cta: "",
-          notes: "",
+          description: item.trim(),
         };
       }
 
       return {
         itemNo: Number(item?.itemNo) || idx + 1,
-        headline: String(item?.headline || "").trim(),
-        subHeadline: String(item?.subHeadline || "").trim(),
-        caption: String(item?.caption || "").trim(),
         description: String(item?.description || "").trim(),
-        cta: String(item?.cta || "").trim(),
-        notes: String(item?.notes || "").trim(),
       };
     })
-    .filter(
-      (x) =>
-        x.headline ||
-        x.subHeadline ||
-        x.caption ||
-        x.description ||
-        x.cta ||
-        x.notes
-    )
+    .filter((x) => x.description)
     .map((x, idx) => ({ ...x, itemNo: idx + 1 }));
 }
 
@@ -193,15 +174,15 @@ function validateContentTypeItems(contentType, items) {
   }
 
   if (!items.length) {
-    return "At least one content item is required";
+    return "At least one image description is required";
   }
 
   if (contentType === "Static" && items.length !== 1) {
-    return "Static must have exactly 1 content item";
+    return "Static must have exactly 1 image";
   }
 
   if (contentType === "Carousel" && items.length < 2) {
-    return "Carousel must have at least 2 content items";
+    return "Carousel must have at least 2 images";
   }
 
   return "";
@@ -499,11 +480,7 @@ router.get("/", requireSession, async (req, res) => {
         { editAssignedTo: re },
         { scriptType: re },
         { contentType: re },
-        { "contentItems.headline": re },
-        { "contentItems.subHeadline": re },
-        { "contentItems.caption": re },
         { "contentItems.description": re },
-        { "contentItems.notes": re },
       ];
     }
 
