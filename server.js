@@ -150,7 +150,7 @@ const bankReconciliationKotak = require("./PaymentGateway/bankReconciliationKota
 const retentionActivityRoutes = require("./routes/retentionActivityRoutes");
 const scriptroutes = require("./marketing/marketingroutes/ScriptRoute");
 const otherVideosRouter = require("./marketing/marketingroutes/otherVideos");
-const marketingDashboard = require("./routes/marketingDashboard");
+const marketingDashboard = require("./routes/marketingDashboard"); 
 const staticCarouselRoutes = require("./marketing/marketingroutes/staticCarouselRoutes");
 const adsVideoRoutes = require("./marketing/marketingroutes/adsVideoRoutes"); 
 

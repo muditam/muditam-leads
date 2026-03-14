@@ -1,11 +1,10 @@
 // const mongoose = require("mongoose");
 // const express = require("express");
 // const router = express.Router();
-
 // const Lead = require("../models/Lead");
 // const Customer = require("../models/Customer");
 // const MyOrder = require("../models/MyOrder");
-// const Order = require("../models/Order"); 
+
 
 // // Normalize phone to last 10 digits
 // const normalizePhone = (p) => {
@@ -13,111 +12,59 @@
 //   return digits.length > 10 ? digits.slice(-10) : digits;
 // };
 
-// // Utility: Validate MongoDB ObjectId
-// const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
-// /**
-//  * GET /api/merged-sales
-//  * Query params:
-//  *  - agentAssignedName (optional)
-//  *  - page (default 1)
-//  *  - limit (default 50)
-//  */
 // router.get("/", async (req, res) => {
 //   const { agentAssignedName, page = 1, limit = 50 } = req.query;
-//   const pageNum = parseInt(page, 10) || 1;
-//   const limitNum = parseInt(limit, 10) || 50;
-//   const skip = (pageNum - 1) * limitNum;
+//   const skip = (parseInt(page) - 1) * parseInt(limit);
 
 //   try {
-//     // 1) Leads with salesStatus "Sales Done" (optionally agent filter)
+//     // 1) Leads → Same logic
 //     const leadQuery = { salesStatus: "Sales Done" };
 //     if (agentAssignedName) leadQuery.agentAssigned = agentAssignedName;
 
-//     const leads = await Lead.find(leadQuery).lean();
+//     const leads = await Lead.find(leadQuery)
+//       .lean()
+//       .select("-images -followUps -details"); // improves speed harmlessly
 
-//     // (kept: customers in case you need later)
-//     const customerQuery = {};
-//     if (agentAssignedName) customerQuery.assignedTo = agentAssignedName;
-//     const customers = await Customer.find(customerQuery).lean(); // eslint: used later if needed
-
-//     // 2) MyOrders (apply agent filter only if provided)
+//     // 2) MyOrder query → same but optimized
 //     const orderQuery = {};
 //     if (agentAssignedName) {
 //       orderQuery.agentName = { $regex: new RegExp(agentAssignedName, "i") };
 //     }
-//     const allMyOrders = await MyOrder.find(orderQuery).lean();
 
-//     // 3) Build ordersByPhone => Array of orders (NOT single item)
-//     const ordersByPhone = {};
-//     allMyOrders.forEach((order) => {
-//       const key = normalizePhone(order.phone);
-//       if (!key) return;
-//       if (!ordersByPhone[key]) ordersByPhone[key] = [];
-//       ordersByPhone[key].push(order);
-//     });
+//     const allMyOrders = await MyOrder.find(orderQuery)
+//       .lean()
+//       .select(
+//         "customerName phone orderId productOrdered dosageOrdered orderDate agentName totalPrice paymentMethod selfRemark partialPayment shipmentStatus"
+//       );
 
-//     // Sort each phone's orders by orderDate DESC (latest first)
-//     Object.values(ordersByPhone).forEach((arr) =>
-//       arr.sort(
-//         (a, b) =>
-//           new Date(b.orderDate || 0).getTime() - new Date(a.orderDate || 0).getTime()
-//       )
-//     );
+//     // 3) Group orders by normalized phone
+//     const ordersByPhone = Object.create(null);
 
-//     // 4) Merge
-//     const seenOrderIds = new Set();
+//     for (const order of allMyOrders) {
+//       const phone = normalizePhone(order.phone);
+//       if (!ordersByPhone[phone]) ordersByPhone[phone] = [];
+//       ordersByPhone[phone].push(order);
+//     }
+
+//     // Sort order list for each phone
+//     for (const list of Object.values(ordersByPhone)) {
+//       list.sort((a, b) => new Date(b.orderDate) - new Date(a.orderDate));
+//     }
+
 //     const merged = [];
-//     const seenPhones = new Set(); // for detecting orders without any lead
+//     const seenOrderIds = new Set();
+//     const seenPhones = new Set();
 
-//     // For each lead: if multiple orders on that phone, create one row per order.
-//     // If no orders, still create a row for the lead (editable lead).
-//     leads.forEach((lead) => {
+//     // 4) Lead → Order merging (same, just faster)
+//     for (const lead of leads) {
 //       const phone = normalizePhone(lead.contactNumber);
-//       if (phone) seenPhones.add(phone);
+//       seenPhones.add(phone);
 
-//       const orders = phone && ordersByPhone[phone] ? ordersByPhone[phone] : [];
+//       const orders = ordersByPhone[phone] || [];
 
-//       if (orders.length > 0) {
-//         orders.forEach((order) => {
-//           seenOrderIds.add(String(order._id));
-//           merged.push({
-//             // Keep lead id here so editing lead-fields uses lead id
-//             _id: lead._id,
-
-//             // Lead-like fields
-//             name: lead.name || order.customerName || "",
-//             contactNumber: lead.contactNumber || order.phone || "",
-//             productsOrdered:
-//               lead.productsOrdered ||
-//               (order.productOrdered ? [order.productOrdered] : []),
-//             dosageOrdered: lead.dosageOrdered || order.dosageOrdered || "",
-//             amountPaid: lead.amountPaid ?? order.totalPrice ?? "",
-//             partialPayment: lead.partialPayment ?? order.partialPayment ?? 0,
-//             modeOfPayment: lead.modeOfPayment || order.paymentMethod || "",
-//             lastOrderDate: lead.lastOrderDate || order.orderDate || "",
-//             salesStatus: lead.salesStatus || "Sales Done",
-//             agentAssigned: lead.agentAssigned || order.agentName || "",
-//             agentsRemarks: lead.agentsRemarks || order.selfRemark || "",
-//             shipmentStatus: lead.shipmentStatus || "", // will be overwritten from Order
-
-//             // Order payload, include the Mongo _id so FE can PUT to order directly
-//             myOrderData: {
-//               _id: order._id,
-//               orderDate: order.orderDate || "",
-//               productOrdered: order.productOrdered || "",
-//               dosageOrdered: order.dosageOrdered || "",
-//               totalPrice: order.totalPrice ?? "",
-//               paymentMethod: order.paymentMethod || "",
-//               partialPayment: order.partialPayment ?? 0,
-//               selfRemark: order.selfRemark || "",
-//               orderId: order.orderId || "",
-//               shipmentStatus: order.shipmentStatus || "", // will be overwritten from Order
-//             },
-//           });
-//         });
-//       } else {
-//         // No order yet; keep a pure lead row (editable lead)
+//       if (orders.length === 0) {
+//         // no order → push pure lead (same as your logic)
 //         merged.push({
 //           _id: lead._id,
 //           name: lead.name || "",
@@ -134,32 +81,29 @@
 //           shipmentStatus: lead.shipmentStatus || "",
 //           myOrderData: null,
 //         });
+//         continue;
 //       }
-//     });
 
-//     // 5) Add orders that have no matching lead (one row per order)
-//     allMyOrders.forEach((order) => {
-//       const phone = normalizePhone(order.phone);
-//       const alreadyInLeadTable = phone && seenPhones.has(phone);
-//       if (seenOrderIds.has(String(order._id))) return; // handled above
+//       // lead has multiple orders → multiple rows
+//       for (const order of orders) {
+//         seenOrderIds.add(String(order._id));
 
-//       if (!alreadyInLeadTable) {
 //         merged.push({
-//           // IMPORTANT: use the order's id so edits target MyOrder when no lead exists
-//           _id: order._id,
-
-//           name: order.customerName || "",
-//           contactNumber: order.phone || "",
-//           productsOrdered: [order.productOrdered].filter(Boolean),
-//           dosageOrdered: order.dosageOrdered || "",
-//           amountPaid: order.totalPrice ?? "",
-//           partialPayment: order.partialPayment ?? 0,
-//           modeOfPayment: order.paymentMethod || "",
-//           lastOrderDate: order.orderDate || "",
-//           salesStatus: "Sales Done",
-//           agentAssigned: order.agentName || "",
-//           agentsRemarks: order.selfRemark || "",
-//           shipmentStatus: order.shipmentStatus || "", // will be overwritten from Order
+//           _id: lead._id,
+//           name: lead.name || order.customerName,
+//           contactNumber: lead.contactNumber || order.phone,
+//           productsOrdered:
+//             lead.productsOrdered ||
+//             (order.productOrdered ? [order.productOrdered] : []),
+//           dosageOrdered: lead.dosageOrdered || order.dosageOrdered,
+//           amountPaid: lead.amountPaid ?? order.totalPrice,
+//           partialPayment: lead.partialPayment ?? order.partialPayment ?? 0,
+//           modeOfPayment: lead.modeOfPayment || order.paymentMethod,
+//           lastOrderDate: lead.lastOrderDate || order.orderDate,
+//           salesStatus: lead.salesStatus || "Sales Done",
+//           agentAssigned: lead.agentAssigned || order.agentName || "",
+//           agentsRemarks: lead.agentsRemarks || order.selfRemark || "",
+//           shipmentStatus: lead.shipmentStatus || order.shipmentStatus || "",
 
 //           myOrderData: {
 //             _id: order._id,
@@ -175,111 +119,107 @@
 //           },
 //         });
 //       }
-//     });
-
-//     // 6) 🔗 Hydrate shipment status from Order collection (Shipway)
-//     const orderIdSet = new Set();
-
-//     merged.forEach((row) => {
-//       const rawId = row.myOrderData?.orderId || "";
-//       if (!rawId) return;
-
-//       // Normalize orderId (remove leading '#') to match Order.order_id
-//       const normalized = String(rawId).replace(/^#/, "");
-//       if (normalized) orderIdSet.add(normalized);
-//     });
-
-//     let statusByOrderId = {};
-//     if (orderIdSet.size > 0) {
-//       const orderDocs = await Order.find(
-//         { order_id: { $in: Array.from(orderIdSet) } },
-//         { order_id: 1, shipment_status: 1 }
-//       ).lean();
-
-//       statusByOrderId = orderDocs.reduce((acc, doc) => {
-//         acc[String(doc.order_id)] = doc.shipment_status || "";
-//         return acc;
-//       }, {});
 //     }
 
-//     // Inject shipmentStatus into each merged row & its myOrderData
-//     merged.forEach((row) => {
-//       const rawId = row.myOrderData?.orderId || "";
-//       if (!rawId) return;
+//     // 5) Orders without leads → SAME as original
+//     for (const order of allMyOrders) {
+//       const phone = normalizePhone(order.phone);
 
-//       const normalized = String(rawId).replace(/^#/, "");
-//       const shipStatus = statusByOrderId[normalized] || row.shipmentStatus || "";
+//       if (seenOrderIds.has(String(order._id))) continue;
+//       if (seenPhones.has(phone)) continue;
 
-//       row.shipmentStatus = shipStatus;
-//       if (row.myOrderData) {
-//         row.myOrderData.shipmentStatus = shipStatus;
-//       }
-//     });
+//       merged.push({
+//         _id: order._id,
+//         name: order.customerName || "",
+//         contactNumber: order.phone || "",
+//         productsOrdered: [order.productOrdered].filter(Boolean),
+//         dosageOrdered: order.dosageOrdered || "",
+//         amountPaid: order.totalPrice ?? "",
+//         partialPayment: order.partialPayment ?? 0,
+//         modeOfPayment: order.paymentMethod || "",
+//         lastOrderDate: order.orderDate || "",
+//         salesStatus: "Sales Done",
+//         agentAssigned: order.agentName || "",
+//         agentsRemarks: order.selfRemark || "",
+//         shipmentStatus: order.shipmentStatus || "",
+//         myOrderData: {
+//           _id: order._id,
+//           orderDate: order.orderDate || "",
+//           productOrdered: order.productOrdered || "",
+//           dosageOrdered: order.dosageOrdered || "",
+//           totalPrice: order.totalPrice ?? "",
+//           paymentMethod: order.paymentMethod || "",
+//           partialPayment: order.partialPayment ?? 0,
+//           selfRemark: order.selfRemark || "",
+//           orderId: order.orderId || "",
+//           shipmentStatus: order.shipmentStatus || "",
+//         },
+//       });
+//     }
 
-//     // 7) Sort by latest relevant date
+//     // 6) Sort final list (same logic)
 //     merged.sort((a, b) => {
-//       const aDate = new Date(
-//         (a.myOrderData && a.myOrderData.orderDate) || a.lastOrderDate || 0
-//       ).getTime();
-//       const bDate = new Date(
-//         (b.myOrderData && b.myOrderData.orderDate) || b.lastOrderDate || 0
-//       ).getTime();
-//       return bDate - aDate; // DESC
+//       const aDate = new Date(a.myOrderData?.orderDate || a.lastOrderDate || 0);
+//       const bDate = new Date(b.myOrderData?.orderDate || b.lastOrderDate || 0);
+//       return bDate - aDate;
 //     });
 
-//     // 8) Paginate
-//     const paginated = merged.slice(skip, skip + limitNum);
+//     // 7) Paginate AFTER merging (same functionality)
+//     const paginated = merged.slice(skip, skip + parseInt(limit));
 
 //     res.json({
 //       sales: paginated,
 //       totalSales: merged.length,
 //     });
 //   } catch (error) {
-//     console.error("Error in merged-sales API:", error);
+//     console.error("Optimized merged-sales API:", error);
 //     res.status(500).json({ error: "Failed to fetch merged sales" });
 //   }
 // });
 
-// /**
-//  * PUT /api/merged-sales/:id
-//  * Auto-detects whether :id belongs to Lead or MyOrder
-//  */
+
+// // Utility: Validate MongoDB ObjectId
+// const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+
+// // PUT update for either Lead or MyOrder (auto-detect by id)
 // router.put("/:id", async (req, res) => {
 //   const { id } = req.params;
 //   const updates = req.body;
+
 
 //   if (!isValidObjectId(id)) {
 //     return res.status(400).json({ message: "Invalid ID" });
 //   }
 
+
 //   try {
-//     // Try Lead first
 //     const existingLead = await Lead.findById(id);
 //     if (existingLead) {
 //       const updated = await Lead.findByIdAndUpdate(id, updates, { new: true });
 //       return res.status(200).json({ source: "lead", updated });
 //     }
 
-//     // Then MyOrder
+
 //     const existingOrder = await MyOrder.findById(id);
 //     if (existingOrder) {
 //       const updated = await MyOrder.findByIdAndUpdate(id, updates, { new: true });
 //       return res.status(200).json({ source: "order", updated });
+
+
+      
 //     }
 
-//     return res
-//       .status(404)
-//       .json({ message: "Record not found in Lead or MyOrder" });
+
+//     return res.status(404).json({ message: "Record not found in Lead or MyOrder" });
 //   } catch (err) {
 //     console.error("Error updating merged sale:", err);
-//     return res
-//       .status(500)
-//       .json({ message: "Internal server error", error: err.message });
+//     return res.status(500).json({ message: "Internal server error", error: err.message });
 //   }
 // });
 
-// module.exports = router;
 
+// module.exports = router;
 
 const mongoose = require("mongoose");
 const express = require("express");
@@ -288,31 +228,43 @@ const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
 const MyOrder = require("../models/MyOrder");
 
-
 // Normalize phone to last 10 digits
 const normalizePhone = (p) => {
   const digits = String(p || "").replace(/\D/g, "");
   return digits.length > 10 ? digits.slice(-10) : digits;
 };
 
+// Escape regex special chars
+const escapeRegex = (str = "") =>
+  String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 router.get("/", async (req, res) => {
   const { agentAssignedName, page = 1, limit = 50 } = req.query;
-  const skip = (parseInt(page) - 1) * parseInt(limit);
+  const parsedPage = parseInt(page, 10) || 1;
+  const parsedLimit = parseInt(limit, 10) || 50;
+  const skip = (parsedPage - 1) * parsedLimit;
 
   try {
-    // 1) Leads → Same logic
+    // 1) Leads query
     const leadQuery = { salesStatus: "Sales Done" };
-    if (agentAssignedName) leadQuery.agentAssigned = agentAssignedName;
+    if (agentAssignedName) {
+      leadQuery.agentAssigned = agentAssignedName;
+    }
 
     const leads = await Lead.find(leadQuery)
       .lean()
-      .select("-images -followUps -details"); // improves speed harmlessly
+      .select("-images -followUps -details");
 
-    // 2) MyOrder query → same but optimized
+    // 2) MyOrder query
+    // FIX: exact case-insensitive match so "Karan" does not match "Karan S"
     const orderQuery = {};
     if (agentAssignedName) {
-      orderQuery.agentName = { $regex: new RegExp(agentAssignedName, "i") };
+      orderQuery.agentName = {
+        $regex: new RegExp(
+          `^\\s*${escapeRegex(agentAssignedName.trim())}\\s*$`,
+          "i"
+        ),
+      };
     }
 
     const allMyOrders = await MyOrder.find(orderQuery)
@@ -326,28 +278,33 @@ router.get("/", async (req, res) => {
 
     for (const order of allMyOrders) {
       const phone = normalizePhone(order.phone);
+      if (!phone) continue;
+
       if (!ordersByPhone[phone]) ordersByPhone[phone] = [];
       ordersByPhone[phone].push(order);
     }
 
-    // Sort order list for each phone
+    // Sort orders for each phone by latest orderDate first
     for (const list of Object.values(ordersByPhone)) {
-      list.sort((a, b) => new Date(b.orderDate) - new Date(a.orderDate));
+      list.sort((a, b) => {
+        const aDate = new Date(a.orderDate || 0);
+        const bDate = new Date(b.orderDate || 0);
+        return bDate - aDate;
+      });
     }
 
     const merged = [];
     const seenOrderIds = new Set();
     const seenPhones = new Set();
 
-    // 4) Lead → Order merging (same, just faster)
+    // 4) Merge leads with orders
     for (const lead of leads) {
       const phone = normalizePhone(lead.contactNumber);
-      seenPhones.add(phone);
+      if (phone) seenPhones.add(phone);
 
-      const orders = ordersByPhone[phone] || [];
+      const orders = phone ? ordersByPhone[phone] || [] : [];
 
       if (orders.length === 0) {
-        // no order → push pure lead (same as your logic)
         merged.push({
           _id: lead._id,
           name: lead.name || "",
@@ -367,27 +324,28 @@ router.get("/", async (req, res) => {
         continue;
       }
 
-      // lead has multiple orders → multiple rows
       for (const order of orders) {
         seenOrderIds.add(String(order._id));
 
         merged.push({
           _id: lead._id,
-          name: lead.name || order.customerName,
-          contactNumber: lead.contactNumber || order.phone,
+          name: lead.name || order.customerName || "",
+          contactNumber: lead.contactNumber || order.phone || "",
           productsOrdered:
-            lead.productsOrdered ||
-            (order.productOrdered ? [order.productOrdered] : []),
-          dosageOrdered: lead.dosageOrdered || order.dosageOrdered,
-          amountPaid: lead.amountPaid ?? order.totalPrice,
+            Array.isArray(lead.productsOrdered) && lead.productsOrdered.length
+              ? lead.productsOrdered
+              : order.productOrdered
+              ? [order.productOrdered]
+              : [],
+          dosageOrdered: lead.dosageOrdered || order.dosageOrdered || "",
+          amountPaid: lead.amountPaid ?? order.totalPrice ?? "",
           partialPayment: lead.partialPayment ?? order.partialPayment ?? 0,
-          modeOfPayment: lead.modeOfPayment || order.paymentMethod,
-          lastOrderDate: lead.lastOrderDate || order.orderDate,
+          modeOfPayment: lead.modeOfPayment || order.paymentMethod || "",
+          lastOrderDate: lead.lastOrderDate || order.orderDate || "",
           salesStatus: lead.salesStatus || "Sales Done",
           agentAssigned: lead.agentAssigned || order.agentName || "",
           agentsRemarks: lead.agentsRemarks || order.selfRemark || "",
           shipmentStatus: lead.shipmentStatus || order.shipmentStatus || "",
-
           myOrderData: {
             _id: order._id,
             orderDate: order.orderDate || "",
@@ -404,12 +362,12 @@ router.get("/", async (req, res) => {
       }
     }
 
-    // 5) Orders without leads → SAME as original
+    // 5) Orders without matching leads
     for (const order of allMyOrders) {
       const phone = normalizePhone(order.phone);
 
       if (seenOrderIds.has(String(order._id))) continue;
-      if (seenPhones.has(phone)) continue;
+      if (phone && seenPhones.has(phone)) continue;
 
       merged.push({
         _id: order._id,
@@ -440,15 +398,15 @@ router.get("/", async (req, res) => {
       });
     }
 
-    // 6) Sort final list (same logic)
+    // 6) Sort final merged list
     merged.sort((a, b) => {
       const aDate = new Date(a.myOrderData?.orderDate || a.lastOrderDate || 0);
       const bDate = new Date(b.myOrderData?.orderDate || b.lastOrderDate || 0);
       return bDate - aDate;
     });
 
-    // 7) Paginate AFTER merging (same functionality)
-    const paginated = merged.slice(skip, skip + parseInt(limit));
+    // 7) Paginate after merge
+    const paginated = merged.slice(skip, skip + parsedLimit);
 
     res.json({
       sales: paginated,
@@ -460,49 +418,46 @@ router.get("/", async (req, res) => {
   }
 });
 
-
 // Utility: Validate MongoDB ObjectId
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
-
 
 // PUT update for either Lead or MyOrder (auto-detect by id)
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
 
-
   if (!isValidObjectId(id)) {
     return res.status(400).json({ message: "Invalid ID" });
   }
 
-
   try {
     const existingLead = await Lead.findById(id);
     if (existingLead) {
-      const updated = await Lead.findByIdAndUpdate(id, updates, { new: true });
+      const updated = await Lead.findByIdAndUpdate(id, updates, {
+        new: true,
+        runValidators: true,
+      });
       return res.status(200).json({ source: "lead", updated });
     }
 
-
     const existingOrder = await MyOrder.findById(id);
     if (existingOrder) {
-      const updated = await MyOrder.findByIdAndUpdate(id, updates, { new: true });
+      const updated = await MyOrder.findByIdAndUpdate(id, updates, {
+        new: true,
+        runValidators: true,
+      });
       return res.status(200).json({ source: "order", updated });
-
-
-      
     }
-
 
     return res.status(404).json({ message: "Record not found in Lead or MyOrder" });
   } catch (err) {
     console.error("Error updating merged sale:", err);
-    return res.status(500).json({ message: "Internal server error", error: err.message });
+    return res.status(500).json({
+      message: "Internal server error",
+      error: err.message,
+    });
   }
 });
 
-
 module.exports = router;
-
-
 
