@@ -166,6 +166,7 @@ router.get("/presign", requireSession, async (req, res) => {
       Bucket: process.env.WASABI_BUCKET,
       Key: key,
       Expires: 3600,
+      ContentType: safeContentType,
     });
 
     const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");

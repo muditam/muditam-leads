@@ -152,7 +152,7 @@ const scriptroutes = require("./marketing/marketingroutes/ScriptRoute");
 const otherVideosRouter = require("./marketing/marketingroutes/otherVideos");
 const marketingDashboard = require("./routes/marketingDashboard");
 const staticCarouselRoutes = require("./marketing/marketingroutes/staticCarouselRoutes");
-const adsVideoRoutes = require("./marketing/marketingroutes/adsVideoRoutes");
+const adsVideoRoutes = require("./marketing/marketingroutes/adsVideoRoutes"); 
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -702,6 +702,7 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/whatsapp", WhatsAppRoutes);
 app.use("/api/whatsapp/templates", whatsappTemplatesRoutes);
 app.use("/api/whatsapp", whatsappMediaRoutes);
+
 app.use("/api/whatsapp", whatsappAiRoutes);
 app.use("/api/bank-reconciliation", bankReconciliationKotak);
 app.use("/api/retention-activity", retentionActivityRoutes);
