@@ -145,6 +145,14 @@ function normalizeUploadMime(filename = "", contentType = "") {
   return byExt[ext] || "application/octet-stream";
 }
 
+function buildSafeDownloadName(value = "") {
+  const base = String(value || "").trim() || "file";
+  return base
+    .replace(/[/\\]/g, "_")
+    .replace(/"/g, "")
+    .replace(/[^\x20-\x7E]/g, "_");
+}
+
 // ─────────────────────────────────────────────────────────────
 // Presign upload URL
 // NOTE: we do NOT bind ContentType into signature.
@@ -189,19 +197,44 @@ router.get("/presign", requireSession, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────
 // Presign download URL
+// supports:
+//   disposition=inline      -> play/preview
+//   disposition=attachment  -> download
 // ─────────────────────────────────────────────────────────────
 router.get("/presign-download", requireSession, async (req, res) => {
   try {
-    const { key } = req.query;
-    if (!key) return res.status(400).json({ message: "Key required" });
+    const { key, filename = "", disposition = "inline" } = req.query;
+
+    if (!key) {
+      return res.status(400).json({ message: "Key required" });
+    }
+
+    const finalFilename = buildSafeDownloadName(
+      filename || path.basename(String(key))
+    );
+
+    const safeDisposition =
+      String(disposition).toLowerCase() === "attachment"
+        ? "attachment"
+        : "inline";
+
+    const responseContentType = normalizeUploadMime(finalFilename);
 
     const url = s3.getSignedUrl("getObject", {
       Bucket: process.env.WASABI_BUCKET,
       Key: key,
       Expires: 60 * 5,
+      ResponseContentDisposition: `${safeDisposition}; filename="${finalFilename}"`,
+      ResponseContentType: responseContentType,
     });
 
-    res.json({ url });
+    res.json({
+      url,
+      key,
+      filename: finalFilename,
+      disposition: safeDisposition,
+      contentType: responseContentType,
+    });
   } catch (err) {
     console.error("Presign download error:", err);
     res.status(500).json({ message: "Could not generate download URL" });
@@ -369,7 +402,8 @@ router.get("/", requireSession, async (req, res) => {
 
     if (scriptStatus) {
       const statuses = toStrArray(scriptStatus);
-      extras.scriptStatus = statuses.length > 1 ? { $in: statuses } : statuses[0];
+      extras.scriptStatus =
+        statuses.length > 1 ? { $in: statuses } : statuses[0];
     }
 
     if (creator) {
