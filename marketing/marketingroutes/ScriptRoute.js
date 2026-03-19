@@ -776,10 +776,6 @@ router.post("/:id/edit-upload", requireSession, async (req, res) => {
       script.editFileName = editFileName || editFileUrl.split("/").pop();
       script.editDoneAt = new Date();
       script.editDoneBy = user.fullName;
-
-      if (script.stage !== "Post") {
-        script.stage = "Edit Done";
-      }
     }
 
     if (editComment !== undefined) script.editComment = editComment;
@@ -787,8 +783,23 @@ router.post("/:id/edit-upload", requireSession, async (req, res) => {
 
     if (editStatus !== undefined) {
       script.editStatus = editStatus;
-      if (editStatus === "Reshoot") script.stage = "Shoot Pending";
-      if (editStatus === "Re-edit") script.stage = "Cut Done";
+    }
+
+    if (script.stage !== "Post") {
+      if (editStatus === "Reshoot") {
+        script.stage = "Shoot Pending";
+      } else if (editStatus === "Re-edit") {
+        script.stage = "Cut Done";
+      } else if (editStatus === "On Hold") {
+        script.stage = "Edit Pending";
+      } else if (editStatus === "Done" || editFileUrl) {
+        script.stage = "Edit Done";
+      }
+    }
+
+    // optional cleanup when marked done
+    if (editStatus === "Done") {
+      script.editHoldReason = "";
     }
 
     await script.save();

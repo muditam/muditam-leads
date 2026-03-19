@@ -16,11 +16,11 @@ function ymd(dateLike) {
 function stripHashOrderName(orderName) {
   if (!orderName) return "";
   return orderName.startsWith("#") ? orderName.slice(1) : orderName;
-} 
+}
 function normalizePhone10(s) {
   const d = String(s || "").replace(/\D/g, "");
   return d.length > 10 ? d.slice(-10) : d;
-} 
+}
 function mopString(order) {
   if (!order) return "";
   if (typeof order.modeOfPayment === "string" && order.modeOfPayment.trim()) {
@@ -31,7 +31,7 @@ function mopString(order) {
   if (typeof g === "string" && g.trim()) return g.trim();
   return "";
 }
- 
+
 const RAW_PRODUCT_ABBREV = {
   "Karela Jamun Fizz": "KJF",
   "Sugar Defend Pro": "SDP",
@@ -47,7 +47,7 @@ const RAW_PRODUCT_ABBREV = {
   "Core Essentials": "CE",
   "Omega Fuel": "OF",
   "Nerve FIx": "NF",
-  "Thyroid Defend Pro": "TDP", 
+  "Thyroid Defend Pro": "TDP",
 };
 const PRODUCT_ABBREV = Object.fromEntries(
   Object.entries(RAW_PRODUCT_ABBREV).map(([k, v]) => [
@@ -64,7 +64,7 @@ function titleToCode(title) {
   const letters = key.split(" ").filter(Boolean).map(w => w[0]).join("").toUpperCase();
   return letters || key.toUpperCase();
 }
- 
+
 router.get("/shopify/orders-table", async (req, res) => {
   try {
     const page  = Math.max(parseInt(req.query.page || "1", 10), 1);
@@ -74,13 +74,13 @@ router.get("/shopify/orders-table", async (req, res) => {
     const selectedStatus = (req.query.status || "").trim();
     const stateFilter    = (req.query.state || "").trim();
     const modeFilter     = (req.query.mode || "").trim();
-    const assigned       = (req.query.assigned || "").trim().toLowerCase();  
+    const assigned       = (req.query.assigned || "").trim().toLowerCase();
     const onlyMeta       = String(req.query.onlyMeta || "") === "1";
     const withMeta       = String(req.query.withMeta || "") === "1";
 
     const startDate = (req.query.startDate || "").trim();
     const endDate   = (req.query.endDate || "").trim();
- 
+
     const baseMatch = {};
     if (stateFilter) baseMatch["customerAddress.province"] = stateFilter;
     if (modeFilter) {
@@ -101,7 +101,7 @@ router.get("/shopify/orders-table", async (req, res) => {
       ];
       baseMatch.$or = baseMatch.$or ? baseMatch.$or.concat(orDate) : orDate;
     }
- 
+
     if (onlyMeta) {
       const metaPipeline = [
         { $match: baseMatch },
@@ -162,7 +162,7 @@ router.get("/shopify/orders-table", async (req, res) => {
         data: []
       });
     }
- 
+
     const early = [{ $match: baseMatch }];
 
     if (selectedStatus) {
@@ -201,9 +201,9 @@ router.get("/shopify/orders-table", async (req, res) => {
         { $project: { oMatch: 0 } }
       );
     }
- 
+
     early.push({ $sort: { orderDate: -1, createdAt: -1 } });
- 
+
     const assignedPresence = [];
     if (assigned === "assigned" || assigned === "unassigned") {
       assignedPresence.push(
@@ -240,12 +240,12 @@ router.get("/shopify/orders-table", async (req, res) => {
         { $project: { leadExist: 0 } }
       );
     }
- 
+
     const facet = {
       rows: [
         { $skip: skip },
         { $limit: limit },
- 
+
         {
           $project: {
             orderName: 1,
@@ -264,7 +264,6 @@ router.get("/shopify/orders-table", async (req, res) => {
           }
         },
 
-        // Derived display fields
         {
           $addFields: {
             orderDateEff: { $ifNull: ["$orderDate", "$createdAt"] },
@@ -272,7 +271,6 @@ router.get("/shopify/orders-table", async (req, res) => {
           }
         },
 
-        // Shipment status (page-only)
         {
           $addFields: {
             orderIdNoHash: {
@@ -302,7 +300,6 @@ router.get("/shopify/orders-table", async (req, res) => {
         },
         { $addFields: { shipmentStatus: { $ifNull: [{ $arrayElemAt: ["$o.shipment_status", 0] }, "-"] } } },
 
-        // Latest agent & HE using EXACT match on either rawA/rawB
         {
           $lookup: {
             from: "leads",
@@ -332,7 +329,6 @@ router.get("/shopify/orders-table", async (req, res) => {
           }
         },
 
-        // Final projection
         {
           $addFields: {
             lineItemTitles: {
@@ -351,7 +347,7 @@ router.get("/shopify/orders-table", async (req, res) => {
             _id: 0,
             orderId: "$orderName",
             name: "$customerName",
-            contactNumber: 1, // show order's customer number column
+            contactNumber: 1,
             orderDate: "$orderDateEff",
             amount: 1,
             modeOfPayment: "$modeEff",
@@ -379,7 +375,6 @@ router.get("/shopify/orders-table", async (req, res) => {
       }
     ];
 
-    // Optional meta (respects filters)
     let statuses = [], states = [], modes = [];
     if (withMeta) {
       const meta2 = await ShopifyOrder.aggregate([
@@ -457,36 +452,78 @@ router.get("/shopify/orders-table", async (req, res) => {
   }
 });
 
-// ---------- Assign Health Expert (EXACT orderName; EXACT phone match) ----------
+// ---------- Assign Health Expert (update existing lead first, else create) ----------
 router.post("/leads/assign-health-expert", async (req, res) => {
   try {
     const { orderName, contactNumber, healthExpertAssigned } = req.body || {};
-    if (!healthExpertAssigned)
+
+    if (!healthExpertAssigned) {
       return res.status(400).json({ error: "healthExpertAssigned is required" });
-    if (!orderName && !contactNumber)
+    }
+
+    if (!orderName && !contactNumber) {
       return res.status(400).json({ error: "Provide orderName or contactNumber" });
+    }
 
     const heClean = String(healthExpertAssigned || "").replace(/"/g, "").trim();
-    if (!heClean) return res.status(400).json({ error: "healthExpertAssigned empty after cleaning" });
+    if (!heClean) {
+      return res.status(400).json({ error: "healthExpertAssigned empty after cleaning" });
+    }
 
-    // EXACT orderName only (as shown in row)
+    const cleanOrderName = String(orderName || "").trim();
+    const orderNameNoHash = stripHashOrderName(cleanOrderName);
+    const orderNameVariants = [...new Set(
+      [cleanOrderName, orderNameNoHash, orderNameNoHash ? `#${orderNameNoHash}` : ""].filter(Boolean)
+    )];
+
+    const inputRaw = String(contactNumber || "").trim();
+
+    // Keep Shopify order lookup simple and fast
     const orOrder = [];
-    if (orderName) orOrder.push({ orderName });
-    if (contactNumber) orOrder.push({ contactNumber });
+    if (orderNameVariants.length) {
+      orOrder.push({ orderName: { $in: orderNameVariants } });
+    }
+    if (inputRaw) {
+      orOrder.push({ contactNumber: inputRaw });
+      orOrder.push({ "customerAddress.phone": inputRaw });
+    }
 
     const shopOrder = await ShopifyOrder.findOne(orOrder.length ? { $or: orOrder } : {})
-      .sort({ orderDate: -1, createdAt: -1 });
+      .sort({ orderDate: -1, createdAt: -1 })
+      .lean();
 
     const rawA = shopOrder?.contactNumber || "";
     const rawB = shopOrder?.customerAddress?.phone || "";
-    const inputRaw = contactNumber || "";
-    const phoneCandidates = [inputRaw, rawA, rawB].filter(v => typeof v === "string" && v.trim() !== "");
+    const bestPhone = rawA || rawB || inputRaw || "";
 
-    // Find existing lead by EXACT equality on any candidate
+    const phoneCandidates = [...new Set(
+      [inputRaw, rawA, rawB].filter(v => typeof v === "string" && v.trim() !== "")
+    )];
+
+    const shopOrderName = String(shopOrder?.orderName || cleanOrderName || "").trim();
+    const shopOrderNameNoHash = stripHashOrderName(shopOrderName);
+    const finalOrderNameVariants = [...new Set(
+      [shopOrderName, shopOrderNameNoHash, shopOrderNameNoHash ? `#${shopOrderNameNoHash}` : ""].filter(Boolean)
+    )];
+
+    // 1) Find existing lead by orderId first
     let existingLead = null;
-    for (const raw of phoneCandidates) {
-      const found = await Lead.findOne({ contactNumber: raw }).sort({ updatedAt: -1, _id: -1 }).lean();
-      if (found) { existingLead = found; break; }
+
+    if (finalOrderNameVariants.length) {
+      existingLead = await Lead.findOne({
+        orderId: { $in: finalOrderNameVariants }
+      })
+        .sort({ _id: -1 })
+        .lean();
+    }
+
+    // 2) If not found, then find by exact contact number
+    if (!existingLead && phoneCandidates.length) {
+      existingLead = await Lead.findOne({
+        contactNumber: { $in: phoneCandidates }
+      })
+        .sort({ _id: -1 })
+        .lean();
     }
 
     const codes = Array.isArray(shopOrder?.productsOrdered)
@@ -496,22 +533,26 @@ router.post("/leads/assign-health-expert", async (req, res) => {
           .map(title => PRODUCT_ABBREV[normalizeTitle(title)] || titleToCode(title))
       : [];
 
-    const orderNameForLead = shopOrder?.orderName || orderName || "";
+    const orderNameForLead = shopOrderName || cleanOrderName || "";
     const dateStr = ymd(shopOrder?.orderDate || shopOrder?.createdAt || new Date());
     const mop = mopString(shopOrder);
-
-    // choose best number to store on Lead: prefer order contactNumber, else address phone, else input
-    const bestPhone = rawA || rawB || inputRaw || "";
 
     if (existingLead) {
       const update = {
         healthExpertAssigned: heClean,
         agentAssigned: existingLead.agentAssigned || "Online Order",
-        orderId: orderNameForLead,
-        contactNumber: bestPhone || existingLead.contactNumber
       };
+
+      if (orderNameForLead) update.orderId = orderNameForLead;
+      if (bestPhone) update.contactNumber = bestPhone;
       if (codes.length) update.productsOrdered = codes;
-      await Lead.updateOne({ _id: existingLead._id }, { $set: update });
+      if (mop) update.modeOfPayment = mop;
+
+      await Lead.updateOne(
+        { _id: existingLead._id },
+        { $set: update }
+      );
+
       return res.json({ ok: true, updated: true, leadId: existingLead._id });
     }
 
@@ -538,4 +579,3 @@ router.post("/leads/assign-health-expert", async (req, res) => {
 });
 
 module.exports = router;
-  

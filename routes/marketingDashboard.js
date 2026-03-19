@@ -166,10 +166,7 @@ function buildDashboardCacheKey(req, extraKey = "") {
 }
 
 async function respondWithCache(req, res, builder, options = {}) {
-  const {
-    ttlMs = DASHBOARD_CACHE_TTL_MS,
-    extraKey = "",
-  } = options;
+  const { ttlMs = DASHBOARD_CACHE_TTL_MS, extraKey = "" } = options;
 
   const bypass = shouldBypassCache(req);
   const cacheKey = buildDashboardCacheKey(req, extraKey);
@@ -529,10 +526,7 @@ async function buildWriterMetrics(user, createdRange) {
 
   const results = await Promise.all(
     MODEL_CONFIGS.map((cfg) =>
-      cfg.model
-        .find(filter)
-        .select(buildSelectFields(cfg))
-        .lean()
+      cfg.model.find(filter).select(buildSelectFields(cfg)).lean()
     )
   );
 
@@ -541,6 +535,7 @@ async function buildWriterMetrics(user, createdRange) {
 
     docs.forEach((doc) => {
       const name = String(doc.createdBy || "").trim() || "Unknown";
+
       if (!map.has(name)) {
         map.set(name, {
           name,
@@ -578,6 +573,92 @@ async function buildWriterMetrics(user, createdRange) {
   );
 }
 
+async function buildVideographerMetrics(user, createdRange) {
+  const createdAtFilter = createdRange ? { createdAt: createdRange } : {};
+  const { fullName } = getUserIdentity(user);
+
+  const actorScope = hasFullAccess(user)
+    ? {
+        $or: [
+          { shootDoneBy: { $exists: true, $ne: "" } },
+          { cutDoneBy: { $exists: true, $ne: "" } },
+          { cutUploadedBy: { $exists: true, $ne: "" } },
+        ],
+      }
+    : fullName
+    ? {
+        $or: [
+          { shootDoneBy: fullName },
+          { cutDoneBy: fullName },
+          { cutUploadedBy: fullName },
+        ],
+      }
+    : { _id: null };
+
+  const filter = andFilters(actorScope, createdAtFilter);
+
+  const map = new Map();
+
+  const ensureRow = (name) => {
+    const cleanName = String(name || "").trim();
+    if (!cleanName) return null;
+
+    if (!map.has(cleanName)) {
+      map.set(cleanName, {
+        name: cleanName,
+        shootDone: 0,
+        cutDone: 0,
+        cutUploaded: 0,
+        totalActions: 0,
+      });
+    }
+
+    return map.get(cleanName);
+  };
+
+  const results = await Promise.all(
+    MODEL_CONFIGS.map((cfg) =>
+      cfg.model.find(filter).select(buildSelectFields(cfg)).lean()
+    )
+  );
+
+  results.forEach((docs) => {
+    docs.forEach((doc) => {
+      const shootName = String(doc.shootDoneBy || "").trim();
+      const cutDoneName = String(doc.cutDoneBy || "").trim();
+      const cutUploadedName = String(doc.cutUploadedBy || "").trim();
+
+      if (shootName) {
+        const row = ensureRow(shootName);
+        if (row) {
+          row.shootDone += 1;
+          row.totalActions += 1;
+        }
+      }
+
+      if (cutDoneName) {
+        const row = ensureRow(cutDoneName);
+        if (row) {
+          row.cutDone += 1;
+          row.totalActions += 1;
+        }
+      }
+
+      if (cutUploadedName) {
+        const row = ensureRow(cutUploadedName);
+        if (row) {
+          row.cutUploaded += 1;
+          row.totalActions += 1;
+        }
+      }
+    });
+  });
+
+  return [...map.values()].sort(
+    (a, b) => b.totalActions - a.totalActions || a.name.localeCompare(b.name)
+  );
+}
+
 async function buildEditorMetrics(user, createdRange) {
   const createdAtFilter = createdRange ? { createdAt: createdRange } : {};
   const filter = andFilters(
@@ -590,10 +671,7 @@ async function buildEditorMetrics(user, createdRange) {
 
   const results = await Promise.all(
     MODEL_CONFIGS.map((cfg) =>
-      cfg.model
-        .find(filter)
-        .select(buildSelectFields(cfg))
-        .lean()
+      cfg.model.find(filter).select(buildSelectFields(cfg)).lean()
     )
   );
 
@@ -630,17 +708,10 @@ async function buildEditorMetrics(user, createdRange) {
         row.pending += 1;
       }
 
-      const isReEdit =
-        doc.editStatus === "Re-edit" || doc.postStatus === "Re-edit";
-      const isReshoot =
-        doc.editStatus === "Reshoot" || doc.postStatus === "Reshoot";
-      const isOnHold =
-        doc.editStatus === "On Hold" || doc.postStatus === "On Hold";
-      const isBlocked =
-        isReEdit ||
-        isReshoot ||
-        isOnHold ||
-        doc.postStatus === "Rejected";
+      const isReEdit = doc.editStatus === "Re-edit" || doc.postStatus === "Re-edit";
+      const isReshoot = doc.editStatus === "Reshoot" || doc.postStatus === "Reshoot";
+      const isOnHold = doc.editStatus === "On Hold" || doc.postStatus === "On Hold";
+      const isBlocked = isReEdit || isReshoot || isOnHold || doc.postStatus === "Rejected";
 
       if (isReEdit) row.reEdit += 1;
       if (isReshoot) row.reshoot += 1;
@@ -682,10 +753,7 @@ async function fetchAcrossSchemas(buildFilterForCfg, selectBuilder, sortField = 
       const filter = buildFilterForCfg(cfg);
       if (!filter || (filter._id && filter._id === null)) return [];
 
-      const docs = await cfg.model
-        .find(filter)
-        .select(selectBuilder(cfg))
-        .lean();
+      const docs = await cfg.model.find(filter).select(selectBuilder(cfg)).lean();
 
       return docs.map((doc) => normalizeListItem(doc, cfg));
     })
@@ -713,8 +781,7 @@ async function getOverallPublishBreakdown(recordScope, postedRange) {
   );
 
   results.flat().forEach((doc) => {
-    const key =
-      String(doc.postPublishStatus || "").trim() || "Not Published";
+    const key = String(doc.postPublishStatus || "").trim() || "Not Published";
     publishMap[key] = (publishMap[key] || 0) + 1;
   });
 
@@ -747,11 +814,13 @@ router.get("/summary", requireSession, async (req, res) => {
         const createdRange = buildDateRange(dateFrom, dateTo);
         const recordScope = buildRecordScopeFilter(user);
 
-        const [bySchema, writerMetrics, editorMetrics] = await Promise.all([
-          buildBySchemaObject(recordScope, createdRange),
-          buildWriterMetrics(user, createdRange),
-          buildEditorMetrics(user, createdRange),
-        ]);
+        const [bySchema, writerMetrics, videographerMetrics, editorMetrics] =
+          await Promise.all([
+            buildBySchemaObject(recordScope, createdRange),
+            buildWriterMetrics(user, createdRange),
+            buildVideographerMetrics(user, createdRange),
+            buildEditorMetrics(user, createdRange),
+          ]);
 
         const overallStageCounts = {};
         const overallPublished = { posted: 0, usedInAds: 0, total: 0 };
@@ -785,6 +854,7 @@ router.get("/summary", requireSession, async (req, res) => {
           pendingWithoutAction,
           blocked: overallBlocked,
           writerMetrics,
+          videographerMetrics,
           editorMetrics,
         };
       },
@@ -1116,11 +1186,7 @@ router.get("/scripts-by-person", requireSession, async (req, res) => {
           : buildActorFilter(field, user);
 
         const items = await fetchAcrossSchemas(
-          () =>
-            andFilters(
-              personFilter,
-              range ? { [dateFieldKey]: range } : {}
-            ),
+          () => andFilters(personFilter, range ? { [dateFieldKey]: range } : {}),
           (cfg) => buildSelectFields(cfg),
           "createdAt"
         );

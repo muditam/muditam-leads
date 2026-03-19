@@ -153,12 +153,14 @@ const otherVideosRouter = require("./marketing/marketingroutes/otherVideos");
 const marketingDashboard = require("./routes/marketingDashboard"); 
 const staticCarouselRoutes = require("./marketing/marketingroutes/staticCarouselRoutes");
 const adsVideoRoutes = require("./marketing/marketingroutes/adsVideoRoutes"); 
+const shopifyCatalog = require("./routes/shopifyCatalog"); 
+const unicommerceViewRoutes = require("./routes/unicommerceViewRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
 app.use(
-  compression({
+  compression({  
     filter: (req, res) => {
       if (req.path === '/api/sse') return false;
 
@@ -711,6 +713,10 @@ app.use("/api/other-videos", otherVideosRouter);
 app.use("/api/marketing-dashboard", marketingDashboard);
 app.use("/api/static-carousel", staticCarouselRoutes);
 app.use("/api/ads-videos", adsVideoRoutes);
+
+app.use("/api/shopify-catalog", shopifyCatalog);
+
+app.use("/api/unicommerce", unicommerceViewRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
