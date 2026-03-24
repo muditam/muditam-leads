@@ -153,6 +153,59 @@ function buildSafeDownloadName(value = "") {
     .replace(/[^\x20-\x7E]/g, "_");
 }
 
+function inferMediaType(value = "") {
+  const v = String(value || "").toLowerCase();
+
+  if (/\.(mp4|mov|avi|webm|mkv|m4v)$/.test(v)) return "video";
+  if (/\.(png|jpg|jpeg|webp|gif|bmp|svg)$/.test(v)) return "image";
+  return "file";
+}
+
+function safeFileNameFromUrl(url = "") {
+  try {
+    const clean = String(url).split("?")[0];
+    return clean.split("/").pop() || "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeEditVariants(rawVariants, userFullName = "", now = new Date()) {
+  let parsed = rawVariants;
+
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      parsed = [];
+    }
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((item, index) => {
+      const url = String(item?.url || "").trim();
+      if (!url) return null;
+
+      const name = String(item?.name || "").trim() || safeFileNameFromUrl(url);
+      const label =
+        String(item?.label || "").trim() || `Variant ${index + 1}`;
+      const type =
+        String(item?.type || "").trim() || inferMediaType(name || url);
+
+      return {
+        label,
+        url,
+        name,
+        type,
+        uploadedAt: item?.uploadedAt ? new Date(item.uploadedAt) : now,
+        uploadedBy: String(item?.uploadedBy || "").trim() || userFullName || "",
+      };
+    })
+    .filter(Boolean);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Presign upload URL
 // NOTE: we do NOT bind ContentType into signature.
@@ -172,7 +225,7 @@ router.get("/presign", requireSession, async (req, res) => {
 
     const presignedUrl = s3.getSignedUrl("putObject", {
       Bucket: process.env.WASABI_BUCKET,
-      Key: key,
+      Key: key, 
       Expires: 3600,
       ContentType: safeContentType,
     });
@@ -766,25 +819,75 @@ router.post("/:id/edit-upload", requireSession, async (req, res) => {
       editComment,
       editStatus,
       editHoldReason,
+      editHasVariants,
+      editVariants,
     } = req.body;
 
     const script = await Script.findById(req.params.id);
-    if (!script) return res.status(404).json({ message: "Not found" });
-
-    if (editFileUrl) {
-      script.editFileUrl = editFileUrl;
-      script.editFileName = editFileName || editFileUrl.split("/").pop();
-      script.editDoneAt = new Date();
-      script.editDoneBy = user.fullName;
+    if (!script) {
+      return res.status(404).json({ message: "Not found" });
     }
 
-    if (editComment !== undefined) script.editComment = editComment;
-    if (editHoldReason !== undefined) script.editHoldReason = editHoldReason;
+    const now = new Date();
+    const normalizedVariants = normalizeEditVariants(
+      editVariants,
+      user.fullName || "",
+      now
+    );
+
+    const wantsVariants =
+      editHasVariants === true ||
+      editHasVariants === "true" ||
+      normalizedVariants.length > 1;
+
+    if (wantsVariants && normalizedVariants.length < 2) {
+      return res.status(400).json({
+        message: "At least 2 media files are required when variants are enabled",
+      });
+    }
+
+    // update comment/status fields even if no file is uploaded
+    if (editComment !== undefined) {
+      script.editComment = editComment;
+    }
+
+    if (editHoldReason !== undefined) {
+      script.editHoldReason = editHoldReason;
+    }
 
     if (editStatus !== undefined) {
       script.editStatus = editStatus;
     }
 
+    let hasUploadedEditMedia = false;
+
+    // MULTI VARIANT MODE
+    if (wantsVariants && normalizedVariants.length > 0) {
+      script.editHasVariants = true;
+      script.editVariants = normalizedVariants;
+
+      // keep legacy single-file fields populated with first variant
+      script.editFileUrl = normalizedVariants[0].url;
+      script.editFileName =
+        normalizedVariants[0].name || safeFileNameFromUrl(normalizedVariants[0].url);
+
+      script.editDoneAt = now;
+      script.editDoneBy = user.fullName || "";
+      hasUploadedEditMedia = true;
+    }
+
+    // SINGLE FILE MODE
+    else if (editFileUrl) {
+      script.editHasVariants = false;
+      script.editVariants = [];
+      script.editFileUrl = editFileUrl;
+      script.editFileName = editFileName || safeFileNameFromUrl(editFileUrl);
+      script.editDoneAt = now;
+      script.editDoneBy = user.fullName || "";
+      hasUploadedEditMedia = true;
+    }
+
+    // stage handling
     if (script.stage !== "Post") {
       if (editStatus === "Reshoot") {
         script.stage = "Shoot Pending";
@@ -792,20 +895,25 @@ router.post("/:id/edit-upload", requireSession, async (req, res) => {
         script.stage = "Cut Done";
       } else if (editStatus === "On Hold") {
         script.stage = "Edit Pending";
-      } else if (editStatus === "Done" || editFileUrl) {
+      } else if (editStatus === "Done" || hasUploadedEditMedia) {
         script.stage = "Edit Done";
       }
     }
 
-    // optional cleanup when marked done
+    // cleanup when marked done
     if (editStatus === "Done") {
       script.editHoldReason = "";
     }
 
     await script.save();
-    res.json({ message: "Edit updated", script });
+
+    return res.json({
+      message: "Edit updated",
+      script,
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Edit upload error:", err);
+    return res.status(500).json({ message: err.message || "Edit upload failed" });
   }
 });
 

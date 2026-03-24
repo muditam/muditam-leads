@@ -1,6 +1,6 @@
-// routes/retentionActivityRoutes.js
 const express = require("express");
 const router = express.Router();
+
 const Lead = require("../models/Lead");
 const DietPlan = require("../models/DietPlan");
 const Employee = require("../models/Employee");
@@ -8,17 +8,17 @@ const Employee = require("../models/Employee");
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const _cache = new Map();
 
-
 function cacheGet(key) {
   const entry = _cache.get(key);
   if (!entry) return null;
+
   if (Date.now() - entry.ts > CACHE_TTL_MS) {
     _cache.delete(key);
     return null;
   }
+
   return entry.data;
 }
-
 
 function cacheSet(key, data) {
   _cache.set(key, { ts: Date.now(), data });
@@ -29,57 +29,67 @@ function normalizeAgentName(name) {
   return String(name).replace(/\s*\([^)]*@[^)]*\)\s*$/i, "").trim();
 }
 
-
 function agentKey(name) {
   return normalizeAgentName(name).toLowerCase();
 }
 
+function hasNumber(value) {
+  return value !== null && value !== undefined && value !== "" && !Number.isNaN(value);
+}
 
-function hasDiabetes(details) {
-  if (!details) return false;
-  return !!(
-    details.hba1c ||
-    details.fastingSugar ||
-    details.ppSugar ||
-    details.durationOfDiabetes ||
-    details.lastTestDone
+function hasText(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function hasDiabetes(details = {}) {
+  return (
+    hasNumber(details.hba1c) ||
+    hasNumber(details.fastingSugar) ||
+    hasNumber(details.ppSugar) ||
+    hasText(details.durationOfDiabetes) ||
+    hasText(details.lastTestDone)
   );
 }
 
-
-function hasCholesterol(details) {
-  if (!details) return false;
-  return !!(
-    details.totalCholesterol ||
-    details.ldl ||
-    details.hdl ||
-    details.triglycerides ||
-    details.lastCholesterolTest
+function hasLiver(details = {}) {
+  return (
+    hasNumber(details.sgpt) ||
+    hasNumber(details.sgot) ||
+    hasNumber(details.ggt) ||
+    hasText(details.ultrasoundFindings) ||
+    hasText(details.lastLiverTest)
   );
 }
 
-
-function hasLiver(details) {
-  if (!details) return false;
-  return !!(
-    details.sgpt ||
-    details.sgot ||
-    details.ggt ||
-    details.ultrasoundFindings ||
-    details.lastLiverTest
+function hasCholesterol(details = {}) {
+  return (
+    hasNumber(details.totalCholesterol) ||
+    hasNumber(details.ldl) ||
+    hasNumber(details.hdl) ||
+    hasNumber(details.triglycerides) ||
+    hasText(details.lastCholesterolTest)
   );
 }
 
-
-const ACTIVE_OR_BLANK_RETENTION = {
+const ACTIVE_CUSTOMER_MATCH = {
+  salesStatus: "Sales Done",
   $or: [
+    { retentionStatus: { $regex: /^active$/i } },
     { retentionStatus: { $exists: false } },
     { retentionStatus: null },
     { retentionStatus: "" },
-    { retentionStatus: { $regex: /^active$/i } },
   ],
 };
 
+const ACTIVE_LOOKUP_LEAD_MATCH = {
+  "lead.salesStatus": "Sales Done",
+  $or: [
+    { "lead.retentionStatus": { $regex: /^active$/i } },
+    { "lead.retentionStatus": { $exists: false } },
+    { "lead.retentionStatus": null },
+    { "lead.retentionStatus": "" },
+  ],
+};
 
 const PROFILE_FILLED_OR = [
   { "details.age": { $type: "number" } },
@@ -89,18 +99,19 @@ const PROFILE_FILLED_OR = [
   { "details.dietType": { $exists: true, $ne: "" } },
 ];
 
-
 const CONDITION_FILLED_OR = [
   { "details.hba1c": { $type: "number" } },
   { "details.fastingSugar": { $type: "number" } },
   { "details.ppSugar": { $type: "number" } },
   { "details.durationOfDiabetes": { $exists: true, $ne: "" } },
   { "details.lastTestDone": { $exists: true, $ne: "" } },
+
   { "details.totalCholesterol": { $type: "number" } },
   { "details.ldl": { $type: "number" } },
   { "details.hdl": { $type: "number" } },
   { "details.triglycerides": { $type: "number" } },
   { "details.lastCholesterolTest": { $exists: true, $ne: "" } },
+
   { "details.sgpt": { $type: "number" } },
   { "details.sgot": { $type: "number" } },
   { "details.ggt": { $type: "number" } },
@@ -115,76 +126,83 @@ router.get("/condition-cards", async (req, res) => {
     return res.json(cached);
   }
 
-
   try {
-
-    const allLeads = await Lead.find({ ...ACTIVE_OR_BLANK_RETENTION })
+    const allLeads = await Lead.find(ACTIVE_CUSTOMER_MATCH)
       .select("details")
       .lean();
 
-
-    let diabetes = 0, liver = 0, cholesterol = 0, noCondition = 0;
-
+    let diabetes = 0;
+    let liver = 0;
+    let cholesterol = 0;
+    let noCondition = 0;
 
     allLeads.forEach((lead) => {
-      const d = lead.details;
-      if (
-        !d ||
-        !(d.hba1c || d.fastingSugar || d.ppSugar || d.totalCholesterol ||
-          d.ldl || d.hdl || d.sgpt || d.sgot || d.ggt || d.age || d.height || d.weight)
-      ) return;
+      const details = lead.details || {};
 
-
-      const isDiabetes = hasDiabetes(d);
-      const isCholesterol = hasCholesterol(d);
-      const isLiver = hasLiver(d);
-
+      const isDiabetes = hasDiabetes(details);
+      const isLiver = hasLiver(details);
+      const isCholesterol = hasCholesterol(details);
 
       if (isDiabetes) diabetes++;
-      if (isCholesterol) cholesterol++;
       if (isLiver) liver++;
-      if (!isDiabetes && !isCholesterol && !isLiver) noCondition++;
+      if (isCholesterol) cholesterol++;
+
+      if (!isDiabetes && !isLiver && !isCholesterol) {
+        noCondition++;
+      }
     });
 
+    const result = {
+      diabetes,
+      liver,
+      cholesterol,
+      noCondition,
+    };
 
-    const result = { diabetes, liver, cholesterol, noCondition };
-    cacheSet(cacheKey, result); 
+    cacheSet(cacheKey, result);
     return res.json(result);
   } catch (err) {
     console.error("condition-cards ERROR:", err.message);
-    return res.status(500).json({ error: "Internal server error", details: err.message });
+    return res.status(500).json({
+      error: "Internal server error",
+      details: err.message,
+    });
   }
 });
-
 
 router.get("/health-expert-activity-summary", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: "startDate and endDate are required" });
-    }
 
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        error: "startDate and endDate are required",
+      });
+    }
 
     const cacheKey = `activity-summary:${startDate}:${endDate}`;
     const cached = cacheGet(cacheKey);
-    if (cached) { 
+    if (cached) {
       return res.json(cached);
     }
 
-
     const start = new Date(`${startDate}T00:00:00+05:30`);
-    const end   = new Date(`${endDate}T23:59:59+05:30`);
+    const end = new Date(`${endDate}T23:59:59+05:30`);
 
     const activeEmployees = await Employee.find({
       status: { $regex: /^active$/i },
-      role:   { $regex: /retention agent/i },
-    }).select("fullName role status").lean();
+      role: { $regex: /retention agent/i },
+    })
+      .select("fullName role status")
+      .lean();
 
     const activeAgentMap = new Map();
     activeEmployees.forEach((emp) => {
       const display = normalizeAgentName(emp.fullName);
       const key = agentKey(emp.fullName);
-      if (display && key) activeAgentMap.set(key, display);
+      if (display && key) {
+        activeAgentMap.set(key, display);
+      }
     });
 
     if (activeAgentMap.size === 0) {
@@ -213,7 +231,6 @@ router.get("/health-expert-activity-summary", async (req, res) => {
       conditionUpdatesAgg,
       firstCallAgg,
     ] = await Promise.all([
-
       DietPlan.aggregate([
         {
           $match: {
@@ -232,59 +249,82 @@ router.get("/health-expert-activity-summary", async (req, res) => {
         { $unwind: { path: "$lead", preserveNullAndEmptyArrays: false } },
         {
           $match: {
-            ...ACTIVE_OR_BLANK_RETENTION,
+            ...ACTIVE_LOOKUP_LEAD_MATCH,
             "lead.healthExpertAssigned": { $exists: true, $ne: null, $ne: "" },
           },
         },
         {
           $group: {
-            _id: { agent: "$lead.healthExpertAssigned", leadId: "$lead._id" },
+            _id: {
+              agent: "$lead.healthExpertAssigned",
+              leadId: "$lead._id",
+            },
           },
         },
-        { $group: { _id: "$_id.agent", count: { $sum: 1 } } },
+        {
+          $group: {
+            _id: "$_id.agent",
+            count: { $sum: 1 },
+          },
+        },
       ]),
 
       Lead.aggregate([
         {
           $match: {
-            ...ACTIVE_OR_BLANK_RETENTION,
+            ...ACTIVE_CUSTOMER_MATCH,
             healthExpertAssigned: { $exists: true, $ne: null, $ne: "" },
           },
         },
-        { $group: { _id: "$healthExpertAssigned", count: { $sum: 1 } } },
+        {
+          $group: {
+            _id: "$healthExpertAssigned",
+            count: { $sum: 1 },
+          },
+        },
       ]),
 
       Lead.aggregate([
         {
           $match: {
-            ...ACTIVE_OR_BLANK_RETENTION,
+            ...ACTIVE_CUSTOMER_MATCH,
             healthExpertAssigned: { $exists: true, $ne: null, $ne: "" },
             details: { $exists: true, $ne: null },
             $or: PROFILE_FILLED_OR,
           },
         },
-        { $group: { _id: "$healthExpertAssigned", count: { $sum: 1 } } },
+        {
+          $group: {
+            _id: "$healthExpertAssigned",
+            count: { $sum: 1 },
+          },
+        },
       ]),
 
       Lead.aggregate([
         {
           $match: {
-            ...ACTIVE_OR_BLANK_RETENTION,
+            ...ACTIVE_CUSTOMER_MATCH,
             healthExpertAssigned: { $exists: true, $ne: null, $ne: "" },
             details: { $exists: true, $ne: null },
             $or: CONDITION_FILLED_OR,
           },
         },
-        { $group: { _id: "$healthExpertAssigned", count: { $sum: 1 } } },
+        {
+          $group: {
+            _id: "$healthExpertAssigned",
+            count: { $sum: 1 },
+          },
+        },
       ]),
 
       Lead.aggregate([
         {
           $match: {
-            ...ACTIVE_OR_BLANK_RETENTION,
+            ...ACTIVE_CUSTOMER_MATCH,
             healthExpertAssigned: { $exists: true, $ne: null, $ne: "" },
-            firstCallConnected: true, 
-            firstCallConnectedAt: { $gte: start, $lte: end },  
+            firstCallConnected: true,
+            firstCallConnectedAt: { $gte: start, $lte: end },
           },
         },
         {
@@ -296,71 +336,88 @@ router.get("/health-expert-activity-summary", async (req, res) => {
       ]),
     ]);
 
-    const dietPlansByKey      = {};
-    const assignedByKey       = {};
-    const profileByKey        = {};
-    const conditionByKey      = {};
-    const firstCallByKey      = {};
+    const dietPlansByKey = {};
+    const assignedByKey = {};
+    const profileByKey = {};
+    const conditionByKey = {};
+    const firstCallByKey = {};
 
+    dietPlansAgg.forEach((item) => {
+      const k = agentKey(item._id);
+      if (k && activeAgentMap.has(k)) {
+        dietPlansByKey[k] = item.count || 0;
+      }
+    });
 
-    dietPlansAgg.forEach((i) => {
-      const k = agentKey(i._id);
-      if (k && activeAgentMap.has(k)) dietPlansByKey[k] = i.count || 0;
+    assignedLeadsAgg.forEach((item) => {
+      const k = agentKey(item._id);
+      if (k && activeAgentMap.has(k)) {
+        assignedByKey[k] = item.count || 0;
+      }
     });
-    assignedLeadsAgg.forEach((i) => {
-      const k = agentKey(i._id);
-      if (k && activeAgentMap.has(k)) assignedByKey[k] = i.count || 0;
+
+    profileUpdatesAgg.forEach((item) => {
+      const k = agentKey(item._id);
+      if (k && activeAgentMap.has(k)) {
+        profileByKey[k] = item.count || 0;
+      }
     });
-    profileUpdatesAgg.forEach((i) => {
-      const k = agentKey(i._id);
-      if (k && activeAgentMap.has(k)) profileByKey[k] = i.count || 0;
+
+    conditionUpdatesAgg.forEach((item) => {
+      const k = agentKey(item._id);
+      if (k && activeAgentMap.has(k)) {
+        conditionByKey[k] = item.count || 0;
+      }
     });
-    conditionUpdatesAgg.forEach((i) => {
-      const k = agentKey(i._id);
-      if (k && activeAgentMap.has(k)) conditionByKey[k] = i.count || 0;
-    });
+
     firstCallAgg.forEach((item) => {
       const k = agentKey(item._id);
       if (k && activeAgentMap.has(k)) {
-        firstCallByKey[k] = item.connected || 0; 
-      } else {
-        console.log(`NOT in activeAgentMap. Available keys:`, Array.from(activeAgentMap.keys()));
+        firstCallByKey[k] = item.connected || 0;
       }
     });
 
     const rows = [];
-    let totAssigned = 0, totDiet = 0, totProfile = 0, totCondition = 0, totConnected = 0;
-
+    let totAssigned = 0;
+    let totDiet = 0;
+    let totProfile = 0;
+    let totCondition = 0;
+    let totConnected = 0;
 
     const agentKeysSorted = Array.from(activeAgentMap.keys()).sort((a, b) =>
       activeAgentMap.get(a).localeCompare(activeAgentMap.get(b))
     );
 
-
     agentKeysSorted.forEach((k) => {
-      const agentName     = activeAgentMap.get(k);
-      const assignedTotal = assignedByKey[k]   || 0;
+      const agentName = activeAgentMap.get(k);
+      const assignedTotal = assignedByKey[k] || 0;
       const dietPlansCreated = dietPlansByKey[k] || 0;
 
-
-      const profileUpdates   = Math.min(profileByKey[k]   || 0, assignedTotal);
+      const profileUpdates = Math.min(profileByKey[k] || 0, assignedTotal);
       const conditionUpdates = Math.min(conditionByKey[k] || 0, assignedTotal);
 
+      const profileUpdatesPct =
+        assignedTotal > 0
+          ? +((profileUpdates / assignedTotal) * 100).toFixed(1)
+          : 0;
 
-      const profileUpdatesPct   = assignedTotal > 0 ? +((profileUpdates   / assignedTotal) * 100).toFixed(1) : 0;
-      const conditionUpdatesPct = assignedTotal > 0 ? +((conditionUpdates / assignedTotal) * 100).toFixed(1) : 0;
+      const conditionUpdatesPct =
+        assignedTotal > 0
+          ? +((conditionUpdates / assignedTotal) * 100).toFixed(1)
+          : 0;
 
+      const firstCallConnected = firstCallByKey[k] || 0;
 
-      const firstCallConnected  = firstCallByKey[k] || 0; 
-     
-      const firstCallPercentage = assignedTotal > 0 ? +((firstCallConnected / assignedTotal) * 100).toFixed(2) : 0;
+      const firstCallPercentage =
+        assignedTotal > 0
+          ? +((firstCallConnected / assignedTotal) * 100).toFixed(2)
+          : 0;
 
-
-      totAssigned   += assignedTotal;
-      totDiet       += dietPlansCreated;
-      totProfile    += profileUpdates;
-      totCondition  += conditionUpdates;
-      totConnected  += firstCallConnected;
+      totAssigned += assignedTotal;
+      totDiet += dietPlansCreated;
+      totProfile += profileUpdates;
+      totCondition += conditionUpdates;
+      totConnected += firstCallConnected;
 
       rows.push({
         agentName,
@@ -370,49 +427,54 @@ router.get("/health-expert-activity-summary", async (req, res) => {
         profileUpdatesPct,
         conditionUpdates,
         conditionUpdatesPct,
-        firstCallConnected,  
-        firstCallPercentage,  
+        firstCallConnected,
+        firstCallPercentage,
       });
     });
 
+    const totProfilePct =
+      totAssigned > 0 ? +((totProfile / totAssigned) * 100).toFixed(1) : 0;
 
-    const totProfilePct   = totAssigned > 0 ? +((totProfile   / totAssigned) * 100).toFixed(1) : 0;
-    const totConditionPct = totAssigned > 0 ? +((totCondition / totAssigned) * 100).toFixed(1) : 0;
-    // ✅ toFixed(2) for totals as well
-    const totFirstCallPct = totAssigned > 0 ? +((totConnected / totAssigned) * 100).toFixed(2) : 0;
+    const totConditionPct =
+      totAssigned > 0 ? +((totCondition / totAssigned) * 100).toFixed(1) : 0;
 
+    const totFirstCallPct =
+      totAssigned > 0 ? +((totConnected / totAssigned) * 100).toFixed(2) : 0;
 
     const response = {
       range: { startDate, endDate },
       rows,
       totals: {
-        assignedTotal:       totAssigned,
-        dietPlansCreated:    totDiet,
-        profileUpdates:      totProfile,
-        profileUpdatesPct:   totProfilePct,
-        conditionUpdates:    totCondition,
+        assignedTotal: totAssigned,
+        dietPlansCreated: totDiet,
+        profileUpdates: totProfile,
+        profileUpdatesPct: totProfilePct,
+        conditionUpdates: totCondition,
         conditionUpdatesPct: totConditionPct,
-        firstCallConnected:  totConnected,      // flat
-        firstCallPercentage: totFirstCallPct,   // flat (2 decimals)
+        firstCallConnected: totConnected,
+        firstCallPercentage: totFirstCallPct,
       },
     };
 
-
     cacheSet(cacheKey, response);
-    return res.json(response); 
+    return res.json(response);
   } catch (err) {
     console.error("activity-summary ERROR:", err.message);
     console.error(err.stack);
-    return res.status(500).json({ error: "Internal server error", details: err.message });
+    return res.status(500).json({
+      error: "Internal server error",
+      details: err.message,
+    });
   }
 });
- 
+
 router.delete("/cache", (req, res) => {
   _cache.clear();
   console.log("Server cache cleared");
-  return res.json({ cleared: true, message: "Server cache cleared" });
+  return res.json({
+    cleared: true,
+    message: "Server cache cleared",
+  });
 });
 
-
 module.exports = router;
-

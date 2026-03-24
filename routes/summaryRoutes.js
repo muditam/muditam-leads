@@ -1,35 +1,38 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const Lead = require('../models/Lead');
-const MyOrder = require('../models/MyOrder');
+const Lead = require("../models/Lead");
+const Customer = require("../models/Customer");
+const MyOrder = require("../models/MyOrder");
 const Order = require("../models/Order");
-const Employee = require('../models/Employee');
+const Employee = require("../models/Employee");
 
+const CUSTOMER_OPEN_STATUSES = [
+  "New Lead",
+  "CONS Scheduled",
+  "CONS Done",
+  "Call Back Later",
+  "On Follow Up",
+  "CNP",
+  "Switch Off",
+];
 
-router.get('/sales-order-ids', async (req, res) => {
+router.get("/sales-order-ids", async (req, res) => {
   try {
-    // Get startDate and endDate from query parameters or default to today (YYYY-MM-DD)
     const { startDate, endDate } = req.query;
     const sDate = startDate || new Date().toISOString().split("T")[0];
     const eDate = endDate || new Date().toISOString().split("T")[0];
- 
-    // Convert dates to Date objects; include full end day
+
     const orderStartDate = new Date(sDate);
     const orderEndDate = new Date(eDate);
     orderEndDate.setHours(23, 59, 59, 999);
 
-
-    // Fetch list of Sales Agents (using their fullName)
     const salesAgents = await Employee.find({ role: "Sales Agent" }, "fullName");
-    const salesAgentNames = salesAgents.map(agent => agent.fullName);
+    const salesAgentNames = salesAgents.map((agent) => agent.fullName);
 
-
-    // Use distinct to get only unique orderId values
     const orderIds = await MyOrder.distinct("orderId", {
       orderDate: { $gte: orderStartDate, $lte: orderEndDate },
-      agentName: { $in: salesAgentNames }
+      agentName: { $in: salesAgentNames },
     });
-
 
     res.json({ orderIds });
   } catch (error) {
@@ -38,31 +41,26 @@ router.get('/sales-order-ids', async (req, res) => {
   }
 });
 
-
 router.get("/sales-summary", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 
-
     const sDate = startDate || new Date().toISOString().split("T")[0];
     const eDate = endDate || new Date().toISOString().split("T")[0];
-
 
     const orderStartDate = new Date(sDate);
     const orderEndDate = new Date(eDate);
     orderEndDate.setHours(23, 59, 59, 999);
 
-
-    // Step 1: Fetch Sales Agents
+    // only active sales agents
     const salesAgents = await Employee.find(
-      { role: "Sales Agent" },
+      { role: "Sales Agent", status: "active" },
       "fullName"
     );
     const salesAgentNames = salesAgents.map((a) => a.fullName);
 
-
-    // Step 2: Aggregation to get leadsAssigned and openLeads
-    const leadsAgg = await Lead.aggregate([
+    // Lead schema counts
+    const leadAgg = await Lead.aggregate([
       {
         $match: {
           date: { $gte: sDate, $lte: eDate },
@@ -78,7 +76,7 @@ router.get("/sales-summary", async (req, res) => {
               $cond: [
                 {
                   $or: [
-                    { $eq: [{ $toLower: "$salesStatus" }, "on followup"] },
+                    { $eq: [{ $toLower: { $ifNull: ["$salesStatus", ""] } }, "on followup"] },
                     { $eq: ["$salesStatus", null] },
                     { $eq: ["$salesStatus", ""] },
                   ],
@@ -92,22 +90,68 @@ router.get("/sales-summary", async (req, res) => {
       },
     ]);
 
+    // Customer schema counts
+    const customerAgg = await Customer.aggregate([
+      {
+        $match: {
+          leadDate: { $gte: orderStartDate, $lte: orderEndDate },
+          assignedTo: { $in: salesAgentNames },
+        },
+      },
+      {
+        $group: {
+          _id: "$assignedTo",
+          leadsAssigned: { $sum: 1 },
+          openLeads: {
+            $sum: {
+              $cond: [
+                {
+                  $or: [
+                    { $in: ["$leadStatus", [
+                      "New Lead",
+                      "CONS Scheduled",
+                      "CONS Done",
+                      "Call Back Later",
+                      "On Follow Up",
+                      "CNP",
+                      "Switch Off",
+                    ]] },
+                    { $eq: ["$leadStatus", null] },
+                    { $eq: ["$leadStatus", ""] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
 
-    const leadsAssignedCount = leadsAgg.reduce(
-      (sum, a) => sum + a.leadsAssigned,
-      0
-    );
     const perAgentLeads = {};
-    leadsAgg.forEach((agent) => {
+
+    leadAgg.forEach((agent) => {
       perAgentLeads[agent._id] = {
-        leadsAssigned: agent.leadsAssigned,
-        openLeads: agent.openLeads,
+        leadsAssigned: agent.leadsAssigned || 0,
+        openLeads: agent.openLeads || 0,
       };
     });
 
+    customerAgg.forEach((agent) => {
+      if (!perAgentLeads[agent._id]) {
+        perAgentLeads[agent._id] = { leadsAssigned: 0, openLeads: 0 };
+      }
+      perAgentLeads[agent._id].leadsAssigned += agent.leadsAssigned || 0;
+      perAgentLeads[agent._id].openLeads += agent.openLeads || 0;
+    });
 
-    // Step 3: Get open leads count for all sales agents
-    const openLeadsAllAgg = await Lead.aggregate([
+    const leadsAssignedCount = Object.values(perAgentLeads).reduce(
+      (sum, a) => sum + (a.leadsAssigned || 0),
+      0
+    );
+
+    const openLeadsLeadAgg = await Lead.aggregate([
       {
         $match: {
           agentAssigned: { $in: salesAgentNames },
@@ -120,10 +164,37 @@ router.get("/sales-summary", async (req, res) => {
       },
       { $count: "openLeads" },
     ]);
-    const openLeadsCount = openLeadsAllAgg[0]?.openLeads || 0;
 
+    const openLeadsCustomerAgg = await Customer.aggregate([
+      {
+        $match: {
+          assignedTo: { $in: salesAgentNames },
+          $or: [
+            {
+              leadStatus: {
+                $in: [
+                  "New Lead",
+                  "CONS Scheduled",
+                  "CONS Done",
+                  "Call Back Later",
+                  "On Follow Up",
+                  "CNP",
+                  "Switch Off",
+                ],
+              },
+            },
+            { leadStatus: null },
+            { leadStatus: "" },
+          ],
+        },
+      },
+      { $count: "openLeads" },
+    ]);
 
-    // Step 4: Aggregation for order data per agent
+    const openLeadsCount =
+      (openLeadsLeadAgg[0]?.openLeads || 0) +
+      (openLeadsCustomerAgg[0]?.openLeads || 0);
+
     const ordersAgg = await MyOrder.aggregate([
       {
         $match: {
@@ -135,9 +206,7 @@ router.get("/sales-summary", async (req, res) => {
         $group: {
           _id: { agentName: "$agentName", orderId: "$orderId" },
           totalPrice: {
-            $first: {
-              $ifNull: ["$totalPrice", "$amountPaid"],
-            },
+            $first: { $ifNull: ["$totalPrice", "$amountPaid"] },
           },
         },
       },
@@ -150,7 +219,6 @@ router.get("/sales-summary", async (req, res) => {
       },
     ]);
 
-
     const agentOrderStats = {};
     ordersAgg.forEach((agent) => {
       agentOrderStats[agent._id] = {
@@ -159,19 +227,17 @@ router.get("/sales-summary", async (req, res) => {
       };
     });
 
-
-    // Step 5: Merge stats
     const perAgent = [];
     for (const agent of salesAgentNames) {
       const leadStats = perAgentLeads[agent] || {
         leadsAssigned: 0,
         openLeads: 0,
       };
+
       const orderStats = agentOrderStats[agent] || {
         orderCount: 0,
         orderSalesAmount: 0,
       };
-
 
       const salesDone = orderStats.orderCount;
       const totalSales = orderStats.orderSalesAmount;
@@ -180,7 +246,6 @@ router.get("/sales-summary", async (req, res) => {
           ? (salesDone / leadStats.leadsAssigned) * 100
           : 0;
       const avgOrderValue = salesDone > 0 ? totalSales / salesDone : 0;
-
 
       const agentSummary = {
         agentName: agent,
@@ -192,7 +257,6 @@ router.get("/sales-summary", async (req, res) => {
         avgOrderValue: Number(avgOrderValue.toFixed(2)),
       };
 
-
       if (
         agentSummary.leadsAssigned > 0 ||
         agentSummary.openLeads > 0 ||
@@ -203,23 +267,12 @@ router.get("/sales-summary", async (req, res) => {
       }
     }
 
-
-    // Step 6: Overall stats
-    const overallSalesDone = ordersAgg.reduce(
-      (sum, a) => sum + a.orderCount,
-      0
-    );
-    const overallTotalSales = ordersAgg.reduce(
-      (sum, a) => sum + a.orderSalesAmount,
-      0
-    );
+    const overallSalesDone = ordersAgg.reduce((sum, a) => sum + a.orderCount, 0);
+    const overallTotalSales = ordersAgg.reduce((sum, a) => sum + a.orderSalesAmount, 0);
     const overallConversionRate =
-      leadsAssignedCount > 0
-        ? (overallSalesDone / leadsAssignedCount) * 100
-        : 0;
+      leadsAssignedCount > 0 ? (overallSalesDone / leadsAssignedCount) * 100 : 0;
     const overallAvgOrderValue =
       overallSalesDone > 0 ? overallTotalSales / overallSalesDone : 0;
-
 
     const overall = {
       leadsAssigned: leadsAssignedCount,
@@ -230,7 +283,6 @@ router.get("/sales-summary", async (req, res) => {
       overallLeadsAssigned: leadsAssignedCount,
       openLeads: openLeadsCount,
     };
-
 
     res.json({ perAgent, overall });
   } catch (error) {
@@ -244,7 +296,6 @@ router.get("/sales-summary", async (req, res) => {
 
 router.get("/followup-summarys", async (req, res) => {
   try {
-    // 1. Get all sales agents (always included in response)
     const salesAgents = await Employee.find(
       { role: "Sales Agent", status: "active" },
       "fullName"
@@ -254,19 +305,16 @@ router.get("/followup-summarys", async (req, res) => {
       req.query.referenceDate || new Date().toISOString().split("T")[0];
     const today = refDate;
 
-
-    // 3. Reference points for nextFollowup logic
     function addDays(dateStr, days) {
       const d = new Date(dateStr);
       d.setDate(d.getDate() + days);
       return d.toISOString().split("T")[0];
     }
+
     const tomorrow = addDays(today, 1);
     const yesterday = addDays(today, -1);
     const dayAfterTomorrow = addDays(today, 2);
 
-
-    // 4. Find all leads assigned to any sales agent (NO DATE FILTER!)
     const leads = await Lead.find(
       {
         agentAssigned: { $in: salesAgentNames },
@@ -278,8 +326,6 @@ router.get("/followup-summarys", async (req, res) => {
       }
     ).lean();
 
-
-    // 5. Build empty stats for every agent
     const agentStats = {};
     salesAgentNames.forEach((name) => {
       agentStats[name] = {
@@ -293,13 +339,10 @@ router.get("/followup-summarys", async (req, res) => {
       };
     });
 
-
-    // 6. Fill stats by bucketing each lead according to nextFollowup rules
     leads.forEach((lead) => {
       const stat = agentStats[lead.agentAssigned];
       if (!stat) return;
       const nf = lead.nextFollowup || "";
-
 
       if (nf === "") {
         stat.noFollowupSet += 1;
@@ -316,10 +359,7 @@ router.get("/followup-summarys", async (req, res) => {
       }
     });
 
-
-    // 7. Build final response: one entry per sales agent, always included (even if zero)
     const final = salesAgentNames.map((name) => agentStats[name]);
-
 
     res.json({ followup: final });
   } catch (error) {
@@ -328,26 +368,23 @@ router.get("/followup-summarys", async (req, res) => {
   }
 });
 
-
 function parseDateRange(startDate, endDate) {
   const s = new Date(startDate);
   const e = new Date(endDate);
   e.setHours(23, 59, 59, 999);
   return { s, e };
 }
-// GET /api/lead-source-summary
-router.get('/lead-source-summary', async (req, res) => {
+
+router.get("/lead-source-summary", async (req, res) => {
   try {
     const { startDate, endDate, agentAssignedName } = req.query;
     const sDate = startDate || new Date().toISOString().split("T")[0];
     const eDate = endDate || new Date().toISOString().split("T")[0];
 
-
     const matchCriteria = { date: { $gte: sDate, $lte: eDate } };
     if (agentAssignedName && agentAssignedName !== "All Agents") {
       matchCriteria.agentAssigned = agentAssignedName;
     }
-
 
     const pipeline = [
       { $match: matchCriteria },
@@ -366,7 +403,12 @@ router.get('/lead-source-summary', async (req, res) => {
           conversionRate: {
             $cond: [
               { $gt: ["$leadsAssigned", 0] },
-              { $multiply: [{ $divide: ["$leadsConverted", "$leadsAssigned"] }, 100] },
+              {
+                $multiply: [
+                  { $divide: ["$leadsConverted", "$leadsAssigned"] },
+                  100,
+                ],
+              },
               0,
             ],
           },
@@ -384,7 +426,6 @@ router.get('/lead-source-summary', async (req, res) => {
       },
     ];
 
-
     const results = await Lead.aggregate(pipeline);
     res.json({ leadSourceSummary: results });
   } catch (error) {
@@ -393,102 +434,84 @@ router.get('/lead-source-summary', async (req, res) => {
   }
 });
 
-
-router.get('/all-shipment-summary', async (req, res) => {
+router.get("/all-shipment-summary", async (req, res) => {
   try {
     const { startDate, endDate, agentName } = req.query;
     if (!startDate || !endDate) {
       return res
         .status(400)
-        .json({ message: 'startDate and endDate are required (YYYY-MM-DD)' });
+        .json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
     }
 
-
-    // Build agent filter: specific agent or all Sales Agents
     let agentFilter;
-    if (agentName && agentName !== 'All Agents') {
+    if (agentName && agentName !== "All Agents") {
       agentFilter = agentName;
     } else {
-      const salesAgents = await Employee.find(
-        { role: 'Sales Agent' },
-        'fullName'
-      );
-      agentFilter = { $in: salesAgents.map(a => a.fullName) };
-    } 
+      const salesAgents = await Employee.find({ role: "Sales Agent" }, "fullName");
+      agentFilter = { $in: salesAgents.map((a) => a.fullName) };
+    }
 
     const { s, e } = parseDateRange(startDate, endDate);
 
-
     const pipeline = [
-      // 1) Filter MyOrder by date range & agentName
       {
         $match: {
           orderDate: { $gte: s, $lte: e },
-          agentName: agentFilter
-        }
+          agentName: agentFilter,
+        },
       },
-      // 2) Normalize orderId (remove leading '#')
       {
         $addFields: {
-          normOrderId: { $trim: { input: '$orderId', chars: '#' } }
-        }
+          normOrderId: { $trim: { input: "$orderId", chars: "#" } },
+        },
       },
-      // 3) Lookup into Order collection to get shipment_status
       {
         $lookup: {
-          from: 'orders',           // your Order collection name
-          localField: 'normOrderId',
-          foreignField: 'order_id',
-          as: 'orderInfo'
-        }
+          from: "orders",
+          localField: "normOrderId",
+          foreignField: "order_id",
+          as: "orderInfo",
+        },
       },
-      // 4) Unwind orderInfo (keep MyOrder even if no match)
       {
         $unwind: {
-          path: '$orderInfo',
-          preserveNullAndEmptyArrays: true
-        }
+          path: "$orderInfo",
+          preserveNullAndEmptyArrays: true,
+        },
       },
-      // 5) Compute amount (from MyOrder.totalPrice) and bring in shipment_status
       {
         $addFields: {
-          amount: { $ifNull: ['$totalPrice', 0] },
-          shipment_status: '$orderInfo.shipment_status'
-        }
+          amount: { $ifNull: ["$totalPrice", 0] },
+          shipment_status: "$orderInfo.shipment_status",
+        },
       },
-      // 6) Group by shipment_status
       {
         $group: {
-          _id: '$shipment_status',
+          _id: "$shipment_status",
           count: { $sum: 1 },
-          totalAmount: { $sum: '$amount' }
-        }
-      }
+          totalAmount: { $sum: "$amount" },
+        },
+      },
     ];
-
 
     const agg = await MyOrder.aggregate(pipeline);
 
-
-    // Compute percentages and format output
     const totalCount = agg.reduce((sum, doc) => sum + doc.count, 0);
-    const result = agg.map(doc => ({
-      category: doc._id || 'Not Provided',
+    const result = agg.map((doc) => ({
+      category: doc._id || "Not Provided",
       count: doc.count,
       amount: Number(doc.totalAmount.toFixed(2)),
       percentage:
-        totalCount > 0
-          ? Number(((doc.count / totalCount) * 100).toFixed(2))
-          : 0
+        totalCount > 0 ? Number(((doc.count / totalCount) * 100).toFixed(2)) : 0,
     }));
-
 
     res.json(result);
   } catch (err) {
-    console.error('Error fetching shipment summary:', err);
-    res
-      .status(500)
-      .json({ message: 'Error fetching shipment summary', error: err.message });
+    console.error("Error fetching shipment summary:", err);
+    res.status(500).json({
+      message: "Error fetching shipment summary",
+      error: err.message,
+    });
   }
 });
 
@@ -497,14 +520,19 @@ router.get("/cod-prepaid-summary", async (req, res) => {
     const { startDate, endDate, agentAssignedName } = req.query;
 
     if (!startDate || !endDate) {
-      return res.status(400).json({ message: "startDate and endDate are required" });
+      return res
+        .status(400)
+        .json({ message: "startDate and endDate are required" });
     }
 
     const sDate = new Date(startDate);
     const eDate = new Date(endDate);
     eDate.setHours(23, 59, 59, 999);
 
-    const salesAgents = await Employee.find({ role: "Sales Agent", status: "active" }, "fullName");
+    const salesAgents = await Employee.find(
+      { role: "Sales Agent", status: "active" },
+      "fullName"
+    );
     const agentNames = salesAgents.map((a) => a.fullName);
 
     let agentFilter = agentNames;
@@ -512,15 +540,20 @@ router.get("/cod-prepaid-summary", async (req, res) => {
       agentFilter = [agentAssignedName];
     }
 
-    // 2️⃣ GET ORDERS FROM MYORDER (Checking partialPayment field)
     const myOrderData = await MyOrder.find(
-      { orderDate: { $gte: sDate, $lte: eDate }, agentName: { $in: agentFilter } },
+      {
+        orderDate: { $gte: sDate, $lte: eDate },
+        agentName: { $in: agentFilter },
+      },
       "agentName paymentMethod partialPayment"
     ).lean();
 
-    // 3️⃣ GET ORDERS FROM LEADS (Sales Done only)
     const leadData = await Lead.find(
-      { lastOrderDate: { $gte: startDate, $lte: endDate }, agentAssigned: { $in: agentFilter }, salesStatus: "Sales Done" },
+      {
+        lastOrderDate: { $gte: startDate, $lte: endDate },
+        agentAssigned: { $in: agentFilter },
+        salesStatus: "Sales Done",
+      },
       "agentAssigned modeOfPayment partialPayment"
     ).lean();
 
@@ -530,7 +563,7 @@ router.get("/cod-prepaid-summary", async (req, res) => {
       combined.push({
         agentName: o.agentName,
         method: (o.paymentMethod || "").toUpperCase(),
-        isPartial: Number(o.partialPayment || 0) > 0 // Logic for Partial
+        isPartial: Number(o.partialPayment || 0) > 0,
       });
     });
 
@@ -538,30 +571,32 @@ router.get("/cod-prepaid-summary", async (req, res) => {
       combined.push({
         agentName: l.agentAssigned,
         method: (l.modeOfPayment || "").toUpperCase(),
-        isPartial: Number(l.partialPayment || 0) > 0 // Logic for Partial
+        isPartial: Number(l.partialPayment || 0) > 0,
       });
     });
 
     const results = agentFilter.map((agent) => {
       const rows = combined.filter((c) => c.agentName === agent);
       const totalOrders = rows.length;
-      
-      // Categorization Priority: Partial > COD > Prepaid
-      const partialOrders = rows.filter(r => r.isPartial).length;
-      const codOrders = rows.filter(r => !r.isPartial && r.method === "COD").length;
+
+      const partialOrders = rows.filter((r) => r.isPartial).length;
+      const codOrders = rows.filter(
+        (r) => !r.isPartial && r.method === "COD"
+      ).length;
       const prepaidOrders = totalOrders - (partialOrders + codOrders);
 
-      const getPct = (val) => (totalOrders > 0 ? Number(((val / totalOrders) * 100).toFixed(2)) : 0);
+      const getPct = (val) =>
+        totalOrders > 0 ? Number(((val / totalOrders) * 100).toFixed(2)) : 0;
 
       return {
         agentName: agent,
         totalOrders,
         codOrders,
         prepaidOrders,
-        partialOrders, // New
+        partialOrders,
         codPercentage: getPct(codOrders),
         prepaidPercentage: getPct(prepaidOrders),
-        partialPercentage: getPct(partialOrders), // New
+        partialPercentage: getPct(partialOrders),
       };
     });
 
@@ -572,4 +607,3 @@ router.get("/cod-prepaid-summary", async (req, res) => {
 });
 
 module.exports = router;
-

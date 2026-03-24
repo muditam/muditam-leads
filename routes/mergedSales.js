@@ -245,7 +245,6 @@ router.get("/", async (req, res) => {
   const skip = (parsedPage - 1) * parsedLimit;
 
   try {
-    // 1) Leads query
     const leadQuery = { salesStatus: "Sales Done" };
     if (agentAssignedName) {
       leadQuery.agentAssigned = agentAssignedName;
@@ -255,8 +254,6 @@ router.get("/", async (req, res) => {
       .lean()
       .select("-images -followUps -details");
 
-    // 2) MyOrder query
-    // FIX: exact case-insensitive match so "Karan" does not match "Karan S"
     const orderQuery = {};
     if (agentAssignedName) {
       orderQuery.agentName = {
@@ -273,7 +270,6 @@ router.get("/", async (req, res) => {
         "customerName phone orderId productOrdered dosageOrdered orderDate agentName totalPrice paymentMethod selfRemark partialPayment shipmentStatus"
       );
 
-    // 3) Group orders by normalized phone
     const ordersByPhone = Object.create(null);
 
     for (const order of allMyOrders) {
@@ -284,7 +280,6 @@ router.get("/", async (req, res) => {
       ordersByPhone[phone].push(order);
     }
 
-    // Sort orders for each phone by latest orderDate first
     for (const list of Object.values(ordersByPhone)) {
       list.sort((a, b) => {
         const aDate = new Date(a.orderDate || 0);
@@ -297,7 +292,6 @@ router.get("/", async (req, res) => {
     const seenOrderIds = new Set();
     const seenPhones = new Set();
 
-    // 4) Merge leads with orders
     for (const lead of leads) {
       const phone = normalizePhone(lead.contactNumber);
       if (phone) seenPhones.add(phone);
@@ -362,7 +356,6 @@ router.get("/", async (req, res) => {
       }
     }
 
-    // 5) Orders without matching leads
     for (const order of allMyOrders) {
       const phone = normalizePhone(order.phone);
 
@@ -398,14 +391,12 @@ router.get("/", async (req, res) => {
       });
     }
 
-    // 6) Sort final merged list
     merged.sort((a, b) => {
       const aDate = new Date(a.myOrderData?.orderDate || a.lastOrderDate || 0);
       const bDate = new Date(b.myOrderData?.orderDate || b.lastOrderDate || 0);
       return bDate - aDate;
     });
 
-    // 7) Paginate after merge
     const paginated = merged.slice(skip, skip + parsedLimit);
 
     res.json({
@@ -418,10 +409,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-// Utility: Validate MongoDB ObjectId
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
-// PUT update for either Lead or MyOrder (auto-detect by id)
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
@@ -452,6 +441,55 @@ router.put("/:id", async (req, res) => {
     return res.status(404).json({ message: "Record not found in Lead or MyOrder" });
   } catch (err) {
     console.error("Error updating merged sale:", err);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: err.message,
+    });
+  }
+});
+
+router.delete("/row", async (req, res) => {
+  const { leadId, orderId } = req.body || {};
+
+  if (!leadId && !orderId) {
+    return res.status(400).json({
+      message: "leadId or orderId is required",
+    });
+  }
+
+  if (leadId && !isValidObjectId(leadId)) {
+    return res.status(400).json({ message: "Invalid leadId" });
+  }
+
+  if (orderId && !isValidObjectId(orderId)) {
+    return res.status(400).json({ message: "Invalid orderId" });
+  }
+
+  try {
+    let deletedLead = null;
+    let deletedOrder = null;
+
+    if (leadId) {
+      deletedLead = await Lead.findByIdAndDelete(leadId);
+    }
+
+    if (orderId) {
+      deletedOrder = await MyOrder.findByIdAndDelete(orderId);
+    }
+
+    if (!deletedLead && !deletedOrder) {
+      return res.status(404).json({
+        message: "No matching Lead/MyOrder record found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Row deleted successfully",
+      deletedLead: !!deletedLead,
+      deletedOrder: !!deletedOrder,
+    });
+  } catch (err) {
+    console.error("Error deleting merged sale row:", err);
     return res.status(500).json({
       message: "Internal server error",
       error: err.message,

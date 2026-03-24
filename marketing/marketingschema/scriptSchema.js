@@ -6,6 +6,17 @@ const counterSchema = new mongoose.Schema({
 });
 const Counter = mongoose.models.Counter || mongoose.model("Counter", counterSchema);
 
+const editVariantSchema = new mongoose.Schema(
+  {
+    label: { type: String, default: "" },
+    url: { type: String, required: true },
+    name: { type: String, default: "" },
+    type: { type: String, default: "" }, // video, image, file
+    uploadedAt: { type: Date, default: Date.now },
+    uploadedBy: { type: String, default: "" },
+  },
+  { _id: false }
+);
 
 const scriptSchema = new mongoose.Schema(
   {
@@ -28,6 +39,7 @@ const scriptSchema = new mongoose.Schema(
       ],
       required: true,
     },
+
     scriptText: { type: String, required: true },
     referenceLink: { type: String, default: "" },
 
@@ -66,16 +78,28 @@ const scriptSchema = new mongoose.Schema(
     cutComment: { type: String, default: "" },
     cutDoneAt: { type: Date },
     cutDoneBy: { type: String, default: "" },
+    cutUploadedBy: { type: String, default: "" },
 
     editAssignedTo: { type: String, default: "" },
+
+    // NEW: variant support
+    editHasVariants: { type: Boolean, default: false },
+    editVariants: {
+      type: [editVariantSchema],
+      default: [],
+    },
+
     editStatus: {
       type: String,
       enum: ["", "On Hold", "Reshoot", "Re-edit", "Done"],
       default: "",
     },
     editHoldReason: { type: String, default: "" },
+
+    // Legacy single-file fields kept for backward compatibility
     editFileUrl: { type: String, default: "" },
     editFileName: { type: String, default: "" },
+
     editComment: { type: String, default: "" },
     editDoneAt: { type: Date },
     editDoneBy: { type: String, default: "" },
@@ -112,12 +136,10 @@ const scriptSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-
 scriptSchema.pre("save", async function (next) {
   if (!this.isNew || this.scriptId) return next();
 
   try {
-
     const counter = await Counter.findByIdAndUpdate(
       "scriptId",
       { $inc: { seq: 1 } },
