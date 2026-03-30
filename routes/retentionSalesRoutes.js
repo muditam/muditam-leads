@@ -12,14 +12,18 @@ const Order = require('../models/Order');
 const MyOrder = require("../models/MyOrder");
 const Employee = require("../models/Employee");
 
+const ShopifyOrder = require("../models/ShopifyOrder");
+const SOP = require("../models/Wallet/SOP");
+const WalletCashToCoinConversion = require("../models/Wallet/WalletCashToCoinConversion");
+
 const RetentionSalesSchema = new mongoose.Schema({
   date: String,
   name: String,
   contactNumber: String,
   productsOrdered: [String],
   dosageOrdered: { type: String, default: "" },
-  upsellAmount: { type: Number, default: 0 },  
-  partialPayment: { type: Number, default: 0 },  
+  upsellAmount: { type: Number, default: 0 },
+  partialPayment: { type: Number, default: 0 },
   amountPaid: { type: Number, default: 0 },
   modeOfPayment: String,
   orderId: String,
@@ -30,8 +34,8 @@ const RetentionSalesSchema = new mongoose.Schema({
 });
 
 const RetentionSales = mongoose.model("RetentionSales", RetentionSalesSchema);
- 
- 
+
+
 const normalizePhoneNumber = (phone) => {
   if (!phone) return "";
   let digits = phone.replace(/\D/g, "");
@@ -51,11 +55,11 @@ const buildDateMatch = (startDate, endDate) => {
   const match = {};
   if (startDate) match.date = { $gte: startDate };
   if (endDate) {
-    match.date = match.date ? { ...match.date, $lte: endDate } : { $lte: endDate }; 
+    match.date = match.date ? { ...match.date, $lte: endDate } : { $lte: endDate };
   }
   return match;
 };
- 
+
 router.get('/api/retention-sales', async (req, res) => {
   const { orderCreatedBy } = req.query;
   try {
@@ -69,7 +73,7 @@ router.get('/api/retention-sales', async (req, res) => {
   }
 });
 
- 
+
 router.post('/api/retention-sales', async (req, res) => {
   const {
     date,
@@ -92,7 +96,7 @@ router.post('/api/retention-sales', async (req, res) => {
   }
 
   try {
-    const amountPaid = upsellAmount + partialPayment;  
+    const amountPaid = upsellAmount + partialPayment;
 
     const newSale = new RetentionSales({
       date,
@@ -156,7 +160,7 @@ router.delete('/api/retention-sales/:id', async (req, res) => {
   }
 });
 
- 
+
 router.post('/api/retention-sales/update-matching', async (req, res) => {
   try {
     // 1. Fetch all retention sales
@@ -449,7 +453,7 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
     res.status(500).json({ message: "Error aggregating sales", error: error.message });
   }
 });
- 
+
 
 // Helper to convert Date to YYYY-MM-DD in IST
 function toISODate(d) {
@@ -577,8 +581,8 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
 
   try {
     // For RetentionSales, build a match filter on agent and date.
-    const retentionMatch = { 
-      orderCreatedBy: agentName, 
+    const retentionMatch = {
+      orderCreatedBy: agentName,
       ...buildDateMatch(startDate, endDate)
     };
 
@@ -588,8 +592,8 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
         $group: {
           _id: "$shipway_status",
           count: { $sum: 1 },
-          totalAmount: { 
-            $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } 
+          totalAmount: {
+            $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } }
           }
         }
       },
@@ -645,8 +649,8 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
           as: "orderDoc"
         }
       },
-      { 
-        $unwind: { path: "$orderDoc", preserveNullAndEmptyArrays: true } 
+      {
+        $unwind: { path: "$orderDoc", preserveNullAndEmptyArrays: true }
       },
       {
         $project: {
@@ -861,7 +865,7 @@ router.get('/api/retention-sales/shipment-summary', async (req, res) => {
       },
       {
         $project: {
-          category: "$_id", 
+          category: "$_id",
           count: 1,
           totalAmount: 1
         }
@@ -898,7 +902,7 @@ const normalizeDate = (d) => {
   date.setHours(0, 0, 0, 0);
   return date;
 };
- 
+
 router.get("/api/retention-sales/cod-prepaid-summary", async (req, res) => {
   try {
     let { startDate, endDate } = req.query;
@@ -1055,23 +1059,23 @@ router.get("/api/followup-summary", async (req, res) => {
 
     // 3) Count each bucket
     const noFollowupSet = await Lead.countDocuments({
-  healthExpertAssigned: agentName,
-  $and: [
-    {
-      $or: [
-        { retentionStatus: null },
-        { retentionStatus: "Active" }
-      ],
-    },
-    {
-      $or: [
-        { rtNextFollowupDate: { $exists: false } },
-        { rtNextFollowupDate: null },
-        { rtNextFollowupDate: "" }
+      healthExpertAssigned: agentName,
+      $and: [
+        {
+          $or: [
+            { retentionStatus: null },
+            { retentionStatus: "Active" }
+          ],
+        },
+        {
+          $or: [
+            { rtNextFollowupDate: { $exists: false } },
+            { rtNextFollowupDate: null },
+            { rtNextFollowupDate: "" }
+          ]
+        }
       ]
-    }
-  ]
-});
+    });
 
     const followupMissed = await Lead.countDocuments({
       healthExpertAssigned: agentName,
@@ -1277,7 +1281,7 @@ router.get("/api/retention-sales/all", async (req, res) => {
 
     const retentionSales = await RetentionSales.find(retentionQuery).lean();
     const myOrders = await MyOrder.find(myOrderQuery).lean();
- 
+
     const transformedOrders = myOrders.map((order) => {
       const upsellAmount = Number(order.upsellAmount || 0);
       const partialPayment = Number(order.partialPayment || 0); // pending/due
@@ -1348,7 +1352,7 @@ router.get("/api/retention-sales/all", async (req, res) => {
   }
 });
 
- 
+
 
 router.get('/api/retention-sales/allapi', async (req, res) => {
   try {
@@ -1363,7 +1367,7 @@ router.get('/api/retention-sales/allapi', async (req, res) => {
 
     const agentFilter = toInFilter(orderCreatedBy);
     const retentionQuery = agentFilter ? { orderCreatedBy: agentFilter } : {};
-    const myOrderQuery   = agentFilter ? { agentName: agentFilter } : {};
+    const myOrderQuery = agentFilter ? { agentName: agentFilter } : {};
 
     // Only select the fields you actually render in the table
     const [retentionSales, myOrders] = await Promise.all([
@@ -1376,9 +1380,9 @@ router.get('/api/retention-sales/allapi', async (req, res) => {
     ]);
 
     const transformedMyOrders = myOrders.map((order) => {
-      const upsellAmount   = Number(order.upsellAmount || 0);
+      const upsellAmount = Number(order.upsellAmount || 0);
       const partialPayment = Number(order.partialPayment || 0);
-      const totalPrice     = Number(order.totalPrice || 0);
+      const totalPrice = Number(order.totalPrice || 0);
       const dt = order.orderDate ? new Date(order.orderDate) : null;
 
       return {
@@ -1501,7 +1505,7 @@ router.get('/api/retention-sales/allnew', async (req, res) => {
     });
 
     const combined = [...retentionSales, ...transformed].sort((a, b) => {
-      const aDate = a.date ? new Date(a.date) : new Date(0); 
+      const aDate = a.date ? new Date(a.date) : new Date(0);
       const bDate = b.date ? new Date(b.date) : new Date(0);
       return bDate - aDate;
     });
@@ -1520,7 +1524,7 @@ router.put('/api/retention-sales/all/:id', async (req, res) => {
   const { id } = req.params;
   // Expect the update payload to have a field "source" indicating the origin.
   const { source, ...updateData } = req.body;
-  
+
   try {
     let updatedRecord;
     if (source && source === "MyOrder") {
@@ -1745,104 +1749,6 @@ router.post('/api/retention-sales/progress-multiple', async (req, res) => {
     res.status(500).json({ message: "Failed to fetch totals" });
   }
 });
-
-// router.post('/api/retention-sales/daywise-matrix', async (req, res) => {
-//   const { names, startDate, endDate } = req.body;
-//   if (!Array.isArray(names) || !startDate || !endDate)
-//     return res.status(400).json({ message: "names[], startDate, endDate required" });
-
-//   try {
-//     // Build date array between startDate and endDate
-//     const days = [];
-//     let d = new Date(startDate);
-//     const end = new Date(endDate);
-//     while (d <= end) {
-//       days.push(d.toISOString().slice(0, 10));
-//       d.setDate(d.getDate() + 1);
-//     }
-
-//     // --- RetentionSales ---
-//     const rs = await RetentionSales.aggregate([
-//       { $match: { orderCreatedBy: { $in: names }, date: { $gte: startDate, $lte: endDate } } },
-//       {
-//         $group: {
-//           _id: { name: "$orderCreatedBy", date: "$date" },
-//           total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } },
-//         },
-//       },
-//     ]);
-
-//     // --- MyOrders ---
-//     const start = new Date(startDate);
-//     const endD = new Date(endDate + "T23:59:59.999");
-//     const mo = await MyOrder.aggregate([
-//       {
-//         $match: {
-//           agentName: { $in: names },
-//           orderDate: { $gte: start, $lte: endD },
-//         },
-//       },
-//       {
-//         $project: {
-//           name: "$agentName",
-//           date: { $dateToString: { format: "%Y-%m-%d", date: "$orderDate" } },
-//           total: {
-//             $add: [
-//               { $toDouble: { $ifNull: ["$totalPrice", 0] } },
-//               { $toDouble: { $ifNull: ["$partialPayment", 0] } },
-//               { $toDouble: { $ifNull: ["$upsellAmount", 0] } },
-//             ],
-//           },
-//         },
-//       },
-//       { $group: { _id: { name: "$name", date: "$date" }, total: { $sum: "$total" } } },
-//     ]);
-
-//     // --- Leads ---
-//     const ld = await Lead.aggregate([
-//       {
-//         $match: {
-//           agentAssigned: { $in: names },
-//           salesStatus: "Sales Done",
-//           date: { $gte: startDate, $lte: endDate },
-//         },
-//       },
-//       {
-//         $group: {
-//           _id: { name: "$agentAssigned", date: "$date" },
-//           total: { $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } } },
-//         },
-//       },
-//     ]);
-
-//     // Combine all sources
-//     const map = {};
-//     const addToMap = (arr) => {
-//       for (const r of arr) {
-//         const key = `${r._id.name}-${r._id.date}`;
-//         map[key] = (map[key] || 0) + r.total;
-//       }
-//     };
-//     addToMap(rs);
-//     addToMap(mo);
-//     addToMap(ld);
-
-//     // Build matrix result
-//     const result = names.map((name) => ({
-//       name,
-//       perDay: days.map((day) => ({
-//         date: day,
-//         total: map[`${name}-${day}`] || 0,
-//       })),
-//       grandTotal: days.reduce((acc, d) => acc + (map[`${name}-${d}`] || 0), 0),
-//     }));
-
-//     res.json(result);
-//   } catch (err) {
-//     console.error("Error in /daywise-matrix:", err);
-//     res.status(500).json({ message: "Error building daywise matrix", error: err.message });
-//   }
-// });
 
 router.post('/api/retention-sales/daywise-matrix', async (req, res) => {
   const { names, startDate, endDate } = req.body;
@@ -2146,5 +2052,1200 @@ router.get("/api/incentives", async (req, res) => {
   }
 });
 
+const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];
+const WALLET_COIN_START_DATE = "2026-03-01";
+const CASH_TO_COIN_RATE = 1;
+
+function isManager(role = "") {
+  return MANAGER_ROLES.includes(String(role).toLowerCase());
+}
+
+function requireSession(req, res, next) {
+  try {
+    const headerUser = req.headers["x-session-user"];
+
+    if (headerUser) {
+      req.sessionUser = JSON.parse(headerUser);
+      return next();
+    }
+
+    if (req.session?.user) {
+      req.sessionUser = req.session.user;
+      return next();
+    }
+
+    return res.status(401).json({ message: "Unauthorized" });
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid session" });
+  }
+}
+
+function hasFullAccess(user = {}) {
+  return isManager(user.role) || user.hasTeam === true;
+}
+
+const INCENTIVE_SLABS = [
+  { min: 0, max: 200000, percent: 1 },
+  { min: 200000, max: 300000, percent: 1.5 },
+  { min: 300000, max: 400000, percent: 2 },
+  { min: 400000, max: 500000, percent: 2.5 },
+  { min: 500000, max: 600000, percent: 3 },
+  { min: 600000, max: 800000, percent: 3.5 },
+  { min: 800000, max: 1000000, percent: 4 },
+  { min: 1000000, max: Number.MAX_SAFE_INTEGER, percent: 4 },
+];
+
+function round2(n) {
+  return Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function parseAmount(value) {
+  if (value === null || value === undefined) return 0;
+  const cleaned = String(value).replace(/,/g, "").trim();
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? round2(num) : 0;
+}
+
+function getIncentivePercent(revenue = 0) {
+  const value = Number(revenue || 0);
+  const slab = INCENTIVE_SLABS.find(
+    (item) => value >= item.min && value < item.max
+  );
+  return slab ? slab.percent : 0;
+}
+
+function isForcedDeliveredStatus(status) {
+  return status === 0 || String(status).trim() === "0";
+}
+
+function isForcedDeliveredAmount(amount) {
+  const amt = parseAmount(amount);
+  return amt === 950 || amt === 300 || amt === 1900;
+}
+
+function normalizeShipmentStatus(status = "", amount = 0) {
+  if (isForcedDeliveredStatus(status) || isForcedDeliveredAmount(amount)) {
+    return "Delivered";
+  }
+  return String(status || "").trim();
+}
+
+function getWalletBucket(status = "", amount = 0) {
+  const s = normalizeShipmentStatus(status, amount).toUpperCase();
+
+  if (!s) return "unknown";
+
+  if (
+    s.includes("RTO") ||
+    s.includes("UNDELIVER") ||
+    s.includes("CANCEL") ||
+    s.includes("RETURN") ||
+    s.includes("LOST") ||
+    s.includes("NDR") ||
+    s.includes("FAILED")
+  ) {
+    return "reversed";
+  }
+
+  if (s.includes("DELIVERED")) {
+    return "available";
+  }
+
+  if (
+    s.includes("IN TRANSIT") ||
+    s.includes("TRANSIT") ||
+    s.includes("OUT FOR DELIVERY") ||
+    s === "OFD" ||
+    s.includes("SHIPPED") ||
+    s.includes("DISPATCH") ||
+    s.includes("MANIFEST") ||
+    s.includes("PICKED") ||
+    s.includes("PICKUP") ||
+    s.includes("BOOKED") ||
+    s.includes("REACHED HUB") ||
+    s.includes("AT HUB")
+  ) {
+    return "coming";
+  }
+
+  return "unknown";
+}
+
+function sumAmountByBucket(rows, bucket) {
+  return round2(
+    rows
+      .filter((r) => r.walletBucket === bucket)
+      .reduce((sum, r) => sum + Number(r.amount || 0), 0)
+  );
+}
+
+function countByBucket(rows, bucket) {
+  return rows.filter((r) => r.walletBucket === bucket).length;
+}
+
+function getDaysOld(dateValue) {
+  if (!dateValue) return null;
+
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return null;
+
+  return Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+const VKR_WALLET_SOP_NAME = "VKR Plan Wallet Coin";
+const VKR_DAILY_TARGET = 2;
+const VKR_MIN_ACHIEVEMENT_PERCENT = 60;
+
+const VKR_VARIANT_COUNT_MAP = {
+  48319092949302: 1,
+  48791244603702: 2,
+  48319093014838: 3,
+};
+
+function vkrRound2(n) {
+  return Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function vkrParseAmount(value) {
+  if (value === null || value === undefined) return 0;
+  const cleaned = String(value).replace(/,/g, "").trim();
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? vkrRound2(num) : 0;
+}
+
+function normalizeOrderIdLocal(v = "") {
+  return String(v || "").trim().replace(/^#/, "");
+}
+
+function getDateRangeObjects(startDate, endDate) {
+  const startObj = startDate ? new Date(`${startDate}T00:00:00.000`) : null;
+  const endObj = endDate ? new Date(`${endDate}T23:59:59.999`) : null;
+  return { startObj, endObj };
+}
+
+function countWorkingDaysExcludingSundays(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    return 0;
+  }
+
+  let count = 0;
+  const current = new Date(start);
+
+  while (current <= end) {
+    if (current.getDay() !== 0) count += 1;
+    current.setDate(current.getDate() + 1);
+  }
+
+  return count;
+}
+
+function maxDateString(...dates) {
+  const valid = dates.filter(Boolean).map((d) => String(d).slice(0, 10));
+  if (!valid.length) return "";
+  return valid.sort().slice(-1)[0];
+}
+
+function getEffectiveStartDateFromJoining(joiningDate, startDate) {
+  let effective = startDate;
+
+  if (joiningDate) {
+    const joining = new Date(joiningDate);
+    if (!Number.isNaN(joining.getTime())) {
+      const joiningYMD = joining.toISOString().split("T")[0];
+      effective = maxDateString(effective, joiningYMD);
+    }
+  }
+
+  return effective;
+}
+
+function getWalletCoinEffectiveStartDate(joiningDate, startDate) {
+  const joinedStart = getEffectiveStartDateFromJoining(joiningDate, startDate);
+  return maxDateString(joinedStart, WALLET_COIN_START_DATE);
+}
+
+function isDeliveredShipmentStatus(status = "") {
+  const s = String(status || "").trim().toUpperCase();
+  if (!s) return false;
+  if (s.includes("RTO")) return false;
+  return s.includes("DELIVERED");
+}
+
+function dedupeSalesRowsByOrder(rows = []) {
+  const seen = new Set();
+
+  return rows.filter((row) => {
+    const orderIdKey = normalizeOrderIdLocal(row.orderId);
+    if (!orderIdKey) return false;
+
+    const key = `order:${orderIdKey}`;
+    if (seen.has(key)) return false;
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function getVKRCountFromProducts(productsOrdered = []) {
+  if (!Array.isArray(productsOrdered)) return 0;
+
+  return productsOrdered.reduce((sum, product) => {
+    const variantId = Number(product?.variant_id || 0);
+    const mappedCount = VKR_VARIANT_COUNT_MAP[variantId] || 0;
+    const quantity = Number(product?.quantity || 1);
+
+    if (!mappedCount) return sum;
+    return sum + mappedCount * (Number.isFinite(quantity) && quantity > 0 ? quantity : 1);
+  }, 0);
+}
+
+async function getCashToCoinConversionSummary({
+  agentName,
+  startDate,
+  endDate,
+}) {
+  const conversions = await WalletCashToCoinConversion.find({
+    agentName,
+    startDate,
+    endDate,
+  })
+    .sort({ convertedAt: -1 })
+    .lean();
+
+  const totalCashConverted = round2(
+    conversions.reduce((sum, item) => sum + Number(item.cashAmount || 0), 0)
+  );
+
+  const totalCoinReceived = round2(
+    conversions.reduce((sum, item) => sum + Number(item.coinAmount || 0), 0)
+  );
+
+  return {
+    conversions,
+    totalCashConverted,
+    totalCoinReceived,
+  };
+}
+
+async function buildCashWalletData({
+  agentName,
+  startDate,
+  endDate,
+  employee,
+}) {
+  const role = employee.role;
+  const { startObj, endObj } = getDateRangeObjects(startDate, endDate);
+
+  let rows = [];
+
+  if (role === "Sales Agent") {
+    const leadQuery = { agentAssigned: agentName };
+
+    if (startDate || endDate) {
+      leadQuery.date = {};
+      if (startDate) leadQuery.date.$gte = startDate;
+      if (endDate) leadQuery.date.$lte = endDate;
+    }
+
+    const leads = await Lead.find(leadQuery).lean();
+
+    const myOrderQuery = { agentName };
+    if (startObj || endObj) {
+      myOrderQuery.orderDate = {};
+      if (startObj) myOrderQuery.orderDate.$gte = startObj;
+      if (endObj) myOrderQuery.orderDate.$lte = endObj;
+    }
+
+    const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+    rows = [
+      ...leads.map((l) => ({
+        source: "Lead",
+        date: l.date,
+        name: l.name || "",
+        orderId: l.orderId || "",
+        phone: l.contactNumber || "",
+        modeOfPayment: l.modeOfPayment || "",
+        deliveryStatus: "",
+        amount: parseAmount(l.amountPaid),
+      })),
+      ...myOrders.map((o) => {
+        const upsell = parseAmount(o.upsellAmount);
+        const total = parseAmount(o.totalPrice);
+
+        return {
+          source: "MyOrder",
+          date: o.orderDate ? o.orderDate.toISOString().slice(0, 10) : "",
+          name: o.customerName || "",
+          orderId: o.orderId || "",
+          phone: o.phone || "",
+          modeOfPayment: o.paymentMethod || "",
+          deliveryStatus: "",
+          amount: upsell > 0 ? upsell : total,
+        };
+      }),
+    ];
+  } else if (role === "Retention Agent") {
+    const retentionQuery = { orderCreatedBy: agentName };
+
+    if (startDate || endDate) {
+      retentionQuery.date = {};
+      if (startDate) retentionQuery.date.$gte = startDate;
+      if (endDate) retentionQuery.date.$lte = endDate;
+    }
+
+    const retentionSales = await RetentionSales.find(retentionQuery).lean();
+
+    const myOrderQuery = { agentName };
+    if (startObj || endObj) {
+      myOrderQuery.orderDate = {};
+      if (startObj) myOrderQuery.orderDate.$gte = startObj;
+      if (endObj) myOrderQuery.orderDate.$lte = endObj;
+    }
+
+    const myOrders = await MyOrder.find(myOrderQuery).lean();
+
+    rows = [
+      ...retentionSales.map((r) => ({
+        source: "RetentionSales",
+        date: r.date,
+        name: r.name || "",
+        orderId: r.orderId || "",
+        phone: r.contactNumber || "",
+        modeOfPayment: r.modeOfPayment || "",
+        deliveryStatus: r.shipway_status || "",
+        amount: parseAmount(r.amountPaid),
+      })),
+      ...myOrders.map((o) => {
+        const upsell = parseAmount(o.upsellAmount);
+        const total = parseAmount(o.totalPrice);
+
+        return {
+          source: "MyOrder",
+          date: o.orderDate ? o.orderDate.toISOString().slice(0, 10) : "",
+          name: o.customerName || "",
+          orderId: o.orderId || "",
+          phone: o.phone || "",
+          modeOfPayment: o.paymentMethod || "",
+          deliveryStatus: "",
+          amount: upsell > 0 ? upsell : total,
+        };
+      }),
+    ];
+  } else {
+    const error = new Error(
+      "Incentives are only supported for Sales Agent and Retention Agent"
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const orderIdVariants = new Set();
+
+  rows.forEach((r) => {
+    if (!r.orderId) return;
+
+    const raw = String(r.orderId).trim();
+    const clean = normalizeOrderIdLocal(raw);
+
+    orderIdVariants.add(raw);
+    orderIdVariants.add(clean);
+    orderIdVariants.add(`#${clean}`);
+  });
+
+  const orderIds = [...orderIdVariants];
+
+  if (orderIds.length) {
+    const orders = await Order.find(
+      { order_id: { $in: orderIds } },
+      { order_id: 1, shipment_status: 1 }
+    ).lean();
+
+    const shipmentMap = orders.reduce((acc, o) => {
+      const clean = normalizeOrderIdLocal(o.order_id);
+      acc[clean] = o.shipment_status;
+      return acc;
+    }, {});
+
+    rows = rows.map((r) => {
+      if (!r.deliveryStatus && r.orderId) {
+        const clean = normalizeOrderIdLocal(r.orderId);
+        r.deliveryStatus = shipmentMap[clean] ?? "";
+      }
+      return r;
+    });
+  }
+
+  rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  rows = rows.map((r) => {
+    const amount = parseAmount(r.amount);
+    const deliveryStatus = normalizeShipmentStatus(r.deliveryStatus, amount);
+    const walletBucket = getWalletBucket(deliveryStatus, amount);
+    const daysOld = getDaysOld(r.date);
+
+    const isAtRisk =
+      walletBucket === "coming" &&
+      daysOld !== null &&
+      daysOld > 5;
+
+    return {
+      ...r,
+      amount,
+      deliveryStatus,
+      walletBucket,
+      daysOld,
+      isAtRisk,
+    };
+  });
+
+  const deliveredRevenue = sumAmountByBucket(rows, "available");
+  const comingRevenue = sumAmountByBucket(rows, "coming");
+  const reversedRevenue = sumAmountByBucket(rows, "reversed");
+  const unknownRevenue = sumAmountByBucket(rows, "unknown");
+
+  const totalRevenue = round2(
+    deliveredRevenue + comingRevenue + reversedRevenue + unknownRevenue
+  );
+
+  const deliveredPercent = getIncentivePercent(deliveredRevenue);
+  const totalPercent = getIncentivePercent(totalRevenue);
+
+  rows = rows.map((r) => {
+    const incentiveAmount =
+      r.walletBucket === "available" ||
+      r.walletBucket === "coming" ||
+      r.walletBucket === "reversed"
+        ? round2((r.amount * deliveredPercent) / 100)
+        : 0;
+
+    return {
+      ...r,
+      incentivePercent: deliveredPercent,
+      incentiveAmount,
+    };
+  });
+
+  const availableRows = rows.filter((r) => r.walletBucket === "available");
+  const upcomingRows = rows.filter(
+    (r) => r.walletBucket === "coming" && !r.isAtRisk
+  );
+  const atRiskRows = rows.filter(
+    (r) => r.walletBucket === "coming" && r.isAtRisk
+  );
+  const reversedRows = rows.filter((r) => r.walletBucket === "reversed");
+
+  const availableIncentive = round2(
+    availableRows.reduce((sum, r) => sum + Number(r.incentiveAmount || 0), 0)
+  );
+
+  const comingIncentive = round2(
+    upcomingRows.reduce((sum, r) => sum + Number(r.incentiveAmount || 0), 0)
+  );
+
+  const reversedIncentive = round2(
+    reversedRows.reduce((sum, r) => sum + Number(r.incentiveAmount || 0), 0)
+  );
+
+  const atRiskOrders = atRiskRows.length;
+  const atRiskRevenue = round2(
+    atRiskRows.reduce((sum, r) => sum + Number(r.amount || 0), 0)
+  );
+  const atRiskIncentive = round2(
+    atRiskRows.reduce((sum, r) => sum + Number(r.incentiveAmount || 0), 0)
+  );
+
+  const upcomingOrders = upcomingRows.length;
+  const upcomingRevenue = round2(
+    upcomingRows.reduce((sum, r) => sum + Number(r.amount || 0), 0)
+  );
+
+  return {
+    agentName,
+    role,
+    slab: {
+      deliveredRevenue,
+      deliveredPercent,
+      totalRevenue,
+      totalPercent,
+      incentivePercent: deliveredPercent,
+    },
+    summary: {
+      totalOrders: rows.length,
+      deliveredOrders: availableRows.length,
+      comingOrders: upcomingOrders,
+      reversedOrders: reversedRows.length,
+      unknownOrders: countByBucket(rows, "unknown"),
+
+      deliveredRevenue,
+      comingRevenue: upcomingRevenue,
+      reversedRevenue,
+      unknownRevenue,
+      totalRevenue,
+
+      availableIncentive,
+      comingIncentive,
+      reversedIncentive,
+
+      atRiskOrders,
+      atRiskRevenue,
+      atRiskIncentive,
+
+      totalVisibleIncentive: round2(availableIncentive + comingIncentive),
+    },
+    rows,
+  };
+}
+
+async function buildVKRWalletData({
+  agentName,
+  startDate,
+  endDate,
+  employee,
+  strictSop = false,
+}) {
+  const coinStartDate = getWalletCoinEffectiveStartDate(
+    employee?.joiningDate,
+    startDate
+  );
+
+  const emptyData = {
+    agentName,
+    role: employee?.role || "",
+    sop: {
+      name: VKR_WALLET_SOP_NAME,
+      rewardType: "coin",
+      valuePerCount: 0,
+    },
+    period: {
+      startDate,
+      endDate,
+      effectiveStartDate: coinStartDate || startDate,
+      joiningDate: employee?.joiningDate
+        ? new Date(employee.joiningDate).toISOString().split("T")[0]
+        : "",
+      walletCoinStartDate: WALLET_COIN_START_DATE,
+    },
+    target: {
+      dailyTarget: VKR_DAILY_TARGET,
+      workingDays: 0,
+      monthlyTargetCount: 0,
+      deliveredCount: 0,
+      achievementPercent: 0,
+      minAchievementPercentToRetain: VKR_MIN_ACHIEVEMENT_PERCENT,
+      status: "earned",
+    },
+    summary: {
+      qualifyingOrders: 0,
+      deliveredQualifyingOrders: 0,
+      projectedCoins: 0,
+      earnedCoins: 0,
+      lapsedCoins: 0,
+    },
+    rules: {
+      below60PercentTargetCoinsLapse: true,
+      redeemableOnlyOnDiwali: true,
+      redeemableOnlyTwiceAYear: ["May", "November"],
+      cannotConvertToCash: true,
+      ifMovedOutOrResignedNoPayout: true,
+      coinCollectionStartsFrom: WALLET_COIN_START_DATE,
+      cashCanConvertToCoin: true,
+      coinCannotConvertToCash: true,
+    },
+    rows: [],
+    note: `Wallet coins are counted only from ${WALLET_COIN_START_DATE}`,
+  };
+
+  if (!coinStartDate || coinStartDate > endDate) {
+    return emptyData;
+  }
+
+  const sop = await SOP.findOne({
+    name: VKR_WALLET_SOP_NAME,
+    rewardType: "coin",
+    isActive: true,
+  }).lean();
+
+  if (!sop) {
+    if (strictSop) {
+      const error = new Error(
+        `Active SOP not found with name "${VKR_WALLET_SOP_NAME}"`
+      );
+      error.statusCode = 404;
+      throw error;
+    }
+    return {
+      ...emptyData,
+      note: "VKR SOP not configured",
+    };
+  }
+
+  const { startObj, endObj } = getDateRangeObjects(coinStartDate, endDate);
+
+  let salesRows = [];
+
+  if (employee.role === "Sales Agent") {
+    const leadQuery = {
+      agentAssigned: agentName,
+      salesStatus: "Sales Done",
+    };
+
+    if (coinStartDate || endDate) {
+      leadQuery.date = {};
+      if (coinStartDate) leadQuery.date.$gte = coinStartDate;
+      if (endDate) leadQuery.date.$lte = endDate;
+    }
+
+    const myOrderQuery = { agentName };
+    if (startObj || endObj) {
+      myOrderQuery.orderDate = {};
+      if (startObj) myOrderQuery.orderDate.$gte = startObj;
+      if (endObj) myOrderQuery.orderDate.$lte = endObj;
+    }
+
+    const [leads, myOrders] = await Promise.all([
+      Lead.find(leadQuery).lean(),
+      MyOrder.find(myOrderQuery).lean(),
+    ]);
+
+    salesRows = [
+      ...leads.map((l) => ({
+        source: "Lead",
+        date: l.date || "",
+        customerName: l.name || "",
+        phone: l.contactNumber || "",
+        orderId: l.orderId || "",
+        amount: vkrParseAmount(l.amountPaid),
+      })),
+      ...myOrders.map((o) => {
+        const upsell = vkrParseAmount(o.upsellAmount);
+        const total = vkrParseAmount(o.totalPrice);
+
+        return {
+          source: "MyOrder",
+          date: o.orderDate ? new Date(o.orderDate).toISOString().split("T")[0] : "",
+          customerName: o.customerName || "",
+          phone: o.phone || "",
+          orderId: o.orderId || "",
+          amount: upsell > 0 ? upsell : total,
+        };
+      }),
+    ];
+  } else if (employee.role === "Retention Agent") {
+    const retentionQuery = {
+      orderCreatedBy: agentName,
+    };
+
+    if (coinStartDate || endDate) {
+      retentionQuery.date = {};
+      if (coinStartDate) retentionQuery.date.$gte = coinStartDate;
+      if (endDate) retentionQuery.date.$lte = endDate;
+    }
+
+    const myOrderQuery = { agentName };
+    if (startObj || endObj) {
+      myOrderQuery.orderDate = {};
+      if (startObj) myOrderQuery.orderDate.$gte = startObj;
+      if (endObj) myOrderQuery.orderDate.$lte = endObj;
+    }
+
+    const [retentionSales, myOrders] = await Promise.all([
+      RetentionSales.find(retentionQuery).lean(),
+      MyOrder.find(myOrderQuery).lean(),
+    ]);
+
+    salesRows = [
+      ...retentionSales.map((r) => ({
+        source: "RetentionSales",
+        date: r.date || "",
+        customerName: r.name || "",
+        phone: r.contactNumber || "",
+        orderId: r.orderId || "",
+        amount: vkrParseAmount(r.amountPaid),
+      })),
+      ...myOrders.map((o) => {
+        const upsell = vkrParseAmount(o.upsellAmount);
+        const total = vkrParseAmount(o.totalPrice);
+
+        return {
+          source: "MyOrder",
+          date: o.orderDate ? new Date(o.orderDate).toISOString().split("T")[0] : "",
+          customerName: o.customerName || "",
+          phone: o.phone || "",
+          orderId: o.orderId || "",
+          amount: upsell > 0 ? upsell : total,
+        };
+      }),
+    ];
+  } else {
+    const error = new Error(
+      "VKR wallet is only supported for Sales Agent and Retention Agent"
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  salesRows = dedupeSalesRowsByOrder(salesRows);
+
+  const orderIdVariants = new Set();
+  const numericOrderIds = new Set();
+
+  salesRows.forEach((row) => {
+    const raw = String(row.orderId || "").trim();
+    const clean = normalizeOrderIdLocal(raw);
+
+    if (!clean) return;
+
+    orderIdVariants.add(raw);
+    orderIdVariants.add(clean);
+    orderIdVariants.add(`#${clean}`);
+
+    const asNum = Number(clean);
+    if (Number.isFinite(asNum)) numericOrderIds.add(asNum);
+  });
+
+  const [shopifyOrders, orderDocs] = await Promise.all([
+    ShopifyOrder.find({
+      $or: [
+        { orderName: { $in: [...orderIdVariants] } },
+        { orderId: { $in: [...numericOrderIds] } },
+      ],
+    }).lean(),
+    Order.find({
+      order_id: { $in: [...orderIdVariants] },
+    }).lean(),
+  ]);
+
+  const shopifyMap = new Map();
+  shopifyOrders.forEach((order) => {
+    const nameKey = normalizeOrderIdLocal(order.orderName);
+    if (nameKey) shopifyMap.set(nameKey, order);
+
+    const numericKey = String(order.orderId || "").trim();
+    if (numericKey) shopifyMap.set(numericKey, order);
+  });
+
+  const shipmentMap = new Map();
+  orderDocs.forEach((order) => {
+    const key = normalizeOrderIdLocal(order.order_id);
+    if (key) shipmentMap.set(key, order.shipment_status || "");
+  });
+
+  const qualifyingRows = salesRows
+    .map((saleRow) => {
+      const cleanOrderId = normalizeOrderIdLocal(saleRow.orderId);
+      const shopifyOrder = shopifyMap.get(cleanOrderId);
+
+      if (!shopifyOrder) return null;
+
+      const vkrCount = getVKRCountFromProducts(shopifyOrder.productsOrdered || []);
+      if (!vkrCount) return null;
+
+      const shipmentStatus = shipmentMap.get(cleanOrderId) || "";
+      const isDelivered = isDeliveredShipmentStatus(shipmentStatus);
+
+      return {
+        date:
+          shopifyOrder.orderDate
+            ? new Date(shopifyOrder.orderDate).toISOString().split("T")[0]
+            : saleRow.date || "",
+        orderId: shopifyOrder.orderName || saleRow.orderId || "",
+        customerName:
+          shopifyOrder.customerName || saleRow.customerName || "",
+        contactNumber:
+          shopifyOrder.normalizedPhone ||
+          shopifyOrder.contactNumber ||
+          saleRow.phone ||
+          "",
+        shipmentStatus,
+        vkrCount,
+        isDelivered,
+        coinsIfDelivered: vkrRound2(vkrCount * Number(sop.value || 0)),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const workingDays = countWorkingDaysExcludingSundays(
+    coinStartDate,
+    endDate
+  );
+
+  const monthlyTargetCount = workingDays * VKR_DAILY_TARGET;
+
+  const deliveredRows = qualifyingRows.filter((row) => row.isDelivered);
+  const deliveredCount = deliveredRows.reduce(
+    (sum, row) => sum + Number(row.vkrCount || 0),
+    0
+  );
+
+  const achievementPercent =
+    monthlyTargetCount > 0
+      ? vkrRound2((deliveredCount / monthlyTargetCount) * 100)
+      : 0;
+
+  const projectedCoins = vkrRound2(deliveredCount * Number(sop.value || 0));
+  const coinsLapsed = achievementPercent < VKR_MIN_ACHIEVEMENT_PERCENT;
+  const earnedCoins = coinsLapsed ? 0 : projectedCoins;
+  const lapsedCoins = coinsLapsed ? projectedCoins : 0;
+
+  return {
+    agentName,
+    role: employee.role,
+    sop: {
+      name: sop.name,
+      rewardType: sop.rewardType,
+      valuePerCount: Number(sop.value || 0),
+    },
+    period: {
+      startDate,
+      endDate,
+      effectiveStartDate: coinStartDate,
+      joiningDate: employee.joiningDate
+        ? new Date(employee.joiningDate).toISOString().split("T")[0]
+        : "",
+      walletCoinStartDate: WALLET_COIN_START_DATE,
+    },
+    target: {
+      dailyTarget: VKR_DAILY_TARGET,
+      workingDays,
+      monthlyTargetCount,
+      deliveredCount,
+      achievementPercent,
+      minAchievementPercentToRetain: VKR_MIN_ACHIEVEMENT_PERCENT,
+      status: coinsLapsed ? "lapsed" : "earned",
+    },
+    summary: {
+      qualifyingOrders: qualifyingRows.length,
+      deliveredQualifyingOrders: deliveredRows.length,
+      projectedCoins,
+      earnedCoins,
+      lapsedCoins,
+    },
+    rules: {
+      below60PercentTargetCoinsLapse: true,
+      redeemableOnlyOnDiwali: true,
+      redeemableOnlyTwiceAYear: ["May", "November"],
+      cannotConvertToCash: true,
+      ifMovedOutOrResignedNoPayout: true,
+      coinCollectionStartsFrom: WALLET_COIN_START_DATE,
+      cashCanConvertToCoin: true,
+      coinCannotConvertToCash: true,
+    },
+    rows: qualifyingRows,
+    note: `Wallet coins counted from ${WALLET_COIN_START_DATE}`,
+  };
+}
+
+function applyCashToCoinConversions({
+  cashData,
+  walletCoinData,
+  conversionSummary,
+}) {
+  const totalCashConverted = Number(conversionSummary?.totalCashConverted || 0);
+  const totalCoinReceived = Number(conversionSummary?.totalCoinReceived || 0);
+
+  const adjustedAvailableCash = round2(
+    Math.max(0, Number(cashData.summary.availableIncentive || 0) - totalCashConverted)
+  );
+
+  const availableWalletCoin = round2(
+    Number(walletCoinData?.summary?.earnedCoins || 0) + totalCoinReceived
+  );
+
+  return {
+    ...cashData,
+    summary: {
+      ...cashData.summary,
+      rawAvailableIncentive: Number(cashData.summary.availableIncentive || 0),
+      availableIncentive: adjustedAvailableCash,
+      totalCashConverted,
+      availableWalletCoin,
+      convertedCoinAdded: totalCoinReceived,
+
+      walletCoin: Number(walletCoinData?.summary?.earnedCoins || 0),
+      walletCoinProjected: Number(walletCoinData?.summary?.projectedCoins || 0),
+      walletCoinLapsed: Number(walletCoinData?.summary?.lapsedCoins || 0),
+      walletCoinQualifyingOrders:
+        Number(walletCoinData?.summary?.qualifyingOrders || 0),
+      walletCoinDeliveredOrders:
+        Number(walletCoinData?.summary?.deliveredQualifyingOrders || 0),
+      walletCoinNote:
+        walletCoinData?.note || `Coins counted from ${WALLET_COIN_START_DATE}`,
+    },
+    wallet: {
+      availableCash: adjustedAvailableCash,
+      availableCoin: availableWalletCoin,
+      totalCashConverted,
+      totalCoinReceived,
+    },
+    walletCoin: walletCoinData
+      ? {
+          ...walletCoinData.summary,
+          note: walletCoinData.note,
+          sop: walletCoinData.sop,
+          target: walletCoinData.target,
+          period: walletCoinData.period,
+          rows: walletCoinData.rows || [],
+          rules: walletCoinData.rules || {},
+          convertedCoinAdded: totalCoinReceived,
+          availableCoin: availableWalletCoin,
+        }
+      : {
+          projectedCoins: 0,
+          earnedCoins: 0,
+          lapsedCoins: 0,
+          qualifyingOrders: 0,
+          deliveredQualifyingOrders: 0,
+          note: `Wallet coins counted from ${WALLET_COIN_START_DATE}`,
+          rows: [],
+          rules: {
+            coinCollectionStartsFrom: WALLET_COIN_START_DATE,
+            cashCanConvertToCoin: true,
+            coinCannotConvertToCash: true,
+          },
+          convertedCoinAdded: totalCoinReceived,
+          availableCoin: totalCoinReceived,
+        },
+  };
+}
+
+router.get("/api/incentives-new", requireSession, async (req, res) => {
+  try {
+    const sessionUser = req.sessionUser || {};
+    let { agentName, startDate, endDate } = req.query;
+
+    if (hasFullAccess(sessionUser)) {
+      if (!agentName) {
+        return res.status(400).json({ message: "agentName is required" });
+      }
+    } else {
+      agentName = sessionUser.fullName || "";
+      if (!agentName) {
+        return res.status(403).json({ message: "Agent scope not found in session" });
+      }
+    }
+
+    const employee = await Employee.findOne(
+      { fullName: agentName },
+      { role: 1, joiningDate: 1 }
+    ).lean();
+
+    if (!employee) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
+
+    const cashData = await buildCashWalletData({
+      agentName,
+      startDate,
+      endDate,
+      employee,
+    });
+
+    let walletCoinData = null;
+    try {
+      walletCoinData = await buildVKRWalletData({
+        agentName,
+        startDate,
+        endDate,
+        employee,
+        strictSop: false,
+      });
+    } catch (walletErr) {
+      console.error("Error building wallet coin inside /api/incentives-new:", walletErr);
+      walletCoinData = null;
+    }
+
+    const conversionSummary = await getCashToCoinConversionSummary({
+      agentName,
+      startDate,
+      endDate,
+    });
+
+    const merged = applyCashToCoinConversions({
+      cashData,
+      walletCoinData,
+      conversionSummary,
+    });
+
+    return res.json(merged);
+  } catch (error) {
+    console.error("Error in /api/incentives-new:", error);
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Failed to fetch incentive data",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/api/vkr-wallet-coins", requireSession, async (req, res) => {
+  try {
+    const sessionUser = req.sessionUser || {};
+    let { agentName, startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        message: "startDate and endDate are required",
+      });
+    }
+
+    if (hasFullAccess(sessionUser)) {
+      if (!agentName) {
+        return res.status(400).json({ message: "agentName is required" });
+      }
+    } else {
+      agentName = sessionUser.fullName || "";
+      if (!agentName) {
+        return res.status(403).json({ message: "Agent scope not found in session" });
+      }
+    }
+
+    const employee = await Employee.findOne(
+      { fullName: agentName },
+      { fullName: 1, role: 1, joiningDate: 1, status: 1, hasTeam: 1 }
+    ).lean();
+
+    if (!employee) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
+
+    const data = await buildVKRWalletData({
+      agentName,
+      startDate,
+      endDate,
+      employee,
+      strictSop: true,
+    });
+
+    return res.json(data);
+  } catch (error) {
+    console.error("Error in /api/vkr-wallet-coins:", error);
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Failed to fetch VKR wallet coins",
+      error: error.message,
+    });
+  }
+});
+
+router.post("/api/wallet/convert-cash-to-coin", requireSession, async (req, res) => {
+  try {
+    const sessionUser = req.sessionUser || {};
+    let { agentName, startDate, endDate, cashAmount } = req.body || {};
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        message: "startDate and endDate are required",
+      });
+    }
+
+    if (hasFullAccess(sessionUser)) {
+      if (!agentName) {
+        return res.status(400).json({ message: "agentName is required" });
+      }
+    } else {
+      agentName = sessionUser.fullName || "";
+      if (!agentName) {
+        return res.status(403).json({ message: "Agent scope not found in session" });
+      }
+    }
+
+    const amount = round2(Number(cashAmount || 0));
+    if (!amount || Number.isNaN(amount) || amount <= 0) {
+      return res.status(400).json({ message: "cashAmount must be greater than 0" });
+    }
+
+    const employee = await Employee.findOne(
+      { fullName: agentName },
+      { _id: 1, fullName: 1, role: 1, joiningDate: 1 }
+    ).lean();
+
+    if (!employee) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
+
+    const cashData = await buildCashWalletData({
+      agentName,
+      startDate,
+      endDate,
+      employee,
+    });
+
+    const existingConversionSummary = await getCashToCoinConversionSummary({
+      agentName,
+      startDate,
+      endDate,
+    });
+
+    const netAvailableCash = round2(
+      Math.max(
+        0,
+        Number(cashData.summary.availableIncentive || 0) -
+          Number(existingConversionSummary.totalCashConverted || 0)
+      )
+    );
+
+    if (amount > netAvailableCash) {
+      return res.status(400).json({
+        message: "Entered amount is greater than available cash",
+      });
+    }
+
+    const coinAmount = round2(amount * CASH_TO_COIN_RATE);
+
+    const conversion = await WalletCashToCoinConversion.create({
+      agentName,
+      employeeId: employee._id || null,
+      role: employee.role || "",
+      startDate,
+      endDate,
+      cashAmount: amount,
+      coinAmount,
+      conversionRate: CASH_TO_COIN_RATE,
+      createdBy: sessionUser.fullName || sessionUser.email || "",
+      createdByEmail: sessionUser.email || "",
+      note: "Cash converted into coin from wallet",
+    });
+
+    const latestConversionSummary = await getCashToCoinConversionSummary({
+      agentName,
+      startDate,
+      endDate,
+    });
+
+    const walletCoinData = await buildVKRWalletData({
+      agentName,
+      startDate,
+      endDate,
+      employee,
+      strictSop: false,
+    });
+
+    const merged = applyCashToCoinConversions({
+      cashData,
+      walletCoinData,
+      conversionSummary: latestConversionSummary,
+    });
+
+    return res.json({
+      message: "Cash converted into coin successfully",
+      conversionId: conversion._id,
+      convertedCash: amount,
+      convertedCoin: coinAmount,
+      conversionRate: CASH_TO_COIN_RATE,
+      wallet: merged.wallet,
+      availableCash: merged.wallet.availableCash,
+      availableCoin: merged.wallet.availableCoin,
+    });
+  } catch (error) {
+    console.error("Error in /api/wallet/convert-cash-to-coin:", error);
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Failed to convert cash into coin",
+      error: error.message,
+    });
+  }
+});
 
 module.exports = router;

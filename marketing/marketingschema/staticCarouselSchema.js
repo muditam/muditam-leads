@@ -13,6 +13,7 @@ const assetSchema = new mongoose.Schema(
     url: { type: String, required: true },
     name: { type: String, default: "" },
     key: { type: String, default: "" },
+    mimeType: { type: String, default: "" },
     uploadedAt: { type: Date, default: Date.now },
     uploadedBy: { type: String, default: "" },
   },

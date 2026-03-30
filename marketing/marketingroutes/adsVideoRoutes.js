@@ -708,7 +708,7 @@ router.post("/:id/cut-upload", requireSession, async (req, res) => {
     }
 
     if (cutVideoUrl && cutVideoUrl !== "pending") {
-      item.cutVideoUrl = cutVideoUrl;
+      item.cutVideoUrl = cutVideoUrl; 
       item.cutVideoName = cutVideoName || cutVideoUrl.split("/").pop();
       item.cutUploadedBy = user.fullName;
     }

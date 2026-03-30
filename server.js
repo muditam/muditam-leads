@@ -155,6 +155,8 @@ const staticCarouselRoutes = require("./marketing/marketingroutes/staticCarousel
 const adsVideoRoutes = require("./marketing/marketingroutes/adsVideoRoutes"); 
 const shopifyCatalog = require("./routes/shopifyCatalog"); 
 const unicommerceViewRoutes = require("./routes/unicommerceViewRoutes");
+const sopRoutes = require("./routes/Wallet/sopRoutes");
+const walletRewardsRoutes = require("./routes/Wallet/walletRewardsRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -717,6 +719,8 @@ app.use("/api/ads-videos", adsVideoRoutes);
 app.use("/api/shopify-catalog", shopifyCatalog);
 
 app.use("/api/unicommerce", unicommerceViewRoutes);
+app.use("/api/sops", sopRoutes);
+app.use(walletRewardsRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

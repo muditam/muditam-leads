@@ -71,7 +71,10 @@ function escapeRegex(s = "") {
 function toStrArray(v) {
   if (v === undefined || v === null) return [];
   if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
-  return String(v).split(",").map((s) => s.trim()).filter(Boolean);
+  return String(v)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function ciExactRegex(value) {
@@ -81,7 +84,9 @@ function ciExactRegex(value) {
 function parseBoolFlexible(v) {
   if (typeof v === "boolean") return v;
   if (typeof v === "number") return v === 1;
-  const s = String(v || "").trim().toLowerCase();
+  const s = String(v || "")
+    .trim()
+    .toLowerCase();
   if (["true", "1", "yes"].includes(s)) return true;
   if (["false", "0", "no"].includes(s)) return false;
   return undefined;
@@ -142,6 +147,7 @@ function normalizeAssets(list = [], uploadedBy = "") {
           url: cleanUrl,
           name: cleanUrl.split("/").pop()?.split("?")[0] || "",
           key: "",
+          mimeType: "",
           uploadedAt: new Date(),
           uploadedBy,
         };
@@ -157,6 +163,7 @@ function normalizeAssets(list = [], uploadedBy = "") {
           url.split("/").pop()?.split("?")[0] ||
           "",
         key: String(item?.key || "").trim(),
+        mimeType: String(item?.mimeType || "").trim(),
         uploadedAt: item?.uploadedAt ? new Date(item.uploadedAt) : new Date(),
         uploadedBy: String(item?.uploadedBy || uploadedBy || "").trim(),
       };
@@ -164,8 +171,8 @@ function normalizeAssets(list = [], uploadedBy = "") {
     .filter(Boolean);
 }
 
-function isImageContentType(contentType = "") {
-  return /^image\//i.test(String(contentType || ""));
+function isAllowedMediaContentType(contentType = "") {
+  return /^(image|video)\//i.test(String(contentType || ""));
 }
 
 function validateContentTypeItems(contentType, items) {
@@ -189,7 +196,7 @@ function validateContentTypeItems(contentType, items) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Presign upload URL (images only)
+// Presign upload URL (images + videos)
 // ─────────────────────────────────────────────────────────────
 router.get("/presign", requireSession, async (req, res) => {
   try {
@@ -199,8 +206,10 @@ router.get("/presign", requireSession, async (req, res) => {
       return res.status(400).json({ message: "filename and contentType required" });
     }
 
-    if (!isImageContentType(contentType)) {
-      return res.status(400).json({ message: "Only image uploads are allowed" });
+    if (!isAllowedMediaContentType(contentType)) {
+      return res.status(400).json({
+        message: "Only image and video uploads are allowed",
+      });
     }
 
     const ext = path.extname(filename) || "";
@@ -216,7 +225,7 @@ router.get("/presign", requireSession, async (req, res) => {
     const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
     const finalUrl = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
 
-    res.json({ presignedUrl, finalUrl, key });
+    res.json({ presignedUrl, finalUrl, key, mimeType: contentType });
   } catch (err) {
     console.error("Presign error:", err);
     res.status(500).json({
@@ -248,7 +257,7 @@ router.get("/presign-download", requireSession, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// Legacy upload route (images only)
+// Legacy upload route (images + videos)
 // ─────────────────────────────────────────────────────────────
 router.post(
   "/upload/wasabi",
@@ -260,10 +269,10 @@ router.post(
     }
 
     try {
-      const invalid = req.files.find((f) => !isImageContentType(f.mimetype));
+      const invalid = req.files.find((f) => !isAllowedMediaContentType(f.mimetype));
       if (invalid) {
         return res.status(400).json({
-          message: `Only image uploads are allowed. Invalid file: ${invalid.originalname}`,
+          message: `Only image and video uploads are allowed. Invalid file: ${invalid.originalname}`,
         });
       }
 
@@ -283,7 +292,13 @@ router.post(
 
           const endpoint = (process.env.WASABI_ENDPOINT || "").replace(/\/$/, "");
           const url = `${endpoint}/${process.env.WASABI_BUCKET}/${key}`;
-          return { originalName: file.originalname, url, key };
+
+          return {
+            originalName: file.originalname,
+            url,
+            key,
+            mimeType: file.mimetype,
+          };
         })
       );
 
@@ -789,7 +804,7 @@ router.post("/:id/cut-upload", requireSession, async (req, res) => {
     }
 
     if (!item.cutAssets.length) {
-      return res.status(400).json({ message: "Please upload cut images first" });
+      return res.status(400).json({ message: "Please upload cut images/videos first" });
     }
 
     if (cutComment !== undefined) item.cutComment = cutComment;

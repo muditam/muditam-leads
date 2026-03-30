@@ -19,7 +19,7 @@ const adsVideoSchema = new mongoose.Schema(
         "Google Ads",
         "YouTube Ads",
         "WhatsApp Ads",
-        "Other Ads",
+        "Other Ads", 
       ],
       required: true,
       index: true,
