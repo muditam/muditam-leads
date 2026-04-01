@@ -2056,6 +2056,31 @@ const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];
 const WALLET_COIN_START_DATE = "2026-03-01";
 const CASH_TO_COIN_RATE = 1;
 
+const PREPAID_COIN_VALUE = 30;
+const PARTIAL_PAID_COIN_VALUE = 10;
+const REFERRAL_PATIENT_COIN_VALUE = 200;
+
+const PREPAID_PAYMENT_MODES = new Set([
+  "razorpay",
+  "prepaid",
+  "upi",
+  "bank transfer",
+]);
+
+const PARTIAL_PAID_PAYMENT_MODES = new Set([
+  "partial paid",
+  "partial_paid",
+  "partial-paid",
+  "partialpayment",
+  "partial payment",
+]);
+
+const REFERRAL_LEAD_SOURCES = new Set([
+  "reference",
+  "referral",
+  "referred",
+]);
+
 function isManager(role = "") {
   return MANAGER_ROLES.includes(String(role).toLowerCase());
 }
@@ -2104,6 +2129,29 @@ function parseAmount(value) {
   const cleaned = String(value).replace(/,/g, "").trim();
   const num = Number(cleaned);
   return Number.isFinite(num) ? round2(num) : 0;
+}
+
+function normalizeString(value = "") {
+  return String(value || "").trim();
+}
+
+function normalizeComparable(value = "") {
+  return normalizeString(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function isPrepaidPaymentMode(mode = "") {
+  const normalized = normalizeComparable(mode);
+  return PREPAID_PAYMENT_MODES.has(normalized);
+}
+
+function isPartialPaidPaymentMode(mode = "") {
+  const normalized = normalizeComparable(mode);
+  return PARTIAL_PAID_PAYMENT_MODES.has(normalized);
+}
+
+function isReferralLeadSource(source = "") {
+  const normalized = normalizeComparable(source);
+  return REFERRAL_LEAD_SOURCES.has(normalized);
 }
 
 function getIncentivePercent(revenue = 0) {
@@ -2302,6 +2350,93 @@ function getVKRCountFromProducts(productsOrdered = []) {
   }, 0);
 }
 
+function getMonthKeyFromDate(dateValue = "") {
+  if (!dateValue) return "";
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) {
+    return String(dateValue).slice(0, 7);
+  }
+  return d.toISOString().slice(0, 7);
+}
+
+function getCustomerKey(row = {}) {
+  const phone = normalizeComparable(row.phone || row.contactNumber || "");
+  if (phone) return `phone:${phone}`;
+
+  const name = normalizeComparable(row.customerName || row.name || "");
+  if (name) return `name:${name}`;
+
+  const orderId = normalizeComparable(row.orderId || "");
+  if (orderId) return `order:${orderId}`;
+
+  return "";
+}
+
+function capRowsPerCustomerPerMonth(rows = [], maxPerMonth = 2) {
+  const groupedCounter = new Map();
+
+  return rows.filter((row) => {
+    const monthKey = getMonthKeyFromDate(row.date);
+    const customerKey = getCustomerKey(row);
+
+    if (!monthKey || !customerKey) return false;
+
+    const key = `${monthKey}__${customerKey}`;
+    const currentCount = Number(groupedCounter.get(key) || 0);
+
+    if (currentCount >= maxPerMonth) return false;
+
+    groupedCounter.set(key, currentCount + 1);
+    return true;
+  });
+}
+
+function isEligibleReferralPatientRow(row = {}) {
+  if (row.source !== "Lead") return false;
+  if (!row.date) return false;
+  if (!isReferralLeadSource(row.leadSource)) return false;
+
+  const salesStatus = normalizeComparable(row.salesStatus);
+  if (salesStatus !== "sales done") return false;
+
+  return true;
+}
+
+function buildExtraCoinSummary(rows = []) {
+  const prepaidEligibleRows = rows.filter((row) =>
+    isPrepaidPaymentMode(row.modeOfPayment)
+  );
+  const partialPaidEligibleRows = rows.filter((row) =>
+    isPartialPaidPaymentMode(row.modeOfPayment)
+  );
+  const referralEligibleRows = rows.filter((row) =>
+    isEligibleReferralPatientRow(row)
+  );
+
+  const prepaidRows = capRowsPerCustomerPerMonth(prepaidEligibleRows, 2);
+  const partialPaidRows = capRowsPerCustomerPerMonth(partialPaidEligibleRows, 2);
+
+  const prepaidCount = prepaidRows.length;
+  const partialPaidCount = partialPaidRows.length;
+  const referralPatientCount = referralEligibleRows.length;
+
+  const prepaidCoins = prepaidCount * PREPAID_COIN_VALUE;
+  const partialPaidCoins = partialPaidCount * PARTIAL_PAID_COIN_VALUE;
+  const referralPatientCoins = referralPatientCount * REFERRAL_PATIENT_COIN_VALUE;
+
+  return {
+    prepaidCount,
+    partialPaidCount,
+    referralPatientCount,
+    prepaidCoins: round2(prepaidCoins),
+    partialPaidCoins: round2(partialPaidCoins),
+    referralPatientCoins: round2(referralPatientCoins),
+    totalExtraCoins: round2(
+      prepaidCoins + partialPaidCoins + referralPatientCoins
+    ),
+  };
+}
+
 async function getCashToCoinConversionSummary({
   agentName,
   startDate,
@@ -2366,9 +2501,12 @@ async function buildCashWalletData({
         source: "Lead",
         date: l.date,
         name: l.name || "",
+        customerName: l.name || "",
         orderId: l.orderId || "",
         phone: l.contactNumber || "",
         modeOfPayment: l.modeOfPayment || "",
+        leadSource: l.leadSource || "",
+        salesStatus: l.salesStatus || "",
         deliveryStatus: "",
         amount: parseAmount(l.amountPaid),
       })),
@@ -2380,9 +2518,12 @@ async function buildCashWalletData({
           source: "MyOrder",
           date: o.orderDate ? o.orderDate.toISOString().slice(0, 10) : "",
           name: o.customerName || "",
+          customerName: o.customerName || "",
           orderId: o.orderId || "",
           phone: o.phone || "",
           modeOfPayment: o.paymentMethod || "",
+          leadSource: "",
+          salesStatus: "",
           deliveryStatus: "",
           amount: upsell > 0 ? upsell : total,
         };
@@ -2413,9 +2554,12 @@ async function buildCashWalletData({
         source: "RetentionSales",
         date: r.date,
         name: r.name || "",
+        customerName: r.name || "",
         orderId: r.orderId || "",
         phone: r.contactNumber || "",
         modeOfPayment: r.modeOfPayment || "",
+        leadSource: r.leadSource || "",
+        salesStatus: r.salesStatus || "",
         deliveryStatus: r.shipway_status || "",
         amount: parseAmount(r.amountPaid),
       })),
@@ -2427,9 +2571,12 @@ async function buildCashWalletData({
           source: "MyOrder",
           date: o.orderDate ? o.orderDate.toISOString().slice(0, 10) : "",
           name: o.customerName || "",
+          customerName: o.customerName || "",
           orderId: o.orderId || "",
           phone: o.phone || "",
           modeOfPayment: o.paymentMethod || "",
+          leadSource: "",
+          salesStatus: "",
           deliveryStatus: "",
           amount: upsell > 0 ? upsell : total,
         };
@@ -2644,6 +2791,15 @@ async function buildVKRWalletData({
       projectedCoins: 0,
       earnedCoins: 0,
       lapsedCoins: 0,
+      baseProjectedCoins: 0,
+      baseEarnedCoins: 0,
+      prepaidCount: 0,
+      partialPaidCount: 0,
+      referralPatientCount: 0,
+      prepaidCoins: 0,
+      partialPaidCoins: 0,
+      referralPatientCoins: 0,
+      extraCoinsTotal: 0,
     },
     rules: {
       below60PercentTargetCoinsLapse: true,
@@ -2717,8 +2873,12 @@ async function buildVKRWalletData({
         date: l.date || "",
         customerName: l.name || "",
         phone: l.contactNumber || "",
+        contactNumber: l.contactNumber || "",
         orderId: l.orderId || "",
         amount: vkrParseAmount(l.amountPaid),
+        modeOfPayment: l.modeOfPayment || "",
+        leadSource: l.leadSource || "",
+        salesStatus: l.salesStatus || "",
       })),
       ...myOrders.map((o) => {
         const upsell = vkrParseAmount(o.upsellAmount);
@@ -2729,8 +2889,12 @@ async function buildVKRWalletData({
           date: o.orderDate ? new Date(o.orderDate).toISOString().split("T")[0] : "",
           customerName: o.customerName || "",
           phone: o.phone || "",
+          contactNumber: o.phone || "",
           orderId: o.orderId || "",
           amount: upsell > 0 ? upsell : total,
+          modeOfPayment: o.paymentMethod || "",
+          leadSource: "",
+          salesStatus: "",
         };
       }),
     ];
@@ -2763,8 +2927,12 @@ async function buildVKRWalletData({
         date: r.date || "",
         customerName: r.name || "",
         phone: r.contactNumber || "",
+        contactNumber: r.contactNumber || "",
         orderId: r.orderId || "",
         amount: vkrParseAmount(r.amountPaid),
+        modeOfPayment: r.modeOfPayment || "",
+        leadSource: r.leadSource || "",
+        salesStatus: r.salesStatus || "",
       })),
       ...myOrders.map((o) => {
         const upsell = vkrParseAmount(o.upsellAmount);
@@ -2775,8 +2943,12 @@ async function buildVKRWalletData({
           date: o.orderDate ? new Date(o.orderDate).toISOString().split("T")[0] : "",
           customerName: o.customerName || "",
           phone: o.phone || "",
+          contactNumber: o.phone || "",
           orderId: o.orderId || "",
           amount: upsell > 0 ? upsell : total,
+          modeOfPayment: o.paymentMethod || "",
+          leadSource: "",
+          salesStatus: "",
         };
       }),
     ];
@@ -2789,6 +2961,8 @@ async function buildVKRWalletData({
   }
 
   salesRows = dedupeSalesRowsByOrder(salesRows);
+
+  const extraCoinSummary = buildExtraCoinSummary(salesRows);
 
   const orderIdVariants = new Set();
   const numericOrderIds = new Set();
@@ -2887,10 +3061,18 @@ async function buildVKRWalletData({
       ? vkrRound2((deliveredCount / monthlyTargetCount) * 100)
       : 0;
 
-  const projectedCoins = vkrRound2(deliveredCount * Number(sop.value || 0));
+  const baseProjectedCoins = vkrRound2(deliveredCount * Number(sop.value || 0));
   const coinsLapsed = achievementPercent < VKR_MIN_ACHIEVEMENT_PERCENT;
-  const earnedCoins = coinsLapsed ? 0 : projectedCoins;
-  const lapsedCoins = coinsLapsed ? projectedCoins : 0;
+  const baseEarnedCoins = coinsLapsed ? 0 : baseProjectedCoins;
+  const lapsedCoins = coinsLapsed ? baseProjectedCoins : 0;
+
+  const projectedCoins = vkrRound2(
+    baseProjectedCoins + Number(extraCoinSummary.totalExtraCoins || 0)
+  );
+
+  const earnedCoins = vkrRound2(
+    baseEarnedCoins + Number(extraCoinSummary.totalExtraCoins || 0)
+  );
 
   return {
     agentName,
@@ -2921,9 +3103,22 @@ async function buildVKRWalletData({
     summary: {
       qualifyingOrders: qualifyingRows.length,
       deliveredQualifyingOrders: deliveredRows.length,
+
+      baseProjectedCoins,
+      baseEarnedCoins,
+
       projectedCoins,
       earnedCoins,
       lapsedCoins,
+
+      prepaidCount: extraCoinSummary.prepaidCount,
+      partialPaidCount: extraCoinSummary.partialPaidCount,
+      referralPatientCount: extraCoinSummary.referralPatientCount,
+
+      prepaidCoins: extraCoinSummary.prepaidCoins,
+      partialPaidCoins: extraCoinSummary.partialPaidCoins,
+      referralPatientCoins: extraCoinSummary.referralPatientCoins,
+      extraCoinsTotal: extraCoinSummary.totalExtraCoins,
     },
     rules: {
       below60PercentTargetCoinsLapse: true,
@@ -2975,6 +3170,17 @@ function applyCashToCoinConversions({
         Number(walletCoinData?.summary?.deliveredQualifyingOrders || 0),
       walletCoinNote:
         walletCoinData?.note || `Coins counted from ${WALLET_COIN_START_DATE}`,
+
+      prepaidCount: Number(walletCoinData?.summary?.prepaidCount || 0),
+      partialPaidCount: Number(walletCoinData?.summary?.partialPaidCount || 0),
+      referralPatientCount: Number(walletCoinData?.summary?.referralPatientCount || 0),
+
+      prepaidCoins: Number(walletCoinData?.summary?.prepaidCoins || 0),
+      partialPaidCoins: Number(walletCoinData?.summary?.partialPaidCoins || 0),
+      referralPatientCoins: Number(walletCoinData?.summary?.referralPatientCoins || 0),
+
+      walletCoinBaseEarned: Number(walletCoinData?.summary?.baseEarnedCoins || 0),
+      walletCoinBaseProjected: Number(walletCoinData?.summary?.baseProjectedCoins || 0),
     },
     wallet: {
       availableCash: adjustedAvailableCash,
@@ -3000,6 +3206,18 @@ function applyCashToCoinConversions({
           lapsedCoins: 0,
           qualifyingOrders: 0,
           deliveredQualifyingOrders: 0,
+          baseEarnedCoins: 0,
+          baseProjectedCoins: 0,
+
+          prepaidCount: 0,
+          partialPaidCount: 0,
+          referralPatientCount: 0,
+
+          prepaidCoins: 0,
+          partialPaidCoins: 0,
+          referralPatientCoins: 0,
+          extraCoinsTotal: 0,
+
           note: `Wallet coins counted from ${WALLET_COIN_START_DATE}`,
           rows: [],
           rules: {
@@ -3247,5 +3465,6 @@ router.post("/api/wallet/convert-cash-to-coin", requireSession, async (req, res)
     });
   }
 });
+
 
 module.exports = router;

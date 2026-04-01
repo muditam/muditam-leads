@@ -73,12 +73,6 @@ const rewardSchema = new mongoose.Schema(
       trim: true,
     },
 
-    note: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
     sourceType: {
       type: String,
       enum: ["curated", "approved_custom"],
@@ -124,8 +118,7 @@ rewardSchema.index({ isActive: 1, milestoneId: 1, coinCost: 1 });
 rewardSchema.index({
   title: "text",
   brand: "text",
-  category: "text",
-  note: "text",
+  category: "text", 
   milestoneLabel: "text",
 });
 

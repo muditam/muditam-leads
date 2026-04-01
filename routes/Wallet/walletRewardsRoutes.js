@@ -68,16 +68,32 @@ function isValidHttpUrl(value = "") {
 function getMilestoneByCoinCost(coinCost) {
   const value = Number(coinCost || 0);
 
-  if (value >= 48000) return { id: 8, label: "Milestone 8" };
-  if (value >= 42000) return { id: 7, label: "Milestone 7" };
-  if (value >= 36000) return { id: 6, label: "Milestone 6" };
-  if (value >= 30000) return { id: 5, label: "Milestone 5" };
-  if (value >= 24000) return { id: 4, label: "Milestone 4" };
-  if (value >= 18000) return { id: 3, label: "Milestone 3" };
-  if (value >= 12000) return { id: 2, label: "Milestone 2" };
-  if (value >= 6000) return { id: 1, label: "Milestone 1" };
+  if (value >= 42001 && value <= 48000) {
+    return { id: 8, label: "Milestone 8" };
+  }
+  if (value >= 36001 && value <= 42000) {
+    return { id: 7, label: "Milestone 7" };
+  }
+  if (value >= 30001 && value <= 36000) {
+    return { id: 6, label: "Milestone 6" };
+  }
+  if (value >= 24001 && value <= 30000) {
+    return { id: 5, label: "Milestone 5" };
+  }
+  if (value >= 18001 && value <= 24000) {
+    return { id: 4, label: "Milestone 4" };
+  }
+  if (value >= 12001 && value <= 18000) {
+    return { id: 3, label: "Milestone 3" };
+  }
+  if (value >= 6001 && value <= 12000) {
+    return { id: 2, label: "Milestone 2" };
+  }
+  if (value >= 1 && value <= 6000) {
+    return { id: 1, label: "Milestone 1" };
+  }
 
-  return { id: null, label: "Below Milestone 1" };
+  return { id: null, label: "Outside Milestones" };
 }
 
 /* =========================================================
@@ -107,7 +123,6 @@ router.get("/api/rewards", requireSession, async (req, res) => {
         { title: regex },
         { brand: regex },
         { category: regex },
-        { note: regex },
         { milestoneLabel: regex },
       ];
     }
@@ -139,7 +154,6 @@ router.post("/api/rewards", requireSession, requireManager, async (req, res) => 
       price,
       brand,
       category,
-      note,
       isActive,
     } = req.body || {};
 
@@ -176,7 +190,6 @@ router.post("/api/rewards", requireSession, requireManager, async (req, res) => 
       category: normalizeText(category),
       milestoneId: milestone.id,
       milestoneLabel: milestone.label,
-      note: normalizeText(note),
       sourceType: "curated",
       isActive: typeof isActive === "boolean" ? isActive : true,
       createdBy: sessionUser.fullName || sessionUser.email || "",
@@ -212,7 +225,6 @@ router.put("/api/rewards/:id", requireSession, requireManager, async (req, res) 
       price,
       brand,
       category,
-      note,
       isActive,
     } = req.body || {};
 
@@ -256,7 +268,6 @@ router.put("/api/rewards/:id", requireSession, requireManager, async (req, res) 
 
     if (brand !== undefined) reward.brand = normalizeText(brand);
     if (category !== undefined) reward.category = normalizeText(category);
-    if (note !== undefined) reward.note = normalizeText(note);
     if (isActive !== undefined) reward.isActive = Boolean(isActive);
 
     reward.updatedBy = sessionUser.fullName || sessionUser.email || "";
@@ -306,11 +317,11 @@ router.post("/api/custom-reward", requireSession, async (req, res) => {
     let {
       agentName,
       url,
-      note,
       availableCoin,
       startDate,
       endDate,
       milestoneId,
+      note,
     } = req.body || {};
 
     const finalUrl = normalizeUrl(url);
@@ -455,7 +466,6 @@ router.post(
         price,
         brand,
         category,
-        note,
         isActive,
       } = req.body || {};
 
@@ -493,7 +503,6 @@ router.post(
         category: normalizeText(category),
         milestoneId: milestone.id,
         milestoneLabel: milestone.label,
-        note: normalizeText(note || customRequest.note || ""),
         sourceType: "approved_custom",
         customRewardRequestId: customRequest._id,
         isActive: typeof isActive === "boolean" ? isActive : true,

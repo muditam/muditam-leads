@@ -1,327 +1,357 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
-const multer = require("multer");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const path = require("path");
-const crypto = require("crypto");
+
+const AssetAllotment = require("../models/AssetAllotment");
 const Asset = require("../models/Add-Asset");
 const Employee = require("../models/Employee");
 
+/* ------------------------------------------------------------
+   helpers
+------------------------------------------------------------ */
+const cleanStr = (v) => (v == null ? "" : String(v).trim());
 
-// ===== Wasabi S3 client =====
-const {
-  WASABI_ACCESS_KEY,
-  WASABI_SECRET_KEY,
-  WASABI_REGION,
-  WASABI_BUCKET,
-  WASABI_ENDPOINT,
-} = process.env;
+const isValidObjectId = (v) => mongoose.Types.ObjectId.isValid(v);
 
+const normalizeUrls = (arr) => {
+  let urls = Array.isArray(arr) ? arr : [];
+  return urls
+    .filter(Boolean)
+    .map((u) => String(u).trim())
+    .filter(Boolean)
+    .slice(0, 50);
+};
 
-const s3 = new S3Client({
-  region: WASABI_REGION,
-  endpoint: WASABI_ENDPOINT,
-  forcePathStyle: false,
-  credentials: {
-    accessKeyId: WASABI_ACCESS_KEY,
-    secretAccessKey: WASABI_SECRET_KEY,
-  },
-});
+/**
+ * Build a fallback "allocated" row from Asset master
+ * for old assets that were assigned before AssetAllotment history existed.
+ */
+const buildLegacyOpenAllotment = async (assetDoc) => {
+  let employee = null;
 
+  if (assetDoc.emp_id && isValidObjectId(assetDoc.emp_id)) {
+    employee = await Employee.findById(assetDoc.emp_id)
+      .select("fullName email")
+      .lean();
+  }
 
-// Multer (memory)
-const upload = multer({ storage: multer.memoryStorage() });
-
+  return {
+    _id: `legacy-${assetDoc._id}`,
+    employee: employee
+      ? {
+          _id: employee._id,
+          fullName: employee.fullName || assetDoc.allottedTo || "",
+          email: employee.email || "",
+        }
+      : assetDoc.allottedTo
+      ? {
+          _id: null,
+          fullName: assetDoc.allottedTo,
+          email: "",
+        }
+      : null,
+    name: cleanStr(assetDoc.name),
+    company: cleanStr(assetDoc.company),
+    model: cleanStr(assetDoc.model),
+    assetCode: cleanStr(assetDoc.assetCode),
+    allotmentImageUrls: Array.isArray(assetDoc.imageUrls) ? assetDoc.imageUrls : [],
+    returnImageUrls: [],
+    allottedAt: assetDoc.issuedDate || assetDoc.updatedAt || assetDoc.createdAt || new Date(),
+    status: "allocated",
+    returnedAt: null,
+    notes: "Legacy assigned asset imported from Asset master",
+    createdAt: assetDoc.createdAt,
+    updatedAt: assetDoc.updatedAt,
+    isLegacy: true,
+  };
+};
 
 /* ============================================================
-   GET ALL ASSETS
+   GET ALL ALLOTMENTS
+   Includes:
+   1) AssetAllotment rows
+   2) legacy active assignments from Asset collection
 ============================================================ */
 router.get("/", async (_req, res) => {
   try {
-    const assets = await Asset.find().sort({ assetCode: 1 }).lean();
-    res.json(assets);
-  } catch (err) {
-    console.error("GET /assets error:", err);
-    res.status(500).json({ message: "Failed to fetch assets" });
-  }
-});
-
-
-/* ============================================================
-   GET EMPLOYEE LIST (for autocomplete / select)
-============================================================ */
-router.get("/employees", async (_req, res) => {
-  try {
-    const employees = await Employee.find(
-      { status: { $ne: "inactive" } }, // remove this filter if you want absolutely all
-      { fullName: 1 }
-    )
-      .sort({ fullName: 1 })
+    const historyRows = await AssetAllotment.find()
+      .populate("employee", "fullName email")
+      .sort({ allottedAt: -1, createdAt: -1 })
       .lean();
 
+    const openHistoryCodes = new Set(
+      historyRows
+        .filter((r) => cleanStr(r.status) !== "returned")
+        .map((r) => cleanStr(r.assetCode).toLowerCase())
+        .filter(Boolean)
+    );
 
-    const result = employees.map((e) => ({
-      id: e._id,            // Mongo _id
-      name: e.fullName,     // for display / search
-      employeeId: String(e._id), // used in frontend as emp_id
-    }));
+    const legacyAssignedAssets = await Asset.find({
+      $or: [
+        { allottedTo: { $exists: true, $ne: "" } },
+        { emp_id: { $exists: true, $ne: "" } },
+      ],
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean();
 
+    const legacyRows = [];
+    for (const asset of legacyAssignedAssets) {
+      const code = cleanStr(asset.assetCode).toLowerCase();
+      if (!code) continue;
 
-    res.json(result);
+      // skip if already represented by an active AssetAllotment row
+      if (openHistoryCodes.has(code)) continue;
+
+      legacyRows.push(await buildLegacyOpenAllotment(asset));
+    }
+
+    const items = [...historyRows, ...legacyRows].sort((a, b) => {
+      const ad = new Date(a.allottedAt || a.createdAt || 0).getTime();
+      const bd = new Date(b.allottedAt || b.createdAt || 0).getTime();
+      return bd - ad;
+    });
+
+    res.json(items);
   } catch (err) {
-    console.error("GET /assets/employees error:", err);
-    res.status(500).json({ message: "Failed to fetch employees" });
+    console.error("GET /asset-allotments error:", err);
+    res.status(500).json({ message: "Failed to fetch allotments" });
   }
 });
 
-
 /* ============================================================
-   CREATE ASSET
+   CREATE ALLOTMENT
+   Also syncs Asset master
 ============================================================ */
 router.post("/", async (req, res) => {
   try {
     const {
+      employeeId,
       name,
       company,
-      brand,      // optional
       model,
       assetCode,
-      imageUrls,
-      allottedTo,
-      emp_id,
-      issuedDate,
-      isFaulty,
-      faultyRemark,
+      allotmentImageUrls,
     } = req.body;
 
-
-    if (!name || !company || !model || !assetCode) {
+    if (!employeeId || !name || !company || !model || !assetCode) {
       return res.status(400).json({
-        message: "name, company, model and assetCode are required",
+        message:
+          "employeeId, name, company, model, and assetCode are required",
       });
     }
 
-
-    const existing = await Asset.findOne({ assetCode: assetCode.trim() });
-    if (existing) {
-      return res.status(409).json({ message: "Asset Code must be unique" });
+    const emp = await Employee.findById(employeeId);
+    if (!emp) {
+      return res.status(404).json({ message: "Employee not found" });
     }
 
+    const cleanAssetCode = cleanStr(assetCode);
 
-    const doc = await Asset.create({
-      name: name.trim(),
-      company: company.trim(),
-      brand: brand?.trim() || "",
-      model: model.trim(),
-      assetCode: assetCode.trim(),
-      allottedTo: allottedTo?.trim() || "",
-      emp_id: emp_id?.trim() || "",
-      issuedDate: issuedDate || null,
-        isFaulty: !!isFaulty,
-  faultyRemark: faultyRemark?.trim() || "",
-      isFaulty: !!isFaulty,
-      imageUrls: Array.isArray(imageUrls) ? imageUrls : [],
+    const existingOpen = await AssetAllotment.findOne({
+      assetCode: cleanAssetCode,
+      status: { $ne: "returned" },
     });
 
-
-    res.status(201).json(doc);
-  } catch (err) {
-    console.error("POST /assets error:", err);
-    if (err.code === 11000) {
-      return res.status(409).json({ message: "Asset Code must be unique" });
-    }
-    res.status(500).json({ message: "Failed to create asset" });
-  }
-});
-
-
-/* ============================================================
-   UPDATE ASSET
-============================================================ */
-router.put("/:id", async (req, res) => {
-  try {
-    const {
-      name,
-      company,
-      brand,
-      model,
-      assetCode,
-      imageUrls,
-      allottedTo,
-      emp_id,
-      issuedDate,
-      isFaulty,
-        faultyRemark,
-    } = req.body;
-
-
-    if (!name || !company || !model || !assetCode) {
-      return res.status(400).json({
-        message: "name, company, model and assetCode are required",
+    if (existingOpen) {
+      return res.status(409).json({
+        message: "This asset is already allocated and not yet returned",
       });
     }
 
+    let imageUrls = normalizeUrls(allotmentImageUrls);
 
-    const existsWithCode = await Asset.findOne({
-      assetCode: assetCode.trim(),
-      _id: { $ne: req.params.id },
+    const now = new Date();
+
+    const doc = await AssetAllotment.create({
+      employee: employeeId,
+      name: cleanStr(name),
+      company: cleanStr(company),
+      model: cleanStr(model),
+      assetCode: cleanAssetCode,
+      allotmentImageUrls: imageUrls,
+      status: "allocated",
+      allottedAt: now,
     });
-    if (existsWithCode) {
-      return res.status(409).json({ message: "Asset Code must be unique" });
-    }
 
-
-    const updated = await Asset.findByIdAndUpdate(
-      req.params.id,
+    // sync asset master
+    await Asset.findOneAndUpdate(
+      { assetCode: cleanAssetCode },
       {
-        name: name.trim(),
-        company: company.trim(),
-        brand: brand?.trim() || "",
-        model: model.trim(),
-        assetCode: assetCode.trim(),
-        allottedTo: allottedTo?.trim() || "",
-        emp_id: emp_id?.trim() || "",
-        issuedDate: issuedDate || null,
-        isFaulty: !!isFaulty,
-            isFaulty: !!isFaulty,
-    faultyRemark: faultyRemark?.trim() || "",
-        imageUrls: Array.isArray(imageUrls) ? imageUrls : [],
+        $set: {
+          name: cleanStr(name),
+          company: cleanStr(company),
+          model: cleanStr(model),
+          allottedTo: cleanStr(emp.fullName),
+          emp_id: String(emp._id),
+          issuedDate: now,
+        },
       },
       { new: true }
     );
 
+    const populated = await AssetAllotment.findById(doc._id)
+      .populate("employee", "fullName email");
 
-    if (!updated) return res.status(404).json({ message: "Asset not found" });
-    res.json(updated);
+    res.status(201).json(populated);
   } catch (err) {
-    console.error("PUT /assets/:id error:", err);
-    if (err.code === 11000) {
-      return res.status(409).json({ message: "Asset Code must be unique" });
-    }
-    res.status(500).json({ message: "Failed to update asset" });
+    console.error("POST /asset-allotments error:", err);
+    res.status(500).json({ message: "Failed to create allotment" });
   }
 });
-
 
 /* ============================================================
-   DELETE ASSET
+   COLLECT / RETURN ASSET
+   Also clears Asset master assignment
 ============================================================ */
-router.delete("/:id", async (req, res) => {
+router.patch("/:id/collect", async (req, res) => {
   try {
-    const deleted = await Asset.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ message: "Asset not found" });
+    const { id } = req.params;
+    const { returnedAt, notes, returnImageUrls } = req.body;
 
-
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("DELETE /assets/:id error:", err);
-    res.status(500).json({ message: "Failed to delete asset" });
-  }
-});
-
-
-/* ============================================================
-   UPLOAD ASSET IMAGES TO WASABI
-============================================================ */
-router.post("/upload", upload.array("files", 15), async (req, res) => {
-  try {
-    const files = req.files || [];
-    if (!files.length)
-      return res.status(400).json({ message: "No files uploaded" });
-
-
-    const prefix = (req.body.prefix || "asset").replace(
-      /[^a-z0-9/_-]/gi,
-      "_"
-    );
-
-
-    // 🔹 upload in parallel instead of for..of + await
-    const uploads = files.map((file) => {
-      const ext = path.extname(file.originalname) || ".bin";
-      const base = path
-        .basename(file.originalname, ext)
-        .replace(/[^a-z0-9/_-]/gi, "_");
-      const hash = crypto.randomBytes(8).toString("hex");
-      const key = `${prefix}/${base}-${Date.now()}-${hash}${ext}`;
-
-
-      const put = new PutObjectCommand({
-        Bucket: WASABI_BUCKET,
-        Key: key,
-        Body: file.buffer,
-        ContentType: file.mimetype || "application/octet-stream",
-        ACL: "public-read",
-      });
-
-
-      const url = `${WASABI_ENDPOINT}/${WASABI_BUCKET}/${encodeURIComponent(
-        key
-      )}`;
-
-
-      // return promise that resolves to url
-      return s3.send(put).then(() => url);
-    });
-
-
-    const uploadedUrls = await Promise.all(uploads);
-
-
-    res.json({ ok: true, urls: uploadedUrls });
-  } catch (err) {
-    console.error("UPLOAD /assets/upload error:", err);
-    res.status(500).json({ message: "Upload failed" });
-  }
-});
-
-
-// PATCH /api/assets/:id/faulty  -> only update isFaulty
-// PATCH /api/assets/:id/faulty  -> update isFaulty (+ optional remark)
-router.patch("/:id/faulty", async (req, res) => {
-  try {
-    const { isFaulty, remark } = req.body;
-
-
-    if (typeof isFaulty === "undefined") {
-      return res.status(400).json({ message: "isFaulty is required" });
+    const retDate = returnedAt ? new Date(returnedAt) : new Date();
+    if (Number.isNaN(retDate.getTime())) {
+      return res.status(400).json({ message: "Invalid returnedAt date" });
     }
 
+    const returnImgs = normalizeUrls(returnImageUrls);
 
-    // 🔹 When marking as faulty => remark is mandatory
-    if (isFaulty && (!remark || !remark.trim())) {
-      return res
-        .status(400)
-        .json({ message: "Remark is required when marking asset as faulty" });
+    const doc = await AssetAllotment.findByIdAndUpdate(
+      id,
+      {
+        returnedAt: retDate,
+        notes: cleanStr(notes),
+        status: "returned",
+        returnImageUrls: returnImgs,
+      },
+      { new: true }
+    ).populate("employee", "fullName email");
+
+    if (!doc) {
+      return res.status(404).json({ message: "Allotment not found" });
     }
 
-
-    const update = { isFaulty: !!isFaulty };
-    if (typeof remark === "string") {
-      update.faultyRemark = remark.trim();
-    }
-
-
-    const updated = await Asset.findByIdAndUpdate(
-      req.params.id,
-      { $set: update },
+    await Asset.findOneAndUpdate(
+      { assetCode: cleanStr(doc.assetCode) },
+      {
+        $set: {
+          allottedTo: "",
+          emp_id: "",
+        },
+      },
       { new: true }
     );
 
+    res.json(doc);
+  } catch (err) {
+    console.error("PATCH /asset-allotments/:id/collect error:", err);
+    res.status(500).json({ message: "Failed to mark as collected" });
+  }
+});
 
-    if (!updated) {
-      return res.status(404).json({ message: "Asset not found" });
+/* ============================================================
+   GET JOURNEY FOR AN ASSET
+   Keeps existing behavior: completed returned legs only
+============================================================ */
+router.get("/journey/:assetCode", async (req, res) => {
+  try {
+    const code = cleanStr(req.params.assetCode);
+    if (!code) {
+      return res.status(400).json({ message: "assetCode is required" });
     }
 
+    const rows = await AssetAllotment.find({
+      assetCode: code,
+      status: "returned",
+      returnedAt: { $ne: null },
+    })
+      .populate("employee", "fullName email")
+      .sort({ allottedAt: 1, createdAt: 1 });
 
-    return res.json(updated);
+    const timeline = rows.map((doc) => ({
+      _id: doc._id,
+      assetCode: doc.assetCode,
+      name: doc.name,
+      assetName: doc.name,
+      company: doc.company,
+      model: doc.model,
+      employee: doc.employee,
+      employeeName: doc.employee?.fullName || "",
+      employeeId: doc.employee?._id || null,
+      status: doc.status,
+      allottedAt: doc.allottedAt,
+      returnedAt: doc.returnedAt,
+      notes: doc.notes || "",
+      allotmentImageUrls: doc.allotmentImageUrls || [],
+      returnImageUrls: doc.returnImageUrls || [],
+    }));
+
+    res.json(timeline);
   } catch (err) {
-    console.error("PATCH /assets/:id/faulty error:", err);
-    return res.status(500).json({ message: "Failed to update faulty status" });
+    console.error("GET /asset-allotments/journey/:assetCode error:", err);
+    res.status(500).json({ message: "Failed to fetch asset journey" });
+  }
+});
+
+/* ============================================================
+   GET ALLOTMENTS OF ONE EMPLOYEE
+   Includes legacy active assigned assets too
+============================================================ */
+router.get("/employee/:employeeId", async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    if (!employeeId) {
+      return res.status(400).json({ message: "employeeId is required" });
+    }
+
+    const includeReturned =
+      String(req.query.includeReturned || "0").trim() === "1";
+
+    const filter = { employee: employeeId };
+    if (!includeReturned) {
+      filter.status = { $ne: "returned" };
+    }
+
+    const historyItems = await AssetAllotment.find(filter)
+      .populate("employee", "fullName email")
+      .sort({ allottedAt: -1, createdAt: -1 })
+      .lean();
+
+    if (includeReturned) {
+      return res.json(historyItems);
+    }
+
+    const openHistoryCodes = new Set(
+      historyItems
+        .filter((r) => cleanStr(r.status) !== "returned")
+        .map((r) => cleanStr(r.assetCode).toLowerCase())
+        .filter(Boolean)
+    );
+
+    const legacyAssets = await Asset.find({
+      emp_id: String(employeeId),
+    }).lean();
+
+    const legacyItems = [];
+    for (const asset of legacyAssets) {
+      const code = cleanStr(asset.assetCode).toLowerCase();
+      if (!code) continue;
+      if (openHistoryCodes.has(code)) continue;
+
+      legacyItems.push(await buildLegacyOpenAllotment(asset));
+    }
+
+    const items = [...historyItems, ...legacyItems].sort((a, b) => {
+      const ad = new Date(a.allottedAt || a.createdAt || 0).getTime();
+      const bd = new Date(b.allottedAt || b.createdAt || 0).getTime();
+      return bd - ad;
+    });
+
+    res.json(items);
+  } catch (err) {
+    console.error("GET /asset-allotments/employee/:employeeId error:", err);
+    res.status(500).json({ message: "Failed to fetch employee allotments" });
   }
 });
 
 module.exports = router;
-
-
-
