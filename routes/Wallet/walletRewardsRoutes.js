@@ -3,6 +3,7 @@ const express = require("express");
 const Employee = require("../../models/Employee");
 const Reward = require("../../models/Wallet/Reward");
 const CustomRewardRequest = require("../../models/Wallet/CustomRewardRequest");
+const WalletCoinRedemption = require("../../models/Wallet/WalletCoinRedemption");
 
 const router = express.Router();
 router.use(express.json());
@@ -357,9 +358,11 @@ router.post("/api/custom-reward", requireSession, async (req, res) => {
         : Number(milestoneId);
 
     const requestDoc = await CustomRewardRequest.create({
+      requestType: "custom",
       agentName,
       employeeId: employee._id || null,
       role: employee.role || "",
+      rewardId: null,
       url: finalUrl,
       note: normalizeText(note),
       requestedCoinBudget: toNumber(availableCoin, 0),
@@ -367,6 +370,12 @@ router.post("/api/custom-reward", requireSession, async (req, res) => {
       endDate: normalizeText(endDate),
       milestoneId: finalMilestoneId,
       milestoneLabel: finalMilestoneId !== null ? `Milestone ${finalMilestoneId}` : "",
+      extractedTitle: "",
+      extractedImage: "",
+      extractedDescription: "",
+      extractedSiteName: "",
+      metadataStatus: "fetched",
+      metadataError: "",
       status: "pending",
       createdBy: sessionUser.fullName || sessionUser.email || "",
       createdByEmail: sessionUser.email || "",
@@ -380,6 +389,109 @@ router.post("/api/custom-reward", requireSession, async (req, res) => {
     console.error("Error submitting custom reward request:", error);
     return res.status(500).json({
       message: "Failed to submit custom reward request",
+      error: error.message,
+    });
+  }
+});
+
+/* =========================================================
+   Curated reward redeem requests
+========================================================= */
+
+router.post("/api/reward-redeem", requireSession, async (req, res) => {
+  try {
+    const sessionUser = req.sessionUser || {};
+    let { agentName, rewardId, availableCoin, startDate, endDate } = req.body || {};
+
+    if (!rewardId) {
+      return res.status(400).json({ message: "rewardId is required" });
+    }
+
+    if (hasFullAccess(sessionUser)) {
+      if (!normalizeText(agentName)) {
+        return res.status(400).json({ message: "agentName is required" });
+      }
+      agentName = normalizeText(agentName);
+    } else {
+      agentName = normalizeText(sessionUser.fullName || "");
+      if (!agentName) {
+        return res.status(403).json({ message: "Agent scope not found in session" });
+      }
+    }
+
+    const [employee, reward] = await Promise.all([
+      Employee.findOne(
+        { fullName: agentName },
+        { _id: 1, fullName: 1, role: 1 }
+      ).lean(),
+      Reward.findOne({ _id: rewardId, isActive: true }).lean(),
+    ]);
+
+    if (!employee) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
+
+    if (!reward) {
+      return res.status(404).json({ message: "Reward not found or inactive" });
+    }
+
+    const coinCost = toNumber(reward.coinCost || reward.price, 0);
+    const finalStartDate = normalizeText(startDate);
+    const finalEndDate = normalizeText(endDate);
+
+    if (toNumber(availableCoin, 0) < coinCost) {
+      return res.status(400).json({
+        message: "You do not have enough coins to redeem this reward",
+      });
+    }
+
+    const existingPending = await CustomRewardRequest.findOne({
+      requestType: "curated_redeem",
+      agentName,
+      rewardId: reward._id,
+      status: "pending",
+      startDate: finalStartDate,
+      endDate: finalEndDate,
+    }).lean();
+
+    if (existingPending) {
+      return res.status(409).json({
+        message: "Redeem request is already pending for this reward",
+      });
+    }
+
+    const requestDoc = await CustomRewardRequest.create({
+      requestType: "curated_redeem",
+      rewardId: reward._id,
+      agentName,
+      employeeId: employee._id || null,
+      role: employee.role || "",
+      url: reward.link || "",
+      note: `Redeem request for ${reward.title || "reward"}`,
+      requestedCoinBudget: coinCost,
+      startDate: finalStartDate,
+      endDate: finalEndDate,
+      milestoneId: reward.milestoneId ?? null,
+      milestoneLabel: reward.milestoneLabel || "",
+      extractedTitle: reward.title || "",
+      extractedImage: reward.image || "",
+      extractedDescription: reward.note || "",
+      extractedSiteName: reward.brand || reward.category || "Curated Reward",
+      metadataStatus: "fetched",
+      metadataError: "",
+      status: "pending",
+      createdBy: sessionUser.fullName || sessionUser.email || "",
+      createdByEmail: sessionUser.email || "",
+    });
+
+    return res.status(201).json({
+      message: "Redeem request submitted successfully and is pending approval",
+      request: requestDoc,
+    });
+  } catch (error) {
+    console.error("Error submitting redeem request:", error);
+    return res.status(500).json({
+      message: "Failed to submit redeem request",
       error: error.message,
     });
   }
@@ -413,7 +525,7 @@ router.get("/api/custom-reward/mine", requireSession, async (req, res) => {
 
 router.get("/api/custom-reward", requireSession, requireManager, async (req, res) => {
   try {
-    const { status } = req.query || {};
+    const { status, requestType } = req.query || {};
     const filter = {};
 
     if (
@@ -421,6 +533,13 @@ router.get("/api/custom-reward", requireSession, requireManager, async (req, res
       ["pending", "approved", "rejected"].includes(String(status).trim())
     ) {
       filter.status = String(status).trim();
+    }
+
+    if (
+      requestType &&
+      ["custom", "curated_redeem"].includes(String(requestType).trim())
+    ) {
+      filter.requestType = String(requestType).trim();
     }
 
     const requests = await CustomRewardRequest.find(filter)
@@ -456,6 +575,44 @@ router.post(
       if (customRequest.status !== "pending") {
         return res.status(400).json({
           message: `Request is already ${customRequest.status}`,
+        });
+      }
+
+      if (customRequest.requestType === "curated_redeem") {
+        const existingRedemption = await WalletCoinRedemption.findOne({
+          customRewardRequestId: customRequest._id,
+        }).lean();
+
+        if (!existingRedemption) {
+          await WalletCoinRedemption.create({
+            agentName: customRequest.agentName || "",
+            employeeId: customRequest.employeeId || null,
+            role: customRequest.role || "",
+            startDate: customRequest.startDate || "",
+            endDate: customRequest.endDate || "",
+            rewardId: customRequest.rewardId || null,
+            customRewardRequestId: customRequest._id,
+            coinAmount: toNumber(customRequest.requestedCoinBudget, 0),
+            approvedAt: new Date(),
+            createdBy: sessionUser.fullName || sessionUser.email || "",
+            createdByEmail: sessionUser.email || "",
+            note:
+              customRequest.note ||
+              `Redeemed reward for ${customRequest.extractedTitle || "reward"}`,
+          });
+        }
+
+        customRequest.status = "approved";
+        customRequest.approvedRewardId = customRequest.rewardId || null;
+        customRequest.reviewedBy = sessionUser.fullName || sessionUser.email || "";
+        customRequest.reviewedAt = new Date();
+        customRequest.rejectionReason = "";
+
+        await customRequest.save();
+
+        return res.json({
+          message: "Redeem request approved successfully",
+          request: customRequest,
         });
       }
 
@@ -514,6 +671,7 @@ router.post(
       customRequest.approvedRewardId = reward._id;
       customRequest.reviewedBy = sessionUser.fullName || sessionUser.email || "";
       customRequest.reviewedAt = new Date();
+      customRequest.rejectionReason = "";
 
       await customRequest.save();
 

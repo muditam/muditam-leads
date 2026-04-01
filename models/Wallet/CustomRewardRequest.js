@@ -2,22 +2,38 @@ const mongoose = require("mongoose");
 
 const customRewardRequestSchema = new mongoose.Schema(
   {
+    requestType: {
+      type: String,
+      enum: ["custom", "curated_redeem"],
+      default: "custom",
+      index: true,
+    },
+
     agentName: {
       type: String,
       required: true,
       trim: true,
       index: true,
     },
+
     employeeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
       default: null,
       index: true,
     },
+
     role: {
       type: String,
       default: "",
       trim: true,
+    },
+
+    rewardId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Reward",
+      default: null,
+      index: true,
     },
 
     url: {
@@ -25,6 +41,7 @@ const customRewardRequestSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+
     note: {
       type: String,
       default: "",
@@ -36,11 +53,13 @@ const customRewardRequestSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+
     startDate: {
       type: String,
       default: "",
       index: true,
     },
+
     endDate: {
       type: String,
       default: "",
@@ -52,6 +71,7 @@ const customRewardRequestSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+
     milestoneLabel: {
       type: String,
       default: "",
@@ -63,16 +83,19 @@ const customRewardRequestSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+
     extractedImage: {
       type: String,
       default: "",
       trim: true,
     },
+
     extractedDescription: {
       type: String,
       default: "",
       trim: true,
     },
+
     extractedSiteName: {
       type: String,
       default: "",
@@ -85,6 +108,7 @@ const customRewardRequestSchema = new mongoose.Schema(
       default: "fetched",
       index: true,
     },
+
     metadataError: {
       type: String,
       default: "",
@@ -107,11 +131,14 @@ const customRewardRequestSchema = new mongoose.Schema(
     reviewedBy: {
       type: String,
       default: "",
+      trim: true,
     },
+
     reviewedAt: {
       type: Date,
       default: null,
     },
+
     rejectionReason: {
       type: String,
       default: "",
@@ -121,17 +148,38 @@ const customRewardRequestSchema = new mongoose.Schema(
     createdBy: {
       type: String,
       default: "",
+      trim: true,
     },
+
     createdByEmail: {
       type: String,
       default: "",
+      trim: true,
     },
   },
   { timestamps: true }
 );
 
-customRewardRequestSchema.index({ agentName: 1, status: 1, createdAt: -1 });
-customRewardRequestSchema.index({ status: 1, createdAt: -1 });
+customRewardRequestSchema.index({
+  agentName: 1,
+  requestType: 1,
+  status: 1,
+  createdAt: -1,
+});
+
+customRewardRequestSchema.index({
+  status: 1,
+  requestType: 1,
+  createdAt: -1,
+});
+
+customRewardRequestSchema.index({
+  rewardId: 1,
+  agentName: 1,
+  status: 1,
+  startDate: 1,
+  endDate: 1,
+});
 
 module.exports =
   mongoose.models.CustomRewardRequest ||

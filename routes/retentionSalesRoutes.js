@@ -2052,11 +2052,13 @@ router.get("/api/incentives", async (req, res) => {
   }
 });
 
+const WalletCoinRedemption = require("../models/Wallet/WalletCoinRedemption");
+
 const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];
 const WALLET_COIN_START_DATE = "2026-03-01";
 const CASH_TO_COIN_RATE = 1;
 
-const PREPAID_COIN_VALUE = 30;
+const PREPAID_COIN_VALUE = 20;
 const PARTIAL_PAID_COIN_VALUE = 10;
 const REFERRAL_PATIENT_COIN_VALUE = 200;
 
@@ -2462,6 +2464,29 @@ async function getCashToCoinConversionSummary({
     conversions,
     totalCashConverted,
     totalCoinReceived,
+  };
+}
+
+async function getWalletCoinRedemptionSummary({
+  agentName,
+  startDate,
+  endDate,
+}) {
+  const redemptions = await WalletCoinRedemption.find({
+    agentName,
+    startDate,
+    endDate,
+  })
+    .sort({ approvedAt: -1, createdAt: -1 })
+    .lean();
+
+  const totalCoinRedeemed = round2(
+    redemptions.reduce((sum, item) => sum + Number(item.coinAmount || 0), 0)
+  );
+
+  return {
+    redemptions,
+    totalCoinRedeemed,
   };
 }
 
@@ -3139,16 +3164,26 @@ function applyCashToCoinConversions({
   cashData,
   walletCoinData,
   conversionSummary,
+  redemptionSummary,
 }) {
   const totalCashConverted = Number(conversionSummary?.totalCashConverted || 0);
   const totalCoinReceived = Number(conversionSummary?.totalCoinReceived || 0);
+  const totalCoinRedeemed = Number(redemptionSummary?.totalCoinRedeemed || 0);
 
   const adjustedAvailableCash = round2(
-    Math.max(0, Number(cashData.summary.availableIncentive || 0) - totalCashConverted)
+    Math.max(
+      0,
+      Number(cashData.summary.availableIncentive || 0) - totalCashConverted
+    )
   );
 
   const availableWalletCoin = round2(
-    Number(walletCoinData?.summary?.earnedCoins || 0) + totalCoinReceived
+    Math.max(
+      0,
+      Number(walletCoinData?.summary?.earnedCoins || 0) +
+        totalCoinReceived -
+        totalCoinRedeemed
+    )
   );
 
   return {
@@ -3158,6 +3193,8 @@ function applyCashToCoinConversions({
       rawAvailableIncentive: Number(cashData.summary.availableIncentive || 0),
       availableIncentive: adjustedAvailableCash,
       totalCashConverted,
+      totalCoinReceived,
+      totalCoinRedeemed,
       availableWalletCoin,
       convertedCoinAdded: totalCoinReceived,
 
@@ -3187,6 +3224,7 @@ function applyCashToCoinConversions({
       availableCoin: availableWalletCoin,
       totalCashConverted,
       totalCoinReceived,
+      totalCoinRedeemed,
     },
     walletCoin: walletCoinData
       ? {
@@ -3198,6 +3236,7 @@ function applyCashToCoinConversions({
           rows: walletCoinData.rows || [],
           rules: walletCoinData.rules || {},
           convertedCoinAdded: totalCoinReceived,
+          totalCoinRedeemed,
           availableCoin: availableWalletCoin,
         }
       : {
@@ -3226,7 +3265,8 @@ function applyCashToCoinConversions({
             coinCannotConvertToCash: true,
           },
           convertedCoinAdded: totalCoinReceived,
-          availableCoin: totalCoinReceived,
+          totalCoinRedeemed,
+          availableCoin: round2(Math.max(0, totalCoinReceived - totalCoinRedeemed)),
         },
   };
 }
@@ -3283,10 +3323,17 @@ router.get("/api/incentives-new", requireSession, async (req, res) => {
       endDate,
     });
 
+    const redemptionSummary = await getWalletCoinRedemptionSummary({
+      agentName,
+      startDate,
+      endDate,
+    });
+
     const merged = applyCashToCoinConversions({
       cashData,
       walletCoinData,
       conversionSummary,
+      redemptionSummary,
     });
 
     return res.json(merged);
@@ -3433,6 +3480,12 @@ router.post("/api/wallet/convert-cash-to-coin", requireSession, async (req, res)
       endDate,
     });
 
+    const redemptionSummary = await getWalletCoinRedemptionSummary({
+      agentName,
+      startDate,
+      endDate,
+    });
+
     const walletCoinData = await buildVKRWalletData({
       agentName,
       startDate,
@@ -3445,6 +3498,7 @@ router.post("/api/wallet/convert-cash-to-coin", requireSession, async (req, res)
       cashData,
       walletCoinData,
       conversionSummary: latestConversionSummary,
+      redemptionSummary,
     });
 
     return res.json({
