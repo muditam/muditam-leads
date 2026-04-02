@@ -15,6 +15,7 @@ const Employee = require("../models/Employee");
 const ShopifyOrder = require("../models/ShopifyOrder");
 const SOP = require("../models/Wallet/SOP");
 const WalletCashToCoinConversion = require("../models/Wallet/WalletCashToCoinConversion");
+const WalletCoinRedemption = require("../models/Wallet/WalletCoinRedemption");
 
 const RetentionSalesSchema = new mongoose.Schema({
   date: String,
@@ -314,15 +315,13 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
           totalSales: "$retentionTotalSales"
         }
       },
-
-      // ----- MyOrder branch via $unionWith -----
+ 
       {
         $unionWith: {
           coll: "myorders", // collection for MyOrder
           pipeline: [
             { $match: myOrderMatch },
-
-            // Step 1: compute base amount (upsellAmount if > 0 else totalPrice)
+ 
             {
               $addFields: {
                 _upsellAmt: {
@@ -344,12 +343,7 @@ router.get('/api/retention-sales/aggregated', async (req, res) => {
                 }
               }
             },
-
-            // Step 2: robust partial payments sum
-            // Supports:
-            //  - partialPayment as array of numbers/strings or objects with amount/value
-            //  - partialPayment as single number/string
-            //  - fallback to partialPayments (plural) if partialPayment missing
+ 
             {
               $addFields: {
                 _partialRaw: { $ifNull: ["$partialPayment", "$partialPayments"] }
@@ -2052,8 +2046,6 @@ router.get("/api/incentives", async (req, res) => {
   }
 });
 
-const WalletCoinRedemption = require("../models/Wallet/WalletCoinRedemption");
-
 const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];
 const WALLET_COIN_START_DATE = "2026-03-01";
 const CASH_TO_COIN_RATE = 1;
@@ -2402,6 +2394,24 @@ function isEligibleReferralPatientRow(row = {}) {
   if (salesStatus !== "sales done") return false;
 
   return true;
+}
+
+function getCurrentMonthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  const formatYMD = (date) => {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  return {
+    monthStart: formatYMD(start),
+    monthEnd: formatYMD(end),
+  };
 }
 
 function buildExtraCoinSummary(rows = []) {
@@ -3068,9 +3078,12 @@ async function buildVKRWalletData({
     .filter(Boolean)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 
+    const { monthStart, monthEnd } = getCurrentMonthRange();
+
+
   const workingDays = countWorkingDaysExcludingSundays(
-    coinStartDate,
-    endDate
+    monthStart,
+    monthEnd
   );
 
   const monthlyTargetCount = workingDays * VKR_DAILY_TARGET;
