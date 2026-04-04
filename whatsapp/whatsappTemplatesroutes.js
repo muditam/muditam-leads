@@ -4,11 +4,7 @@ const axios = require("axios");
 const WhatsAppTemplate = require("./whatsaapModels/WhatsAppTemplate");
 
 const router = express.Router();
-
-/* ================================
-   Base URL normalize (avoid /v1/v1)
-   Use: https://waba-v2.360dialog.io  (recommended)
-================================ */
+ 
 function normalizeBaseUrl(raw = "") {
   const u = String(raw || "").trim().replace(/\/+$/, "");
   if (!u) return "";
@@ -19,8 +15,7 @@ function normalizeBaseUrl(raw = "") {
 
 const WHATSAPP_V1_BASE =
   normalizeBaseUrl(process.env.WHATSAPP_BASE_URL) || "https://waba-v2.360dialog.io/v1";
-
-/** 360dialog client */
+ 
 const whatsappClient = axios.create({
   baseURL: WHATSAPP_V1_BASE,
   headers: {
@@ -29,10 +24,7 @@ const whatsappClient = axios.create({
   },
   timeout: 30000,
 });
-
-/* =========================
-   Helpers
-========================= */
+ 
 function normalizeName(v = "") {
   return String(v || "")
     .toLowerCase()
@@ -59,9 +51,8 @@ function normalizeStatus(raw = "") {
   if (v.includes("REJECT") || v.includes("DISAPPROV")) return "REJECTED";
   if (v.includes("PEND") || v.includes("SUBMIT") || v.includes("IN_REVIEW")) return "PENDING";
   return v;
-}
+} 
 
-// 360 sometimes nests fields differently
 function pickStatus(t) {
   const candidates = [
     t?.status,
@@ -106,7 +97,7 @@ function getFooterFromComponents(components = []) {
 
 function getHeaderMetaFromComponents(components = []) {
   const header = components.find((c) => String(c?.type || "").toUpperCase() === "HEADER");
-  const format = String(header?.format || "").toUpperCase(); // TEXT / IMAGE / VIDEO / DOCUMENT
+  const format = String(header?.format || "").toUpperCase();  
   const text = String(header?.text || "");
 
   return {
@@ -115,8 +106,6 @@ function getHeaderMetaFromComponents(components = []) {
   };
 }
 
-// capture example media handles for HEADER media templates (helps frontend enforce upload)
-// 360 can return example header handles under "example.header_handle" or variants
 function getHeaderExampleFromComponents(components = []) {
   const header = components.find((c) => String(c?.type || "").toUpperCase() === "HEADER");
   const ex = header?.example;
@@ -127,23 +116,19 @@ function getHeaderExampleFromComponents(components = []) {
 
   if (Array.isArray(h)) return h.filter(Boolean).map(String);
   if (typeof h === "string" && h.trim()) return [h.trim()];
-
-  // sometimes example is directly an array
+ 
   if (Array.isArray(ex)) return ex.filter(Boolean).map(String);
 
   return [];
 }
-
-// 360dialog list response can be: array OR {data: []} OR {templates: []} etc.
+ 
 function extractTemplateList(data) {
   if (Array.isArray(data)) return data;
-
-  // common direct shapes
+ 
   if (Array.isArray(data?.data)) return data.data;
   if (Array.isArray(data?.templates)) return data.templates;
   if (Array.isArray(data?.waba_templates)) return data.waba_templates;
-
-  // nested shapes (seen in some providers/proxies)
+ 
   if (Array.isArray(data?.data?.data)) return data.data.data;
 
   if (Array.isArray(data?.payload?.data)) return data.payload.data;
@@ -154,18 +139,13 @@ function extractTemplateList(data) {
 
   return [];
 }
-
-// normalize 360 errors to something readable on UI
+ 
 function normalizeProviderError(err) {
   const data = err?.response?.data;
   if (!data) return { error: err?.message || "UNKNOWN_ERROR" };
   return data;
 }
-
-/* ===============================
-   GET /api/whatsapp/templates
-   Returns templates FROM MONGO
-================================ */
+ 
 router.get("/", async (req, res) => {
   try {
     const templates = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
@@ -182,11 +162,7 @@ router.get("/", async (req, res) => {
     res.status(500).json({ success: false, error: "LIST_FAILED" });
   }
 });
-
-/* ===============================
-   GET /api/whatsapp/templates/by-name/:name
-   Handy for debugging send-template issues
-================================ */
+ 
 router.get("/by-name/:name", async (req, res) => {
   try {
     const name = normalizeName(req.params.name || "");
@@ -199,11 +175,7 @@ router.get("/by-name/:name", async (req, res) => {
     res.status(500).json({ success: false, error: "GET_BY_NAME_FAILED" });
   }
 });
-
-/* ===============================
-   POST /api/whatsapp/templates
-   Create template (send to 360) + save in Mongo
-================================ */
+ 
 router.post("/", async (req, res) => {
   try {
     const payload = req.body || {};
@@ -220,8 +192,7 @@ router.post("/", async (req, res) => {
         error: "category, name, components are required",
       });
     }
-
-    // Send to 360dialog
+ 
     const createResp = await whatsappClient.post("/configs/templates", {
       ...payload,
       name: cleanName,
@@ -234,8 +205,7 @@ router.post("/", async (req, res) => {
     const footer = getFooterFromComponents(components);
     const headerMeta = getHeaderMetaFromComponents(components);
     const headerExample = getHeaderExampleFromComponents(components);
-
-    // Save locally (PENDING until sync updates status)
+ 
     const doc = await WhatsAppTemplate.findOneAndUpdate(
       { name: cleanName },
       {
@@ -250,8 +220,7 @@ router.post("/", async (req, res) => {
           rejectionReason: "",
           raw360: createResp?.data || {},
           lastSubmittedAt: new Date(),
-
-          // avoid stale values (always set)
+ 
           headerFormat: headerMeta.headerFormat || "",
           headerText: headerMeta.headerText || "",
           headerExampleHandles: headerExample || [],
@@ -263,8 +232,7 @@ router.post("/", async (req, res) => {
     res.json({ success: true, template: doc });
   } catch (err) {
     console.error("CREATE ERROR:", err.response?.data || err);
-
-    // friendly duplicate handling
+ 
     const msg = String(err?.response?.data?.message || "");
     if (
       err?.response?.status === 409 ||
@@ -350,8 +318,7 @@ router.post("/sync", async (req, res) => {
               components: components || [],
               raw360: t,
               syncedAt: syncAt,
-
-              // avoid stale values (always set)
+ 
               headerFormat: headerMeta.headerFormat || "",
               headerText: headerMeta.headerText || "",
               headerExampleHandles: headerExample || [],

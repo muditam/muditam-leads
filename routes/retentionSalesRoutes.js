@@ -2047,7 +2047,7 @@ router.get("/api/incentives", async (req, res) => {
 });
 
 const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];
-const WALLET_COIN_START_DATE = "2026-03-01";
+const WALLET_COIN_START_DATE = "2026-04-01";
 const CASH_TO_COIN_RATE = 1;
 
 const PREPAID_COIN_VALUE = 20;
@@ -2173,7 +2173,7 @@ function normalizeShipmentStatus(status = "", amount = 0) {
 }
 
 function getWalletBucket(status = "", amount = 0) {
-  const s = normalizeShipmentStatus(status, amount).toUpperCase();
+  const s = normalizeShipmentStatus(status, amount).toUpperCase().trim();
 
   if (!s) return "unknown";
 
@@ -2194,6 +2194,13 @@ function getWalletBucket(status = "", amount = 0) {
   }
 
   if (
+    s.includes("PROCESSING") ||
+    s.includes("CREATED") ||
+    s.includes("NEW") ||
+    s.includes("OPEN") ||
+    s.includes("CONFIRMED") ||
+    s.includes("READY TO SHIP") ||
+    s.includes("AWB") ||
     s.includes("IN TRANSIT") ||
     s.includes("TRANSIT") ||
     s.includes("OUT FOR DELIVERY") ||
@@ -2334,14 +2341,40 @@ function dedupeSalesRowsByOrder(rows = []) {
 function getVKRCountFromProducts(productsOrdered = []) {
   if (!Array.isArray(productsOrdered)) return 0;
 
-  return productsOrdered.reduce((sum, product) => {
-    const variantId = Number(product?.variant_id || 0);
-    const mappedCount = VKR_VARIANT_COUNT_MAP[variantId] || 0;
-    const quantity = Number(product?.quantity || 1);
+  let total = 0;
+  let onePackQty = 0;
+  let threePackQty = 0;
+  let hasOtherVkrPack = false;
 
-    if (!mappedCount) return sum;
-    return sum + mappedCount * (Number.isFinite(quantity) && quantity > 0 ? quantity : 1);
-  }, 0);
+  productsOrdered.forEach((product) => {
+    const variantId = Number(product?.variant_id || 0);
+    const mappedCount = Number(VKR_VARIANT_COUNT_MAP[variantId] || 0);
+    const quantity = Number(product?.quantity || 1);
+    const safeQty = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+
+    if (!mappedCount) return;
+
+    total += mappedCount * safeQty;
+
+    if (mappedCount === 1) {
+      onePackQty += safeQty;
+    } else if (mappedCount === 3) {
+      threePackQty += safeQty;
+    } else {
+      hasOtherVkrPack = true;
+    }
+  });
+
+  if (
+    threePackQty === 1 &&
+    onePackQty === 1 &&
+    !hasOtherVkrPack &&
+    total === 4
+  ) {
+    return 3;
+  }
+
+  return total;
 }
 
 function getMonthKeyFromDate(dateValue = "") {

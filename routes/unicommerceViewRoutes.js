@@ -14,12 +14,36 @@ const UNI_FACILITY = process.env.UNICOMMERCE_FACILITY_CODE || "";
 const RAW_PAGE_SIZE = 100;
 const MAX_INTERNAL_PAGES = 200;
 const ENRICH_CONCURRENCY = 5;
-const UPSERT_CONCURRENCY = 25;
 
 let uniTokenCache = {
   accessToken: null,
   expiresAt: 0,
 };
+
+const RTO_KEYWORDS = [
+  "returned to origin",
+  "return to origin",
+  "rto",
+  "return to sender",
+  "shipper's request",
+  "returned back",
+];
+
+const DELIVERED_KEYWORDS = [
+  "shipment delivered",
+  "delivered",
+];
+
+const TRANSIT_KEYWORDS = [
+  "in transit",
+  "transit",
+  "dispatch",
+  "dispatched",
+  "shipped",
+];
+
+const HOLD_KEYWORDS = ["hold"];
+const CANCELED_KEYWORDS = ["cancelled", "canceled", "cancel"];
 
 async function getUniwareToken() {
   const now = Date.now();
@@ -66,6 +90,45 @@ function safeDate(v) {
   if (!v) return null;
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function joinText(values = []) {
+  return values
+    .filter(Boolean)
+    .map((v) => String(v).trim())
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function hasAny(text, keywords = []) {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  return keywords.some((keyword) => normalized.includes(keyword));
+}
+
+function isRtoText(text) {
+  return hasAny(text, RTO_KEYWORDS);
+}
+
+function isDeliveredText(text) {
+  return hasAny(text, DELIVERED_KEYWORDS);
+}
+
+function isTransitText(text) {
+  return hasAny(text, TRANSIT_KEYWORDS);
+}
+
+function isHoldText(text) {
+  return hasAny(text, HOLD_KEYWORDS);
+}
+
+function isCanceledText(text) {
+  return hasAny(text, CANCELED_KEYWORDS);
 }
 
 function getChannelText(saleOrder = {}) {
@@ -118,9 +181,9 @@ function buildOrderIdVariants(orderId = "") {
   const digits = canonical.replace(/^MA/, "");
 
   return [
-    canonical,        // MA111147
-    `#${canonical}`,  // #MA111147
-    digits,           // 111147
+    canonical,
+    `#${canonical}`,
+    digits,
   ];
 }
 
@@ -155,22 +218,113 @@ function chooseLatestPackage(packages = []) {
   })[0];
 }
 
-function mapShipmentStatus(pkg = {}) {
-  const txt = [pkg.status, pkg.trackingStatus, pkg.courierStatus]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+function getPackageStatusText(pkg = {}) {
+  return joinText([
+    pkg?.status,
+    pkg?.trackingStatus,
+    pkg?.courierStatus,
+    pkg?.statusDescription,
+    pkg?.remarks,
+    pkg?.currentStatus,
+    pkg?.shippingStatus,
+    pkg?.latestTrackingEvent,
+    pkg?.eventName,
+    pkg?.eventDescription,
+  ]);
+}
 
-  if (txt.includes("rto delivered")) return "RTO Delivered";
-  if (pkg.delivered || txt.includes("delivered")) return "Delivered";
-  if (txt.includes("rto") || txt.includes("return")) return "RTO";
-  if (pkg.dispatched || txt.includes("transit") || txt.includes("dispatch")) {
-    return "In Transit";
+function getOrderLevelStatusText(saleOrder = {}, saleOrderDetails = null) {
+  return joinText([
+    saleOrder?.status,
+    saleOrder?.orderStatus,
+    saleOrder?.displayStatus,
+    saleOrder?.statusCode,
+    saleOrder?.state,
+    saleOrder?.shippingStatus,
+    saleOrder?.fulfillmentStatus,
+    saleOrder?.currentStatus,
+    saleOrderDetails?.status,
+    saleOrderDetails?.orderStatus,
+    saleOrderDetails?.displayStatus,
+    saleOrderDetails?.statusCode,
+    saleOrderDetails?.state,
+    saleOrderDetails?.shippingStatus,
+    saleOrderDetails?.fulfillmentStatus,
+    saleOrderDetails?.currentStatus,
+  ]);
+}
+
+function mapSinglePackageStatus(pkg = {}) {
+  const txt = getPackageStatusText(pkg);
+
+  const hasRto = isRtoText(txt);
+  const hasDelivered = Boolean(pkg?.delivered) || isDeliveredText(txt);
+  const hasTransit = Boolean(pkg?.dispatched) || isTransitText(txt);
+  const hasHold = isHoldText(txt);
+  const hasCanceled = isCanceledText(txt);
+
+  if (hasRto && hasDelivered) return "RTO Delivered";
+  if (hasRto) return "RTO";
+  if (hasDelivered) return "Delivered";
+  if (hasTransit) return "In Transit";
+  if (hasHold) return "On Hold";
+  if (hasCanceled) return "Canceled";
+
+  return pkg?.status || pkg?.trackingStatus || pkg?.courierStatus || "";
+}
+
+/**
+ * Main business rule:
+ * - if order is in RTO flow, and latest phase is delivered -> RTO Delivered
+ * - if order is in RTO flow, and latest phase is not delivered -> RTO
+ * - only use Delivered when there is no RTO flow
+ */
+function deriveShipmentStatus({
+  saleOrder = {},
+  saleOrderDetails = null,
+  packages = [],
+}) {
+  const orderText = getOrderLevelStatusText(saleOrder, saleOrderDetails);
+  const latestPkg = chooseLatestPackage(packages);
+  const latestPkgStatus = latestPkg ? mapSinglePackageStatus(latestPkg) : "";
+
+  const packageStatuses = Array.isArray(packages)
+    ? packages.map((pkg) => mapSinglePackageStatus(pkg)).filter(Boolean)
+    : [];
+
+  const hasRtoFlow =
+    isRtoText(orderText) ||
+    packageStatuses.includes("RTO") ||
+    packageStatuses.includes("RTO Delivered");
+
+  if (hasRtoFlow) {
+    if (
+      latestPkgStatus === "Delivered" ||
+      latestPkgStatus === "RTO Delivered" ||
+      packageStatuses.includes("RTO Delivered")
+    ) {
+      return "RTO Delivered";
+    }
+
+    return "RTO";
   }
-  if (txt.includes("hold")) return "On Hold";
-  if (txt.includes("cancel")) return "Canceled";
 
-  return pkg.status || pkg.trackingStatus || pkg.courierStatus || "";
+  if (latestPkgStatus === "Delivered") return "Delivered";
+  if (latestPkgStatus === "In Transit") return "In Transit";
+  if (latestPkgStatus === "On Hold") return "On Hold";
+  if (latestPkgStatus === "Canceled") return "Canceled";
+
+  if (packageStatuses.includes("Delivered")) return "Delivered";
+  if (packageStatuses.includes("In Transit")) return "In Transit";
+  if (packageStatuses.includes("On Hold")) return "On Hold";
+  if (packageStatuses.includes("Canceled")) return "Canceled";
+
+  if (isDeliveredText(orderText)) return "Delivered";
+  if (isTransitText(orderText)) return "In Transit";
+  if (isHoldText(orderText)) return "On Hold";
+  if (isCanceledText(orderText)) return "Canceled";
+
+  return saleOrderDetails?.status || saleOrder?.status || "";
 }
 
 async function searchSaleOrders({
@@ -351,7 +505,10 @@ async function collectShopifyChannelOrders({
 router.get("/shopify-orders-live", async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit || "20", 10), 1), 100);
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit || "20", 10), 1),
+      100
+    );
     const { startDate, endDate, search } = req.query;
 
     const accessToken = await getUniwareToken();
@@ -373,6 +530,7 @@ router.get("/shopify-orders-live", async (req, res) => {
       ENRICH_CONCURRENCY,
       async (saleOrder) => {
         let saleOrderDetails = null;
+        let packages = [];
         let latestPkg = null;
 
         try {
@@ -382,9 +540,10 @@ router.get("/shopify-orders-live", async (req, res) => {
         }
 
         try {
-          const packages = await searchShippingPackages(accessToken, saleOrder.code);
+          packages = await searchShippingPackages(accessToken, saleOrder.code);
           latestPkg = chooseLatestPackage(packages);
         } catch (_) {
+          packages = [];
           latestPkg = null;
         }
 
@@ -392,7 +551,11 @@ router.get("/shopify-orders-live", async (req, res) => {
 
         return {
           order_id: orderId || "-",
-          shipment_status: latestPkg ? mapShipmentStatus(latestPkg) : "",
+          shipment_status: deriveShipmentStatus({
+            saleOrder,
+            saleOrderDetails,
+            packages,
+          }),
           order_date: getOrderDate(saleOrder, saleOrderDetails),
           tracking_number: latestPkg?.trackingNumber || "",
           carrier_title: latestPkg?.shippingProvider || "",
@@ -410,7 +573,10 @@ router.get("/shopify-orders-live", async (req, res) => {
       orders: rows,
     });
   } catch (error) {
-    console.error("shopify-orders-live error:", error?.response?.data || error.message);
+    console.error(
+      "shopify-orders-live error:",
+      error?.response?.data || error.message
+    );
     return res.status(500).json({
       success: false,
       message: "Failed to fetch orders",
@@ -443,6 +609,7 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
       ENRICH_CONCURRENCY,
       async (saleOrder) => {
         let saleOrderDetails = null;
+        let packages = [];
         let latestPkg = null;
 
         try {
@@ -452,9 +619,10 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
         }
 
         try {
-          const packages = await searchShippingPackages(accessToken, saleOrder.code);
+          packages = await searchShippingPackages(accessToken, saleOrder.code);
           latestPkg = chooseLatestPackage(packages);
         } catch (_) {
+          packages = [];
           latestPkg = null;
         }
 
@@ -469,8 +637,12 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
         }
 
         return {
-          order_id: orderId, // always saved as MA123456
-          shipment_status: latestPkg ? mapShipmentStatus(latestPkg) : "",
+          order_id: orderId,
+          shipment_status: deriveShipmentStatus({
+            saleOrder,
+            saleOrderDetails,
+            packages,
+          }),
           order_date: getOrderDate(saleOrder, saleOrderDetails),
           tracking_number: latestPkg?.trackingNumber || "",
           carrier_title: latestPkg?.shippingProvider || "",
@@ -489,7 +661,9 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
     );
 
     const validRows = enrichedRows.filter((row) => row && row.order_id);
-    const matchedShopifyCount = validRows.filter((row) => row.has_shopify_match).length;
+    const matchedShopifyCount = validRows.filter(
+      (row) => row.has_shopify_match
+    ).length;
 
     if (!validRows.length) {
       return res.status(200).json({
@@ -546,8 +720,12 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
       { ordered: false }
     );
 
-    const inserted = validRows.filter((row) => !existingSet.has(row.order_id)).length;
-    const updated = validRows.filter((row) => existingSet.has(row.order_id)).length;
+    const inserted = validRows.filter(
+      (row) => !existingSet.has(row.order_id)
+    ).length;
+    const updated = validRows.filter((row) =>
+      existingSet.has(row.order_id)
+    ).length;
 
     return res.status(200).json({
       success: true,
