@@ -87,6 +87,27 @@ function addDaysUTC(date, days) {
   return d;
 }
 
+const blankShopifyNotesClause = {
+  $or: [
+    { "orderConfirmOps.shopifyNotes": { $exists: false } },
+    { "orderConfirmOps.shopifyNotes": null },
+    { "orderConfirmOps.shopifyNotes": "" },
+    { "orderConfirmOps.shopifyNotes": { $regex: /^\s*$/ } },
+  ],
+};
+
+const emptyCallStatusClause = {
+  $or: [
+    { "orderConfirmOps.callStatus": { $exists: false } },
+    { "orderConfirmOps.callStatus": null },
+    { "orderConfirmOps.callStatus": "" },
+  ],
+};
+
+const strictPendingClause = {
+  $and: [blankShopifyNotesClause, emptyCallStatusClause],
+};
+
 /**
  * Builds one common date range clause for all tabs.
  * Matches orderDate OR createdAt in IST date boundaries.
@@ -388,7 +409,10 @@ router.get("/list", async (req, res) => {
 
     // Allow confirmed tab to fetch up to 5000 rows for client-side filtering
     const maxLimit = tabUpper === "ORDER_CONFIRMED" ? 5000 : 100;
-    const pageSize = Math.min(maxLimit, Math.max(1, parseInt(limit, 10) || 20));
+    const pageSize = Math.min(
+      maxLimit,
+      Math.max(1, parseInt(limit, 10) || 20)
+    );
 
     const clauses = [];
 
@@ -397,12 +421,7 @@ router.get("/list", async (req, res) => {
       if (Object.values(CallStatusEnum).includes(tabUpper)) {
         clauses.push({ "orderConfirmOps.callStatus": tabUpper });
       } else if (tabUpper === "PENDING") {
-        clauses.push({
-          $or: [
-            { "orderConfirmOps.shopifyNotes": { $exists: false } },
-            { "orderConfirmOps.shopifyNotes": "" },
-          ],
-        });
+        clauses.push(strictPendingClause);
       } else if (tabUpper === "ALL_CNPS") {
         clauses.push({ "orderConfirmOps.callStatus": CallStatusEnum.CNP });
       } else if (tabUpper !== "ALL") {
@@ -483,14 +502,12 @@ router.get("/list", async (req, res) => {
             String(assigned)
           ),
         });
-      } else {
-        if (/^operations$/i.test(role) && isValidObjectId(authedUserId)) {
-          clauses.push({
-            "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(
-              String(authedUserId)
-            ),
-          });
-        }
+      } else if (/^operations$/i.test(role) && isValidObjectId(authedUserId)) {
+        clauses.push({
+          "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(
+            String(authedUserId)
+          ),
+        });
       }
     }
 
@@ -645,7 +662,9 @@ router.post("/create-payment-link", async (req, res) => {
     const shortUrl = link?.short_url || link?.url;
 
     if (!shortUrl) {
-      return res.status(502).json({ error: "Failed to create payment link" });
+      return res
+        .status(502)
+        .json({ error: "Failed to create payment link" });
     }
 
     return res.json({ paymentLink: shortUrl, id: link.id });
@@ -845,7 +864,12 @@ router.get("/history-by-phone", async (req, res) => {
    ============================================ */
 router.post("/shopify-notes", async (req, res) => {
   try {
-    const { orderName, note, userFullName: fromBody } = req.body || {};
+    const {
+      orderName,
+      note,
+      callStatus,
+      userFullName: fromBody,
+    } = req.body || {};
 
     if (!orderName || typeof note !== "string") {
       return res.status(400).json({ error: "orderName and note are required" });
@@ -870,11 +894,20 @@ router.post("/shopify-notes", async (req, res) => {
     };
 
     const raw = String(note).trim();
-    const up = raw.toUpperCase().replace(/\s+/g, "_");
+    const upFromNote = raw.toUpperCase().replace(/\s+/g, "_");
+
+    let normalizedStatus = "";
+    if (typeof callStatus === "string" && callStatus.trim()) {
+      normalizedStatus = callStatus.trim().toUpperCase().replace(/\s+/g, "_");
+
+      if (!Object.values(CallStatusEnum).includes(normalizedStatus)) {
+        return res.status(400).json({ error: "Invalid callStatus value" });
+      }
+    }
 
     let label;
-    if (STATUS_LABELS[up]) {
-      label = STATUS_LABELS[up];
+    if (STATUS_LABELS[upFromNote]) {
+      label = STATUS_LABELS[upFromNote];
     } else {
       const match = Object.values(STATUS_LABELS).find(
         (l) => l.toLowerCase() === raw.toLowerCase()
@@ -911,17 +944,28 @@ router.post("/shopify-notes", async (req, res) => {
       possibleNames.push(nameWithHash.slice(1));
     }
 
+    const mongoSet = {
+      "orderConfirmOps.shopifyNotes": finalNote,
+    };
+
+    if (normalizedStatus) {
+      mongoSet["orderConfirmOps.callStatus"] = normalizedStatus;
+      mongoSet["orderConfirmOps.callStatusUpdatedAt"] = new Date();
+    }
+
     const mongoUpdate = await ShopifyOrder.findOneAndUpdate(
       {
         $or: [{ orderName: { $in: possibleNames } }, { orderId: shopifyId }],
       },
-      { $set: { "orderConfirmOps.shopifyNotes": finalNote } },
+      { $set: mongoSet },
       {
         new: true,
         projection: {
           orderName: 1,
           orderId: 1,
           "orderConfirmOps.shopifyNotes": 1,
+          "orderConfirmOps.callStatus": 1,
+          "orderConfirmOps.callStatusUpdatedAt": 1,
         },
       }
     ).lean();
@@ -1059,14 +1103,12 @@ router.get("/counts", async (req, res) => {
           String(assigned)
         ),
       });
-    } else {
-      if (/^operations$/i.test(role) && isValidObjectId(authedUserId)) {
-        clauses.push({
-          "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(
-            String(authedUserId)
-          ),
-        });
-      }
+    } else if (/^operations$/i.test(role) && isValidObjectId(authedUserId)) {
+      clauses.push({
+        "orderConfirmOps.assignedAgentId": new mongoose.Types.ObjectId(
+          String(authedUserId)
+        ),
+      });
     }
 
     // common date range
@@ -1077,16 +1119,11 @@ router.get("/counts", async (req, res) => {
 
     const baseMatch = clauses.length ? { $and: clauses } : {};
 
-    // Pending = no shopifyNotes
+    // Pending = blank shopifyNotes + blank callStatus
     const pendingNotesMatch = {
       $and: [
         ...(Array.isArray(baseMatch.$and) ? baseMatch.$and : [baseMatch]),
-        {
-          $or: [
-            { "orderConfirmOps.shopifyNotes": { $exists: false } },
-            { "orderConfirmOps.shopifyNotes": "" },
-          ],
-        },
+        strictPendingClause,
       ],
     };
 
@@ -1227,7 +1264,9 @@ router.get("/today-confirmed-count", async (req, res) => {
     res.json({ count });
   } catch (err) {
     console.error("GET /today-confirmed-count error:", err);
-    res.status(500).json({ error: "Failed to compute today's confirmed count" });
+    res
+      .status(500)
+      .json({ error: "Failed to compute today's confirmed count" });
   }
 });
 

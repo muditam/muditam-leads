@@ -729,7 +729,7 @@ function parseWebhookPayload(body = {}) {
         text,
         type,
         media: {
-          id: media.id || "",
+          id: media.id || "", 
           url: media.url || "",
           mime: media.mime || "",
           filename: media.filename || "",
