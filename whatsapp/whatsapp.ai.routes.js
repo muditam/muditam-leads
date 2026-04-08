@@ -9,6 +9,7 @@ const router = express.Router();
 
 const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
 const last10 = (v = "") => digitsOnly(v).slice(-10);
+
 const normalizeWaId = (v = "") => {
   const d = digitsOnly(v);
   if (d.length === 10) return `91${d}`;
@@ -20,6 +21,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 function safeStr(x) {
   return String(x ?? "").trim();
 }
+
 function clamp(n, min, max) {
   const v = Number(n);
   if (!Number.isFinite(v)) return min;
@@ -30,10 +32,18 @@ function clamp(n, min, max) {
 function buildConversationTranscript(msgs = []) {
   return (msgs || [])
     .map((m) => {
-      const dir = String(m.direction || "").toUpperCase() === "OUTBOUND" ? "AGENT" : "CUSTOMER";
+      const dir =
+        String(m.direction || "").toUpperCase() === "OUTBOUND" ? "AGENT" : "CUSTOMER";
+
       const t = safeStr(m.text);
-      const mediaTag = m.media?.url ? ` [MEDIA:${m.type || "file"}]` : "";
-      // Keep timestamps optional; they add tokens and rarely help
+
+      const hasMedia =
+        Boolean(m?.media?.id) ||
+        Boolean(m?.media?.url) ||
+        Boolean(m?.media?.filename);
+
+      const mediaTag = hasMedia ? ` [MEDIA:${m.type || "file"}]` : "";
+
       return `${dir}: ${t || ""}${mediaTag}`.trim();
     })
     .filter(Boolean)
@@ -91,11 +101,15 @@ router.post("/help-me-write", async (req, res) => {
       .limit(maxMessages)
       .lean();
 
-    const convo = await WhatsAppConversation.findOne({ phone: waId }).lean();
+    const convo = await WhatsAppConversation.findOne({
+      phone: new RegExp(`${l10}$`),
+    }).lean();
 
-    const transcript = buildConversationTranscript((msgs || []).reverse()); // oldest -> newest
+    const transcript = buildConversationTranscript((msgs || []).reverse());
+
     const sessionActive =
-      convo?.windowExpiresAt && new Date(convo.windowExpiresAt).getTime() > Date.now();
+      convo?.windowExpiresAt &&
+      new Date(convo.windowExpiresAt).getTime() > Date.now();
 
     const instructions = `
 You help a support agent write a WhatsApp message.
@@ -130,7 +144,9 @@ Write the next message now.
       maxOutputTokens: 220,
     });
 
-    if (!suggestion) return res.status(500).json({ message: "AI did not return text" });
+    if (!suggestion) {
+      return res.status(500).json({ message: "AI did not return text" });
+    }
 
     return res.json({ success: true, suggestion });
   } catch (e) {
@@ -155,6 +171,7 @@ router.post("/rephrase", async (req, res) => {
     const styleRaw = safeStr(req.body?.style).toLowerCase();
 
     if (!text) return res.status(400).json({ message: "text required" });
+
     if (text.length > 2000) {
       return res.status(400).json({ message: "text too long (max 2000 chars)" });
     }
@@ -192,7 +209,9 @@ Rewrite now.
       maxOutputTokens: 200,
     });
 
-    if (!result) return res.status(500).json({ message: "AI did not return text" });
+    if (!result) {
+      return res.status(500).json({ message: "AI did not return text" });
+    }
 
     return res.json({ success: true, result });
   } catch (e) {

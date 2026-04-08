@@ -18,27 +18,35 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
 });
- 
-function normalizeMessagingBaseUrl(raw = "") {
-  let u = String(raw || "").trim().replace(/\/+$/, "");
-  if (!u) return "";
-  u = u.replace(/\/v1$/i, "");
-  return u;
-}
 
-const WHATSAPP_MSG_BASE =
-  normalizeMessagingBaseUrl(process.env.WHATSAPP_BASE_URL) || 
-  "https://waba-v2.360dialog.io";
+/* ----------------------------------------
+   TRUSTSIGNAL CONFIG
+----------------------------------------- */
+const TRUSTSIGNAL_API_BASE = String(
+  process.env.TRUSTSIGNAL_API_BASE || "https://wpapi.trustsignal.io"
+).replace(/\/+$/, "");
 
-const whatsappClient = axios.create({
-  baseURL: WHATSAPP_MSG_BASE, // ✅ NO /v1 here
-  headers: {
-    "D360-API-KEY": process.env.WHATSAPP_API_KEY,
-    "Content-Type": "application/json",
-  },
-  timeout: 30000,
+const TRUSTSIGNAL_API_KEY = String(process.env.TRUSTSIGNAL_API_KEY || "").trim();
+
+const TS_PATH_SEND_TEXT = "/api/v1/whatsapp/single";
+const TS_PATH_SEND_TEMPLATE = "/api/v1/whatsapp/single";
+
+/*
+  Keep these only if TrustSignal confirms these media endpoints for your account.
+*/
+const TS_PATH_UPLOAD_MEDIA = "/v1/whatsapp/media";
+const TS_PATH_MEDIA_META = "/v1/whatsapp/media/:id";
+const TS_PATH_MEDIA_DOWNLOAD = "/v1/whatsapp/media/:id/download";
+
+const trustsignalClient = axios.create({
+  baseURL: TRUSTSIGNAL_API_BASE,
+  timeout: 60000,
+  validateStatus: () => true,
 });
 
+/* ----------------------------------------
+   STORAGE CONFIG
+----------------------------------------- */
 const WASABI_ENDPOINT = process.env.WASABI_ENDPOINT;
 const WASABI_REGION = process.env.WASABI_REGION || "ap-southeast-1";
 const WASABI_BUCKET = process.env.WASABI_BUCKET;
@@ -56,7 +64,10 @@ const s3 =
         signatureVersion: "v4",
       })
     : null;
- 
+
+/* ----------------------------------------
+   HELPERS
+----------------------------------------- */
 const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
 const last10 = (v = "") => digitsOnly(v).slice(-10);
 
@@ -66,6 +77,18 @@ const normalizeWaId = (v = "") => {
   return d;
 };
 
+const toE164Plus = (v = "") => {
+  const d = digitsOnly(v);
+  return d ? `+${d}` : "";
+};
+
+// TrustSignal support asked to remove "+" from recipient number
+function getTrustSignalRecipient(v = "") {
+  const d = digitsOnly(v);
+  if (d.length === 10) return `91${d}`;
+  return d;
+}
+
 function normalizeTemplateName(v = "") {
   return String(v || "")
     .toLowerCase()
@@ -73,6 +96,290 @@ function normalizeTemplateName(v = "") {
     .replace(/\s+/g, "_")
     .replace(/[^a-z0-9_]/g, "")
     .slice(0, 250);
+}
+
+function normalizeTemplateStatus(v = "") {
+  const s = String(v || "").trim().toUpperCase();
+  if (!s) return "UNKNOWN";
+  if (s.includes("APPROV")) return "APPROVED";
+  if (s.includes("REJECT")) return "REJECTED";
+  if (s.includes("PEND")) return "PENDING";
+  return s;
+}
+
+function normalizeTemplateCategory(v = "") {
+  return String(v || "").trim().toUpperCase();
+}
+
+function isObjectLike(v) {
+  return v !== null && typeof v === "object";
+}
+
+function compilePath(pathTemplate = "", pathParams = {}) {
+  let out = String(pathTemplate || "");
+  for (const [k, v] of Object.entries(pathParams || {})) {
+    out = out.replace(
+      new RegExp(`:${k}\\b`, "g"),
+      encodeURIComponent(String(v ?? ""))
+    );
+  }
+  return out;
+}
+
+function deepPick(obj, candidates = []) {
+  if (!isObjectLike(obj) && !Array.isArray(obj)) return null;
+
+  for (const key of candidates) {
+    const parts = String(key).split(".");
+    let cur = obj;
+    let ok = true;
+
+    for (const p of parts) {
+      if (!isObjectLike(cur) && !Array.isArray(cur)) {
+        ok = false;
+        break;
+      }
+      if (!(p in cur)) {
+        ok = false;
+        break;
+      }
+      cur = cur[p];
+    }
+
+    if (ok && cur != null && cur !== "") return cur;
+  }
+  return null;
+}
+
+function asArray(v) {
+  if (Array.isArray(v)) return v;
+  if (v == null) return [];
+  return [v];
+}
+
+function okOrThrow(resp, fallbackMessage = "Provider request failed") {
+  if (resp.status >= 200 && resp.status < 300) return resp;
+
+  const message =
+    deepPick(resp.data, ["message", "error.message", "error", "details", "result.message"]) ||
+    (typeof resp.data === "string" ? resp.data : "") ||
+    `${fallbackMessage} (${resp.status})`;
+
+  const err = new Error(String(message));
+  err.status = resp.status;
+  err.data = resp.data;
+  throw err;
+}
+
+function isHtmlLikeResponse(data, headers = {}) {
+  const ct = String(headers["content-type"] || headers["Content-Type"] || "").toLowerCase();
+
+  if (ct.includes("text/html")) return true;
+
+  if (typeof data === "string") {
+    const s = data.trim().toLowerCase();
+    if (s.startsWith("<!doctype html")) return true;
+    if (s.startsWith("<html")) return true;
+    if (s.includes("<title>404")) return true;
+    if (s.includes("<body")) return true;
+  }
+
+  return false;
+}
+
+function buildHeaders(extra = {}) {
+  const headers = {
+    accept: "*/*",
+    ...extra,
+  };
+
+  if (TRUSTSIGNAL_API_KEY) {
+    headers["x-api-key"] = TRUSTSIGNAL_API_KEY;
+    headers["api-key"] = TRUSTSIGNAL_API_KEY;
+  }
+
+  return headers;
+}
+
+function buildParams(extra = {}) {
+  const params = { ...(extra || {}) };
+  if (TRUSTSIGNAL_API_KEY) {
+    params.api_key = TRUSTSIGNAL_API_KEY;
+  }
+  return params;
+}
+
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function findProviderError(data, matcher) {
+  const errors = Array.isArray(data?.errors) ? data.errors : [];
+  return errors.find((err) => matcher(err)) || null;
+}
+
+async function tsRequest({
+  method = "GET",
+  path = "",
+  pathParams = {},
+  params = {},
+  data = undefined,
+  headers = {},
+  responseType = undefined,
+}) {
+  const finalPath = compilePath(path, pathParams);
+  const finalUrl = `${TRUSTSIGNAL_API_BASE}${finalPath}`;
+
+  console.log("TS REQUEST =>", method, finalUrl, buildParams(params));
+  if (data !== undefined) {
+    console.log(
+      "TS BODY =>",
+      data instanceof FormData ? "[form-data]" : safeStringify(data)
+    );
+  }
+
+  const resp = await trustsignalClient.request({
+    method,
+    url: finalPath,
+    params: buildParams(params),
+    data,
+    headers: buildHeaders(headers),
+    ...(responseType ? { responseType } : {}),
+  });
+
+  okOrThrow(resp);
+
+  if (!responseType && isHtmlLikeResponse(resp.data, resp.headers || {})) {
+    const err = new Error("Received HTML page instead of API JSON");
+    err.status = 502;
+    err.data = typeof resp.data === "string" ? resp.data.slice(0, 1000) : resp.data;
+    throw err;
+  }
+
+  return resp;
+}
+
+function extractProviderMessageId(data) {
+  return (
+    deepPick(data, [
+      "message_id",
+      "data.message_id",
+      "msg_id",
+      "data.msg_id",
+      "id",
+      "data.id",
+      "message.id",
+      "messages.0.id",
+      "data.messages.0.id",
+      "result.message_id",
+      "result.id",
+    ]) || null
+  );
+}
+
+function extractProviderMediaId(data) {
+  return (
+    deepPick(data, [
+      "media_id",
+      "data.media_id",
+      "id",
+      "data.id",
+      "media.id",
+      "result.media_id",
+      "result.id",
+      "upload.id",
+    ]) || null
+  );
+}
+
+function extractProviderMediaUrl(data) {
+  return (
+    deepPick(data, [
+      "url",
+      "data.url",
+      "media.url",
+      "result.url",
+      "download_url",
+      "data.download_url",
+      "result.download_url",
+      "file.url",
+    ]) || null
+  );
+}
+
+function getTrustSignalSenderOrThrow() {
+  const sender = String(
+    process.env.TRUSTSIGNAL_SENDER_ID || process.env.TRUSTSIGNAL_SENDER || ""
+  ).trim();
+
+  if (!sender) {
+    const err = new Error(
+      "TrustSignal sender missing. Set TRUSTSIGNAL_SENDER_ID in env."
+    );
+    err.status = 500;
+    throw err;
+  }
+
+  return sender;
+}
+
+function senderForDb(sender = "") {
+  const raw = String(sender || "").trim();
+  const d = digitsOnly(raw);
+  return d ? normalizeWaId(d) : raw;
+}
+
+function templateComponents(tpl) {
+  return Array.isArray(tpl?.components) ? tpl.components : [];
+}
+
+function extractTemplateBodyText(tpl) {
+  if (!tpl) return "";
+  if (typeof tpl?.body === "string" && tpl.body.trim()) return tpl.body;
+  if (typeof tpl?.bodyText === "string" && tpl.bodyText.trim()) return tpl.bodyText;
+  if (typeof tpl?.text === "string" && tpl.text.trim()) return tpl.text;
+
+  const comps = templateComponents(tpl);
+  const bodyComp =
+    comps.find((x) => String(x?.type || "").toUpperCase() === "BODY") ||
+    comps.find((x) => String(x?.type || "").toLowerCase() === "body");
+
+  if (typeof bodyComp?.text === "string") return bodyComp.text;
+  return "";
+}
+
+function applyTemplateVars(bodyText, vars) {
+  if (!bodyText) return "";
+  return bodyText.replace(/{{\s*(\d+)\s*}}/g, (_, num) => {
+    const i = parseInt(num, 10) - 1;
+    const v = vars?.[i];
+    return v != null && String(v).trim() !== "" ? String(v) : `{{${num}}}`;
+  });
+}
+
+function resolveTemplateIdentifier(tpl, fallback = "") {
+  return String(
+    deepPick(tpl, [
+      "template_id",
+      "templateId",
+      "providerTemplateId",
+      "provider_template_id",
+      "externalTemplateId",
+      "raw360.id",
+      "raw360.templateId",
+      "raw360.template_id",
+      "raw360.data.id",
+      "raw360.template.id",
+      "data.id",
+      "template.id",
+    ]) ||
+      fallback ||
+      ""
+  ).trim();
 }
 
 const roomForPhone10 = (p10) => `wa:${String(p10 || "").slice(-10)}`;
@@ -115,7 +422,7 @@ const emitConversationPatch = (req, { phone10, patch }) => {
     phone: p10,
     patch,
   });
-}; 
+};
 
 function freeformExpiryFromConvo(convo) {
   const t = convo?.lastInboundAt ? new Date(convo.lastInboundAt).getTime() : 0;
@@ -123,147 +430,47 @@ function freeformExpiryFromConvo(convo) {
   return new Date(t + 24 * 60 * 60 * 1000);
 }
 
-function extractTemplateBodyText(tpl) {
-  if (!tpl) return "";
-  if (typeof tpl?.bodyText === "string") return tpl.bodyText;
-  if (typeof tpl?.body === "string") return tpl.body;
-  if (typeof tpl?.text === "string") return tpl.text;
-
-  const comps = Array.isArray(tpl?.components) ? tpl.components : [];
-  const bodyComp =
-    comps.find((x) => String(x?.type || "").toUpperCase() === "BODY") ||
-    comps.find((x) => String(x?.type || "").toLowerCase() === "body");
-
-  if (typeof bodyComp?.text === "string") return bodyComp.text;
-  return "";
-}
-
-function applyTemplateVars(bodyText, vars) {
-  if (!bodyText) return "";
-  return bodyText.replace(/{{\s*(\d+)\s*}}/g, (_, num) => {
-    const i = parseInt(num, 10) - 1;
-    const v = vars?.[i];
-    return v != null && String(v).trim() !== "" ? String(v) : `{{${num}}}`;
-  });
-}
-
-function getHeaderMediaFormatFromTemplate(tpl) {
-  const comps = Array.isArray(tpl?.components) ? tpl.components : [];
-  const header = comps.find(
-    (c) => String(c?.type || "").toUpperCase() === "HEADER"
-  );
-  const fmt = String(header?.format || "").toUpperCase();
-  if (["IMAGE", "VIDEO", "DOCUMENT"].includes(fmt)) return fmt;
-  return "";
-}
-
-function buildHeaderComponentFromMedia({ format, id, filename }) {
-  const fmt = String(format || "").toUpperCase();
-  const mediaId = String(id || "").trim();
-  const fname = String(filename || "").trim();
-
-  if (!mediaId) return null;
-
-  if (fmt === "DOCUMENT") {
-    return {
-      type: "header",
-      parameters: [
-        {
-          type: "document",
-          document: {
-            id: mediaId,
-            ...(fname ? { filename: fname } : {}), // ✅ important
-          },
-        },
-      ],
-    };
-  }
-
-  if (fmt === "IMAGE") {
-    return {
-      type: "header",
-      parameters: [{ type: "image", image: { id: mediaId } }],
-    };
-  }
-  if (fmt === "VIDEO") {
-    return {
-      type: "header",
-      parameters: [{ type: "video", video: { id: mediaId } }],
-    };
-  }
-  return null;
-}
-
-function validateTemplateParamsOrThrow(tpl, parameters) {
-  const bodyText = extractTemplateBodyText(tpl) || "";
-  const matches = Array.from(bodyText.matchAll(/{{\s*(\d+)\s*}}/g));
-  const neededCount = matches.length
-    ? Math.max(...matches.map((m) => parseInt(m[1], 10)))
-    : 0;
-
-  const got = Array.isArray(parameters) ? parameters.length : 0;
-
-  if (neededCount && got < neededCount) {
-    const err = new Error(
-      `Template expects ${neededCount} parameters, got ${got}`
-    );
-    err.code = "PARAM_MISMATCH";
-    err.status = 400;
-    throw err;
-  }
-}
- 
-function cleanMetaUrl(u = "") {
-  return String(u || "").trim().replace(/\\\//g, "/");
-}
-
-function to360DownloadUrl(metaUrl) { 
-  const cleaned = cleanMetaUrl(metaUrl);
-  if (!cleaned) return "";
- 
-  if (cleaned.startsWith(WHATSAPP_MSG_BASE)) return cleaned;
- 
-  if (cleaned.startsWith("https://lookaside.fbsbx.com")) {
-    return cleaned.replace("https://lookaside.fbsbx.com", WHATSAPP_MSG_BASE);
-  }
- 
-  if (cleaned.startsWith("/whatsapp_business/attachments/")) {
-    return `${WHATSAPP_MSG_BASE}${cleaned}`;
-  }
-
-  return cleaned; 
-}
-
-async function fetchMediaMeta(mediaId) { 
+/* ----------------------------------------
+   TRUSTSIGNAL MEDIA HELPERS
+----------------------------------------- */
+async function fetchMediaMeta(mediaId) {
   const id = String(mediaId || "").trim();
   if (!id) throw new Error("mediaId missing");
 
-  const r = await whatsappClient.get(`/${id}`);
-  const url = String(r?.data?.url || "").trim();
-  const mime = String(r?.data?.mime_type || "").trim();
-  const fileSize = r?.data?.file_size ?? null;
+  const r = await tsRequest({
+    method: "GET",
+    path: TS_PATH_MEDIA_META,
+    pathParams: { id },
+  });
 
   return {
     id,
-    metaUrl: url,
-    downloadUrl: to360DownloadUrl(url),
-    mime_type: mime,
-    file_size: fileSize,
-    raw: r?.data || null,
+    downloadUrl: String(extractProviderMediaUrl(r.data) || "").trim(),
+    mime_type: String(
+      deepPick(r.data, ["mime_type", "mime", "data.mime", "media.mime"]) || ""
+    ).trim(),
+    raw: r.data || null,
   };
 }
 
-async function download360Attachment(downloadUrl) {
-  const url = String(downloadUrl || "").trim();
-  if (!url) throw new Error("downloadUrl missing");
+async function downloadTrustSignalAttachment({
+  mediaId,
+  downloadUrl = "",
+  range = "",
+  asStream = false,
+}) {
+  const id = String(mediaId || "").trim();
+  const directUrl = String(downloadUrl || "").trim();
+  const responseType = asStream ? "stream" : "arraybuffer";
 
-  const tryReq = async (withKey) => {
-    const r = await axios.get(url, {
-      responseType: "arraybuffer",
+  if (directUrl) {
+    const r = await axios.request({
+      method: "GET",
+      url: directUrl,
+      params: buildParams(),
+      headers: buildHeaders(range ? { Range: range } : {}),
       timeout: 60000,
-      ...(withKey
-        ? { headers: { "D360-API-KEY": process.env.WHATSAPP_API_KEY } }
-        : {}),
+      responseType,
       validateStatus: () => true,
     });
 
@@ -274,69 +481,22 @@ async function download360Attachment(downloadUrl) {
       throw e;
     }
 
-    const mime = String(r.headers?.["content-type"] || "").trim();
-    return { buffer: Buffer.from(r.data), mime };
-  };
-
-  try {
-    return await tryReq(true);
-  } catch {
-    return await tryReq(false);
+    return r;
   }
-} 
 
-router.post(
-  "/upload-template-media",
-  upload.single("file"),
-  async (req, res) => {
-    try {
-      if (!req.file) return res.status(400).json({ message: "file required" });
+  if (!id) throw new Error("mediaId missing");
 
-      const fd = new FormData();
-      fd.append("file", req.file.buffer, {
-        filename: req.file.originalname || "file",
-        contentType: req.file.mimetype || "application/octet-stream",
-        knownLength: req.file.size,
-      });
-      fd.append("messaging_product", "whatsapp");
- 
-      const mediaUrl = `${String(WHATSAPP_MSG_BASE || "").replace(
-        /\/+$/,
-        ""
-      )}/media`;
+  const r = await tsRequest({
+    method: "GET",
+    path: TS_PATH_MEDIA_DOWNLOAD,
+    pathParams: { id },
+    headers: range ? { Range: range } : {},
+    responseType,
+  });
 
-      const r = await axios.post(mediaUrl, fd, {
-        headers: {
-          ...fd.getHeaders(),
-          "D360-API-KEY": process.env.WHATSAPP_API_KEY,
-        },
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-        timeout: 30000,
-      });
+  return r;
+}
 
-      const mediaId = r?.data?.id || r?.data?.media?.id || null;
-      if (!mediaId) {
-        return res.status(400).json({
-          message: "Upload succeeded but provider did not return media id",
-          providerError: r?.data || null,
-        });
-      }
-
-      return res.json({ success: true, mediaId });
-    } catch (e) {
-      console.error("upload-template-media error:", e.response?.data || e);
-      return res.status(e.response?.status || 400).json({
-        message:
-          e.response?.data?.message ||
-          e.message ||
-          "Upload template media failed",
-        providerError: e.response?.data || null,
-      });
-    }
-  }
-);
- 
 function extFromMime(mime = "") {
   const m = String(mime || "").toLowerCase();
 
@@ -345,14 +505,12 @@ function extFromMime(mime = "") {
   if (m.includes("png")) return "png";
   if (m.includes("webp")) return "webp";
   if (m.includes("gif")) return "gif";
-
   if (m.includes("mp4")) return "mp4";
   if (m.includes("pdf")) return "pdf";
- 
+
   if (m.includes("audio/ogg") || m.includes("application/ogg") || m.includes("ogg"))
     return "ogg";
   if (m.includes("opus")) return "ogg";
-
   if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
   if (m.includes("wav")) return "wav";
   if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac")) return "m4a";
@@ -387,12 +545,12 @@ async function uploadInboundToWasabi({
       Key: key,
       Body: buffer,
       ContentType: mime || "application/octet-stream",
-      ContentDisposition: "inline", 
+      ContentDisposition: "inline",
       CacheControl: "public, max-age=31536000",
       ACL: "public-read",
     })
     .promise();
- 
+
   const loc = up?.Location || "";
   if (loc) return loc;
 
@@ -404,7 +562,350 @@ async function uploadInboundToWasabi({
 
 const proxyUrlForMediaId = (mediaId) =>
   `/api/whatsapp/media-proxy/${encodeURIComponent(String(mediaId || "").trim())}`;
- 
+
+/* ----------------------------------------
+   WEBHOOK PARSER
+----------------------------------------- */
+function textFromInboundMessage(msg = {}) {
+  return (
+    String(
+      deepPick(msg, [
+        "text.body",
+        "text",
+        "message",
+        "body",
+        "content.text",
+        "payload.text",
+        "interactive.button_reply.title",
+        "interactive.list_reply.title",
+        "button.text",
+        "button.payload",
+      ]) || ""
+    ).trim() || ""
+  );
+}
+
+function mediaFromInboundMessage(msg = {}, item = {}) {
+  const type = String(
+    deepPick(msg, ["type", "message_type", "content.type", "payload.type"]) || "text"
+  ).toLowerCase();
+
+  const node =
+    deepPick(msg, [
+      `${type}`,
+      "media",
+      "content.media",
+      "payload.media",
+      "document",
+      "image",
+      "audio",
+      "video",
+    ]) || {};
+
+  return {
+    id: String(
+      deepPick(node, ["id", "media_id"]) ||
+        deepPick(msg, ["media_id", "id"]) ||
+        ""
+    ).trim(),
+    url: String(
+      deepPick(node, ["url", "download_url"]) ||
+        item?.__fileurl ||
+        ""
+    ).trim(),
+    mime: String(deepPick(node, ["mime_type", "mime", "content_type"]) || "").trim(),
+    filename: String(deepPick(node, ["filename", "file_name", "name"]) || "").trim(),
+    type,
+  };
+}
+
+function parseWebhookPayload(body = {}) {
+  const buckets = [];
+  const topWebhookType = String(body?.webhook_type || "").trim();
+  const topFileUrl = String(body?.fileurl || "").trim();
+  const topAcid = String(body?.acid || "").trim();
+
+  if (Array.isArray(body?.entry)) {
+    for (const entry of body.entry) {
+      for (const change of entry.changes || []) {
+        buckets.push({
+          ...(change?.value || {}),
+          __webhook_type: change?.webhook_type || topWebhookType || "",
+          __fileurl: topFileUrl || "",
+          __acid: topAcid || "",
+        });
+      }
+    }
+  } else if (Array.isArray(body?.events)) {
+    for (const ev of body.events) {
+      buckets.push({
+        ...(ev || {}),
+        __webhook_type: ev?.webhook_type || topWebhookType || "",
+        __fileurl: ev?.fileurl || topFileUrl || "",
+        __acid: ev?.acid || topAcid || "",
+      });
+    }
+  } else if (body?.value && isObjectLike(body.value)) {
+    buckets.push({
+      ...(body.value || {}),
+      __webhook_type: topWebhookType || "",
+      __fileurl: topFileUrl || "",
+      __acid: topAcid || "",
+    });
+  } else if (body?.data || body?.messages || body?.statuses) {
+    buckets.push({
+      ...(body.data || body),
+      __webhook_type: topWebhookType || "",
+      __fileurl: topFileUrl || "",
+      __acid: topAcid || "",
+    });
+  } else {
+    buckets.push({
+      ...(body || {}),
+      __webhook_type: topWebhookType || "",
+      __fileurl: topFileUrl || "",
+      __acid: topAcid || "",
+    });
+  }
+
+  const out = { businessPhone: "", statuses: [], messages: [] };
+
+  for (const item of buckets) {
+    const businessPhone = normalizeWaId(
+      deepPick(item, [
+        "metadata.display_phone_number",
+        "business_phone",
+        "phone_number",
+        "sender",
+        "channel.phone",
+      ]) || ""
+    );
+    if (businessPhone && !out.businessPhone) out.businessPhone = businessPhone;
+
+    const statuses = asArray(item?.statuses || item?.status_updates || item?.status || []);
+    for (const st of statuses) {
+      const waId = String(deepPick(st, ["id", "wa_id", "message_id"]) || "").trim();
+      const status = String(
+        deepPick(st, ["status", "state", "event"]) || ""
+      ).toLowerCase().trim();
+      const phone = normalizeWaId(
+        deepPick(st, ["recipient_id", "to", "phone", "customer_phone"]) || ""
+      );
+
+      if (waId && status) {
+        out.statuses.push({
+          waId,
+          status,
+          phone,
+          errors: Array.isArray(st?.errors) ? st.errors : [],
+          raw: st,
+        });
+      }
+    }
+
+    const messages = asArray(item?.messages || item?.message || item?.inbound_messages || []);
+    for (const msg of messages) {
+      const waId = String(deepPick(msg, ["id", "wa_id", "message_id"]) || "").trim();
+      const from = normalizeWaId(
+        deepPick(msg, ["from", "customer.phone", "sender"]) ||
+          deepPick(item, ["contacts.0.wa_id"]) ||
+          ""
+      );
+      const timestampRaw = deepPick(msg, ["timestamp", "time", "created_at"]);
+      const timestamp = timestampRaw
+        ? new Date(Number(timestampRaw) ? Number(timestampRaw) * 1000 : timestampRaw)
+        : new Date();
+
+      const text = textFromInboundMessage(msg);
+      const media = mediaFromInboundMessage(msg, item);
+      const type = String(
+        deepPick(msg, ["type", "message_type", "content.type"]) || media.type || "text"
+      ).toLowerCase();
+
+      out.messages.push({
+        waId,
+        from,
+        to: businessPhone || out.businessPhone || "",
+        text,
+        type,
+        media: {
+          id: media.id || "",
+          url: media.url || "",
+          mime: media.mime || "",
+          filename: media.filename || "",
+        },
+        raw: msg,
+        timestamp,
+      });
+    }
+  }
+
+  return out;
+}
+
+function parseWebhookPayload(body = {}) {
+  const buckets = [];
+  const topWebhookType = String(body?.webhook_type || "").trim();
+  const topFileUrl = String(body?.fileurl || "").trim();
+  const topAcid = String(body?.acid || "").trim();
+
+  if (Array.isArray(body?.entry)) {
+    for (const entry of body.entry) {
+      for (const change of entry.changes || []) {
+        buckets.push({
+          ...(change?.value || {}),
+          __webhook_type: change?.webhook_type || topWebhookType || "",
+          __fileurl: topFileUrl || "",
+          __acid: topAcid || "",
+        });
+      }
+    }
+  } else if (Array.isArray(body?.events)) {
+    for (const ev of body.events) {
+      buckets.push({
+        ...(ev || {}),
+        __webhook_type: ev?.webhook_type || topWebhookType || "",
+        __fileurl: ev?.fileurl || topFileUrl || "",
+        __acid: ev?.acid || topAcid || "",
+      });
+    }
+  } else if (body?.value && isObjectLike(body.value)) {
+    buckets.push({
+      ...(body.value || {}),
+      __webhook_type: topWebhookType || "",
+      __fileurl: topFileUrl || "",
+      __acid: topAcid || "",
+    });
+  } else if (body?.data || body?.messages || body?.statuses) {
+    buckets.push({
+      ...(body.data || body),
+      __webhook_type: topWebhookType || "",
+      __fileurl: topFileUrl || "",
+      __acid: topAcid || "",
+    });
+  } else {
+    buckets.push({
+      ...(body || {}),
+      __webhook_type: topWebhookType || "",
+      __fileurl: topFileUrl || "",
+      __acid: topAcid || "",
+    });
+  }
+
+  const out = { businessPhone: "", statuses: [], messages: [] };
+
+  for (const item of buckets) {
+    const businessPhone = normalizeWaId(
+      deepPick(item, [
+        "metadata.display_phone_number",
+        "business_phone",
+        "phone_number",
+        "sender",
+        "channel.phone",
+      ]) || ""
+    );
+    if (businessPhone && !out.businessPhone) out.businessPhone = businessPhone;
+
+    const statuses = asArray(item?.statuses || item?.status_updates || item?.status || []);
+    for (const st of statuses) {
+      const waId = String(deepPick(st, ["id", "wa_id", "message_id"]) || "").trim();
+      const status = String(
+        deepPick(st, ["status", "state", "event"]) || ""
+      ).toLowerCase().trim();
+      const phone = normalizeWaId(
+        deepPick(st, ["recipient_id", "to", "phone", "customer_phone"]) || ""
+      );
+
+      if (waId && status) {
+        out.statuses.push({
+          waId,
+          status,
+          phone,
+          errors: Array.isArray(st?.errors) ? st.errors : [],
+          raw: st,
+        });
+      }
+    }
+
+    const messages = asArray(item?.messages || item?.message || item?.inbound_messages || []);
+    for (const msg of messages) {
+      const waId = String(deepPick(msg, ["id", "wa_id", "message_id"]) || "").trim();
+      const from = normalizeWaId(
+        deepPick(msg, ["from", "customer.phone", "sender"]) ||
+          deepPick(item, ["contacts.0.wa_id"]) ||
+          ""
+      );
+      const timestampRaw = deepPick(msg, ["timestamp", "time", "created_at"]);
+      const timestamp = timestampRaw
+        ? new Date(Number(timestampRaw) ? Number(timestampRaw) * 1000 : timestampRaw)
+        : new Date();
+
+      const text = textFromInboundMessage(msg);
+      const media = mediaFromInboundMessage(msg, item);
+      const type = String(
+        deepPick(msg, ["type", "message_type", "content.type"]) || media.type || "text"
+      ).toLowerCase();
+
+      out.messages.push({
+        waId,
+        from,
+        to: businessPhone || out.businessPhone || "",
+        text,
+        type,
+        media: {
+          id: media.id || "",
+          url: media.url || "",
+          mime: media.mime || "",
+          filename: media.filename || "",
+        },
+        raw: msg,
+        timestamp,
+      });
+    }
+  }
+
+  return out;
+}
+
+/* ----------------------------------------
+   ROUTES
+----------------------------------------- */
+router.post("/upload-template-media", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "file required" });
+
+    const fd = new FormData();
+    fd.append("file", req.file.buffer, {
+      filename: req.file.originalname || "file",
+      contentType: req.file.mimetype || "application/octet-stream",
+      knownLength: req.file.size,
+    });
+
+    const r = await tsRequest({
+      method: "POST",
+      path: TS_PATH_UPLOAD_MEDIA,
+      data: fd,
+      headers: fd.getHeaders(),
+    });
+
+    const mediaId = extractProviderMediaId(r.data);
+    if (!mediaId) {
+      return res.status(400).json({
+        message: "Upload succeeded but provider did not return media id",
+        providerError: r.data || null,
+      });
+    }
+
+    return res.json({ success: true, mediaId });
+  } catch (e) {
+    console.error("upload-template-media error:", e?.response?.data || e?.data || e);
+    return res.status(e?.response?.status || e?.status || 400).json({
+      message: e?.message || "Upload template media failed",
+      providerError: e?.response?.data || e?.data || null,
+    });
+  }
+});
+
 router.post("/conversations/mark-read", async (req, res) => {
   try {
     const phoneRaw = req.body?.phone || "";
@@ -430,7 +931,7 @@ router.post("/conversations/mark-read", async (req, res) => {
     return res.status(500).json({ message: e.message || "mark-read failed" });
   }
 });
- 
+
 router.get("/conversations", async (req, res) => {
   try {
     const { role, userName } = req.query;
@@ -497,7 +998,7 @@ router.get("/conversations", async (req, res) => {
     res.status(500).json({ message: "Failed to load conversations" });
   }
 });
- 
+
 router.get("/messages", async (req, res) => {
   try {
     const q = digitsOnly(req.query.phone);
@@ -523,7 +1024,7 @@ router.get("/messages", async (req, res) => {
     res.status(500).json({ message: "Failed to load messages" });
   }
 });
- 
+
 router.get("/templates", async (req, res) => {
   try {
     const tpls = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
@@ -533,11 +1034,11 @@ router.get("/templates", async (req, res) => {
     res.status(500).json({ message: "Failed to load templates" });
   }
 });
- 
+
 router.post("/send-text", async (req, res) => {
   try {
     const { to, text } = req.body;
-    if (!to || !text?.trim()) {
+    if (!to || !String(text || "").trim()) {
       return res.status(400).json({ message: "to & text required" });
     }
 
@@ -547,7 +1048,7 @@ router.post("/send-text", async (req, res) => {
     const convo = await WhatsAppConversation.findOne({
       phone: new RegExp(`${p10}$`),
     }).lean();
- 
+
     const expiry = freeformExpiryFromConvo(convo) || convo?.windowExpiresAt || null;
 
     if (!expiry || expiry < new Date()) {
@@ -557,22 +1058,30 @@ router.post("/send-text", async (req, res) => {
       });
     }
 
+    const sender = getTrustSignalSenderOrThrow();
+    const toNumber = getTrustSignalRecipient(phone);
+
     const payload = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: phone,
-      type: "text",
-      text: { body: text },
+      message_type: "text",
+      sender,
+      to: toNumber,
+      message: String(text).trim(),
     };
 
-    const r = await whatsappClient.post("/messages", payload);
+    const r = await tsRequest({
+      method: "POST",
+      path: TS_PATH_SEND_TEXT,
+      data: payload,
+      headers: { "Content-Type": "application/json" },
+    });
+
     const now = new Date();
 
     const created = await WhatsAppMessage.create({
-      waId: r.data?.messages?.[0]?.id,
-      from: process.env.WHATSAPP_BUSINESS_PHONE,
+      waId: extractProviderMessageId(r.data),
+      from: senderForDb(sender),
       to: phone,
-      text,
+      text: String(text).trim(),
       direction: "OUTBOUND",
       type: "text",
       status: "sent",
@@ -586,8 +1095,8 @@ router.post("/send-text", async (req, res) => {
         $set: {
           phone,
           lastMessageAt: now,
-          lastMessageText: text.slice(0, 200),
-          lastOutboundAt: now, 
+          lastMessageText: String(text).trim().slice(0, 200),
+          lastOutboundAt: now,
         },
       },
       { upsert: true }
@@ -598,143 +1107,146 @@ router.post("/send-text", async (req, res) => {
       phone10: p10,
       patch: {
         lastMessageAt: now,
-        lastMessageText: text.slice(0, 200),
+        lastMessageText: String(text).trim().slice(0, 200),
         lastOutboundAt: now,
       },
     });
 
-    return res.json({ success: true });
+    return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
-    const status = e.response?.status || 400;
-    const data = e.response?.data || null;
-    console.error("Send text error:", { status, data, message: e.message });
+    const status = e?.response?.status || e?.status || 400;
+    const data = e?.response?.data || e?.data || null;
+
+    const countryBlocked = findProviderError(
+      data,
+      (x) =>
+        String(x?.code || "") === "1013" ||
+        String(x?.codeMsg || "").toUpperCase() === "WHATSAPP_COUNTRY_NOT_ALLOWED"
+    );
+
+    if (countryBlocked) {
+      return res.status(400).json({
+        success: false,
+        code: "WHATSAPP_COUNTRY_NOT_ALLOWED",
+        message:
+          "Send text failed: this TrustSignal sender/account is not enabled to send WhatsApp messages to this destination country.",
+        providerError: data,
+      });
+    }
+
+    console.error("Send text error:", {
+      status,
+      data,
+      message: e?.message,
+    });
 
     return res.status(status).json({
+      success: false,
       message: "Send text failed",
-      providerError: data || { error: e.message },
+      providerError: data || { error: e?.message },
     });
   }
 });
- 
+
 router.post("/send-template", async (req, res) => {
   try {
     const {
       to,
       templateName,
+      templateId: requestedTemplateId = "",
       parameters = [],
       renderedText = "",
       headerMedia = null,
     } = req.body;
 
-    if (!to || !templateName) {
-      return res.status(400).json({ message: "to & templateName required" });
+    if (!to || (!templateName && !requestedTemplateId)) {
+      return res.status(400).json({ message: "to & templateName/templateId required" });
     }
 
-    const rawDigits = String(to || "").replace(/\D/g, "");
+    const rawDigits = digitsOnly(to);
     const normalizedTo = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
     const phone = normalizeWaId(normalizedTo);
     const p10 = last10(phone);
+    const toNumber = getTrustSignalRecipient(phone);
+    const sender = getTrustSignalSenderOrThrow();
 
-    const cleanTemplateName = normalizeTemplateName(templateName);
+    const originalTemplateName = String(templateName || "").trim();
+    const cleanTemplateName = normalizeTemplateName(originalTemplateName);
+    const requestedId = String(requestedTemplateId || "").trim();
 
-    const tpl = await WhatsAppTemplate.findOne({ name: cleanTemplateName }).lean();
-    if (!tpl) return res.status(400).json({ message: "Template not found" });
+    const or = [];
+    if (requestedId) {
+      or.push(
+        { template_id: requestedId },
+        { templateId: requestedId },
+        { providerTemplateId: requestedId },
+        { provider_template_id: requestedId },
+        { externalTemplateId: requestedId }
+      );
+    }
+    if (originalTemplateName) {
+      or.push({ name: cleanTemplateName }, { name: originalTemplateName });
+    }
+
+    const tpl = await WhatsAppTemplate.findOne({ $or: or }).lean();
+    if (!tpl) {
+      return res.status(400).json({ message: "Template not found" });
+    }
 
     if (String(tpl.status || "").toUpperCase() !== "APPROVED") {
       return res.status(400).json({ message: "Template not approved" });
     }
-    if (String(tpl.category || "").toUpperCase() !== "UTILITY") {
-      return res.status(400).json({ message: "Only UTILITY templates are allowed" });
-    }
 
-    validateTemplateParamsOrThrow(tpl, parameters);
-
-    const lang = String(tpl.language || "").trim();
-    if (!lang) {
+    const providerTemplateId = resolveTemplateIdentifier(tpl, requestedId);
+    if (!providerTemplateId) {
       return res.status(400).json({
-        message: "Template language missing in DB. Sync templates again.",
-        code: "TEMPLATE_LANGUAGE_MISSING",
-      });
-    }
-
-    const neededHeaderFmt = getHeaderMediaFormatFromTemplate(tpl);
-
-    if (neededHeaderFmt) {
-      const providedId = String(headerMedia?.id || "").trim();
-      if (!providedId) {
-        return res.status(400).json({
-          message: `This template requires HEADER ${neededHeaderFmt}. Upload header media first and send headerMedia.id`,
-          code: "HEADER_MEDIA_ID_REQUIRED",
-        });
-      }
-    }
-
-    const components = [];
-
-    if (neededHeaderFmt) {
-      const headerComp = buildHeaderComponentFromMedia({
-        format: neededHeaderFmt,
-        id: headerMedia?.id,
-        filename: headerMedia?.filename,
-      });
-
-      if (!headerComp) {
-        return res.status(400).json({
-          message: "Invalid headerMedia. Send { id } for header media templates.",
-          code: "HEADER_MEDIA_INVALID",
-        });
-      }
-      components.push(headerComp);
-    }
-
-    if (Array.isArray(parameters) && parameters.length) {
-      components.push({
-        type: "body",
-        parameters: parameters.map((p) => ({
-          type: "text",
-          text: String(p ?? ""),
-        })),
+        message: "Full TrustSignal template_id missing in DB",
+        code: "TEMPLATE_ID_MISSING",
       });
     }
 
     const payload = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: phone,
-      type: "template",
-      template: {
-        name: tpl.name,
-        language: { code: lang },
-        ...(components.length ? { components } : {}),
-      },
+      message_type: "text",
+      sender,
+      to: toNumber,
+      template_id: providerTemplateId,
     };
 
-    const r = await whatsappClient.post("/messages", payload);
+    console.log("TS TEMPLATE PAYLOAD =>", JSON.stringify(payload, null, 2));
+
+    const r = await tsRequest({
+      method: "POST",
+      path: TS_PATH_SEND_TEMPLATE,
+      data: payload,
+      headers: { "Content-Type": "application/json" },
+    });
+
     const now = new Date();
 
     const clientText = String(renderedText || "").trim();
     const serverBody = extractTemplateBodyText(tpl);
-    const serverText = serverBody ? applyTemplateVars(serverBody, parameters) : "";
-    const finalText = clientText || serverText || `[TEMPLATE] ${tpl.name}`;
+    const serverText = serverBody ? applyTemplateVars(serverBody, asArray(parameters)) : "";
+    const finalText = clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
 
     const created = await WhatsAppMessage.create({
-      waId: r.data?.messages?.[0]?.id,
-      from: process.env.WHATSAPP_BUSINESS_PHONE,
+      waId: extractProviderMessageId(r.data),
+      from: senderForDb(sender),
       to: phone,
       direction: "OUTBOUND",
       type: "template",
       text: finalText,
       status: "sent",
       templateMeta: {
-        name: tpl.name,
-        language: lang,
-        parameters: (parameters || []).map((x) => String(x ?? "")),
-        ...(neededHeaderFmt && headerMedia?.id
+        name: tpl.name || originalTemplateName,
+        templateId: providerTemplateId,
+        language: String(tpl.language || "").trim(),
+        parameters: asArray(parameters).map((x) => String(x ?? "")),
+        ...(headerMedia?.id
           ? {
               headerMedia: {
-                format: neededHeaderFmt,
+                format: String(headerMedia.format || ""),
                 id: String(headerMedia.id),
-                filename: String(headerMedia.filename || ""), 
+                filename: String(headerMedia.filename || ""),
               },
             }
           : {}),
@@ -766,10 +1278,27 @@ router.post("/send-template", async (req, res) => {
       },
     });
 
-    return res.json({ success: true });
+    return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
     const status = e?.response?.status || e?.status || 400;
-    const data = e?.response?.data || null;
+    const data = e?.response?.data || e?.data || null;
+
+    const countryBlocked = findProviderError(
+      data,
+      (x) =>
+        String(x?.code || "") === "1013" ||
+        String(x?.codeMsg || "").toUpperCase() === "WHATSAPP_COUNTRY_NOT_ALLOWED"
+    );
+
+    if (countryBlocked) {
+      return res.status(400).json({
+        success: false,
+        code: "WHATSAPP_COUNTRY_NOT_ALLOWED",
+        message:
+          "Send template failed: this TrustSignal sender/account is not enabled to send WhatsApp messages to this destination country.",
+        providerError: data,
+      });
+    }
 
     console.error("Send template error:", {
       status,
@@ -778,59 +1307,39 @@ router.post("/send-template", async (req, res) => {
     });
 
     return res.status(status).json({
+      success: false,
       message: "Send template failed",
       providerError: data || { error: e?.message || "UNKNOWN_ERROR" },
     });
   }
 });
- 
+
 router.get("/media-proxy/:id", async (req, res) => {
   const mediaId = String(req.params.id || "").trim();
   if (!mediaId) return res.status(400).send("mediaId required");
 
-  try { 
-    const meta = await fetchMediaMeta(mediaId);
-    const downloadUrl = meta.downloadUrl;
-    if (!downloadUrl) {
-      return res.status(404).json({
-        message: "provider url missing",
-        providerError: meta.raw || null,
-      });
+  try {
+    let meta = null;
+    try {
+      meta = await fetchMediaMeta(mediaId);
+    } catch {
+      meta = null;
     }
- 
-    const range = req.headers.range;
 
-    const fetchStream = async (withKey) =>
-      axios.get(downloadUrl, {
-        responseType: "stream",
-        timeout: 60000,
-        headers: {
-          ...(withKey ? { "D360-API-KEY": process.env.WHATSAPP_API_KEY } : {}),
-          ...(range ? { Range: range } : {}),
-        },
-        validateStatus: () => true,
-      });
- 
-    let r = await fetchStream(true);
-    if ([401, 403].includes(r.status)) r = await fetchStream(false);
+    const range = req.headers.range || "";
 
-    if (r.status >= 400) {
-      console.error("media-proxy download failed:", {
-        status: r.status,
-        headers: r.headers,
-      });
-      res.status(r.status);
-      if (r.headers?.["content-type"]) {
-        res.setHeader("Content-Type", r.headers["content-type"]);
-      }
-      return r.data.pipe(res);
-    }
- 
+    const r = await downloadTrustSignalAttachment({
+      mediaId,
+      downloadUrl: meta?.downloadUrl || "",
+      range,
+      asStream: true,
+    });
+
     res.status(r.status);
 
     const ct =
       r.headers["content-type"] ||
-      meta.mime_type ||
+      meta?.mime_type ||
       "application/octet-stream";
     res.setHeader("Content-Type", ct);
 
@@ -841,257 +1350,401 @@ router.get("/media-proxy/:id", async (req, res) => {
     if (r.headers["content-length"]) {
       res.setHeader("Content-Length", r.headers["content-length"]);
     }
- 
-    res.setHeader("Cache-Control", "no-store");
 
+    res.setHeader("Cache-Control", "no-store");
     r.data.pipe(res);
   } catch (e) {
     console.error("media-proxy error:", {
       code: e.code,
       message: e.message,
-      status: e.response?.status,
-      data: e.response?.data,
+      status: e?.status,
+      data: e?.data,
     });
 
-    return res.status(500).json({
+    return res.status(e?.status || 500).json({
       message: "proxy failed",
       error: e.message,
-      status: e.response?.status || null,
-      providerError: e.response?.data || null,
+      status: e?.status || null,
+      providerError: e?.data || null,
     });
   }
 });
- 
+
 router.get("/webhook", (req, res) => res.sendStatus(200));
 
 router.post("/webhook", async (req, res) => {
   try {
-    const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
+    const webhookType = String(req.body?.webhook_type || "").trim();
 
-    for (const entry of entries) {
-      for (const change of entry.changes || []) {
-        const value = change.value || {};
-        const businessPhone = normalizeWaId(
-          value.metadata?.display_phone_number || ""
+    if (webhookType === "phone_number_quality_update") {
+      const value = req.body?.value || {};
+
+      const displayPhoneNumber = String(value?.display_phone_number || "").trim();
+      const event = String(value?.event || "").trim();
+      const currentLimit = String(value?.current_limit || "").trim();
+      const oldLimit = String(value?.old_limit || "").trim();
+      const acid = String(req.body?.acid || "").trim();
+
+      const senderInEnv = String(
+        process.env.TRUSTSIGNAL_SENDER_ID || process.env.TRUSTSIGNAL_SENDER || ""
+      ).trim();
+
+      const displayDigits = digitsOnly(displayPhoneNumber);
+      const envDigits = digitsOnly(senderInEnv);
+
+      console.log(
+        "TS PHONE QUALITY WEBHOOK =>",
+        JSON.stringify(
+          {
+            webhook_type: "phone_number_quality_update",
+            acid,
+            display_phone_number: displayPhoneNumber,
+            event,
+            current_limit: currentLimit,
+            old_limit: oldLimit,
+            sender_env: senderInEnv,
+            sender_matches_env: Boolean(displayDigits && envDigits && displayDigits === envDigits),
+          },
+          null,
+          2
+        )
+      );
+
+      return res.sendStatus(200);
+    }
+
+    if (webhookType === "phone_number_name_update") {
+      const value = req.body?.value || {};
+      console.log(
+        "TS PHONE NAME WEBHOOK =>",
+        JSON.stringify(
+          {
+            webhook_type: "phone_number_name_update",
+            acid: String(req.body?.acid || "").trim(),
+            display_phone_number: String(value?.display_phone_number || "").trim(),
+            decision: String(value?.decision || "").trim(),
+            requested_verified_name: String(value?.requested_verified_name || "").trim(),
+            rejection_reason: String(value?.rejection_reason || "").trim(),
+          },
+          null,
+          2
+        )
+      );
+      return res.sendStatus(200);
+    }
+
+    if (webhookType === "embedded") {
+      console.log(
+        "TS EMBEDDED WEBHOOK =>",
+        JSON.stringify(req.body || {}, null, 2)
+      );
+      return res.sendStatus(200);
+    }
+
+    if (webhookType === "message_template_status_update") {
+      const value = req.body?.value || {};
+      const templateId = String(value?.message_template_id || "").trim();
+      const templateName = normalizeTemplateName(value?.message_template_name || "");
+      const language = String(value?.message_template_language || "").trim();
+      const event = normalizeTemplateStatus(value?.event || "");
+      const reason = String(value?.reason || "").trim();
+
+      const filter = templateId
+        ? {
+            $or: [
+              { template_id: templateId },
+              { templateId: templateId },
+              { providerTemplateId: templateId },
+              { provider_template_id: templateId },
+              { externalTemplateId: templateId },
+              ...(templateName ? [{ name: templateName }] : []),
+            ],
+          }
+        : {
+            ...(templateName ? { name: templateName } : {}),
+            ...(language ? { language } : {}),
+          };
+
+      if (Object.keys(filter).length) {
+        await WhatsAppTemplate.findOneAndUpdate(
+          filter,
+          {
+            $set: {
+              ...(templateName ? { name: templateName } : {}),
+              ...(language ? { language } : {}),
+              ...(templateId
+                ? {
+                    template_id: templateId,
+                    templateId: templateId,
+                    providerTemplateId: templateId,
+                  }
+                : {}),
+              ...(event ? { status: event } : {}),
+              rejectionReason: reason === "NONE" ? "" : reason,
+              raw360: req.body,
+            },
+          },
+          { upsert: true }
         );
- 
-        const statuses = Array.isArray(value.statuses) ? value.statuses : [];
-        for (const st of statuses) {
-          const waId = st?.id;
-          if (!waId) continue;
+      }
 
-          const newStatus = String(st.status || "").toLowerCase().trim();
-          if (!newStatus) continue;
+      console.log(
+        "TS TEMPLATE STATUS WEBHOOK =>",
+        JSON.stringify(req.body || {}, null, 2)
+      );
+      return res.sendStatus(200);
+    }
 
-          const updated = await WhatsAppMessage.findOneAndUpdate(
-            { waId },
-            { $set: { status: newStatus } },
-            { new: true }
-          ).lean();
+    if (webhookType === "template_category_update") {
+      const value = req.body?.value || {};
+      const templateId = String(value?.message_template_id || "").trim();
+      const templateName = normalizeTemplateName(value?.message_template_name || "");
+      const language = String(value?.message_template_language || "").trim();
+      const newCategory = normalizeTemplateCategory(value?.new_category || "");
 
-          if (updated) {
-            const dir = String(updated.direction || "").toUpperCase();
-            const customerPhone = dir === "INBOUND" ? updated.from : updated.to;
-            const p10 = last10(customerPhone || "");
-            if (p10) emitStatus(req, { phone10: p10, waId, status: newStatus });
+      const filter = templateId
+        ? {
+            $or: [
+              { template_id: templateId },
+              { templateId: templateId },
+              { providerTemplateId: templateId },
+              { provider_template_id: templateId },
+              { externalTemplateId: templateId },
+              ...(templateName ? [{ name: templateName }] : []),
+            ],
           }
+        : {
+            ...(templateName ? { name: templateName } : {}),
+            ...(language ? { language } : {}),
+          };
+
+      if (Object.keys(filter).length) {
+        await WhatsAppTemplate.findOneAndUpdate(
+          filter,
+          {
+            $set: {
+              ...(templateName ? { name: templateName } : {}),
+              ...(language ? { language } : {}),
+              ...(templateId
+                ? {
+                    template_id: templateId,
+                    templateId: templateId,
+                    providerTemplateId: templateId,
+                  }
+                : {}),
+              ...(newCategory ? { category: newCategory } : {}),
+              raw360: req.body,
+            },
+          },
+          { upsert: true }
+        );
+      }
+
+      console.log(
+        "TS TEMPLATE CATEGORY WEBHOOK =>",
+        JSON.stringify(req.body || {}, null, 2)
+      );
+      return res.sendStatus(200);
+    }
+
+    if (webhookType === "message_template_quality_update") {
+      console.log(
+        "TS TEMPLATE QUALITY WEBHOOK =>",
+        JSON.stringify(req.body || {}, null, 2)
+      );
+      return res.sendStatus(200);
+    }
+
+    const parsed = parseWebhookPayload(req.body || {});
+    const businessPhone =
+      normalizeWaId(parsed.businessPhone || "") ||
+      normalizeWaId(process.env.WHATSAPP_BUSINESS_PHONE || "");
+
+    for (const st of parsed.statuses || []) {
+      const waId = st?.waId;
+      if (!waId) continue;
+
+      const newStatus = String(st.status || "").toLowerCase().trim();
+      if (!newStatus) continue;
+
+      const updated = await WhatsAppMessage.findOneAndUpdate(
+        { waId },
+        { $set: { status: newStatus } },
+        { new: true }
+      ).lean();
+
+      if (updated) {
+        const dir = String(updated.direction || "").toUpperCase();
+        const customerPhone = dir === "INBOUND" ? updated.from : updated.to;
+        const p10 = last10(st.phone || customerPhone || "");
+        if (p10) emitStatus(req, { phone10: p10, waId, status: newStatus });
+      }
+    }
+
+    for (const msg of parsed.messages || []) {
+      if (!msg?.from) continue;
+
+      const waId = String(msg?.waId || "").trim();
+
+      if (waId) {
+        const already = await WhatsAppMessage.findOne({ waId }).select("_id").lean();
+        if (already) continue;
+      }
+
+      const from = normalizeWaId(msg.from);
+      const to = businessPhone;
+      if (from && to && from === to) continue;
+
+      const p10 = last10(from);
+      const now = msg?.timestamp ? new Date(msg.timestamp) : new Date();
+      const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      let type = String(msg?.type || "text").toLowerCase();
+      let text = String(msg?.text || "").trim();
+      const mediaId = String(msg?.media?.id || "").trim();
+
+      let media = null;
+
+      if (mediaId) {
+        if (!["image", "video", "audio", "document"].includes(type)) {
+          type = "document";
         }
- 
-        const messages = Array.isArray(value.messages) ? value.messages : [];
 
-        for (const msg of messages) {
-          if (!msg?.id || !msg?.from) continue;
- 
-          const already = await WhatsAppMessage.findOne({ waId: msg.id })
-            .select("_id")
-            .lean();
-          if (already) continue;
+        try {
+          const meta = await fetchMediaMeta(mediaId);
 
-          const from = normalizeWaId(msg.from);  
-          const to =
-            businessPhone ||
-            normalizeWaId(value.metadata?.display_phone_number || "");
-          if (from && to && from === to) continue;
+          const mimeFromMeta = String(meta?.mime_type || "").trim();
+          const mimeFromWebhook = String(msg?.media?.mime || "").trim();
+          const baseMime =
+            (mimeFromMeta || mimeFromWebhook || "application/octet-stream").trim() ||
+            "application/octet-stream";
 
-          const p10 = last10(from);
-          const now = new Date();
- 
-          const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          const filename =
+            String(msg?.media?.filename || "").trim() ||
+            `${type}_${p10 || "unknown"}_${mediaId}.${extFromMime(baseMime)}`;
 
-          const msgType = String(msg.type || "").toLowerCase();
- 
-          let text = "";
-          let type = msgType || "text";
+          media = {
+            id: mediaId,
+            url: msg?.media?.url || proxyUrlForMediaId(mediaId),
+            mime: baseMime,
+            filename,
+          };
 
-          if (msgType === "text") {
-            text = String(msg?.text?.body || "");
-          } else if (msgType === "button") {
-            text = String(msg?.button?.text || msg?.button?.payload || "");
-          } else if (msgType === "interactive") {
-            const it = msg?.interactive || {};
-            const itType = String(it.type || "").toLowerCase();
-            if (itType === "button_reply") {
-              text = String(it?.button_reply?.title || it?.button_reply?.id || "");
-            } else if (itType === "list_reply") {
-              text = String(it?.list_reply?.title || it?.list_reply?.id || "");
-            } else {
-              text = JSON.stringify(it).slice(0, 500);
-            }
-          }
- 
-          const mediaObj =
-            msg?.image || msg?.video || msg?.audio || msg?.document || null;
-          const mediaId = mediaObj?.id ? String(mediaObj.id) : "";
-          let media = null;
- 
-          if (mediaId) {
-            if (msg.image) type = "image";
-            else if (msg.video) type = "video";
-            else if (msg.audio) type = "audio";
-            else if (msg.document) type = "document";
-            else type = msgType || "document";
-          } else {
-            type = msgType || "text";
+          try {
+            const dl = await downloadTrustSignalAttachment({
+              mediaId,
+              downloadUrl: meta?.downloadUrl || msg?.media?.url || "",
+              asStream: false,
+            });
+
+            const buffer = Buffer.isBuffer(dl.data) ? dl.data : Buffer.from(dl.data);
+            const bestMime =
+              String(dl.headers?.["content-type"] || baseMime || "").trim() ||
+              "application/octet-stream";
+
+            const wasabiUrl = await uploadInboundToWasabi({
+              buffer,
+              mime: bestMime,
+              filename,
+              from10: p10,
+              mediaId,
+              msgType: type,
+            });
+
+            media = {
+              id: mediaId,
+              url: wasabiUrl || msg?.media?.url || proxyUrlForMediaId(mediaId),
+              mime: bestMime,
+              filename,
+            };
+          } catch (uploadErr) {
+            console.error(
+              "Inbound Wasabi upload failed (keeping proxy url):",
+              uploadErr?.data || uploadErr
+            );
           }
 
-          if (mediaId) {
-            try { 
-              const meta = await fetchMediaMeta(mediaId);
+          if (!text) {
+            text =
+              type === "image"
+                ? "📷 Photo"
+                : type === "video"
+                ? "🎥 Video"
+                : type === "audio"
+                ? "🎙️ Audio"
+                : "📎 Attachment";
+          }
+        } catch (e) {
+          console.error("Inbound media handling failed:", e?.data || e);
 
-              const mimeFromMeta = String(meta?.mime_type || "").trim();
-              const mimeFromWebhook = String(mediaObj?.mime_type || "").trim();
-              const baseMime =
-                (mimeFromMeta || mimeFromWebhook || "application/octet-stream").trim() ||
-                "application/octet-stream";
-
-              const filename =
-                String(mediaObj?.filename || mediaObj?.name || "").trim() ||
-                `${type || "media"}_${p10 || "unknown"}_${mediaId}.${extFromMime(
-                  baseMime
-                )}`;
- 
-              media = {
-                id: mediaId,
-                url: proxyUrlForMediaId(mediaId),
-                mime: baseMime,
-                filename,
-              };
- 
-              if (meta.downloadUrl) {
-                try {
-                  const dl = await download360Attachment(meta.downloadUrl);
-                  const buffer = dl?.buffer || null;
- 
-                  let bestMime = String(dl?.mime || baseMime || "").trim();
-                  if (!bestMime && String(type).toLowerCase() === "audio") {
-                    bestMime = "audio/ogg; codecs=opus";
-                  }
-                  if (!bestMime) bestMime = "application/octet-stream";
-
-                  let wasabiUrl = null;
-                  if (buffer) {
-                    wasabiUrl = await uploadInboundToWasabi({
-                      buffer,
-                      mime: bestMime,
-                      filename,
-                      from10: p10,
-                      mediaId,
-                      msgType: type || msgType,
-                    });
-                  }
-
-                  media = {
-                    id: mediaId,
-                    url: wasabiUrl || proxyUrlForMediaId(mediaId),
-                    mime: bestMime,
-                    filename,
-                  };
-                } catch (uploadErr) {
-                  console.error(
-                    "Inbound Wasabi upload failed (keeping proxy url):",
-                    uploadErr?.response?.data || uploadErr
-                  );
-                }
-              }
- 
-              if (!text) {
-                const t = String(type || msgType || "").toLowerCase();
-                text =
-                  t === "image"
-                    ? "📷 Photo"
-                    : t === "video"
-                    ? "🎥 Video"
-                    : t === "audio"
-                    ? "🎙️ Audio"
-                    : "📎 Attachment";
-              }
-            } catch (e) {
-              console.error("Inbound media handling failed:", e.response?.data || e);
-
-              if (!text) {
-                const t = String(type || msgType || "").toLowerCase();
-                text = t === "audio" ? "🎙️ Audio" : "📎 Attachment";
-              }
-
-              if (!media) {
-                media = {
-                  id: mediaId,
-                  url: proxyUrlForMediaId(mediaId),
-                  mime: String(mediaObj?.mime_type || "").trim() || "",
-                  filename: String(mediaObj?.filename || mediaObj?.name || "").trim() || "",
-                };
-              }
-            }
+          if (!text) {
+            text =
+              type === "image"
+                ? "📷 Photo"
+                : type === "video"
+                ? "🎥 Video"
+                : type === "audio"
+                ? "🎙️ Audio"
+                : "📎 Attachment";
           }
 
-          const created = await WhatsAppMessage.create({
-            waId: msg.id,
-            from,
-            to,
-            direction: "INBOUND",
-            type,
-            text: String(text || "").slice(0, 4000),
-            status: "received",
-            timestamp: now,
-            media: media || undefined,
-            raw: msg,
-          });
- 
-          const updatedConv = await WhatsAppConversation.findOneAndUpdate(
-            { phone: new RegExp(`${p10}$`) },
-            {
-              $set: {
-                phone: from,
-                lastMessageAt: now,
-                lastMessageText: String(text || "").slice(0, 200),
-                lastInboundAt: now,
-                windowExpiresAt: windowExpiry, 
-              },
-              $inc: { unreadCount: 1 },
-            },
-            { upsert: true, new: true }
-          ).lean();
-
-          emitMessage(req, created);
-
-          emitConversationPatch(req, {
-            phone10: p10,
-            patch: {
-              lastMessageAt: updatedConv?.lastMessageAt || now,
-              lastMessageText:
-                updatedConv?.lastMessageText || String(text || "").slice(0, 200),
-              lastInboundAt: updatedConv?.lastInboundAt || now,
-              windowExpiresAt: updatedConv?.windowExpiresAt || windowExpiry,
-              unreadCount: updatedConv?.unreadCount ?? 1,
-            },
-          });
+          if (!media) {
+            media = {
+              id: mediaId,
+              url: msg?.media?.url || proxyUrlForMediaId(mediaId),
+              mime: String(msg?.media?.mime || "").trim() || "",
+              filename: String(msg?.media?.filename || "").trim() || "",
+            };
+          }
         }
       }
+
+      const created = await WhatsAppMessage.create({
+        waId: waId || undefined,
+        from,
+        to,
+        direction: "INBOUND",
+        type,
+        text: String(text || "").slice(0, 4000),
+        status: "received",
+        timestamp: now,
+        media: media || undefined,
+        raw: msg.raw || msg,
+      });
+
+      const updatedConv = await WhatsAppConversation.findOneAndUpdate(
+        { phone: new RegExp(`${p10}$`) },
+        {
+          $set: {
+            phone: from,
+            lastMessageAt: now,
+            lastMessageText: String(text || "").slice(0, 200),
+            lastInboundAt: now,
+            windowExpiresAt: windowExpiry,
+          },
+          $inc: { unreadCount: 1 },
+        },
+        { upsert: true, new: true }
+      ).lean();
+
+      emitMessage(req, created);
+
+      emitConversationPatch(req, {
+        phone10: p10,
+        patch: {
+          lastMessageAt: updatedConv?.lastMessageAt || now,
+          lastMessageText:
+            updatedConv?.lastMessageText || String(text || "").slice(0, 200),
+          lastInboundAt: updatedConv?.lastInboundAt || now,
+          windowExpiresAt: updatedConv?.windowExpiresAt || windowExpiry,
+          unreadCount: updatedConv?.unreadCount ?? 1,
+        },
+      });
     }
 
     return res.sendStatus(200);
   } catch (e) {
-    console.error("webhook error:", e.response?.data || e);
+    console.error("webhook error:", e?.data || e);
     return res.sendStatus(200);
   }
 });

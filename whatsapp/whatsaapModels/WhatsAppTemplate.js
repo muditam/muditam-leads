@@ -28,6 +28,9 @@ const WhatsAppTemplateSchema = new mongoose.Schema(
     rejectionReason: { type: String, default: "" },
 
     raw360: { type: mongoose.Schema.Types.Mixed },
+    template_id: { type: String, default: "", index: true },
+    templateId: { type: String, default: "" },
+    providerTemplateId: { type: String, default: "" },
 
     syncedAt: Date,
     lastSubmittedAt: Date,
