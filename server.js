@@ -280,6 +280,13 @@ app.use(session({
   },
 }));
 
+function requireSession(req, res, next) {
+  if (!req.session || !req.session.user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+}
+
 function toNumberLoose(v) {
   if (v === null || v === undefined) return undefined;
   if (typeof v === "number" && !Number.isNaN(v)) return v;
@@ -557,7 +564,7 @@ app.use('/', exportLeadsRouter);
 
 app.use("/api/leads/retention", activeCountsRoute);
 
-app.use('/api', summaryRoutes);
+app.use('/api', summaryRoutes); 
 
 app.use('/api/dashboard', dashboardRoutes);
 
@@ -1060,7 +1067,7 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
 const phoneLast10 = (v = "") => String(v).replace(/\D/g, "").slice(-10);
 
 
-app.post('/api/leads/by-phones', async (req, res) => {
+app.post('/api/leads/by-phones', requireSession, async (req, res) => {
   const { phoneNumbers } = req.body;
   if (!Array.isArray(phoneNumbers)) {
     return res.status(400).json({ message: 'phoneNumbers should be an array' });
@@ -1267,7 +1274,7 @@ async function fetchShopifyFirstOrderDateByPhone(phone) {
   }
 }
 
-app.post('/api/leads/update-lastOrderDate-from-shopify', async (req, res) => {
+app.post('/api/leads/update-lastOrderDate-from-shopify', requireSession, async (req, res) => {
   try {
     console.log("Starting update of lastOrderDate from Shopify...");
 
@@ -1418,7 +1425,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
 });
 
 
-app.get('/api/leads/check-duplicate', async (req, res) => {
+app.get('/api/leads/check-duplicate', requireSession, async (req, res) => {
   const { contactNumber } = req.query;
 
   try {
@@ -1436,7 +1443,7 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
 });
 
 
-app.get('/api/leads', async (req, res) => {
+app.get('/api/leads', requireSession, async (req, res) => {
   const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus, sortBy = '_id', sortOrder = 'desc' } = req.query;
   const filterCriteria = JSON.parse(filters);
 
@@ -1534,7 +1541,7 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
-app.post('/api/leads', async (req, res) => {
+app.post('/api/leads', requireSession, async (req, res) => {
   try {
     if (req.body.contactNumber) {
       req.body.contactNumber = phoneLast10(req.body.contactNumber);
@@ -1549,7 +1556,7 @@ app.post('/api/leads', async (req, res) => {
   }
 });
 
-app.put('/api/leads/:id', async (req, res) => {
+app.put('/api/leads/:id', requireSession, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -1574,7 +1581,7 @@ app.put('/api/leads/:id', async (req, res) => {
 });
 
 
-app.delete('/api/leads/:id', async (req, res) => {
+app.delete('/api/leads/:id', requireSession, async (req, res) => {
   try {
     const deletedLead = await Lead.findByIdAndDelete(req.params.id);
     if (!deletedLead) {
@@ -1601,7 +1608,7 @@ function getReminderType(nextFollowupDate) {
   return "Later";
 }
 
-app.get("/api/leads/retention", async (req, res) => {
+app.get("/api/leads/retention", requireSession, async (req, res) => {
   try {
     let {
       page = 1,
@@ -1861,7 +1868,7 @@ app.get("/api/leads/retention", async (req, res) => {
   }
 });
 
-app.get('/api/leads/retentions', async (req, res) => {
+app.get('/api/leads/retentions', requireSession, async (req, res) => {
   const { fullName, email } = req.query;
   if (!fullName || !email) {
     return res.status(400).json({ message: 'Full name and email are required' });

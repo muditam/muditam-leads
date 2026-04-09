@@ -26,9 +26,11 @@ const TRUSTSIGNAL_API_BASE = String(
   process.env.TRUSTSIGNAL_API_BASE || "https://wpapi.trustsignal.io"
 ).replace(/\/+$/, "");
 
-const TRUSTSIGNAL_API_KEY = String(process.env.TRUSTSIGNAL_API_KEY || "").trim();
+const TRUSTSIGNAL_API_KEY = String(
+  process.env.TRUSTSIGNAL_API_KEY || ""
+).trim();
 
-const TS_PATH_SEND_TEXT = "/api/v1/whatsapp/single";
+const TS_PATH_SEND_TEXT = "/api/v1/whatsapp/agent-reply";
 const TS_PATH_SEND_TEMPLATE = "/api/v1/whatsapp/single";
 
 /*
@@ -161,7 +163,13 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
   if (resp.status >= 200 && resp.status < 300) return resp;
 
   const message =
-    deepPick(resp.data, ["message", "error.message", "error", "details", "result.message"]) ||
+    deepPick(resp.data, [
+      "message",
+      "error.message",
+      "error",
+      "details",
+      "result.message",
+    ]) ||
     (typeof resp.data === "string" ? resp.data : "") ||
     `${fallbackMessage} (${resp.status})`;
 
@@ -172,7 +180,9 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
 }
 
 function isHtmlLikeResponse(data, headers = {}) {
-  const ct = String(headers["content-type"] || headers["Content-Type"] || "").toLowerCase();
+  const ct = String(
+    headers["content-type"] || headers["Content-Type"] || ""
+  ).toLowerCase();
 
   if (ct.includes("text/html")) return true;
 
@@ -256,7 +266,8 @@ async function tsRequest({
   if (!responseType && isHtmlLikeResponse(resp.data, resp.headers || {})) {
     const err = new Error("Received HTML page instead of API JSON");
     err.status = 502;
-    err.data = typeof resp.data === "string" ? resp.data.slice(0, 1000) : resp.data;
+    err.data =
+      typeof resp.data === "string" ? resp.data.slice(0, 1000) : resp.data;
     throw err;
   }
 
@@ -312,9 +323,14 @@ function extractProviderMediaUrl(data) {
 }
 
 function getTrustSignalSenderOrThrow() {
-  const sender = String(
-    process.env.TRUSTSIGNAL_SENDER_ID || process.env.TRUSTSIGNAL_SENDER || ""
+  const senderRaw = String(
+    process.env.TRUSTSIGNAL_SENDER_ID ||
+      process.env.TRUSTSIGNAL_SENDER ||
+      process.env.WHATSAPP_BUSINESS_PHONE ||
+      ""
   ).trim();
+
+  const sender = digitsOnly(senderRaw) || senderRaw;
 
   if (!sender) {
     const err = new Error(
@@ -340,7 +356,8 @@ function templateComponents(tpl) {
 function extractTemplateBodyText(tpl) {
   if (!tpl) return "";
   if (typeof tpl?.body === "string" && tpl.body.trim()) return tpl.body;
-  if (typeof tpl?.bodyText === "string" && tpl.bodyText.trim()) return tpl.bodyText;
+  if (typeof tpl?.bodyText === "string" && tpl.bodyText.trim())
+    return tpl.bodyText;
   if (typeof tpl?.text === "string" && tpl.text.trim()) return tpl.text;
 
   const comps = templateComponents(tpl);
@@ -425,9 +442,31 @@ const emitConversationPatch = (req, { phone10, patch }) => {
 };
 
 function freeformExpiryFromConvo(convo) {
-  const t = convo?.lastInboundAt ? new Date(convo.lastInboundAt).getTime() : 0;
+  const t = convo?.lastInboundAt
+    ? new Date(convo.lastInboundAt).getTime()
+    : 0;
   if (!t) return null;
   return new Date(t + 24 * 60 * 60 * 1000);
+}
+
+async function sendFreeformTextViaTrustSignal({ sender, toNumber, text }) {
+  const textValue = String(text || "").trim();
+
+  const payload = {
+    message_type: "text",
+    sender: toE164Plus(sender),
+    to: toE164Plus(toNumber),
+    reply: {
+      message: textValue,
+    },
+  };
+
+  return await tsRequest({
+    method: "POST",
+    path: TS_PATH_SEND_TEXT,
+    data: payload,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 /* ----------------------------------------
@@ -508,12 +547,17 @@ function extFromMime(mime = "") {
   if (m.includes("mp4")) return "mp4";
   if (m.includes("pdf")) return "pdf";
 
-  if (m.includes("audio/ogg") || m.includes("application/ogg") || m.includes("ogg"))
+  if (
+    m.includes("audio/ogg") ||
+    m.includes("application/ogg") ||
+    m.includes("ogg")
+  )
     return "ogg";
   if (m.includes("opus")) return "ogg";
   if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
   if (m.includes("wav")) return "wav";
-  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac")) return "m4a";
+  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac"))
+    return "m4a";
 
   return "bin";
 }
@@ -561,7 +605,9 @@ async function uploadInboundToWasabi({
 }
 
 const proxyUrlForMediaId = (mediaId) =>
-  `/api/whatsapp/media-proxy/${encodeURIComponent(String(mediaId || "").trim())}`;
+  `/api/whatsapp/media-proxy/${encodeURIComponent(
+    String(mediaId || "").trim()
+  )}`;
 
 /* ----------------------------------------
    WEBHOOK PARSER
@@ -587,7 +633,8 @@ function textFromInboundMessage(msg = {}) {
 
 function mediaFromInboundMessage(msg = {}, item = {}) {
   const type = String(
-    deepPick(msg, ["type", "message_type", "content.type", "payload.type"]) || "text"
+    deepPick(msg, ["type", "message_type", "content.type", "payload.type"]) ||
+      "text"
   ).toLowerCase();
 
   const node =
@@ -600,21 +647,44 @@ function mediaFromInboundMessage(msg = {}, item = {}) {
       "image",
       "audio",
       "video",
+      "sticker",
     ]) || {};
 
+  const mediaId = String(
+    deepPick(node, ["id", "media_id"]) ||
+      deepPick(msg, ["media_id"]) ||
+      ""
+  ).trim();
+
+  const url = String(
+    deepPick(node, ["url", "download_url"]) ||
+      (mediaId ? item?.__fileurl : "") ||
+      ""
+  ).trim();
+
+  const mime = String(
+    deepPick(node, ["mime_type", "mime", "content_type"]) || ""
+  ).trim();
+
+  const filename = String(
+    deepPick(node, ["filename", "file_name", "name"]) || ""
+  ).trim();
+
+  if (!mediaId && !url && !mime && !filename) {
+    return {
+      id: "",
+      url: "",
+      mime: "",
+      filename: "",
+      type: "",
+    };
+  }
+
   return {
-    id: String(
-      deepPick(node, ["id", "media_id"]) ||
-        deepPick(msg, ["media_id", "id"]) ||
-        ""
-    ).trim(),
-    url: String(
-      deepPick(node, ["url", "download_url"]) ||
-        item?.__fileurl ||
-        ""
-    ).trim(),
-    mime: String(deepPick(node, ["mime_type", "mime", "content_type"]) || "").trim(),
-    filename: String(deepPick(node, ["filename", "file_name", "name"]) || "").trim(),
+    id: mediaId,
+    url,
+    mime,
+    filename,
     type,
   };
 }
@@ -682,136 +752,18 @@ function parseWebhookPayload(body = {}) {
     );
     if (businessPhone && !out.businessPhone) out.businessPhone = businessPhone;
 
-    const statuses = asArray(item?.statuses || item?.status_updates || item?.status || []);
-    for (const st of statuses) {
-      const waId = String(deepPick(st, ["id", "wa_id", "message_id"]) || "").trim();
-      const status = String(
-        deepPick(st, ["status", "state", "event"]) || ""
-      ).toLowerCase().trim();
-      const phone = normalizeWaId(
-        deepPick(st, ["recipient_id", "to", "phone", "customer_phone"]) || ""
-      );
-
-      if (waId && status) {
-        out.statuses.push({
-          waId,
-          status,
-          phone,
-          errors: Array.isArray(st?.errors) ? st.errors : [],
-          raw: st,
-        });
-      }
-    }
-
-    const messages = asArray(item?.messages || item?.message || item?.inbound_messages || []);
-    for (const msg of messages) {
-      const waId = String(deepPick(msg, ["id", "wa_id", "message_id"]) || "").trim();
-      const from = normalizeWaId(
-        deepPick(msg, ["from", "customer.phone", "sender"]) ||
-          deepPick(item, ["contacts.0.wa_id"]) ||
-          ""
-      );
-      const timestampRaw = deepPick(msg, ["timestamp", "time", "created_at"]);
-      const timestamp = timestampRaw
-        ? new Date(Number(timestampRaw) ? Number(timestampRaw) * 1000 : timestampRaw)
-        : new Date();
-
-      const text = textFromInboundMessage(msg);
-      const media = mediaFromInboundMessage(msg, item);
-      const type = String(
-        deepPick(msg, ["type", "message_type", "content.type"]) || media.type || "text"
-      ).toLowerCase();
-
-      out.messages.push({
-        waId,
-        from,
-        to: businessPhone || out.businessPhone || "",
-        text,
-        type,
-        media: {
-          id: media.id || "", 
-          url: media.url || "",
-          mime: media.mime || "",
-          filename: media.filename || "",
-        },
-        raw: msg,
-        timestamp,
-      });
-    }
-  }
-
-  return out;
-}
-
-function parseWebhookPayload(body = {}) {
-  const buckets = [];
-  const topWebhookType = String(body?.webhook_type || "").trim();
-  const topFileUrl = String(body?.fileurl || "").trim();
-  const topAcid = String(body?.acid || "").trim();
-
-  if (Array.isArray(body?.entry)) {
-    for (const entry of body.entry) {
-      for (const change of entry.changes || []) {
-        buckets.push({
-          ...(change?.value || {}),
-          __webhook_type: change?.webhook_type || topWebhookType || "",
-          __fileurl: topFileUrl || "",
-          __acid: topAcid || "",
-        });
-      }
-    }
-  } else if (Array.isArray(body?.events)) {
-    for (const ev of body.events) {
-      buckets.push({
-        ...(ev || {}),
-        __webhook_type: ev?.webhook_type || topWebhookType || "",
-        __fileurl: ev?.fileurl || topFileUrl || "",
-        __acid: ev?.acid || topAcid || "",
-      });
-    }
-  } else if (body?.value && isObjectLike(body.value)) {
-    buckets.push({
-      ...(body.value || {}),
-      __webhook_type: topWebhookType || "",
-      __fileurl: topFileUrl || "",
-      __acid: topAcid || "",
-    });
-  } else if (body?.data || body?.messages || body?.statuses) {
-    buckets.push({
-      ...(body.data || body),
-      __webhook_type: topWebhookType || "",
-      __fileurl: topFileUrl || "",
-      __acid: topAcid || "",
-    });
-  } else {
-    buckets.push({
-      ...(body || {}),
-      __webhook_type: topWebhookType || "",
-      __fileurl: topFileUrl || "",
-      __acid: topAcid || "",
-    });
-  }
-
-  const out = { businessPhone: "", statuses: [], messages: [] };
-
-  for (const item of buckets) {
-    const businessPhone = normalizeWaId(
-      deepPick(item, [
-        "metadata.display_phone_number",
-        "business_phone",
-        "phone_number",
-        "sender",
-        "channel.phone",
-      ]) || ""
+    const statuses = asArray(
+      item?.statuses || item?.status_updates || item?.status || []
     );
-    if (businessPhone && !out.businessPhone) out.businessPhone = businessPhone;
-
-    const statuses = asArray(item?.statuses || item?.status_updates || item?.status || []);
     for (const st of statuses) {
-      const waId = String(deepPick(st, ["id", "wa_id", "message_id"]) || "").trim();
+      const waId = String(
+        deepPick(st, ["id", "wa_id", "message_id"]) || ""
+      ).trim();
       const status = String(
         deepPick(st, ["status", "state", "event"]) || ""
-      ).toLowerCase().trim();
+      )
+        .toLowerCase()
+        .trim();
       const phone = normalizeWaId(
         deepPick(st, ["recipient_id", "to", "phone", "customer_phone"]) || ""
       );
@@ -827,9 +779,13 @@ function parseWebhookPayload(body = {}) {
       }
     }
 
-    const messages = asArray(item?.messages || item?.message || item?.inbound_messages || []);
+    const messages = asArray(
+      item?.messages || item?.message || item?.inbound_messages || []
+    );
     for (const msg of messages) {
-      const waId = String(deepPick(msg, ["id", "wa_id", "message_id"]) || "").trim();
+      const waId = String(
+        deepPick(msg, ["id", "wa_id", "message_id"]) || ""
+      ).trim();
       const from = normalizeWaId(
         deepPick(msg, ["from", "customer.phone", "sender"]) ||
           deepPick(item, ["contacts.0.wa_id"]) ||
@@ -843,7 +799,9 @@ function parseWebhookPayload(body = {}) {
       const text = textFromInboundMessage(msg);
       const media = mediaFromInboundMessage(msg, item);
       const type = String(
-        deepPick(msg, ["type", "message_type", "content.type"]) || media.type || "text"
+        deepPick(msg, ["type", "message_type", "content.type"]) ||
+          media.type ||
+          "text"
       ).toLowerCase();
 
       out.messages.push({
@@ -898,7 +856,10 @@ router.post("/upload-template-media", upload.single("file"), async (req, res) =>
 
     return res.json({ success: true, mediaId });
   } catch (e) {
-    console.error("upload-template-media error:", e?.response?.data || e?.data || e);
+    console.error(
+      "upload-template-media error:",
+      e?.response?.data || e?.data || e
+    );
     return res.status(e?.response?.status || e?.status || 400).json({
       message: e?.message || "Upload template media failed",
       providerError: e?.response?.data || e?.data || null,
@@ -1027,7 +988,9 @@ router.get("/messages", async (req, res) => {
 
 router.get("/templates", async (req, res) => {
   try {
-    const tpls = await WhatsAppTemplate.find({}).sort({ updatedAt: -1 }).lean();
+    const tpls = await WhatsAppTemplate.find({})
+      .sort({ updatedAt: -1 })
+      .lean();
     res.json(tpls || []);
   } catch (e) {
     console.error("load templates error:", e);
@@ -1038,7 +1001,9 @@ router.get("/templates", async (req, res) => {
 router.post("/send-text", async (req, res) => {
   try {
     const { to, text } = req.body;
-    if (!to || !String(text || "").trim()) {
+    const textValue = String(text || "").trim();
+
+    if (!to || !textValue) {
       return res.status(400).json({ message: "to & text required" });
     }
 
@@ -1061,18 +1026,10 @@ router.post("/send-text", async (req, res) => {
     const sender = getTrustSignalSenderOrThrow();
     const toNumber = getTrustSignalRecipient(phone);
 
-    const payload = {
-      message_type: "text",
+    const r = await sendFreeformTextViaTrustSignal({
       sender,
-      to: toNumber,
-      message: String(text).trim(),
-    };
-
-    const r = await tsRequest({
-      method: "POST",
-      path: TS_PATH_SEND_TEXT,
-      data: payload,
-      headers: { "Content-Type": "application/json" },
+      toNumber,
+      text: textValue,
     });
 
     const now = new Date();
@@ -1081,7 +1038,7 @@ router.post("/send-text", async (req, res) => {
       waId: extractProviderMessageId(r.data),
       from: senderForDb(sender),
       to: phone,
-      text: String(text).trim(),
+      text: textValue,
       direction: "OUTBOUND",
       type: "text",
       status: "sent",
@@ -1095,7 +1052,7 @@ router.post("/send-text", async (req, res) => {
         $set: {
           phone,
           lastMessageAt: now,
-          lastMessageText: String(text).trim().slice(0, 200),
+          lastMessageText: textValue.slice(0, 200),
           lastOutboundAt: now,
         },
       },
@@ -1107,7 +1064,7 @@ router.post("/send-text", async (req, res) => {
       phone10: p10,
       patch: {
         lastMessageAt: now,
-        lastMessageText: String(text).trim().slice(0, 200),
+        lastMessageText: textValue.slice(0, 200),
         lastOutboundAt: now,
       },
     });
@@ -1121,7 +1078,8 @@ router.post("/send-text", async (req, res) => {
       data,
       (x) =>
         String(x?.code || "") === "1013" ||
-        String(x?.codeMsg || "").toUpperCase() === "WHATSAPP_COUNTRY_NOT_ALLOWED"
+        String(x?.codeMsg || "").toUpperCase() ===
+          "WHATSAPP_COUNTRY_NOT_ALLOWED"
     );
 
     if (countryBlocked) {
@@ -1130,6 +1088,26 @@ router.post("/send-text", async (req, res) => {
         code: "WHATSAPP_COUNTRY_NOT_ALLOWED",
         message:
           "Send text failed: this TrustSignal sender/account is not enabled to send WhatsApp messages to this destination country.",
+        providerError: data,
+      });
+    }
+
+    const templateRequired = findProviderError(
+      data,
+      (x) =>
+        String(x?.code || "") === "119" ||
+        String(x?.codeMsg || "").toUpperCase() === "TEMPLATE_NOT_APPROVED" ||
+        String(x?.message || "")
+          .toLowerCase()
+          .includes("template id is required")
+    );
+
+    if (templateRequired) {
+      return res.status(400).json({
+        success: false,
+        code: "TEXT_PAYLOAD_REJECTED",
+        message:
+          "Send text failed: TrustSignal is rejecting the freeform text payload on the current endpoint.",
         providerError: data,
       });
     }
@@ -1160,7 +1138,9 @@ router.post("/send-template", async (req, res) => {
     } = req.body;
 
     if (!to || (!templateName && !requestedTemplateId)) {
-      return res.status(400).json({ message: "to & templateName/templateId required" });
+      return res
+        .status(400)
+        .json({ message: "to & templateName/templateId required" });
     }
 
     const rawDigits = digitsOnly(to);
@@ -1225,8 +1205,11 @@ router.post("/send-template", async (req, res) => {
 
     const clientText = String(renderedText || "").trim();
     const serverBody = extractTemplateBodyText(tpl);
-    const serverText = serverBody ? applyTemplateVars(serverBody, asArray(parameters)) : "";
-    const finalText = clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
+    const serverText = serverBody
+      ? applyTemplateVars(serverBody, asArray(parameters))
+      : "";
+    const finalText =
+      clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
 
     const created = await WhatsAppMessage.create({
       waId: extractProviderMessageId(r.data),
@@ -1287,7 +1270,8 @@ router.post("/send-template", async (req, res) => {
       data,
       (x) =>
         String(x?.code || "") === "1013" ||
-        String(x?.codeMsg || "").toUpperCase() === "WHATSAPP_COUNTRY_NOT_ALLOWED"
+        String(x?.codeMsg || "").toUpperCase() ===
+          "WHATSAPP_COUNTRY_NOT_ALLOWED"
     );
 
     if (countryBlocked) {
@@ -1386,7 +1370,9 @@ router.post("/webhook", async (req, res) => {
       const acid = String(req.body?.acid || "").trim();
 
       const senderInEnv = String(
-        process.env.TRUSTSIGNAL_SENDER_ID || process.env.TRUSTSIGNAL_SENDER || ""
+        process.env.TRUSTSIGNAL_SENDER_ID ||
+          process.env.TRUSTSIGNAL_SENDER ||
+          ""
       ).trim();
 
       const displayDigits = digitsOnly(displayPhoneNumber);
@@ -1403,7 +1389,11 @@ router.post("/webhook", async (req, res) => {
             current_limit: currentLimit,
             old_limit: oldLimit,
             sender_env: senderInEnv,
-            sender_matches_env: Boolean(displayDigits && envDigits && displayDigits === envDigits),
+            sender_matches_env: Boolean(
+              displayDigits &&
+                envDigits &&
+                displayDigits === envDigits
+            ),
           },
           null,
           2
@@ -1421,9 +1411,13 @@ router.post("/webhook", async (req, res) => {
           {
             webhook_type: "phone_number_name_update",
             acid: String(req.body?.acid || "").trim(),
-            display_phone_number: String(value?.display_phone_number || "").trim(),
+            display_phone_number: String(
+              value?.display_phone_number || ""
+            ).trim(),
             decision: String(value?.decision || "").trim(),
-            requested_verified_name: String(value?.requested_verified_name || "").trim(),
+            requested_verified_name: String(
+              value?.requested_verified_name || ""
+            ).trim(),
             rejection_reason: String(value?.rejection_reason || "").trim(),
           },
           null,
@@ -1444,8 +1438,12 @@ router.post("/webhook", async (req, res) => {
     if (webhookType === "message_template_status_update") {
       const value = req.body?.value || {};
       const templateId = String(value?.message_template_id || "").trim();
-      const templateName = normalizeTemplateName(value?.message_template_name || "");
-      const language = String(value?.message_template_language || "").trim();
+      const templateName = normalizeTemplateName(
+        value?.message_template_name || ""
+      );
+      const language = String(
+        value?.message_template_language || ""
+      ).trim();
       const event = normalizeTemplateStatus(value?.event || "");
       const reason = String(value?.reason || "").trim();
 
@@ -1498,8 +1496,12 @@ router.post("/webhook", async (req, res) => {
     if (webhookType === "template_category_update") {
       const value = req.body?.value || {};
       const templateId = String(value?.message_template_id || "").trim();
-      const templateName = normalizeTemplateName(value?.message_template_name || "");
-      const language = String(value?.message_template_language || "").trim();
+      const templateName = normalizeTemplateName(
+        value?.message_template_name || ""
+      );
+      const language = String(
+        value?.message_template_language || ""
+      ).trim();
       const newCategory = normalizeTemplateCategory(value?.new_category || "");
 
       const filter = templateId
@@ -1587,7 +1589,9 @@ router.post("/webhook", async (req, res) => {
       const waId = String(msg?.waId || "").trim();
 
       if (waId) {
-        const already = await WhatsAppMessage.findOne({ waId }).select("_id").lean();
+        const already = await WhatsAppMessage.findOne({ waId })
+          .select("_id")
+          .lean();
         if (already) continue;
       }
 
@@ -1601,14 +1605,16 @@ router.post("/webhook", async (req, res) => {
 
       let type = String(msg?.type || "text").toLowerCase();
       let text = String(msg?.text || "").trim();
+
       const mediaId = String(msg?.media?.id || "").trim();
+      const hasActualMedia =
+        Boolean(mediaId) &&
+        ["image", "video", "audio", "document", "sticker"].includes(type);
 
       let media = null;
 
-      if (mediaId) {
-        if (!["image", "video", "audio", "document"].includes(type)) {
-          type = "document";
-        }
+      if (hasActualMedia) {
+        if (type === "sticker") type = "image";
 
         try {
           const meta = await fetchMediaMeta(mediaId);
@@ -1637,7 +1643,9 @@ router.post("/webhook", async (req, res) => {
               asStream: false,
             });
 
-            const buffer = Buffer.isBuffer(dl.data) ? dl.data : Buffer.from(dl.data);
+            const buffer = Buffer.isBuffer(dl.data)
+              ? dl.data
+              : Buffer.from(dl.data);
             const bestMime =
               String(dl.headers?.["content-type"] || baseMime || "").trim() ||
               "application/octet-stream";
@@ -1653,7 +1661,10 @@ router.post("/webhook", async (req, res) => {
 
             media = {
               id: mediaId,
-              url: wasabiUrl || msg?.media?.url || proxyUrlForMediaId(mediaId),
+              url:
+                wasabiUrl ||
+                msg?.media?.url ||
+                proxyUrlForMediaId(mediaId),
               mime: bestMime,
               filename,
             };
@@ -1699,6 +1710,10 @@ router.post("/webhook", async (req, res) => {
         }
       }
 
+      if (!media) {
+        type = "text";
+      }
+
       const created = await WhatsAppMessage.create({
         waId: waId || undefined,
         from,
@@ -1731,7 +1746,7 @@ router.post("/webhook", async (req, res) => {
 
       emitConversationPatch(req, {
         phone10: p10,
-        patch: {
+        patch: { 
           lastMessageAt: updatedConv?.lastMessageAt || now,
           lastMessageText:
             updatedConv?.lastMessageText || String(text || "").slice(0, 200),
