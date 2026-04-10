@@ -262,28 +262,23 @@ app.options("*", cors({
   ],
 }));
 
-const isProd =
-  process.env.NODE_ENV === "production" ||
-  process.env.APP_ENV === "production";
-
 app.set("trust proxy", 1);
+ 
+const isProd = process.env.NODE_ENV === "production";
 
-app.use(
-  session({
-    name: "sid",
-    secret: process.env.SESSION_SECRET || "dev-secret",
-    resave: false,
-    saveUninitialized: false,
-    proxy: isProd,
-    store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
-    cookie: {
-      httpOnly: true,
-      sameSite: isProd ? "none" : "lax",
-      secure: isProd,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    },
-  })
-);
+app.use(session({
+  name: "sid",
+  secret: process.env.SESSION_SECRET || "dev-secret",
+  resave: false,
+  saveUninitialized: false,
+  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
+  cookie: {
+    httpOnly: true,
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd, // true only on https
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+}));
 
 function requireSession(req, res, next) {
   if (!req.session || !req.session.user) {
@@ -577,7 +572,7 @@ app.use("/api/order-by-id", orderByIdRoutes);
 
 app.use("/api/orders/combined", combinedOrdersRoute);
 
-app.use(requireSession, customerRoutes);
+app.use(customerRoutes);
 
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
@@ -621,7 +616,7 @@ app.use('/api/leads', leadTransfer);
 
 app.use('/api/search', searchRoutes);
 
-app.use(requireSession, Addemployee);
+app.use(Addemployee);
 
 app.use('/api', authRoutes);
 

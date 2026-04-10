@@ -1,69 +1,70 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const Employee = require("../models/Employee");
 
-
-
-
-
-
-function getChangedFields(oldData, newData) {
-  const changes = {};
-  const oldObj = oldData.toObject ? oldData.toObject() : oldData;
- 
-  for (const key in newData) {
-    if (key !== 'password' && newData.hasOwnProperty(key)) {
-      const oldVal = JSON.stringify(oldObj[key]);
-      const newVal = JSON.stringify(newData[key]);
-     
-      if (oldVal !== newVal) {
-        changes[key] = { old: oldObj[key], new: newData[key] };
-      }
-    }
-  }
-  return changes;
+function normalizeEmail(email = "") {
+  return String(email).trim().toLowerCase();
 }
 
+function normalizeName(name = "") {
+  return String(name).trim().replace(/\s+/g, " ");
+}
+
+function isValidObjectId(id) {
+  return mongoose.Types.ObjectId.isValid(id);
+}
+
+function safeEmployeeResponse(employeeDoc) {
+  if (!employeeDoc) return null;
+  const obj = employeeDoc.toObject ? employeeDoc.toObject() : employeeDoc;
+  delete obj.password;
+  return obj;
+}
+
+function getActorName(req) {
+  return (
+    req.headers["x-agent-name"] ||
+    req.body?.changedByName ||
+    req.session?.user?.fullName ||
+    req.session?.user?.email ||
+    "Unknown"
+  );
+}
 
 router.get("/api/employees", async (req, res) => {
   const { role, fullName, email } = req.query;
 
-
   try {
-    // Special case: used by Navbar to fetch target/async etc for logged-in user
+    // Used by Navbar to fetch target/async etc for logged-in user
     if (fullName && email) {
-      const employee = await Employee.findOne({ fullName, email });
+      const employee = await Employee.findOne({
+        fullName: normalizeName(fullName),
+        email: normalizeEmail(email),
+      }).select("async agentNumber callerId target hasTeam isDoctor");
+
       if (!employee) {
         return res.status(404).json({ message: "Employee not found" });
       }
 
+      const { async, agentNumber, callerId, target, hasTeam, isDoctor } = employee;
 
-      const {
-        async,
-        agentNumber,
-        callerId,
-        target,
-        hasTeam,
-        isDoctor,
-      } = employee;
       return res.status(200).json([
         { async, agentNumber, callerId, target, hasTeam, isDoctor },
       ]);
     }
 
-
     const query = role ? { role } : {};
-
 
     const employees = await Employee.find(query)
       .select(
         "fullName email callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate languages permissions"
       )
-      .populate("teamLeader", "fullName");
-
+      .populate("teamLeader", "fullName")
+      .sort({ fullName: 1 });
 
     const formatted = employees.map((emp) => ({
-      ...emp.toObject(),
+      ...safeEmployeeResponse(emp),
       teamLeader: emp.teamLeader
         ? {
             _id: emp.teamLeader._id,
@@ -72,20 +73,25 @@ router.get("/api/employees", async (req, res) => {
         : null,
     }));
 
-
-    res.status(200).json(formatted);
+    return res.status(200).json(formatted);
   } catch (error) {
     console.error("Error fetching employees:", error);
-    res.status(500).json({ message: "Error fetching employees", error });
+    return res.status(500).json({ message: "Error fetching employees" });
   }
 });
 
-
-
-
-router.get("/api/employees/:id",  async (req, res) => {
+router.get("/api/employees/:id", async (req, res) => {
   try {
-    const emp = await Employee.findById(req.params.id)
+    const { id } = req.params;
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid employee id" });
+    }
+
+    const emp = await Employee.findById(id)
+      .select(
+        "fullName email callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate languages permissions auditLogs"
+      )
       .populate({
         path: "teamMembers",
         select:
@@ -97,28 +103,23 @@ router.get("/api/employees/:id",  async (req, res) => {
       })
       .populate("teamLeader", "fullName email role status");
 
+    if (!emp) {
+      return res.status(404).json({ message: "Not found" });
+    }
 
-    if (!emp) return res.status(404).json({ message: "Not found" });
+    const data = safeEmployeeResponse(emp);
 
-
-    const data = emp.toObject();
-
-
-    data.teamMembers = data.teamMembers.map((tm) => ({
+    data.teamMembers = (data.teamMembers || []).map((tm) => ({
       ...tm,
       teamLeader: tm.teamLeader?.fullName || "--",
     }));
 
-
-    res.json(data);
+    return res.status(200).json(data);
   } catch (err) {
     console.error("Error fetching employee:", err);
-    res.status(500).json({ message: "Error fetching employee", error: err });
+    return res.status(500).json({ message: "Error fetching employee" });
   }
 });
-
-
-
 
 router.post("/api/employees", async (req, res) => {
   const {
@@ -138,13 +139,13 @@ router.post("/api/employees", async (req, res) => {
     permissions,
   } = req.body;
 
-
   const isAgentRole = role === "Sales Agent" || role === "Retention Agent";
-
+  const normalizedFullName = normalizeName(fullName);
+  const normalizedEmail = normalizeEmail(email);
 
   if (
-    !fullName ||
-    !email ||
+    !normalizedFullName ||
+    !normalizedEmail ||
     !role ||
     !password ||
     (isAgentRole && (!callerId || !agentNumber))
@@ -154,28 +155,19 @@ router.post("/api/employees", async (req, res) => {
       .json({ message: "All required fields are not filled." });
   }
 
-
   try {
-    const existingEmployee = await Employee.findOne({ email });
+    const existingEmployee = await Employee.findOne({ email: normalizedEmail });
     if (existingEmployee) {
       return res.status(400).json({ message: "Email already exists." });
     }
 
-
-    // ✅ actor name for audit log (no middleware)
-    const actorName =
-      req.headers["x-agent-name"] ||
-      req.body.changedByName ||
-      req.session?.user?.fullName ||
-      req.session?.user?.email ||
-      "Unknown";
-
+    const actorName = getActorName(req);
 
     const newEmployee = new Employee({
-      fullName: String(fullName).trim(),
-      email,
-      callerId,
-      agentNumber,
+      fullName: normalizedFullName,
+      email: normalizedEmail,
+      callerId: callerId || "",
+      agentNumber: agentNumber || "",
       role,
       password,
       async: 1,
@@ -185,7 +177,9 @@ router.post("/api/employees", async (req, res) => {
       isDoctor: !!isDoctor,
       teamLeader: teamLeader || null,
       joiningDate: joiningDate || null,
-      languages: Array.isArray(languages) ? languages : [],
+      languages: Array.isArray(languages)
+        ? [...new Set(languages.map((s) => String(s).trim()))].filter(Boolean)
+        : [],
       permissions:
         permissions && typeof permissions === "object"
           ? {
@@ -195,30 +189,24 @@ router.post("/api/employees", async (req, res) => {
           : { menubar: {}, navbar: {} },
     });
 
-
-    // ✅ Add audit log ONCE
-    newEmployee.addAuditLog("CREATE", actorName);
-
+    if (typeof newEmployee.addAuditLog === "function") {
+      newEmployee.addAuditLog("CREATE", actorName);
+    }
 
     await newEmployee.save();
 
-
     return res.status(201).json({
       message: "Employee added successfully",
-      employee: newEmployee,
+      employee: safeEmployeeResponse(newEmployee),
     });
   } catch (error) {
     console.error("Error adding employee:", error);
-    return res.status(500).json({ message: "Error adding employee", error });
+    return res.status(500).json({ message: "Error adding employee" });
   }
 });
 
-
-
-
 router.put("/api/employees/:id", async (req, res) => {
   const { id } = req.params;
-
 
   const {
     callerId,
@@ -232,17 +220,20 @@ router.put("/api/employees/:id", async (req, res) => {
     languages,
     permissions,
     status,
-    changedByName, // optional
+    changedByName,
     ...rest
   } = req.body;
 
-
   try {
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid employee id" });
+    }
+
     const employee = await Employee.findById(id);
-    if (!employee) return res.status(404).json({ message: "Employee not found" });
+    if (!employee) {
+      return res.status(404).json({ message: "Employee not found" });
+    }
 
-
-    // ✅ DEFINE actorName (this was missing)
     const actorName =
       req.headers["x-agent-name"] ||
       changedByName ||
@@ -250,12 +241,25 @@ router.put("/api/employees/:id", async (req, res) => {
       req.session?.user?.email ||
       "Unknown";
 
-
     const oldStatus = employee.status;
-
-
     const updateData = { ...rest };
 
+    if (updateData.fullName !== undefined) {
+      updateData.fullName = normalizeName(updateData.fullName);
+    }
+
+    if (updateData.email !== undefined) {
+      updateData.email = normalizeEmail(updateData.email);
+
+      const existingEmployee = await Employee.findOne({
+        email: updateData.email,
+        _id: { $ne: id },
+      });
+
+      if (existingEmployee) {
+        return res.status(400).json({ message: "Email already exists." });
+      }
+    }
 
     if (callerId !== undefined) updateData.callerId = callerId;
     if (agentNumber !== undefined) updateData.agentNumber = agentNumber;
@@ -267,11 +271,9 @@ router.put("/api/employees/:id", async (req, res) => {
     if (joiningDate !== undefined) updateData.joiningDate = joiningDate || null;
     if (status !== undefined) updateData.status = status;
 
-
     if (Array.isArray(languages)) {
-      updateData.languages = [...new Set(languages.map(s => String(s).trim()))].filter(Boolean);
+      updateData.languages = [...new Set(languages.map((s) => String(s).trim()))].filter(Boolean);
     }
-
 
     if (permissions && typeof permissions === "object") {
       updateData.permissions = {
@@ -280,83 +282,72 @@ router.put("/api/employees/:id", async (req, res) => {
       };
     }
 
-
     let actionType = "UPDATE";
     if (status !== undefined && status !== oldStatus) {
       actionType = status === "active" ? "ACTIVATE" : "INACTIVATE";
     }
-  
-    employee.addAuditLog(actionType, actorName);
+
+    if (typeof employee.addAuditLog === "function") {
+      employee.addAuditLog(actionType, actorName);
+    }
 
     Object.assign(employee, { async: 1, ...updateData });
     await employee.save();
 
-
     return res.status(200).json({
       message: "Employee updated successfully",
-      employee,
+      employee: safeEmployeeResponse(employee),
     });
   } catch (error) {
     console.error("Error updating employee:", error);
-    return res.status(500).json({ message: "Error updating employee", error });
+    return res.status(500).json({ message: "Error updating employee" });
   }
 });
- 
 
 router.delete("/api/employees/:id", async (req, res) => {
   const { id } = req.params;
 
-
   try {
-    // ✅ actor name for audit log (no middleware)
-    const actorName =
-      req.headers["x-agent-name"] ||
-      req.body?.changedByName ||
-      req.session?.user?.fullName ||
-      req.session?.user?.email ||
-      "Unknown";
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid employee id" });
+    }
 
+    const actorName = getActorName(req);
 
-    // 1) Find employee first (needed for audit log)
     const employee = await Employee.findById(id);
     if (!employee) {
       return res.status(404).json({ message: "Employee not found" });
     }
 
+    if (typeof employee.addAuditLog === "function") {
+      employee.addAuditLog("INACTIVATE", actorName);
+      await employee.save();
+    }
 
-    // 2) Add audit log BEFORE deleting (only works if you keep the document)
-    employee.addAuditLog("INACTIVATE", actorName);
-
-
-    // 3) Save audit log
-    await employee.save();
-
-
-    // 4) Delete employee
     await employee.deleteOne();
 
-
-    const employees = await Employee.find({}, "-password");
-
+    const employees = await Employee.find({})
+      .select(
+        "fullName email callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate languages permissions"
+      )
+      .populate("teamLeader", "fullName")
+      .sort({ fullName: 1 });
 
     return res.status(200).json({
       message: "Employee deleted successfully",
-      employees,
+      employees: employees.map((emp) => safeEmployeeResponse(emp)),
     });
   } catch (error) {
     console.error("Error deleting employee:", error);
     return res.status(500).json({
       message: "Error deleting employee",
-      error,
     });
   }
 });
 
-
 router.put("/api/employees/:id/team", async (req, res) => {
   const { id } = req.params;
   const { teamMembers } = req.body;
-
 
   if (!Array.isArray(teamMembers)) {
     return res
@@ -364,63 +355,59 @@ router.put("/api/employees/:id/team", async (req, res) => {
       .json({ message: "teamMembers must be an array of employee IDs" });
   }
 
-
   try {
-    // ✅ actor name for audit log (no middleware)
-    const actorName =
-      req.headers["x-agent-name"] ||
-      req.body.changedByName ||
-      req.session?.user?.fullName ||
-      req.session?.user?.email ||
-      "Unknown";
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid manager id" });
+    }
 
+    const actorName = getActorName(req);
 
-    // ✅ Load manager first so we can append auditLogs
     const manager = await Employee.findById(id);
-    if (!manager) return res.status(404).json({ message: "Manager not found" });
+    if (!manager) {
+      return res.status(404).json({ message: "Manager not found" });
+    }
 
+    if (typeof manager.addAuditLog === "function") {
+      manager.addAuditLog("UPDATE", actorName);
+    }
 
-    // ✅ Audit log for team update (counts as UPDATE)
-    manager.addAuditLog("UPDATE", actorName);
-
-
-    // ✅ Apply update + save
     manager.teamMembers = teamMembers;
     manager.hasTeam = teamMembers.length > 0;
     manager.async = 1;
 
-
     await manager.save();
 
+    const populated = await Employee.findById(id)
+      .select(
+        "fullName email callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate languages permissions"
+      )
+      .populate("teamMembers", "fullName email role status target");
 
-    // Populate for response
-    const populated = await Employee.findById(id).populate(
-      "teamMembers",
-      "fullName email role status target"
-    );
-
-
-    return res.status(200).json({ message: "Team updated", manager: populated });
+    return res.status(200).json({
+      message: "Team updated",
+      manager: safeEmployeeResponse(populated),
+    });
   } catch (error) {
     console.error("Error updating team:", error);
-    return res.status(500).json({ message: "Error updating team", error });
+    return res.status(500).json({ message: "Error updating team" });
   }
 });
 
-
-
-
 router.get("/api/employees/:id/audit-logs", async (req, res) => {
   try {
-    const employee = await Employee.findById(req.params.id).select(
+    const { id } = req.params;
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid employee id" });
+    }
+
+    const employee = await Employee.findById(id).select(
       "fullName email auditLogs"
     );
-
 
     if (!employee) {
       return res.status(404).json({ message: "Employee not found" });
     }
-
 
     return res.status(200).json({
       employee: { name: employee.fullName, email: employee.email },
@@ -430,10 +417,8 @@ router.get("/api/employees/:id/audit-logs", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching audit logs:", error);
-    return res.status(500).json({ message: "Error fetching audit logs", error });
+    return res.status(500).json({ message: "Error fetching audit logs" });
   }
 });
+
 module.exports = router;
-
-
-

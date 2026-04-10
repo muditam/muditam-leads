@@ -1,12 +1,9 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const Customer = require("../models/Customer");
-const Employee = require("../models/Employee");
-const ConsultationDetails = require("../models/ConsultationDetails");
 const router = express.Router();
 const { Transform: Json2CsvTransform } = require("json2csv");
-const { pipeline } = require("stream");
-const { Transform: StreamTransform } = require("stream");
+const { pipeline, Transform: StreamTransform } = require("stream");
 
 const OPEN_STATUSES = [
   "New Lead",
@@ -32,6 +29,36 @@ const WON_STATUS = "Sales Done";
 const DEAD_STATUSES = [...LOST_STATUSES, "Switch Off"];
 const EXCLUDE_STATUSES_FOR_MISSED = [...DEAD_STATUSES, WON_STATUS];
 
+function isValidObjectId(id) {
+  return mongoose.Types.ObjectId.isValid(id);
+}
+
+function normalizeName(name = "") {
+  return String(name).trim().replace(/\s+/g, " ");
+}
+
+function normalizePhone(phone = "") {
+  return String(phone).trim();
+}
+
+function normalizeText(value = "") {
+  return String(value).trim();
+}
+
+function parseJsonSafe(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function toSafeDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function getDayRanges() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -54,7 +81,7 @@ function applyBaseFilters({
   userName = "",
 }) {
   if (filters.search) {
-    const regex = new RegExp(filters.search, "i");
+    const regex = new RegExp(String(filters.search).trim(), "i");
     match.$or = [
       { name: { $regex: regex } },
       { phone: { $regex: regex } },
@@ -62,30 +89,51 @@ function applyBaseFilters({
     ];
   }
 
-  if (filters.name) match.name = { $regex: filters.name, $options: "i" };
-  if (filters.phone) match.phone = filters.phone;
+  if (filters.name) {
+    match.name = { $regex: String(filters.name).trim(), $options: "i" };
+  }
+
+  if (filters.phone) {
+    match.phone = normalizePhone(filters.phone);
+  }
+
   if (filters.location) {
-    match.location = { $regex: filters.location, $options: "i" };
+    match.location = {
+      $regex: String(filters.location).trim(),
+      $options: "i",
+    };
   }
 
   if (assignedTo) {
-    const assignedArray = assignedTo.split(",").map((a) => a.trim());
-    match.assignedTo =
-      assignedArray.length === 1 ? assignedArray[0] : { $in: assignedArray };
+    const assignedArray = String(assignedTo)
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+
+    if (assignedArray.length === 1) {
+      match.assignedTo = assignedArray[0];
+    } else if (assignedArray.length > 1) {
+      match.assignedTo = { $in: assignedArray };
+    }
   }
 
-  if ((userRole === "Sales Agent" || userRole === "Retention Agent") && userName) {
-    match.assignedTo = userName;
+  if (
+    (userRole === "Sales Agent" || userRole === "Retention Agent") &&
+    userName
+  ) {
+    match.assignedTo = String(userName).trim();
   }
 
   if (createdAt) {
-    const dateStart = new Date(createdAt);
-    dateStart.setHours(0, 0, 0, 0);
+    const dateStart = toSafeDate(createdAt);
+    if (dateStart) {
+      dateStart.setHours(0, 0, 0, 0);
 
-    const dateEnd = new Date(createdAt);
-    dateEnd.setHours(23, 59, 59, 999);
+      const dateEnd = new Date(dateStart);
+      dateEnd.setHours(23, 59, 59, 999);
 
-    match.createdAt = { $gte: dateStart, $lte: dateEnd };
+      match.createdAt = { $gte: dateStart, $lte: dateEnd };
+    }
   }
 }
 
@@ -97,7 +145,6 @@ function applyStatusFilter(match, status) {
   } else if (status === "Lost") {
     match.leadStatus = { $in: LOST_STATUSES };
   } else {
-    // Default list should not show Won leads
     match.leadStatus = { $ne: WON_STATUS };
   }
 }
@@ -164,6 +211,16 @@ function mergeTagClauses(match, orClauses) {
   }
 }
 
+function buildSortStage(sortBy = "") {
+  let sortStage = { createdAt: -1 };
+
+  if (sortBy === "asc") sortStage = { name: 1 };
+  if (sortBy === "desc") sortStage = { name: -1 };
+  if (sortBy === "oldest") sortStage = { createdAt: 1 };
+
+  return sortStage;
+}
+
 // Create a new customer with duplicate phone check
 router.post("/api/customers", async (req, res) => {
   const {
@@ -178,10 +235,15 @@ router.post("/api/customers", async (req, res) => {
     leadDate,
   } = req.body;
 
+  const normalizedName = normalizeName(name);
+  const normalizedPhone = normalizePhone(phone);
+
   if (
-    !name ||
-    !phone ||
-    !age ||
+    !normalizedName ||
+    !normalizedPhone ||
+    age === undefined ||
+    age === null ||
+    age === "" ||
     !lookingFor ||
     !assignedTo ||
     !followUpDate ||
@@ -192,30 +254,32 @@ router.post("/api/customers", async (req, res) => {
   }
 
   try {
-    const existingCustomer = await Customer.findOne({ phone });
+    const existingCustomer = await Customer.findOne({ phone: normalizedPhone });
     if (existingCustomer) {
       return res.status(400).json({ message: "Phone number already exists." });
     }
 
     const newCustomer = new Customer({
-      name,
-      phone,
+      name: normalizedName,
+      phone: normalizedPhone,
       age,
-      location,
-      lookingFor,
-      assignedTo,
+      location: normalizeText(location),
+      lookingFor: normalizeText(lookingFor),
+      assignedTo: normalizeText(assignedTo),
       followUpDate,
-      leadSource,
+      leadSource: normalizeText(leadSource),
       leadDate,
     });
 
     await newCustomer.save();
-    res
-      .status(201)
-      .json({ message: "Customer added successfully", customer: newCustomer });
+
+    return res.status(201).json({
+      message: "Customer added successfully",
+      customer: newCustomer,
+    });
   } catch (error) {
     console.error("Error adding customer:", error);
-    res.status(500).json({ message: "Error adding customer", error });
+    return res.status(500).json({ message: "Error adding customer" });
   }
 });
 
@@ -223,12 +287,13 @@ router.get("/api/customers", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
-    const skip =
+    const rawSkip =
       req.query.skip !== undefined ? parseInt(req.query.skip, 10) : null;
+    const skip = rawSkip !== null && !Number.isNaN(rawSkip) ? rawSkip : null;
 
-    const filters = JSON.parse(req.query.filters || "{}");
+    const filters = parseJsonSafe(req.query.filters, {});
+    const tags = parseJsonSafe(req.query.tags, []);
     const status = req.query.status || "";
-    const tags = JSON.parse(req.query.tags || "[]");
     const sortBy = req.query.sortBy || "";
     const assignedTo = req.query.assignedTo || "";
     const createdAt = req.query.createdAt || "";
@@ -248,23 +313,20 @@ router.get("/api/customers", async (req, res) => {
 
     applyStatusFilter(rootMatch, status);
 
-    const orClauses = buildTagClauses(tags);
+    const orClauses = buildTagClauses(Array.isArray(tags) ? tags : []);
     mergeTagClauses(rootMatch, orClauses);
 
-    let sortStage = { createdAt: -1 };
-    if (sortBy === "asc") sortStage = { name: 1 };
-    if (sortBy === "desc") sortStage = { name: -1 };
-    if (sortBy === "oldest") sortStage = { createdAt: 1 };
+    const sortStage = buildSortStage(sortBy);
 
     const [customers, total] = await Promise.all([
       Customer.find(rootMatch)
         .sort(sortStage)
-        .skip(skip !== null && !isNaN(skip) ? skip : (page - 1) * limit)
+        .skip(skip !== null ? skip : (page - 1) * limit)
         .limit(limit),
       Customer.countDocuments(rootMatch),
     ]);
 
-    res.json({
+    return res.status(200).json({
       customers,
       totalCustomers: total,
       totalPages: Math.ceil(total / limit),
@@ -272,7 +334,7 @@ router.get("/api/customers", async (req, res) => {
     });
   } catch (err) {
     console.error("Error fetching customers:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 
@@ -282,7 +344,7 @@ router.get("/api/customers/counts", async (req, res) => {
 
     const matchStage = {};
     if ((role === "Sales Agent" || role === "Retention Agent") && userName) {
-      matchStage.assignedTo = userName;
+      matchStage.assignedTo = String(userName).trim();
     }
 
     const { today, tomorrow, afterTomorrow } = getDayRanges();
@@ -300,40 +362,34 @@ router.get("/api/customers/counts", async (req, res) => {
         ...matchStage,
         leadStatus: { $in: OPEN_STATUSES },
       }),
-
       Customer.countDocuments({
         ...matchStage,
         leadStatus: WON_STATUS,
       }),
-
       Customer.countDocuments({
         ...matchStage,
         leadStatus: { $in: LOST_STATUSES },
       }),
-
       Customer.countDocuments({
         ...matchStage,
         followUpDate: { $gte: today, $lt: tomorrow },
       }),
-
       Customer.countDocuments({
         ...matchStage,
         followUpDate: { $lt: today },
         leadStatus: { $nin: EXCLUDE_STATUSES_FOR_MISSED },
       }),
-
       Customer.countDocuments({
         ...matchStage,
         followUpDate: { $gte: tomorrow, $lt: afterTomorrow },
       }),
-
       Customer.countDocuments({
         ...matchStage,
         leadStatus: "New Lead",
       }),
     ]);
 
-    res.json({
+    return res.status(200).json({
       openCount,
       wonCount,
       lostCount,
@@ -344,7 +400,7 @@ router.get("/api/customers/counts", async (req, res) => {
     });
   } catch (err) {
     console.error("Error fetching counts:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 
@@ -361,8 +417,8 @@ router.get("/api/customers/export-csv", async (req, res) => {
       sortBy = "newest",
     } = req.query;
 
-    const filtersObj = JSON.parse(filters);
-    const tagsArray = JSON.parse(tags);
+    const filtersObj = parseJsonSafe(filters, {});
+    const tagsArray = parseJsonSafe(tags, []);
 
     const match = {};
 
@@ -377,13 +433,10 @@ router.get("/api/customers/export-csv", async (req, res) => {
 
     applyStatusFilter(match, status);
 
-    const orClauses = buildTagClauses(tagsArray);
+    const orClauses = buildTagClauses(Array.isArray(tagsArray) ? tagsArray : []);
     mergeTagClauses(match, orClauses);
 
-    let sortStage = { createdAt: -1 };
-    if (sortBy === "asc") sortStage = { name: 1 };
-    if (sortBy === "desc") sortStage = { name: -1 };
-    if (sortBy === "oldest") sortStage = { createdAt: 1 };
+    const sortStage = buildSortStage(sortBy);
 
     const projection = {
       name: 1,
@@ -406,8 +459,17 @@ router.get("/api/customers/export-csv", async (req, res) => {
       .lean()
       .cursor({ batchSize: 1000 });
 
-    const toDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "");
-    const toDateTime = (d) => (d ? new Date(d).toISOString() : "");
+    const toDate = (d) => {
+      if (!d) return "";
+      const date = new Date(d);
+      return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+    };
+
+    const toDateTime = (d) => {
+      if (!d) return "";
+      const date = new Date(d);
+      return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+    };
 
     const mapTransform = new StreamTransform({
       readableObjectMode: true,
@@ -467,21 +529,29 @@ router.get("/api/customers/export-csv", async (req, res) => {
     });
   } catch (err) {
     console.error("CSV export setup error:", err);
-    if (!res.headersSent) res.status(500).send("Internal Server Error");
+    if (!res.headersSent) {
+      return res.status(500).send("Internal Server Error");
+    }
   }
 });
 
 router.get("/api/customers/:id", async (req, res) => {
   const { id } = req.params;
+
   try {
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid customer id" });
+    }
+
     const customer = await Customer.findById(id);
     if (!customer) {
       return res.status(404).json({ message: "Customer not found" });
     }
-    res.status(200).json(customer);
+
+    return res.status(200).json(customer);
   } catch (error) {
     console.error("Error fetching customer:", error);
-    res.status(500).json({ message: "Error fetching customer", error });
+    return res.status(500).json({ message: "Error fetching customer" });
   }
 });
 
@@ -501,50 +571,70 @@ router.put("/api/customers/:id", async (req, res) => {
   } = req.body;
 
   try {
-    const updatedCustomer = await Customer.findByIdAndUpdate(
-      id,
-      {
-        name,
-        phone,
-        age,
-        location,
-        lookingFor,
-        assignedTo,
-        followUpDate,
-        leadSource,
-        leadStatus,
-        subLeadStatus,
-      },
-      { new: true }
-    );
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid customer id" });
+    }
 
-    if (!updatedCustomer) {
+    const customer = await Customer.findById(id);
+    if (!customer) {
       return res.status(404).json({ message: "Customer not found" });
     }
 
-    res.status(200).json({
+    const normalizedPhone = normalizePhone(phone);
+
+    if (normalizedPhone && normalizedPhone !== customer.phone) {
+      const existingCustomer = await Customer.findOne({
+        phone: normalizedPhone,
+        _id: { $ne: id },
+      });
+
+      if (existingCustomer) {
+        return res.status(400).json({ message: "Phone number already exists." });
+      }
+    }
+
+    if (name !== undefined) customer.name = normalizeName(name);
+    if (phone !== undefined) customer.phone = normalizedPhone;
+    if (age !== undefined) customer.age = age;
+    if (location !== undefined) customer.location = normalizeText(location);
+    if (lookingFor !== undefined) customer.lookingFor = normalizeText(lookingFor);
+    if (assignedTo !== undefined) customer.assignedTo = normalizeText(assignedTo);
+    if (followUpDate !== undefined) customer.followUpDate = followUpDate;
+    if (leadSource !== undefined) customer.leadSource = normalizeText(leadSource);
+    if (leadStatus !== undefined) customer.leadStatus = normalizeText(leadStatus);
+    if (subLeadStatus !== undefined) {
+      customer.subLeadStatus = normalizeText(subLeadStatus);
+    }
+
+    await customer.save();
+
+    return res.status(200).json({
       message: "Customer updated successfully",
-      customer: updatedCustomer,
+      customer,
     });
   } catch (error) {
     console.error("Error updating customer:", error);
-    res.status(500).json({ message: "Error updating customer", error });
+    return res.status(500).json({ message: "Error updating customer" });
   }
 });
 
-// Delete a customer
 router.delete("/api/customers/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid customer id" });
+    }
+
     const deletedCustomer = await Customer.findByIdAndDelete(id);
     if (!deletedCustomer) {
       return res.status(404).json({ message: "Customer not found" });
     }
-    res.status(200).json({ message: "Customer deleted successfully" });
+
+    return res.status(200).json({ message: "Customer deleted successfully" });
   } catch (error) {
     console.error("Error deleting customer:", error);
-    res.status(500).json({ message: "Error deleting customer", error });
+    return res.status(500).json({ message: "Error deleting customer" });
   }
 });
 
