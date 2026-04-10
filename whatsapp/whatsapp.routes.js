@@ -232,15 +232,6 @@ function findProviderError(data, matcher) {
   return errors.find((err) => matcher(err)) || null;
 }
 
-function hasRealMedia(media = {}) {
-  return Boolean(
-    String(media?.id || "").trim() ||
-      String(media?.url || "").trim() ||
-      String(media?.mime || "").trim() ||
-      String(media?.filename || "").trim()
-  );
-}
-
 async function tsRequest({
   method = "GET",
   path = "",
@@ -791,18 +782,15 @@ function parseWebhookPayload(body = {}) {
     const messages = asArray(
       item?.messages || item?.message || item?.inbound_messages || []
     );
-
     for (const msg of messages) {
       const waId = String(
         deepPick(msg, ["id", "wa_id", "message_id"]) || ""
       ).trim();
-
       const from = normalizeWaId(
         deepPick(msg, ["from", "customer.phone", "sender"]) ||
           deepPick(item, ["contacts.0.wa_id"]) ||
           ""
       );
-
       const timestampRaw = deepPick(msg, ["timestamp", "time", "created_at"]);
       const timestamp = timestampRaw
         ? new Date(Number(timestampRaw) ? Number(timestampRaw) * 1000 : timestampRaw)
@@ -810,29 +798,24 @@ function parseWebhookPayload(body = {}) {
 
       const text = textFromInboundMessage(msg);
       const media = mediaFromInboundMessage(msg, item);
-      const normalizedMedia = {
-        id: media.id || "",
-        url: media.url || "",
-        mime: media.mime || "",
-        filename: media.filename || "",
-      };
-
       const type = String(
         deepPick(msg, ["type", "message_type", "content.type"]) ||
           media.type ||
           "text"
       ).toLowerCase();
 
-      const isRealMedia = hasRealMedia(normalizedMedia);
-      const safeType = isRealMedia ? type : "text";
-
       out.messages.push({
         waId,
         from,
         to: businessPhone || out.businessPhone || "",
         text,
-        type: safeType,
-        ...(isRealMedia ? { media: normalizedMedia } : {}),
+        type,
+        media: {
+          id: media.id || "",
+          url: media.url || "",
+          mime: media.mime || "",
+          filename: media.filename || "",
+        },
         raw: msg,
         timestamp,
       });
@@ -1031,8 +1014,7 @@ router.post("/send-text", async (req, res) => {
       phone: new RegExp(`${p10}$`),
     }).lean();
 
-    const expiry =
-      freeformExpiryFromConvo(convo) || convo?.windowExpiresAt || null;
+    const expiry = freeformExpiryFromConvo(convo) || convo?.windowExpiresAt || null;
 
     if (!expiry || expiry < new Date()) {
       return res.status(400).json({
@@ -1203,20 +1185,11 @@ router.post("/send-template", async (req, res) => {
       });
     }
 
-    const paramValues = asArray(parameters).map((x) => String(x ?? "").trim());
-
     const payload = {
-      message_type: paramValues.length ? "text_var" : "text",
+      message_type: "text",
       sender,
       to: toNumber,
       template_id: providerTemplateId,
-      ...(paramValues.length
-        ? {
-            sample: {
-              bodyvar: paramValues,
-            },
-          }
-        : {}),
     };
 
     console.log("TS TEMPLATE PAYLOAD =>", JSON.stringify(payload, null, 2));
@@ -1233,7 +1206,7 @@ router.post("/send-template", async (req, res) => {
     const clientText = String(renderedText || "").trim();
     const serverBody = extractTemplateBodyText(tpl);
     const serverText = serverBody
-      ? applyTemplateVars(serverBody, paramValues)
+      ? applyTemplateVars(serverBody, asArray(parameters))
       : "";
     const finalText =
       clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
@@ -1250,7 +1223,7 @@ router.post("/send-template", async (req, res) => {
         name: tpl.name || originalTemplateName,
         templateId: providerTemplateId,
         language: String(tpl.language || "").trim(),
-        parameters: paramValues,
+        parameters: asArray(parameters).map((x) => String(x ?? "")),
         ...(headerMedia?.id
           ? {
               headerMedia: {
@@ -1633,42 +1606,32 @@ router.post("/webhook", async (req, res) => {
       let type = String(msg?.type || "text").toLowerCase();
       let text = String(msg?.text || "").trim();
 
-      const incomingMedia = {
-        id: String(msg?.media?.id || "").trim(),
-        url: String(msg?.media?.url || "").trim(),
-        mime: String(msg?.media?.mime || "").trim(),
-        filename: String(msg?.media?.filename || "").trim(),
-      };
-
-      const hasIncomingMedia = hasRealMedia(incomingMedia);
-
+      const mediaId = String(msg?.media?.id || "").trim();
       const hasActualMedia =
-        hasIncomingMedia &&
+        Boolean(mediaId) &&
         ["image", "video", "audio", "document", "sticker"].includes(type);
 
       let media = null;
 
       if (hasActualMedia) {
-        const mediaId = incomingMedia.id;
-
         if (type === "sticker") type = "image";
 
         try {
           const meta = await fetchMediaMeta(mediaId);
 
           const mimeFromMeta = String(meta?.mime_type || "").trim();
-          const mimeFromWebhook = String(incomingMedia.mime || "").trim();
+          const mimeFromWebhook = String(msg?.media?.mime || "").trim();
           const baseMime =
             (mimeFromMeta || mimeFromWebhook || "application/octet-stream").trim() ||
             "application/octet-stream";
 
           const filename =
-            String(incomingMedia.filename || "").trim() ||
+            String(msg?.media?.filename || "").trim() ||
             `${type}_${p10 || "unknown"}_${mediaId}.${extFromMime(baseMime)}`;
 
           media = {
             id: mediaId,
-            url: incomingMedia.url || proxyUrlForMediaId(mediaId),
+            url: msg?.media?.url || proxyUrlForMediaId(mediaId),
             mime: baseMime,
             filename,
           };
@@ -1676,14 +1639,13 @@ router.post("/webhook", async (req, res) => {
           try {
             const dl = await downloadTrustSignalAttachment({
               mediaId,
-              downloadUrl: meta?.downloadUrl || incomingMedia.url || "",
+              downloadUrl: meta?.downloadUrl || msg?.media?.url || "",
               asStream: false,
             });
 
             const buffer = Buffer.isBuffer(dl.data)
               ? dl.data
               : Buffer.from(dl.data);
-
             const bestMime =
               String(dl.headers?.["content-type"] || baseMime || "").trim() ||
               "application/octet-stream";
@@ -1699,7 +1661,10 @@ router.post("/webhook", async (req, res) => {
 
             media = {
               id: mediaId,
-              url: wasabiUrl || incomingMedia.url || proxyUrlForMediaId(mediaId),
+              url:
+                wasabiUrl ||
+                msg?.media?.url ||
+                proxyUrlForMediaId(mediaId),
               mime: bestMime,
               filename,
             };
@@ -1737,17 +1702,16 @@ router.post("/webhook", async (req, res) => {
           if (!media) {
             media = {
               id: mediaId,
-              url: incomingMedia.url || proxyUrlForMediaId(mediaId),
-              mime: incomingMedia.mime || "",
-              filename: incomingMedia.filename || "",
+              url: msg?.media?.url || proxyUrlForMediaId(mediaId),
+              mime: String(msg?.media?.mime || "").trim() || "",
+              filename: String(msg?.media?.filename || "").trim() || "",
             };
           }
         }
       }
 
-      if (!hasActualMedia || !media) {
+      if (!media) {
         type = "text";
-        media = null;
       }
 
       const created = await WhatsAppMessage.create({
@@ -1759,7 +1723,7 @@ router.post("/webhook", async (req, res) => {
         text: String(text || "").slice(0, 4000),
         status: "received",
         timestamp: now,
-        ...(media ? { media } : {}),
+        media: media || undefined,
         raw: msg.raw || msg,
       });
 
@@ -1782,7 +1746,7 @@ router.post("/webhook", async (req, res) => {
 
       emitConversationPatch(req, {
         phone10: p10,
-        patch: {
+        patch: { 
           lastMessageAt: updatedConv?.lastMessageAt || now,
           lastMessageText:
             updatedConv?.lastMessageText || String(text || "").slice(0, 200),
