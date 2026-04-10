@@ -572,7 +572,7 @@ app.use("/api/order-by-id", orderByIdRoutes);
 
 app.use("/api/orders/combined", combinedOrdersRoute);
 
-app.use(customerRoutes);
+app.use(requireSession, customerRoutes);
 
 app.use("/api/consultation-details", consultationDetailsRoutes);
 
