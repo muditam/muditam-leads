@@ -321,7 +321,7 @@ router.post("/:id/assign-expert", async (req, res) => {
     const phone = ab?.customer?.phone;
     if (!phone) return res.status(400).json({ error: "missing_phone" });
 
-    // prefer existing expert (Customer/Lead) if any
+    const fullAddress = buildAddressStringFromAb(ab) || "";
     const existingExpert = await findExistingExpertForPhone(phone);
 
     if (existingExpert) {
@@ -340,7 +340,6 @@ router.post("/:id/assign-expert", async (req, res) => {
         }
       );
 
-      // Append consolidated Address + Cart note to the matched customer
       const n10 = normalizePhoneTo10(phone);
       const foundCustomer = await Customer.findOne({
         phone: { $regex: `${n10}$` },
@@ -349,12 +348,25 @@ router.post("/:id/assign-expert", async (req, res) => {
         .lean();
 
       if (foundCustomer) {
+        // update customer location with full address
+        if (fullAddress) {
+          await Customer.updateOne(
+            { _id: foundCustomer._id },
+            {
+              $set: {
+                location: fullAddress,
+              },
+            }
+          );
+        }
+
         await appendAddressAndCartNote(foundCustomer._id, ab);
       }
 
       return res.json({
         ok: true,
         assignedAt: new Date().toISOString(),
+        address: fullAddress,
         expert: {
           _id: existingExpert._id,
           fullName: existingExpert.fullName,
@@ -366,10 +378,9 @@ router.post("/:id/assign-expert", async (req, res) => {
       });
     }
 
-    // otherwise, assign to posted expert + create a Customer
     const firstItemTitle =
       Array.isArray(ab.items) && ab.items.length ? ab.items[0].title : "";
-    // You may still use your lookingFor mapper if you like
+
     const lookingFor = (() => {
       const t = String(firstItemTitle).toLowerCase();
       if (/karela\s*jamun\s*fizz/.test(t)) return "Diabetes";
@@ -381,13 +392,14 @@ router.post("/:id/assign-expert", async (req, res) => {
       name: ab.customer?.name || "",
       phone: phone,
       age: 0,
-      location: ab.customer?.state || "", // save STATE here
+      location: fullAddress || ab.customer?.state || "", // full address instead of only state
       lookingFor,
       assignedTo: postedExpert.fullName,
       followUpDate: new Date(),
       leadSource: "Abandoned Cart",
       leadDate: ab.eventAt ? new Date(ab.eventAt) : new Date(),
     });
+
     await customerDoc.save();
 
     await AbandonedCheckout.updateOne(
@@ -405,12 +417,12 @@ router.post("/:id/assign-expert", async (req, res) => {
       }
     );
 
-    // Append consolidated Address + Cart note for the NEW customer
     await appendAddressAndCartNote(customerDoc._id, ab);
 
     return res.json({
       ok: true,
       assignedAt: new Date().toISOString(),
+      address: fullAddress,
       expert: {
         _id: postedExpert._id,
         fullName: postedExpert.fullName,
