@@ -616,7 +616,7 @@ app.use('/api/leads', leadTransfer);
 
 app.use('/api/search', searchRoutes);
 
-app.use(Addemployee);
+app.use(requireSession, Addemployee);
 
 app.use('/api', authRoutes);
 
