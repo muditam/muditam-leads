@@ -262,23 +262,28 @@ app.options("*", cors({
   ],
 }));
 
-app.set("trust proxy", 1);
- 
-const isProd = process.env.NODE_ENV === "production";
+const isProd =
+  process.env.NODE_ENV === "production" ||
+  process.env.APP_ENV === "production";
 
-app.use(session({
-  name: "sid",
-  secret: process.env.SESSION_SECRET || "dev-secret",
-  resave: false,
-  saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
-  cookie: {
-    httpOnly: true,
-    sameSite: isProd ? "none" : "lax",
-    secure: isProd, // true only on https
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  },
-}));
+app.set("trust proxy", 1);
+
+app.use(
+  session({
+    name: "sid",
+    secret: process.env.SESSION_SECRET || "dev-secret",
+    resave: false,
+    saveUninitialized: false,
+    proxy: isProd,
+    store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
+    cookie: {
+      httpOnly: true,
+      sameSite: isProd ? "none" : "lax",
+      secure: isProd,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    },
+  })
+);
 
 function requireSession(req, res, next) {
   if (!req.session || !req.session.user) {
