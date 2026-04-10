@@ -1425,7 +1425,7 @@ app.post("/api/bulk-upload", upload.single("file"), async (req, res) => {
 });
 
 
-app.get('/api/leads/check-duplicate', requireSession, async (req, res) => {
+app.get('/api/leads/check-duplicate', async (req, res) => {
   const { contactNumber } = req.query;
 
   try {
