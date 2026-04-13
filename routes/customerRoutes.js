@@ -1,13 +1,9 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const Customer = require("../models/Customer");
-const requireSession = require("../middleware/requireSession");
 const router = express.Router();
 const { Transform: Json2CsvTransform } = require("json2csv");
 const { pipeline, Transform: StreamTransform } = require("stream");
-
-// Protect all routes in this file only
-router.use(requireSession);
 
 const OPEN_STATUSES = [
   "New Lead",
@@ -71,7 +67,7 @@ function getDayRanges() {
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   const afterTomorrow = new Date(tomorrow);
-  afterTomorrow.setDate(tomorrow.getDate() + 1);
+  afterTomorrow.setDate(afterTomorrow.getDate() + 1);
 
   return { today, tomorrow, afterTomorrow };
 }
@@ -225,6 +221,7 @@ function buildSortStage(sortBy = "") {
   return sortStage;
 }
 
+// Create a new customer with duplicate phone check
 router.post("/api/customers", async (req, res) => {
   const {
     name,
@@ -630,7 +627,7 @@ router.delete("/api/customers/:id", async (req, res) => {
     }
 
     const deletedCustomer = await Customer.findByIdAndDelete(id);
-    if (!deletedCustomer) {
+    if (!deletedCustomer) { 
       return res.status(404).json({ message: "Customer not found" });
     }
 
@@ -641,4 +638,4 @@ router.delete("/api/customers/:id", async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = router; 
