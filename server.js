@@ -20,6 +20,7 @@ const cron = require('node-cron');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const compression = require('compression');
+const requireSession = require("./middleware/requireSession");
 const TransferRequest = require('./models/TransferRequests');
 const shopifyProductsRoute = require("./services/shopifyProducts");
 const shopifyOrdersRoute = require("./services/shopifyOrders");
@@ -279,13 +280,6 @@ app.use(session({
     maxAge: 7 * 24 * 60 * 60 * 1000,
   },
 }));
-
-function requireSession(req, res, next) {
-  if (!req.session || !req.session.user) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  next();
-}
 
 function toNumberLoose(v) {
   if (v === null || v === undefined) return undefined;
