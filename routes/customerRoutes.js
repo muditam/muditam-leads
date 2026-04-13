@@ -4,6 +4,7 @@ const Customer = require("../models/Customer");
 const router = express.Router();
 const { Transform: Json2CsvTransform } = require("json2csv");
 const { pipeline, Transform: StreamTransform } = require("stream");
+const requireSession = require("../middleware/requireSession");
 
 const OPEN_STATUSES = [
   "New Lead",
@@ -222,7 +223,7 @@ function buildSortStage(sortBy = "") {
 }
 
 // Create a new customer with duplicate phone check
-router.post("/api/customers", async (req, res) => {
+router.post("/api/customers", requireSession, async (req, res) => {
   const {
     name,
     phone,
@@ -283,7 +284,7 @@ router.post("/api/customers", async (req, res) => {
   }
 });
 
-router.get("/api/customers", async (req, res) => {
+router.get("/api/customers", requireSession, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
@@ -338,7 +339,7 @@ router.get("/api/customers", async (req, res) => {
   }
 });
 
-router.get("/api/customers/counts", async (req, res) => {
+router.get("/api/customers/counts", requireSession, async (req, res) => {
   try {
     const { role, userName } = req.query;
 
@@ -404,7 +405,7 @@ router.get("/api/customers/counts", async (req, res) => {
   }
 });
 
-router.get("/api/customers/export-csv", async (req, res) => {
+router.get("/api/customers/export-csv", requireSession, async (req, res) => {
   try {
     const {
       filters = "{}",
@@ -535,7 +536,7 @@ router.get("/api/customers/export-csv", async (req, res) => {
   }
 });
 
-router.get("/api/customers/:id", async (req, res) => {
+router.get("/api/customers/:id", requireSession, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -555,7 +556,7 @@ router.get("/api/customers/:id", async (req, res) => {
   }
 });
 
-router.put("/api/customers/:id", async (req, res) => {
+router.put("/api/customers/:id", requireSession, async (req, res) => {
   const { id } = req.params;
   const {
     name,
@@ -618,7 +619,7 @@ router.put("/api/customers/:id", async (req, res) => {
   }
 });
 
-router.delete("/api/customers/:id", async (req, res) => {
+router.delete("/api/customers/:id", requireSession, async (req, res) => {
   const { id } = req.params;
 
   try {
