@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const ConsultationDetails = require("../models/ConsultationDetails");
 const Customer = require("../models/Customer");
@@ -15,6 +16,10 @@ function formatDayMonthYear(dateObj) {
   const month = dateObj.toLocaleString("en-US", { month: "long" });
   const year  = dateObj.getFullYear();
   return `${day} ${month} ${year}`;
+}
+
+function isValidObjectId(id) {
+  return mongoose.Types.ObjectId.isValid(id);
 }
 
 const priceMap = {
@@ -245,6 +250,10 @@ router.get("/proxy/consultation/:id", async (req, res) => {
 
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(400).json({ error: "This endpoint returns HTML, not JSON." });
+  }
+
+  if (!isValidObjectId(customerId)) {
+    return res.status(400).send("Invalid customer id.");
   }
 
   try {
