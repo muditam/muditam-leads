@@ -595,7 +595,9 @@ router.put("/api/customers/:id", requireSession, async (req, res) => {
 
     if (name !== undefined) customer.name = normalizeName(name);
     if (phone !== undefined) customer.phone = normalizedPhone;
-    if (age !== undefined) customer.age = age;
+    if (age !== undefined && age !== "") {
+      customer.age = Number(age);
+    }
     if (location !== undefined) customer.location = normalizeText(location);
     if (lookingFor !== undefined) customer.lookingFor = normalizeText(lookingFor);
     if (assignedTo !== undefined) customer.assignedTo = normalizeText(assignedTo);
@@ -614,7 +616,10 @@ router.put("/api/customers/:id", requireSession, async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating customer:", error);
-    return res.status(500).json({ message: "Error updating customer" });
+    return res.status(500).json({
+      message: "Error updating customer",
+      error: error.message,
+    });
   }
 });
 

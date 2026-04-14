@@ -5,6 +5,7 @@ const Employee = require("../models/Employee");
 const Customer = require("../models/Customer");
 const Lead = require("../models/Lead");
 const ConsultationDetails = require("../models/ConsultationDetails");
+const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
 
@@ -336,7 +337,7 @@ async function appendAddressAndCartNote(customerId, ab) {
 }
 
 /* -------------------- GET /api/abandoned -------------------- */
-router.get("/", async (req, res) => {
+router.get("/", requireSession, async (req, res) => {
   try {
     const {
       query = "",
@@ -412,7 +413,7 @@ router.get("/", async (req, res) => {
 });
 
 /* -------------------- POST /api/abandoned/:id/assign-expert -------------------- */
-router.post("/:id/assign-expert", async (req, res) => {
+router.post("/:id/assign-expert", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     const { expertId } = req.body;

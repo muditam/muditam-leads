@@ -26,6 +26,15 @@ const nameVariants = (shopifyName = "") => {
   return [withHash, noHash];
 };
 
+const pickFirstNonEmpty = (...values) => {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return value;
+    }
+  }
+  return null;
+};
+
 // Try both REST filters that commonly work across stores:
 async function fetchOrderByName(nameNoHash) {
   const base = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders.json`;
@@ -35,7 +44,7 @@ async function fetchOrderByName(nameNoHash) {
   let resp = await axios.get(byNameUrl, { headers: shopifyHeaders });
   if (resp?.data?.orders?.length) return resp.data.orders[0];
 
-  // 2) Fallback: use a query search by name (works on many stores)
+  // 2) Fallback: use a query search by name
   const queryUrl = `${base}?status=any&query=${encodeURIComponent(`name:${nameNoHash}`)}`;
   resp = await axios.get(queryUrl, { headers: shopifyHeaders });
   if (resp?.data?.orders?.length) {
@@ -52,7 +61,10 @@ router.get("/customerDetails", async (req, res) => {
   try {
     const { phone, q } = req.query;
     const raw = (q || phone || "").trim();
-    if (!raw) return res.status(400).json({ error: "Phone or query is required." });
+
+    if (!raw) {
+      return res.status(400).json({ error: "Phone or query is required." });
+    }
 
     const digitsOnly = normalizePhone(raw);
     const hasLetters = /[A-Za-z]/.test(raw);
@@ -63,9 +75,10 @@ router.get("/customerDetails", async (req, res) => {
 
       const customerUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/customers/${customerId}.json`;
       const customerResp = await axios.get(customerUrl, { headers: shopifyHeaders });
-      const c = customerResp.data.customer;
+      const c = customerResp.data.customer || {};
 
       const allIds = new Set();
+
       orders.forEach((o) => {
         const orderName = (o.name || "").trim();
         if (orderName) {
@@ -77,39 +90,73 @@ router.get("/customerDetails", async (req, res) => {
 
       let internalOrders = [];
       if (allIds.size > 0) {
-        internalOrders = await Order.find({ order_id: { $in: Array.from(allIds) } })
-          .select("order_id shipment_status")
+        internalOrders = await Order.find({
+          order_id: { $in: Array.from(allIds) },
+        })
+          .select("order_id shipment_status tracking_number contact_number full_name")
           .lean();
       }
 
-      const shipmentMap = new Map();
+      const internalOrderMap = new Map();
+
       internalOrders.forEach((doc) => {
         const id = (doc.order_id || "").trim();
         if (!id) return;
+
         const withHash = id.startsWith("#") ? id : `#${id}`;
         const noHash = id.replace(/^#/, "");
-        shipmentMap.set(withHash, doc.shipment_status);
-        shipmentMap.set(noHash, doc.shipment_status);
+
+        internalOrderMap.set(withHash, doc);
+        internalOrderMap.set(noHash, doc);
       });
 
       const lastOrder = orders[0] || null;
 
+      const customerPhone = normalizePhone(
+        pickFirstNonEmpty(
+          c.phone,
+          c.default_address?.phone,
+          orders[0]?.shipping_address?.phone,
+          internalOrders.find((x) => x?.contact_number)?.contact_number
+        ) || ""
+      );
+
       const orderDetails = orders.map((o) => {
         const orderName = (o.name || "").trim();
-        const shipmentStatus =
-          shipmentMap.get(orderName) || shipmentMap.get(orderName.replace(/^#/, "")) || null;
+        const internalOrder =
+          internalOrderMap.get(orderName) ||
+          internalOrderMap.get(orderName.replace(/^#/, "")) ||
+          null;
+
+        const orderPhone = normalizePhone(
+          pickFirstNonEmpty(
+            o.shipping_address?.phone,
+            o.billing_address?.phone,
+            o.customer?.phone,
+            c.phone,
+            c.default_address?.phone,
+            internalOrder?.contact_number
+          ) || ""
+        );
 
         return {
           id: o.id,
           name: orderName,
           created_at: o.created_at,
           totalAmount: o.total_price,
-          itemCount: o.line_items.reduce((acc, it) => acc + Number(it.quantity || 0), 0),
+          itemCount: o.line_items.reduce(
+            (acc, it) => acc + Number(it.quantity || 0),
+            0
+          ),
           deliveryStatus: o.fulfillment_status || "Not fulfilled",
-          shipmentStatus,
+          shipmentStatus: internalOrder?.shipment_status || null,
+          trackingNumber: internalOrder?.tracking_number || null,
+          customerPhone: orderPhone || null,
           shippingAddress: o.shipping_address
             ? `${o.shipping_address.address1 || ""}${
-                o.shipping_address.address2 ? ", " + o.shipping_address.address2 : ""
+                o.shipping_address.address2
+                  ? ", " + o.shipping_address.address2
+                  : ""
               }, ${o.shipping_address.city || ""}, ${o.shipping_address.province || ""}, ${
                 o.shipping_address.country || ""
               }, ${o.shipping_address.zip || ""}`
@@ -126,6 +173,7 @@ router.get("/customerDetails", async (req, res) => {
         customer: {
           id: c.id,
           name: `${c.first_name || ""} ${c.last_name || ""}`.trim(),
+          phone: customerPhone || null,
           totalOrders: orders.length,
           totalSpent: c.total_spent,
           lastOrderDate: lastOrder ? lastOrder.created_at : null,
@@ -136,11 +184,13 @@ router.get("/customerDetails", async (req, res) => {
     };
 
     const tryPhone = async () => {
-      if (!digitsOnly) return null;
-      if (digitsOnly.length < 8) return null;
+      if (!digitsOnly || digitsOnly.length < 8) return null;
 
       const customerUrl = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/customers/search.json?query=phone:${digitsOnly}`;
-      const customerResponse = await axios.get(customerUrl, { headers: shopifyHeaders });
+      const customerResponse = await axios.get(customerUrl, {
+        headers: shopifyHeaders,
+      });
+
       const customers = customerResponse.data.customers || [];
       if (!customers.length) return null;
 
@@ -183,7 +233,9 @@ router.get("/customerDetails", async (req, res) => {
       "Error fetching Shopify customer details:",
       error?.response?.data || error.message
     );
-    return res.status(500).json({ error: "Failed to fetch customer details from Shopify." });
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch customer details from Shopify." });
   }
 });
 
@@ -195,22 +247,20 @@ router.get("/order-details", async (req, res) => {
 
   try {
     const url = `https://${SHOPIFY_STORE_NAME}.myshopify.com/admin/api/2024-04/orders/${orderId}.json`;
-
     const response = await axios.get(url, { headers: shopifyHeaders });
-
     const order = response.data.order;
+
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // ✅ NEW: parse note_attributes for partial-paid info
     const noteAttrs = Array.isArray(order.note_attributes) ? order.note_attributes : [];
     const noteMap = {};
     for (const a of noteAttrs) {
       if (a?.name) noteMap[String(a.name)] = a?.value;
     }
 
-    const paymentMode = noteMap.payment_mode || ""; // "Partial Paid" if you set it
+    const paymentMode = noteMap.payment_mode || "";
     const partialPaidFromNote = noteMap.partial_paid_amount || "";
     const remainingFromNote = noteMap.remaining_cod_amount || "";
     const txnIdFromNote = noteMap.transaction_id || "";
@@ -219,13 +269,10 @@ router.get("/order-details", async (req, res) => {
       customerName: order.customer
         ? `${order.customer.first_name || ""} ${order.customer.last_name || ""}`.trim()
         : "N/A",
-
-      // ✅ Better phone fallback (shipping phone first)
       phone:
         order.shipping_address?.phone ||
         order.customer?.default_address?.phone ||
         "N/A",
-
       shippingAddress: order.shipping_address
         ? `${order.shipping_address.address1 || ""}${
             order.shipping_address.address2 ? ", " + order.shipping_address.address2 : ""
@@ -233,22 +280,19 @@ router.get("/order-details", async (req, res) => {
             order.shipping_address.country || ""
           }, ${order.shipping_address.zip || ""}`
         : "N/A",
-
-      paymentStatus: order.financial_status, // can be "paid" | "pending" | "partially_paid" etc.
+      paymentStatus: order.financial_status,
       productOrdered:
         order.line_items && order.line_items.length > 0
           ? order.line_items.map((item) => item.title).join(", ")
           : "N/A",
       orderDate: order.created_at,
-
-      // keep same field names your popup expects
-      orderId: order.name, // e.g. "#MA123"
+      orderId: order.name,
       totalPrice: order.total_price,
-
-      // ✅ NEW fields for Partial Paid UI
       paymentMode,
       transactionId: txnIdFromNote,
-      partialPaidAmount: partialPaidFromNote ? Math.round(Number(partialPaidFromNote)) : "",
+      partialPaidAmount: partialPaidFromNote
+        ? Math.round(Number(partialPaidFromNote))
+        : "",
       remainingCODAmount: remainingFromNote,
     };
 
