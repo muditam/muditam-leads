@@ -1,4 +1,3 @@
-// routes/bluedart.routes.js
 const express = require("express");
 const multer = require("multer");
 const csv = require("csv-parser");
@@ -6,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const BluedartSettlement = require("../models/BluedartSettlement");
+const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
 
@@ -218,7 +218,7 @@ function fmtDateYMD(d) {
 }
 
 // ------------------- GET /sample -------------------
-router.get("/sample", (req, res) => {
+router.get("/sample", requireSession, (req, res) => {
   const header = [
     "AWB NO",
     "DPUDATE",
@@ -249,7 +249,7 @@ router.get("/sample", (req, res) => {
 });
 
 // ------------------- POST /upload -------------------
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file is required" });
 
   const filePath = req.file.path;
@@ -301,7 +301,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 // ------------------- DELETE /delete-last-upload -------------------
-router.delete("/delete-last-upload", async (req, res) => {
+router.delete("/delete-last-upload", requireSession, async (req, res) => {
   try {
     const latest = await BluedartSettlement.findOne({})
       .sort({ uploadDate: -1, createdAt: -1 })
@@ -328,7 +328,7 @@ router.delete("/delete-last-upload", async (req, res) => {
 });
 
 // ------------------- GET /data (with filters + total sum) -------------------
-router.get("/data", async (req, res) => {
+router.get("/data", requireSession, async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
   if (page < 1) page = 1;
@@ -360,7 +360,7 @@ router.get("/data", async (req, res) => {
       limit,
       totalCount,
       pages: Math.ceil(totalCount / limit),
-      totalCustomerPayAmt, // ✅ NEW
+      totalCustomerPayAmt,
     });
   } catch (err) {
     console.error("Fetch error:", err);
@@ -369,7 +369,7 @@ router.get("/data", async (req, res) => {
 });
 
 // ------------------- GET /export (all / filtered) -------------------
-router.get("/export", async (req, res) => {
+router.get("/export", requireSession, async (req, res) => {
   try {
     const query = buildQueryFromReq(req.query);
 
@@ -379,7 +379,6 @@ router.get("/export", async (req, res) => {
       'attachment; filename="bluedart_export.csv"'
     );
 
-    // header
     res.write(
       [
         "Upload Date",

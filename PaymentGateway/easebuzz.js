@@ -1,4 +1,3 @@
-// routes/easebuzz.routes.js
 const express = require("express");
 const multer = require("multer");
 const csv = require("csv-parser");
@@ -6,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const EasebuzzTransaction = require("../models/EasebuzzTransaction");
+const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
 
@@ -43,11 +43,9 @@ function parseDate(value) {
   const s = String(value).trim();
   if (!s) return null;
 
-  // native first
   const d1 = new Date(s);
   if (!Number.isNaN(d1.getTime())) return d1;
 
-  // dd/mm/yyyy or dd-mm-yyyy
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (m) {
     const dd = parseInt(m[1], 10);
@@ -58,13 +56,11 @@ function parseDate(value) {
   return null;
 }
 
-// ✅ For date inputs (YYYY-MM-DD): coerce to start/end of day
 function parseDateParam(v, endOfDay = false) {
   if (!v) return null;
   const s = String(v).trim();
   if (!s) return null;
 
-  // YYYY-MM-DD from <input type="date" />
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   let d = null;
 
@@ -96,13 +92,11 @@ function csvEscape(v) {
   return s;
 }
 
-// ✅ build query once (used in /data and /export)
 function buildEasebuzzQuery(qs = {}) {
   const { q, uploadMin, uploadMax, settleMin, settleMax, amountMin, amountMax } = qs;
 
   const query = {};
 
-  // search across common identifiers
   if (q && String(q).trim()) {
     const rx = new RegExp(escapeRegex(String(q).trim()), "i");
     query.$or = [
@@ -118,7 +112,6 @@ function buildEasebuzzQuery(qs = {}) {
     ];
   }
 
-  // upload date range
   if (uploadMin || uploadMax) {
     query.uploadDate = {};
     const dMin = parseDateParam(uploadMin, false);
@@ -128,7 +121,6 @@ function buildEasebuzzQuery(qs = {}) {
     if (!Object.keys(query.uploadDate).length) delete query.uploadDate;
   }
 
-  // settlement date range
   if (settleMin || settleMax) {
     query.settlementDate = {};
     const sMin = parseDateParam(settleMin, false);
@@ -138,7 +130,6 @@ function buildEasebuzzQuery(qs = {}) {
     if (!Object.keys(query.settlementDate).length) delete query.settlementDate;
   }
 
-  // amount range (on Amount column)
   const aMin = amountMin !== undefined && amountMin !== "" ? Number(amountMin) : null;
   const aMax = amountMax !== undefined && amountMax !== "" ? Number(amountMax) : null;
   if (aMin !== null || aMax !== null) {
@@ -152,13 +143,12 @@ function buildEasebuzzQuery(qs = {}) {
 }
 
 // ------------------- POST /upload -------------------
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file is required" });
 
   const filePath = req.file.path;
   const rows = [];
 
-  // ✅ one batch id + one uploadDate for all rows (delete-last works perfectly)
   const batchId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
   const batchAt = new Date();
 
@@ -267,8 +257,8 @@ router.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// ------------------- GET /data (filters + pagination + totals) -------------------
-router.get("/data", async (req, res) => {
+// ------------------- GET /data -------------------
+router.get("/data", requireSession, async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
   if (page < 1) page = 1;
@@ -306,8 +296,6 @@ router.get("/data", async (req, res) => {
       limit,
       totalCount,
       pages: Math.ceil(totalCount / limit),
-
-      // ✅ totals for ALL if no filters, else totals for FILTERED
       totalAmount: totals.totalAmount || 0,
       totalDebit: totals.totalDebit || 0,
       totalCredit: totals.totalCredit || 0,
@@ -318,8 +306,8 @@ router.get("/data", async (req, res) => {
   }
 });
 
-// ------------------- EXPORT CSV (ALL or FILTERED) -------------------
-router.get("/export", async (req, res) => {
+// ------------------- EXPORT CSV -------------------
+router.get("/export", requireSession, async (req, res) => {
   try {
     const query = buildEasebuzzQuery(req.query);
 
@@ -370,30 +358,24 @@ router.get("/export", async (req, res) => {
           csvEscape(doc.transactionType || ""),
           csvEscape(doc.paymentId || ""),
           csvEscape(doc.orderId || ""),
-
           csvEscape(doc.amount ?? 0),
           csvEscape(doc.currency || ""),
           csvEscape(doc.tax ?? 0),
           csvEscape(doc.fee ?? 0),
           csvEscape(doc.additionalFees ?? 0),
           csvEscape(doc.additionalTax ?? 0),
-
           csvEscape(doc.debit ?? 0),
           csvEscape(doc.gokwikDeduction ?? 0),
           csvEscape(doc.credit ?? 0),
-
           csvEscape(doc.paymentMethod || ""),
           csvEscape(doc.transactionDate || ""),
           csvEscape(doc.transactionRRN || ""),
-
           csvEscape(doc.merchantOrderId || ""),
           csvEscape(doc.shopifyOrderId || ""),
           csvEscape(doc.shopifyTransactionId || ""),
-
           csvEscape(doc.settlementUTR || ""),
           csvEscape(doc.settlementDate ? new Date(doc.settlementDate).toISOString() : ""),
           csvEscape(doc.settledBy || ""),
-
           csvEscape(doc.paymentMode || ""),
           csvEscape(doc.bankCode || ""),
           csvEscape(doc.cardNetwork || ""),
@@ -412,9 +394,12 @@ router.get("/export", async (req, res) => {
 });
 
 // ------------------- DELETE /delete-last-upload -------------------
-router.delete("/delete-last-upload", async (req, res) => {
+router.delete("/delete-last-upload", requireSession, async (req, res) => {
   try {
-    const last = await EasebuzzTransaction.findOne().sort({ uploadDate: -1, createdAt: -1 }).lean();
+    const last = await EasebuzzTransaction.findOne()
+      .sort({ uploadDate: -1, createdAt: -1 })
+      .lean();
+
     if (!last) return res.json({ deleted: 0 });
 
     let deleted = 0;
@@ -423,11 +408,12 @@ router.delete("/delete-last-upload", async (req, res) => {
       const r = await EasebuzzTransaction.deleteMany({ uploadBatchId: last.uploadBatchId });
       deleted = r.deletedCount || 0;
     } else if (last.uploadDate) {
-      // fallback for very old rows
       const t = new Date(last.uploadDate).getTime();
       const start = new Date(t - 2 * 60 * 1000);
       const end = new Date(t + 2 * 60 * 1000);
-      const r = await EasebuzzTransaction.deleteMany({ uploadDate: { $gte: start, $lte: end } });
+      const r = await EasebuzzTransaction.deleteMany({
+        uploadDate: { $gte: start, $lte: end },
+      });
       deleted = r.deletedCount || 0;
     }
 
@@ -439,7 +425,7 @@ router.delete("/delete-last-upload", async (req, res) => {
 });
 
 // ------------------- GET /sample -------------------
-router.get("/sample", (req, res) => {
+router.get("/sample", requireSession, (req, res) => {
   const header =
     "S. No.,Transaction Type,Payment Id,Order Id,Amount,Currency,Tax,Fee,Additional Fees,Additional Tax,Debit,gokwik Deduction,Credit,Payment Method,Transaction Date,Transaction RRN,Merchant Order Id,Shopify Order Id,Shopify Transaction Id,Settlement UTR,Settlement Date,Settled By,Payment Mode,Bank Code,Card Network\n";
 

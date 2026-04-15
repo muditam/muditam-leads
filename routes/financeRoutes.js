@@ -13,6 +13,8 @@ const DtdcSettlement = require("../models/DtdcSettlement");
 const DelhiverySettlement = require("../models/DelhiverySettlement");
 const BluedartSettlement = require("../models/BluedartSettlement");
 
+const requireSession = require("../middleware/requireSession");
+
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const SHOPIFY_STORE_NAME = process.env.SHOPIFY_STORE_NAME;
 
@@ -195,7 +197,7 @@ function parseSettlementDateString(s) {
  * - First time: from 1 April 2025
  * - After that: from latest orderDate stored
  */
-router.post("/refresh-shopify", async (req, res) => {
+router.post("/refresh-shopify", requireSession, async (req, res) => {
   try {
     const lastDoc = await ShopifyFinanceOrder.findOne()
       .sort({ orderDate: -1 }) // use orderDate
@@ -274,11 +276,8 @@ router.post("/refresh-shopify", async (req, res) => {
       .json({ ok: false, error: "Failed to refresh from Shopify" });
   }
 });
-
-/**
- * 🧨 FULL BACKFILL / RANGE REFRESH (for Postman)
- */
-router.post("/refresh-shopify-full", async (req, res) => {
+ 
+router.post("/refresh-shopify-full", requireSession, async (req, res) => {
   try {
     let { startDate, endDate } = req.query;
 
@@ -350,12 +349,7 @@ router.post("/refresh-shopify-full", async (req, res) => {
   }
 });
 
-/**
- * 📄 Paged + filtered list for frontend
- * - Expects startDate / endDate as "YYYY-MM-DD" (or empty)
- * - Filters by orderDate (Shopify order date)
- */
-router.get("/orders", async (req, res) => {
+router.get("/orders", requireSession, async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
     const limit = Math.min(
@@ -375,13 +369,13 @@ router.get("/orders", async (req, res) => {
       if (endDate) {
         orderDate.$lte = new Date(`${endDate}T23:59:59.999Z`);
       }
-      findQuery.orderDate = orderDate; // 🔴 filter by true Shopify order date
+      findQuery.orderDate = orderDate;  
     }
 
     const [totalCount, baseRows] = await Promise.all([
       ShopifyFinanceOrder.countDocuments(findQuery),
       ShopifyFinanceOrder.find(findQuery)
-        .sort({ orderDate: -1 }) // 🔴 sort by orderDate (reverse chronological)
+        .sort({ orderDate: -1 })  
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -397,15 +391,13 @@ router.get("/orders", async (req, res) => {
       clean: cleanKeys,
       numeric: numericKeys,
     } = buildMatchSets(orderNames);
-
-    // 1) Order (includes shipment_status)
+ 
     const ordersDocs = await Order.find({ order_id: { $in: cleanKeys } })
       .select(
         "order_id tracking_number carrier_title last_updated_at shipment_status"
       )
       .lean();
-
-    // 2) MyOrder
+ 
     const myOrdersStrDocs = await MyOrder.find({
       orderId: { $in: [...rawKeys, ...cleanKeys] },
     })
@@ -419,8 +411,7 @@ router.get("/orders", async (req, res) => {
         .select("orderId partialPayment")
         .lean();
     }
-
-    // 3) Settlements
+ 
     const easebuzzStrDocs = await EasebuzzTransaction.find({
       merchantOrderId: { $in: [...rawKeys, ...cleanKeys] },
     })
@@ -476,8 +467,7 @@ router.get("/orders", async (req, res) => {
         .select("orderId utr customerPayAmt settledDate")
         .lean();
     }
-
-    // Maps
+ 
     const mapOrderByCleanId = new Map();
     for (const od of ordersDocs) {
       mapOrderByCleanId.set((od.order_id || "").toString(), od);
@@ -604,8 +594,7 @@ router.get("/orders", async (req, res) => {
       const trackingId = od?.tracking_number || "--";
       const courierPartner = od?.carrier_title || "--";
       const deliveredDate = od?.last_updated_at || null;
-
-      // Shipment status from Orders collection
+  
       const shipmentStatus = od?.shipment_status || "—";
 
       const partialPayment =
@@ -627,14 +616,10 @@ router.get("/orders", async (req, res) => {
         (mapAmountByKey.get(r.orderName) ?? 0) +
         (mapAmountByKey.get(cleanId) ?? 0) +
         (numericId !== null ? mapAmountByKey.get(numericId) ?? 0 : 0);
-
-      // Remaining = max(0, Partial Payment - Total Received)
+ 
       const remainingAmount =
         partialPayment > 0 ? Math.max(0, partialPayment - totalReceived) : 0;
-
-      // 🔒 Auto-close logic
-      // 1) If shipmentStatus is "RTO Delivered" → closed
-      // 2) If UTR exists AND shipmentStatus is "Delivered" AND remainingAmount == 0 → closed
+ 
       let customOrderStatus = "open";
 
       if (shipmentStatus === "RTO Delivered") {
@@ -645,10 +630,9 @@ router.get("/orders", async (req, res) => {
         customOrderStatus = "closed";
       }
 
-      return {
-        // 🔴 frontend can use this for date column
-        orderDate: r.orderDate,    // actual Shopify order date
-        createdAt: r.createdAt,    // Mongo doc creation date
+      return { 
+        orderDate: r.orderDate,    
+        createdAt: r.createdAt,  
 
         orderName: r.orderName,
         billingName: r.billingName,
@@ -669,7 +653,7 @@ router.get("/orders", async (req, res) => {
         remainingAmount,
 
         refund: "",
-        settlementDate, // "YYYY-MM-DD"
+        settlementDate,  
         remark: "",
         utr,
         orderStatus: "—",

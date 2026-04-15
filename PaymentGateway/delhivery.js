@@ -1,4 +1,3 @@
-// routes/delhivery.routes.js
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -6,6 +5,7 @@ const csv = require("csv-parser");
 const fs = require("fs");
 const path = require("path");
 const DelhiverySettlement = require("../models/DelhiverySettlement");
+const requireSession = require("../middleware/requireSession");
 
 // ✅ ensure upload dir exists
 const uploadDir = path.join(__dirname, "..", "uploads", "delhivery");
@@ -42,11 +42,9 @@ function parseDate(value) {
   const s = String(value).trim();
   if (!s) return null;
 
-  // native first
   const d1 = new Date(s);
   if (!Number.isNaN(d1.getTime())) return d1;
 
-  // dd/mm/yyyy or dd-mm-yyyy
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (m) {
     const dd = parseInt(m[1], 10);
@@ -104,7 +102,6 @@ function safeUnlink(p) {
   fs.unlink(p, () => {});
 }
 
-// ✅ shared query builder (used in /data and /export)
 function buildQueryFromReq(qs = {}) {
   const { q, uploadMin, uploadMax, settledMin, settledMax, amountMin, amountMax } = qs;
 
@@ -163,7 +160,7 @@ function fmtDateYMD(d) {
 }
 
 // ------------------- GET /sample -------------------
-router.get("/sample", (req, res) => {
+router.get("/sample", requireSession, (req, res) => {
   const sample =
     "AWB NO,ORDER ID,AMOUNT,UTR NO,SETTLED DATE\n" +
     "1234567890,MA12345,15200,R22026012113984136,21-Jan-26\n";
@@ -174,7 +171,7 @@ router.get("/sample", (req, res) => {
 });
 
 // ------------------- POST /upload -------------------
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file is required" });
 
   const filePath = req.file.path;
@@ -198,7 +195,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         awbNo: awbNo || "",
         utrNo: utrNo || "",
         orderId: orderId || "",
-        amount: parseNum(amountRaw), // ✅ Amount considered
+        amount: parseNum(amountRaw),
         settledDate: parseDate(settledRaw),
       };
     });
@@ -215,7 +212,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 // ------------------- DELETE /delete-last-upload -------------------
-router.delete("/delete-last-upload", async (req, res) => {
+router.delete("/delete-last-upload", requireSession, async (req, res) => {
   try {
     const latest = await DelhiverySettlement.findOne({}, { uploadDate: 1 })
       .sort({ uploadDate: -1, createdAt: -1 })
@@ -240,7 +237,7 @@ router.delete("/delete-last-upload", async (req, res) => {
 });
 
 // ------------------- DELETE /delete-by-upload-date -------------------
-router.delete("/delete-by-upload-date", async (req, res) => {
+router.delete("/delete-by-upload-date", requireSession, async (req, res) => {
   try {
     const { date } = req.query;
     if (!date) return res.status(400).json({ error: "date (YYYY-MM-DD) is required" });
@@ -260,8 +257,8 @@ router.delete("/delete-by-upload-date", async (req, res) => {
   }
 });
 
-// ------------------- GET /data (with filters + totalAmount SUM) -------------------
-router.get("/data", async (req, res) => {
+// ------------------- GET /data -------------------
+router.get("/data", requireSession, async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
   if (page < 1) page = 1;
@@ -282,7 +279,7 @@ router.get("/data", async (req, res) => {
         .lean(),
       DelhiverySettlement.aggregate([
         { $match: query },
-        { $group: { _id: null, total: { $sum: "$amount" } } }, // ✅ Amount total
+        { $group: { _id: null, total: { $sum: "$amount" } } },
       ]),
     ]);
 
@@ -294,7 +291,7 @@ router.get("/data", async (req, res) => {
       limit,
       totalCount,
       pages: Math.ceil(totalCount / limit),
-      totalAmount, // ✅ NEW
+      totalAmount,
     });
   } catch (err) {
     console.error(err);
@@ -302,15 +299,14 @@ router.get("/data", async (req, res) => {
   }
 });
 
-// ------------------- GET /export (all / filtered) -------------------
-router.get("/export", async (req, res) => {
+// ------------------- GET /export -------------------
+router.get("/export", requireSession, async (req, res) => {
   try {
     const query = buildQueryFromReq(req.query);
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", 'attachment; filename="delhivery_export.csv"');
 
-    // header
     res.write(["Upload Date", "AWB No", "Order ID", "Amount", "UTR No", "Settled Date"].join(",") + "\n");
 
     const cursor = DelhiverySettlement.find(query)

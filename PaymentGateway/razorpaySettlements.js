@@ -5,6 +5,7 @@ const csv = require("csv-parser");
 const fs = require("fs");
 const path = require("path");
 const RazorpaySettlement = require("../models/RazorpaySettlement");
+const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
 
@@ -178,7 +179,7 @@ function buildQueryFromReq(qs = {}) {
 }
 
 // ===================== UPLOAD CSV =====================
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
   const results = [];
@@ -256,11 +257,11 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 // ===================== GET PAGINATED DATA + FILTERS + totalAmount =====================
-router.get("/data", async (req, res) => {
+router.get("/data", requireSession, async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
   if (page < 1) page = 1;
-  if (limit < 1) limit = 50;
+  if (limit < 1) limit = 50; 
   limit = Math.min(limit, 500);
   const skip = (page - 1) * limit;
 
@@ -296,7 +297,7 @@ router.get("/data", async (req, res) => {
 });
 
 // ===================== EXPORT CSV (ALL or FILTERED) =====================
-router.get("/export", async (req, res) => {
+router.get("/export", requireSession, async (req, res) => {
   try {
     const query = buildQueryFromReq(req.query);
 
@@ -367,7 +368,7 @@ router.get("/export", async (req, res) => {
 });
 
 // ===================== SAMPLE CSV DOWNLOAD =====================
-router.get("/sample", (req, res) => {
+router.get("/sample", requireSession, (req, res) => {
   const headerRow =
     "Upload Date,Transaction Entity,Entity ID,Amount,Currency,Fee,Tax,Debit,Credit,Payment Method,Card Type,Issuer Name,Created At,Order ID,Settlemet Id,Settlement UTR,Settled At,Settled By\n";
 

@@ -1,4 +1,3 @@
-// routes/cashfree.js
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -7,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const CashfreeSettlement = require("../models/CashfreeSettlement");
+const requireSession = require("../middleware/requireSession");
 
 // ✅ ensure upload dir exists
 const uploadDir = path.join(__dirname, "..", "uploads", "cashfree");
@@ -143,7 +143,7 @@ function safeUnlink(p) {
 }
 
 // ------------------- GET /sample -------------------
-router.get("/sample", (req, res) => {
+router.get("/sample", requireSession, (req, res) => {
   const sample =
     "Order ID,Amount Received,Date of Payment,Transaction ID,Utr No,Date of Settlement\n" +
     "MA12345,1520,2026-02-16,tx_123ABC,UTR123456,2026-02-18\n";
@@ -154,12 +154,11 @@ router.get("/sample", (req, res) => {
 });
 
 // ------------------- POST /upload -------------------
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file is required" });
 
   const filePath = req.file.path;
 
-  // ✅ one batch id + one uploadDate for all rows
   const batchId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
   const batchAt = new Date();
 
@@ -203,9 +202,12 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 // ------------------- DELETE /delete-last-upload -------------------
-router.delete("/delete-last-upload", async (req, res) => {
+router.delete("/delete-last-upload", requireSession, async (req, res) => {
   try {
-    const last = await CashfreeSettlement.findOne().sort({ uploadDate: -1, createdAt: -1 }).lean();
+    const last = await CashfreeSettlement.findOne()
+      .sort({ uploadDate: -1, createdAt: -1 })
+      .lean();
+
     if (!last) return res.json({ deleted: 0 });
 
     let deleted = 0;
@@ -217,7 +219,9 @@ router.delete("/delete-last-upload", async (req, res) => {
       const t = new Date(last.uploadDate).getTime();
       const start = new Date(t - 2 * 60 * 1000);
       const end = new Date(t + 2 * 60 * 1000);
-      const r = await CashfreeSettlement.deleteMany({ uploadDate: { $gte: start, $lte: end } });
+      const r = await CashfreeSettlement.deleteMany({
+        uploadDate: { $gte: start, $lte: end },
+      });
       deleted = r.deletedCount || 0;
     }
 
@@ -229,7 +233,7 @@ router.delete("/delete-last-upload", async (req, res) => {
 });
 
 // ------------------- GET /data (filters + pagination) -------------------
-router.get("/data", async (req, res) => {
+router.get("/data", requireSession, async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
   if (page < 1) page = 1;
@@ -252,13 +256,11 @@ router.get("/data", async (req, res) => {
 
     const query = {};
 
-    // search
     if (q && String(q).trim()) {
       const rx = new RegExp(escapeRegex(String(q).trim()), "i");
       query.$or = [{ orderId: rx }, { transactionId: rx }, { utrNo: rx }];
     }
 
-    // upload date range
     if (uploadMin || uploadMax) {
       query.uploadDate = {};
       const dMin = parseDateParam(uploadMin, false);
@@ -268,7 +270,6 @@ router.get("/data", async (req, res) => {
       if (!Object.keys(query.uploadDate).length) delete query.uploadDate;
     }
 
-    // payment date range
     if (paymentMin || paymentMax) {
       query.dateOfPayment = {};
       const pMin = parseDateParam(paymentMin, false);
@@ -278,7 +279,6 @@ router.get("/data", async (req, res) => {
       if (!Object.keys(query.dateOfPayment).length) delete query.dateOfPayment;
     }
 
-    // settlement date range
     if (settlementMin || settlementMax) {
       query.dateOfSettlement = {};
       const sMin = parseDateParam(settlementMin, false);
@@ -288,7 +288,6 @@ router.get("/data", async (req, res) => {
       if (!Object.keys(query.dateOfSettlement).length) delete query.dateOfSettlement;
     }
 
-    // amount range
     const aMin = amountMin !== undefined && amountMin !== "" ? Number(amountMin) : null;
     const aMax = amountMax !== undefined && amountMax !== "" ? Number(amountMax) : null;
     if (aMin !== null || aMax !== null) {

@@ -6,8 +6,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const DtdcSettlement = require("../models/DtdcSettlement");
-
-// ✅ ensure upload dir exists
+const requireSession = require("../middleware/requireSession");
+ 
 const uploadDir = path.join(__dirname, "..", "uploads", "dtdc");
 fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -15,8 +15,7 @@ const upload = multer({
   dest: uploadDir,
   limits: { fileSize: 15 * 1024 * 1024 },
 });
-
-// ---------- helper: safely read possible header variants ----------
+ 
 const pick = (row, keys) => {
   for (const k of keys) {
     if (row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
@@ -41,12 +40,10 @@ function parseDate(value) {
   if (!value) return null;
   const s = String(value).trim();
   if (!s) return null;
-
-  // native first
+ 
   const d1 = new Date(s);
   if (!Number.isNaN(d1.getTime())) return d1;
-
-  // dd/mm/yyyy or dd-mm-yyyy
+ 
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (m) {
     const dd = parseInt(m[1], 10);
@@ -74,8 +71,7 @@ function detectSeparator(filePath) {
 function parseDateOnlyToYMD(input) {
   if (!input) return null;
   const s = String(input).trim();
-
-  // YYYY-MM-DD
+ 
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) {
     const yyyy = m[1];
@@ -83,8 +79,7 @@ function parseDateOnlyToYMD(input) {
     const dd = String(m[3]).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
   }
-
-  // DD/MM/YYYY or DD-MM-YYYY
+ 
   m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (m) {
     const dd = String(m[1]).padStart(2, "0");
@@ -95,8 +90,7 @@ function parseDateOnlyToYMD(input) {
 
   return null;
 }
-
-// IST day range => converts to correct UTC Date objects
+ 
 function istDayRange(ymd) {
   const start = new Date(`${ymd}T00:00:00.000+05:30`);
   const end = new Date(`${ymd}T23:59:59.999+05:30`);
@@ -132,8 +126,7 @@ function makeBatchId() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return `${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
 }
-
-// ✅ shared query builder (used in /data and /export)
+ 
 function buildQueryFromReq(qs = {}) {
   const {
     q,
@@ -153,8 +146,7 @@ function buildQueryFromReq(qs = {}) {
   } = qs;
 
   const query = {};
-
-  // search (CN / CustomerRef / UTR / Status)
+ 
   if (q && String(q).trim()) {
     const rx = new RegExp(escapeRegex(String(q).trim()), "i");
     query.$or = [
@@ -164,13 +156,11 @@ function buildQueryFromReq(qs = {}) {
       { remittanceStatus: rx },
     ];
   }
-
-  // status contains
+ 
   if (status && String(status).trim()) {
     query.remittanceStatus = new RegExp(escapeRegex(String(status).trim()), "i");
   }
-
-  // helper to apply IST day range if input is date-only (YYYY-MM-DD or DD/MM/YYYY)
+ 
   const applyDateRange = (field, minV, maxV) => {
     if (!minV && !maxV) return;
 
@@ -238,9 +228,8 @@ function fmtDateYMD(d) {
   const dd = String(dt.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
-
-// ✅ GET /sample (download sample CSV)
-router.get("/sample", (req, res) => {
+ 
+router.get("/sample", requireSession, (req, res) => {
   const header = [
     "CN Number",
     "Customer Reference Number",
@@ -271,9 +260,8 @@ router.get("/sample", (req, res) => {
   res.setHeader("Content-Disposition", 'attachment; filename="dtdc_upload_sample.csv"');
   return res.send(csvContent);
 });
-
-// ------------------- POST /upload -------------------
-router.post("/upload", upload.single("file"), async (req, res) => {
+ 
+router.post("/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file is required" });
 
   const filePath = req.file.path;
@@ -285,7 +273,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "No rows parsed from CSV." });
     }
 
-    const batchId = makeBatchId(); // ✅ one batch id per upload
+    const batchId = makeBatchId();
 
     const records = rows.map((row) => {
       const cnNumber = pick(row, ["CN Number", "CN No", "CNNumber", "CN"]);
@@ -336,9 +324,8 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     return res.status(500).json({ error: "Upload failed" });
   }
 });
-
-// ✅ DELETE /delete-last-upload (delete latest uploaded batch)
-router.delete("/delete-last-upload", async (req, res) => {
+ 
+router.delete("/delete-last-upload", requireSession, async (req, res) => {
   try {
     const latest = await DtdcSettlement.findOne({})
       .sort({ uploadDate: -1, createdAt: -1 })
@@ -363,9 +350,8 @@ router.delete("/delete-last-upload", async (req, res) => {
     return res.status(500).json({ error: "Failed to delete last upload" });
   }
 });
-
-// ------------------- GET /data (with filters + total sum of remitted) -------------------
-router.get("/data", async (req, res) => {
+ 
+router.get("/data", requireSession, async (req, res) => {
   let page = parseInt(req.query.page, 10) || 1;
   let limit = parseInt(req.query.limit, 10) || 50;
   if (page < 1) page = 1;
@@ -398,7 +384,7 @@ router.get("/data", async (req, res) => {
       limit,
       totalCount,
       pages: Math.ceil(totalCount / limit),
-      totalRemittedAmount, // ✅ NEW
+      totalRemittedAmount,
     });
   } catch (err) {
     console.error(err);
@@ -407,14 +393,13 @@ router.get("/data", async (req, res) => {
 });
 
 // ------------------- GET /export (all / filtered) -------------------
-router.get("/export", async (req, res) => {
+router.get("/export", requireSession, async (req, res) => {
   try {
     const query = buildQueryFromReq(req.query);
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", 'attachment; filename="dtdc_export.csv"');
 
-    // header
     res.write(
       [
         "Upload Date",
@@ -462,7 +447,7 @@ router.get("/export", async (req, res) => {
   }
 });
 
-router.get("/count-upload-date", async (req, res) => {
+router.get("/count-upload-date", requireSession, async (req, res) => {
   try {
     const ymd = parseDateOnlyToYMD(req.query.date);
     if (!ymd) return res.status(400).json({ error: "Invalid date. Use YYYY-MM-DD or DD/MM/YYYY" });
@@ -485,10 +470,8 @@ router.get("/count-upload-date", async (req, res) => {
     return res.status(500).json({ error: "Failed to count DTDC records" });
   }
 });
-
-// ✅ Delete rows uploaded on that date (IST)
-// DELETE /api/dtdc/delete-upload-date?date=16/02/2026  (or 2026-02-16)
-router.delete("/delete-upload-date", async (req, res) => {
+ 
+router.delete("/delete-upload-date", requireSession, async (req, res) => {
   try {
     const ymd = parseDateOnlyToYMD(req.query.date);
     if (!ymd) return res.status(400).json({ error: "Invalid date. Use YYYY-MM-DD or DD/MM/YYYY" });

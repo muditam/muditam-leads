@@ -4,6 +4,7 @@ const multer = require("multer");
 const csv = require("csv-parser");
 const fs = require("fs");
 const PhonePeSettlement = require("../models/PhonePeSettlement");
+const requireSession = require("../middleware/requireSession");
 
 const upload = multer({ dest: "uploads/" });
 
@@ -14,8 +15,12 @@ const safeParseFloat = (value) => {
 };
 
 // Upload and save CSV
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", requireSession, upload.single("file"), async (req, res) => {
   try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
     const filePath = req.file.path;
     const records = [];
 
@@ -56,26 +61,29 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         try {
           await PhonePeSettlement.insertMany(records);
           fs.unlinkSync(filePath);
-          res.json({ message: "Upload successful", inserted: records.length });
+          return res.json({
+            message: "Upload successful",
+            inserted: records.length,
+          });
         } catch (err) {
           console.error("DB insert error:", err);
-          res.status(500).json({ error: "Failed to save records to DB." });
+          return res.status(500).json({ error: "Failed to save records to DB." });
         }
       })
       .on("error", (err) => {
         console.error("CSV parsing error:", err);
-        res.status(500).json({ error: "Error reading the CSV file." });
+        return res.status(500).json({ error: "Error reading the CSV file." });
       });
   } catch (error) {
     console.error("Upload error:", error);
-    res.status(500).json({ error: "Failed to upload CSV." });
+    return res.status(500).json({ error: "Failed to upload CSV." });
   }
 });
 
 // Paginated fetch
-router.get("/data", async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 50;
+router.get("/data", requireSession, async (req, res) => {
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 50;
   const skip = (page - 1) * limit;
 
   try {
@@ -85,10 +93,16 @@ router.get("/data", async (req, res) => {
       .skip(skip)
       .limit(limit);
 
-    res.json({ data, page, limit, totalCount, totalPages: Math.ceil(totalCount / limit) });
+    return res.json({
+      data,
+      page,
+      limit,
+      totalCount,
+      totalPages: Math.ceil(totalCount / limit),
+    });
   } catch (err) {
     console.error("Fetch error:", err);
-    res.status(500).json({ error: "Failed to fetch paginated data" });
+    return res.status(500).json({ error: "Failed to fetch paginated data" });
   }
 });
 
