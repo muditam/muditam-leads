@@ -5,6 +5,7 @@ const router = express.Router();
 const ShopifyOrder = require("../models/ShopifyOrder");
 const Lead = require("../models/Lead");
 const Order = require("../models/Order");
+const requireSession = require("../middleware/requireSession");
 
 // ---------- helpers ----------
 function ymd(dateLike) {
@@ -65,7 +66,7 @@ function titleToCode(title) {
   return letters || key.toUpperCase();
 }
 
-router.get("/shopify/orders-table", async (req, res) => {
+router.get("/shopify/orders-table", requireSession, async (req, res) => {
   try {
     const page  = Math.max(parseInt(req.query.page || "1", 10), 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 200);
@@ -453,7 +454,7 @@ router.get("/shopify/orders-table", async (req, res) => {
 });
 
 // ---------- Assign Health Expert (update existing lead first, else create) ----------
-router.post("/leads/assign-health-expert", async (req, res) => {
+router.post("/leads/assign-health-expert", requireSession, async (req, res) => {
   try {
     const { orderName, contactNumber, healthExpertAssigned } = req.body || {};
 
