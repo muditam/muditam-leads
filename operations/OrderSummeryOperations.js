@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Order = require("../models/Order");
 const ShopifyOrder = require("../models/ShopifyOrder");
+const requireSession = require("../middleware/requireSession");
 
 const EXCLUDED_STATUSES = ["Delivered", "RTO Delivered"];
 
@@ -104,7 +105,7 @@ async function attachFinancialStatus(orders = []) {
   });
 }
 
-router.get("/order-counts", async (req, res) => {
+router.get("/order-counts", requireSession, async (req, res) => {
   try {
     const counts = await Order.aggregate([
       {
@@ -139,7 +140,7 @@ router.get("/order-counts", async (req, res) => {
   }
 });
 
-router.patch("/ops-meta/by-order-id", async (req, res) => {
+router.patch("/ops-meta/by-order-id", requireSession, async (req, res) => {
   try {
     const { order_id, opsRemark, assignedAgentId } = req.body;
 
@@ -180,8 +181,7 @@ router.patch("/ops-meta/by-order-id", async (req, res) => {
   }
 });
 
-// GET endpoint with server-side filtering + financial_status from ShopifyOrder
-router.get("/undelivered-orders", async (req, res) => {
+router.get("/undelivered-orders", requireSession, async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 50;

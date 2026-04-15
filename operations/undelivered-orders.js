@@ -2,8 +2,9 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
+const requireSession = require("../middleware/requireSession");
 
-router.get('/undelivered', async (req, res) => {
+router.get('/undelivered', requireSession, async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page || '1', 10), 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit || '50', 10), 1), 200);
@@ -288,7 +289,7 @@ router.get('/undelivered', async (req, res) => {
 });
 
 // PATCH /api/orders/:id/issue  { issue: "fakeRemark" | "anything" }
-router.patch('/:id/issue', async (req, res) => {
+router.patch('/:id/issue', requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     let { issue } = req.body;
