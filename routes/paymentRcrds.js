@@ -10,6 +10,7 @@ const PaymentRcrd = require("../models/PaymentRcrd");
 const PurchaseRcrd = require("../models/PurchaseRcrd"); // ✅ make sure filename matches
 const Vendor = require("../models/Vendorname");
 
+const requireSession = require("../middleware/requireSession");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -73,7 +74,7 @@ function vendorMatchFilter(vendor) {
 }
 
 
-router.get("/", async (req, res) => {
+router.get("/", requireSession, async (req, res) => {
   try {
     const records = await PaymentRcrd.find({ isDeleted: { $ne: true } }).sort({ date: -1 });
     res.json(records);
@@ -82,7 +83,7 @@ router.get("/", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch payment records" });
   }
 });
-router.get("/calc-due", async (req, res) => {
+router.get("/calc-due", requireSession, async (req, res) => {
   try {
     const { date, amountPaid, vendorId, vendorName } = req.query;
     if (!date) return res.status(400).json({ error: "Date required" });
@@ -124,7 +125,7 @@ router.get("/calc-due", async (req, res) => {
 });
 
 
-router.post("/", async (req, res) => {
+router.post("/", requireSession, async (req, res) => {
   try {
     const { date, vendorId, vendorName, amountPaid, screenshotUrl } = req.body;
 
@@ -178,7 +179,8 @@ router.post("/", async (req, res) => {
     res.status(500).json({ error: "Failed to add payment record" });
   }
 });
-router.post("/upload-screenshot", upload.single("file"), async (req, res) => {
+
+router.post("/upload-screenshot", requireSession, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
@@ -200,7 +202,7 @@ router.post("/upload-screenshot", upload.single("file"), async (req, res) => {
     res.status(500).json({ error: "Screenshot upload failed" });
   }
 });
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireSession, async (req, res) => {
   try {
     const updated = await PaymentRcrd.findByIdAndUpdate(
       req.params.id,
