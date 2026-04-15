@@ -1,8 +1,8 @@
-
-
 const express = require("express");
 const router = express.Router();
 const ShopifyOrder = require("../models/ShopifyOrder");
+const requireSession = require("../middleware/requireSession");
+
 // keep in sync with your main OC router
 const CallStatusEnum = {
   CNP: "CNP",
@@ -46,9 +46,9 @@ function buildRangeClause(rangeKey) {
   if (start) clause.$gte = start;
   if (end) clause.$lte = end;
   return clause;
-}
-// GET /api/order-confirmation/confirmed-order
-router.get("/confirmed-order", async (req, res) => {
+} 
+
+router.get("/confirmed-order", requireSession, async (req, res) => {
   try {
     const {
       page = 1,

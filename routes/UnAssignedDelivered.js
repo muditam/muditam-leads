@@ -1,10 +1,9 @@
-
-
 const express = require("express");
 const router = express.Router();
 const Order = require("../models/Order");
 const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
+const requireSession = require("../middleware/requireSession");
 
 const TTL_MS = 5 * 60 * 1000;
 
@@ -100,17 +99,14 @@ async function getPhoneSets({ force = false, startDate = null } = {}) {
   return phoneCache.building;
 }
 
-
-router.get("/unassigned-delivered-count", async (req, res) => {
+router.get("/unassigned-delivered-count", requireSession, async (req, res) => {
   try {
     const { startDate } = req.query;
-
 
     const { unassignedPhones } = await getPhoneSets({
       force: req.query.refresh === "1",
       startDate,
     });
-
 
     if (unassignedPhones.length === 0) {
       return res.json({
@@ -119,13 +115,11 @@ router.get("/unassigned-delivered-count", async (req, res) => {
       });
     }
 
-
     const match = {
       shipment_status: "Delivered",
       contact_number: { $in: unassignedPhones },
       order_id: { $regex: /^MA\d+$/ }, 
     };
-
 
     if (startDate) {
       const sd = new Date(startDate);
@@ -144,9 +138,7 @@ router.get("/unassigned-delivered-count", async (req, res) => {
       { $count: "count" },
     ]);
 
-
     const count = result[0]?.count || 0;
-
 
     res.json({
       count,
@@ -159,7 +151,7 @@ router.get("/unassigned-delivered-count", async (req, res) => {
 });
 
 
-router.get("/unassigned-delivered", async (req, res) => {
+router.get("/unassigned-delivered", requireSession, async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
     const limit = Math.min(
@@ -168,22 +160,17 @@ router.get("/unassigned-delivered", async (req, res) => {
     );
     const skip = (page - 1) * limit;
 
-
     const { startDate } = req.query;
-
 
     const sortOrder =
       (req.query.sortOrder || "desc").toLowerCase() === "asc" ? 1 : -1;
 
-
     const sortField = "order_date";  
-
 
     const { unassignedPhones } = await getPhoneSets({
       force: req.query.refresh === "1",
       startDate,
     });
-
 
     if (unassignedPhones.length === 0) {
       return res.json({
@@ -195,12 +182,10 @@ router.get("/unassigned-delivered", async (req, res) => {
       });
     }
 
-
     const matchStage = {
       shipment_status: "Delivered",
       contact_number: { $in: unassignedPhones },
     };
-
 
     if (startDate) {
       const sd = new Date(startDate);
@@ -208,7 +193,6 @@ router.get("/unassigned-delivered", async (req, res) => {
         matchStage.order_date = { $gte: sd };
       }
     }
-
 
  const pipeline = [
   {
@@ -233,25 +217,16 @@ router.get("/unassigned-delivered", async (req, res) => {
     },
   },
 
-
-
-
   { $sort: { order_date: sortOrder } },
-
-
-
 
   { $skip: skip },
   { $limit: limit },
 ];
 
-
     const data = await Order.aggregate(pipeline);
-
 
     const total = unassignedPhones.length;
     const totalPages = Math.ceil(total / limit);
-
 
     res.json({
       page,
@@ -265,27 +240,23 @@ router.get("/unassigned-delivered", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-router.post("/assign-employee", async (req, res) => {
+
+router.post("/assign-employee", requireSession, async (req, res) => {
   try {
     const { phone, employeeId } = req.body;
-
 
     if (!phone || !employeeId) {
       return res.status(400).json({ error: "phone and employeeId required" });
     }
-
 
     const employee = await require("../models/Employee").findById(employeeId);
     if (!employee) {
       return res.status(404).json({ error: "Employee not found" });
     }
 
-
     const normalized = String(phone).replace(/\D/g, "").slice(-10);
 
-
     let lead = await Lead.findOne({ contactNumber: normalized });
-
 
     if (!lead) {
       lead = await Lead.create({
@@ -294,19 +265,15 @@ router.post("/assign-employee", async (req, res) => {
       });
     }
 
-
     if (employee.role.toLowerCase().includes("sales")) {
       lead.agentAssigned = employee._id;
     }
-
 
     if (employee.role.toLowerCase().includes("retention")) {
       lead.healthExpertAssigned = employee._id;
     }
 
-
     await lead.save();
-
 
     res.json({ success: true });
   } catch (err) {
@@ -314,7 +281,8 @@ router.post("/assign-employee", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-router.post("/update-lead-from-unassigned", async (req, res) => {
+
+router.post("/update-lead-from-unassigned", requireSession, async (req, res) => {
   try {
     const {
       name,
@@ -324,21 +292,17 @@ router.post("/update-lead-from-unassigned", async (req, res) => {
       assignedName,
     } = req.body;
 
-
     if (!contactNumber || !assignedName) {
       return res.status(400).json({
         error: "contactNumber and assignedName are required",
       });
     }
 
-
     const normalizedContact = String(contactNumber)
       .replace(/\D/g, "")
       .slice(-10);
 
-
     let lead = await Lead.findOne({ contactNumber: normalizedContact });
-
 
     if (!lead) {
       const now = new Date();
@@ -347,17 +311,14 @@ router.post("/update-lead-from-unassigned", async (req, res) => {
       lead = new Lead({
         contactNumber: normalizedContact,
         leadSource: "Unassigned Delivered",
-        date: now.toISOString().slice(0, 10), // YYYY-MM-DD
+        date: now.toISOString().slice(0, 10), 
         time: now.toLocaleTimeString("en-IN", {
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit",
         }),
       });
-    }
-
-
-
+    } 
 
     lead.name = name || lead.name;
     lead.contactNumber = normalizedContact;
@@ -374,9 +335,7 @@ router.post("/update-lead-from-unassigned", async (req, res) => {
         .slice(0, 10);
     }
 
-
     await lead.save();
-
 
     res.json({ success: true });
   } catch (err) {
