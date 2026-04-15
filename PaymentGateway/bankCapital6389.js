@@ -6,6 +6,7 @@ const path = require("path");
 const csv = require("csv-parser");
 const mongoose = require("mongoose");
 const Capital6389Txn = require("../models/Capital6389Txn");
+const requireSession = require("../middleware/requireSession");
 
 const upload = multer({
   dest: path.join(__dirname, "..", "uploads", "bank-capital-6389"),
@@ -118,7 +119,7 @@ async function parseCsvFile(filePath) {
 }
 
 // GET with filters
-router.get("/capital-6389", async (req, res) => {
+router.get("/capital-6389", requireSession, async (req, res) => {
   try {
     let { page = 1, limit = 50, q, dateMin, dateMax, branchCode, amountMin, amountMax } = req.query;
     page = parseInt(page, 10) || 1;
@@ -190,7 +191,7 @@ router.get("/capital-6389", async (req, res) => {
 });
 
 // PUT rowColor (and future-safe for partial updates)
-router.put("/capital-6389/:id", async (req, res) => {
+router.put("/capital-6389/:id", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     if (!isValidObjectId(id)) {
@@ -210,7 +211,7 @@ router.put("/capital-6389/:id", async (req, res) => {
   }
 });
 
-router.post("/capital-6389/upload", upload.single("file"), async (req, res) => {
+router.post("/capital-6389/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: "CSV file is required" });
   }

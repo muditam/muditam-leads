@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const csv = require("csv-parser");
 const mongoose = require("mongoose");
+const requireSession = require("../middleware/requireSession");
 
 const KotakBankTxn = require("../models/KotakBankTxn");
 
@@ -85,9 +86,8 @@ function detectSeparator(filePath) {
     rs.on("error", reject);
   });
 }
-
-// ---------- GET /kotak-bank (pagination + filters) ----------
-router.get("/kotak-bank", async (req, res) => {
+ 
+router.get("/kotak-bank", requireSession, async (req, res) => {
   try {
     let { page = 1, limit = 250 } = req.query;
     page = parseInt(page, 10) || 1;
@@ -186,9 +186,8 @@ router.get("/kotak-bank", async (req, res) => {
     return res.status(500).json({ success: false, message: err.message || "Server error" });
   }
 });
-
-// ---------- PUT /kotak-bank/:id (rowColor update or full update) ----------
-router.put("/kotak-bank/:id", async (req, res) => {
+ 
+router.put("/kotak-bank/:id", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     if (!isValidObjectId(id)) return res.status(400).json({ success: false, message: "Invalid id" });
@@ -210,9 +209,8 @@ router.put("/kotak-bank/:id", async (req, res) => {
     return res.status(500).json({ success: false, message: err.message || "Server error" });
   }
 });
-
-// ---------- POST /kotak-bank/upload (CSV) ----------
-router.post("/kotak-bank/upload", upload.single("file"), async (req, res) => {
+ 
+router.post("/kotak-bank/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: "CSV file is required" });
   }

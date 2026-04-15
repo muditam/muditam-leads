@@ -6,6 +6,7 @@ const path = require("path");
 const csv = require("csv-parser");
 const mongoose = require("mongoose");
 const Cc1101Txn = require("../models/Cc1101Txn");
+const requireSession = require("../middleware/requireSession");
 
 // -------- Multer setup --------
 const upload = multer({
@@ -123,7 +124,7 @@ async function parseCsvFile(filePath) {
 }
 
 // -------- GET: list transactions with pagination + filters --------
-router.get("/cc-1101", async (req, res) => {
+router.get("/cc-1101", requireSession, async (req, res) => {
   try {
     let { page = 1, limit = 50, q, dateMin, dateMax, branchCode, amountMin, amountMax } = req.query;
     page = parseInt(page, 10) || 1;
@@ -191,7 +192,7 @@ router.get("/cc-1101", async (req, res) => {
 });
 
 // -------- PUT: update rowColor (partial) --------
-router.put("/cc-1101/:id", async (req, res) => {
+router.put("/cc-1101/:id", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     if (!isValidObjectId(id)) {
@@ -212,7 +213,7 @@ router.put("/cc-1101/:id", async (req, res) => {
 });
 
 // -------- POST: upload CSV (tolerant headers + separator detect) --------
-router.post("/cc-1101/upload", upload.single("file"), async (req, res) => {
+router.post("/cc-1101/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: "CSV file is required" });
   }

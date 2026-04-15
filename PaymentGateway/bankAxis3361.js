@@ -6,6 +6,7 @@ const path = require("path");
 const csv = require("csv-parser");
 const mongoose = require("mongoose");
 const Axis3361Txn = require("../models/Axis3361Txn");
+const requireSession = require("../middleware/requireSession");
 
 const upload = multer({
   dest: path.join(__dirname, "..", "uploads", "bank-axis-3361"),
@@ -117,7 +118,7 @@ async function parseCsvFile(filePath) {
 }
 
 // GET with filters
-router.get("/axis-3361", async (req, res) => {
+router.get("/axis-3361", requireSession, async (req, res) => {
   try {
     let { page = 1, limit = 50, q, dateMin, dateMax, branchName, amountMin, amountMax } = req.query;
     page = parseInt(page, 10) || 1;
@@ -185,7 +186,7 @@ router.get("/axis-3361", async (req, res) => {
 });
 
 // PUT rowColor (partial update)
-router.put("/axis-3361/:id", async (req, res) => {
+router.put("/axis-3361/:id", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     if (!isValidObjectId(id)) {
@@ -206,7 +207,7 @@ router.put("/axis-3361/:id", async (req, res) => {
 });
 
 // Upload CSV
-router.post("/axis-3361/upload", upload.single("file"), async (req, res) => {
+router.post("/axis-3361/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: "CSV file is required" });
   }

@@ -6,6 +6,7 @@ const xlsx = require("xlsx");
 const mongoose = require("mongoose");
 
 const BankEntry = require("../models/BankEntry");
+const requireSession = require("../middleware/requireSession");
 
 // ---------- Multer (with size limits) ----------
 const upload = multer({
@@ -146,7 +147,7 @@ async function insertInChunks(docs, size = 1000) {
 }
 
 // ---------- GET /api/bank-entries (with optional filters) ----------
-router.get("/api/bank-entries", async (req, res) => {
+router.get("/api/bank-entries", requireSession, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page || "1", 10));
     const limit = Math.max(1, Math.min(200, parseInt(req.query.limit || "10", 10)));
@@ -219,7 +220,7 @@ router.get("/api/bank-entries", async (req, res) => {
 });
 
 // ---------- POST /api/bank-entries (create single) ----------
-router.post("/api/bank-entries", async (req, res) => {
+router.post("/api/bank-entries", requireSession, async (req, res) => {
   try {
     const payload = sanitizePayload(req.body);
     const doc = await BankEntry.create(payload);
@@ -231,7 +232,7 @@ router.post("/api/bank-entries", async (req, res) => {
 });
 
 // ---------- PUT /api/bank-entries/:id (update single) ----------
-router.put("/api/bank-entries/:id", async (req, res) => {
+router.put("/api/bank-entries/:id", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     if (!isValidObjectId(id)) {
@@ -250,7 +251,7 @@ router.put("/api/bank-entries/:id", async (req, res) => {
 });
 
 // ---------- DELETE /api/bank-entries/:id ----------
-router.delete("/api/bank-entries/:id", async (req, res) => {
+router.delete("/api/bank-entries/:id", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     if (!isValidObjectId(id)) {
@@ -268,7 +269,7 @@ router.delete("/api/bank-entries/:id", async (req, res) => {
 });
 
 // ---------- POST /api/bank-entries/upload (Excel/CSV -> server parse) ----------
-router.post("/api/bank-entries/upload", upload.single("file"), async (req, res) => {
+router.post("/api/bank-entries/upload", requireSession, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ ok: false, error: "No file provided." });
 
@@ -365,7 +366,7 @@ router.post("/api/bank-entries/upload", upload.single("file"), async (req, res) 
 /**
  * POST /api/bank-entries/bulk (compat)
  */
-router.post("/api/bank-entries/bulk", async (req, res) => {
+router.post("/api/bank-entries/bulk", requireSession, async (req, res) => {
   try {
     if (!Array.isArray(req.body?.rows) || req.body.rows.length === 0) {
       return res.status(400).json({ ok: false, error: "rows[] required" });

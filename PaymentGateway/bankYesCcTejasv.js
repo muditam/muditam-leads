@@ -6,6 +6,7 @@ const path = require("path");
 const csv = require("csv-parser");
 const mongoose = require("mongoose");
 const YesCcTejasvTxn = require("../models/YesCcTejasvTxn");
+const requireSession = require("../middleware/requireSession");
 
 const upload = multer({
   dest: path.join(__dirname, "..", "uploads", "bank-yes-cc-tejasv"),
@@ -126,7 +127,7 @@ async function parseCsvFile(filePath) {
 }
 
 // ✅ GET with filters
-router.get("/yes-cc-tejasv", async (req, res) => {
+router.get("/yes-cc-tejasv", requireSession, async (req, res) => {
   try {
     let {
       page = 1,
@@ -195,7 +196,7 @@ router.get("/yes-cc-tejasv", async (req, res) => {
 });
 
 // ✅ PUT rowColor
-router.put("/yes-cc-tejasv/:id", async (req, res) => {
+router.put("/yes-cc-tejasv/:id", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     if (!isValidObjectId(id)) {
@@ -216,7 +217,7 @@ router.put("/yes-cc-tejasv/:id", async (req, res) => {
 });
 
 // ✅ Upload (tolerant CSV)
-router.post("/yes-cc-tejasv/upload", upload.single("file"), async (req, res) => {
+router.post("/yes-cc-tejasv/upload", requireSession, upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: "CSV file is required" });
   }
