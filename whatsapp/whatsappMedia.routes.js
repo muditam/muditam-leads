@@ -19,13 +19,20 @@ const upload = multer({
    TRUSTSIGNAL CONFIG
 ----------------------------------------- */
 const TRUSTSIGNAL_API_BASE = String(
-  process.env.TRUSTSIGNAL_API_BASE || "https://api.trustsignal.io"
+  process.env.TRUSTSIGNAL_API_BASE || "https://wpapi.trustsignal.io"
 ).replace(/\/+$/, "");
 
-const TRUSTSIGNAL_API_KEY = String(process.env.TRUSTSIGNAL_API_KEY || "").trim();
+const TRUSTSIGNAL_API_KEY = String(
+  process.env.TRUSTSIGNAL_API_KEY || ""
+).trim();
 
-const TS_PATH_UPLOAD_MEDIA = "/v1/whatsapp/media";
-const TS_PATH_SEND_MEDIA = "/v1/whatsapp/messages/media";
+const TS_PATH_UPLOAD_MEDIA = String(
+  process.env.TRUSTSIGNAL_UPLOAD_MEDIA_PATH || "/v1/whatsapp/media"
+).trim();
+
+const TS_PATH_SEND_MEDIA = String(
+  process.env.TRUSTSIGNAL_SEND_MEDIA_PATH || "/v1/whatsapp/messages/media"
+).trim();
 
 const trustsignalClient = axios.create({
   baseURL: TRUSTSIGNAL_API_BASE,
@@ -44,6 +51,38 @@ const normalizeWaId = (v = "") => {
   if (d.length === 10) return `91${d}`;
   return d;
 };
+
+const toE164Plus = (v = "") => {
+  const d = digitsOnly(v);
+  return d ? `+${d}` : "";
+};
+
+function getTrustSignalSenderOrThrow() {
+  const senderRaw = String(
+    process.env.TRUSTSIGNAL_SENDER_ID ||
+      process.env.TRUSTSIGNAL_SENDER ||
+      process.env.WHATSAPP_BUSINESS_PHONE ||
+      ""
+  ).trim();
+
+  const sender = digitsOnly(senderRaw) || senderRaw;
+
+  if (!sender) {
+    const err = new Error(
+      "TrustSignal sender missing. Set TRUSTSIGNAL_SENDER_ID in env."
+    );
+    err.status = 500;
+    throw err;
+  }
+
+  return sender;
+}
+
+function senderForDb(sender = "") {
+  const raw = String(sender || "").trim();
+  const d = digitsOnly(raw);
+  return d ? normalizeWaId(d) : raw;
+}
 
 function safeFilename(name = "file") {
   return String(name || "file")
@@ -74,7 +113,13 @@ function inferTypeAndMime({ mimetype = "", originalname = "" }) {
   const isVideo = mime.startsWith("video/") || videoExts.includes(ext);
   const isImage = mime.startsWith("image/") || imgExts.includes(ext);
 
-  const type = isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : "document";
+  const type = isImage
+    ? "image"
+    : isVideo
+    ? "video"
+    : isAudio
+    ? "audio"
+    : "document";
 
   let bestMime = mime;
   if (!bestMime || bestMime === "application/octet-stream") {
@@ -87,10 +132,12 @@ function inferTypeAndMime({ mimetype = "", originalname = "" }) {
       bestMime = ext === "png" ? "image/png" : "image/jpeg";
     } else if (type === "video") {
       bestMime = "video/mp4";
+    } else if (type === "document" && ext === "pdf") {
+      bestMime = "application/pdf";
     }
   }
 
-  return { type, mime: bestMime };
+  return { type, mime: bestMime || "application/octet-stream" };
 }
 
 function previewTextForType(type, filename = "") {
@@ -124,8 +171,13 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
   if (resp.status >= 200 && resp.status < 300) return resp;
 
   const message =
-    deepPick(resp.data, ["message", "error.message", "error", "details", "result.message"]) ||
-    `${fallbackMessage} (${resp.status})`;
+    deepPick(resp.data, [
+      "message",
+      "error.message",
+      "error",
+      "details",
+      "result.message",
+    ]) || `${fallbackMessage} (${resp.status})`;
 
   const err = new Error(String(message));
   err.status = resp.status;
@@ -133,10 +185,26 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
   throw err;
 }
 
-function tsAuthParams(extra = {}) {
-  const out = { ...(extra || {}) };
-  if (TRUSTSIGNAL_API_KEY) out.api_key = TRUSTSIGNAL_API_KEY;
-  return out;
+function buildHeaders(extra = {}) {
+  const headers = {
+    accept: "*/*",
+    ...extra,
+  };
+
+  if (TRUSTSIGNAL_API_KEY) {
+    headers["x-api-key"] = TRUSTSIGNAL_API_KEY;
+    headers["api-key"] = TRUSTSIGNAL_API_KEY;
+  }
+
+  return headers;
+}
+
+function buildParams(extra = {}) {
+  const params = { ...(extra || {}) };
+  if (TRUSTSIGNAL_API_KEY) {
+    params.api_key = TRUSTSIGNAL_API_KEY;
+  }
+  return params;
 }
 
 async function tsRequest({
@@ -149,9 +217,9 @@ async function tsRequest({
   const resp = await trustsignalClient.request({
     method,
     url: path,
-    params: tsAuthParams(params),
+    params: buildParams(params),
     data,
-    headers,
+    headers: buildHeaders(headers),
   });
 
   return okOrThrow(resp);
@@ -244,7 +312,11 @@ async function uploadToWasabi({ buffer, mimetype, originalname }) {
 
   const url =
     result?.Location ||
-    buildPublicWasabiUrl({ endpoint: WASABI_ENDPOINT, bucket: WASABI_BUCKET, key });
+    buildPublicWasabiUrl({
+      endpoint: WASABI_ENDPOINT,
+      bucket: WASABI_BUCKET,
+      key,
+    });
 
   return { url, key };
 }
@@ -303,7 +375,9 @@ async function uploadMediaToTrustSignal({ buffer, filename, mime, size }) {
 
   const mediaId = extractProviderMediaId(r.data);
   if (!mediaId) {
-    const err = new Error("Upload succeeded but provider did not return media id");
+    const err = new Error(
+      "Upload succeeded but provider did not return media id"
+    );
     err.status = 400;
     err.data = r.data;
     throw err;
@@ -313,7 +387,10 @@ async function uploadMediaToTrustSignal({ buffer, filename, mime, size }) {
 }
 
 async function sendMediaViaTrustSignal({ to, type, mediaId, filename }) {
+  const sender = getTrustSignalSenderOrThrow();
+
   const payload = {
+    sender: toE164Plus(sender),
     channel: "whatsapp",
     to: [to],
     recipient: to,
@@ -339,6 +416,7 @@ async function sendMediaViaTrustSignal({ to, type, mediaId, filename }) {
   return {
     messageId: extractProviderMessageId(r.data),
     raw: r.data,
+    sender,
   };
 }
 
@@ -364,7 +442,8 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     });
 
     const type = inferred.type;
-    const mime = req.file.mimetype || inferred.mime || "application/octet-stream";
+    const mime =
+      req.file.mimetype || inferred.mime || "application/octet-stream";
     const previewText = previewTextForType(type, req.file.originalname);
 
     const wasabi = await uploadToWasabi({
@@ -397,7 +476,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
 
     const created = await WhatsAppMessage.create({
       waId: sent.messageId,
-      from: process.env.WHATSAPP_BUSINESS_PHONE,
+      from: senderForDb(sent.sender),
       to,
       direction: "OUTBOUND",
       type,
@@ -431,7 +510,8 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       phone10: p10,
       patch: {
         lastMessageAt: updatedConv?.lastMessageAt || now,
-        lastMessageText: updatedConv?.lastMessageText || previewText.slice(0, 200),
+        lastMessageText:
+          updatedConv?.lastMessageText || previewText.slice(0, 200),
         lastOutboundAt: updatedConv?.lastOutboundAt || now,
       },
     });
@@ -453,7 +533,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
 });
 
 router.use((err, req, res, next) => {
-  if (err) { 
+  if (err) {
     console.error("multer error:", err);
     return res.status(400).json({
       message: "Upload failed",
