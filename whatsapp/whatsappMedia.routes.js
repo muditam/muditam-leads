@@ -101,14 +101,24 @@ function previewTextForType(type, filename = "") {
   return filename ? `📎 ${filename}` : "📎 Attachment";
 }
 
+function isObjectLike(v) {
+  return v !== null && typeof v === "object";
+}
+
 function deepPick(obj, candidates = []) {
+  if (!isObjectLike(obj) && !Array.isArray(obj)) return null;
+
   for (const key of candidates) {
     const parts = String(key).split(".");
     let cur = obj;
     let ok = true;
 
     for (const p of parts) {
-      if (cur == null || !(p in cur)) {
+      if (!isObjectLike(cur) && !Array.isArray(cur)) {
+        ok = false;
+        break;
+      }
+      if (!(p in cur)) {
         ok = false;
         break;
       }
