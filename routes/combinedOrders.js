@@ -5,12 +5,12 @@ const Lead = require("../models/Lead");
 const MyOrder = require("../models/MyOrder");
 const Employee = require("../models/Employee");
 const Order = require("../models/Order");
-
+const requireSession = require("../middleware/requireSession");
 
 // =====================
 // /sales-metrics endpoint
 // =====================
-router.get('/sales-metrics', async (req, res) => {
+router.get('/sales-metrics', requireSession, async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const sDate = startDate ? new Date(startDate) : new Date('2000-01-01');
@@ -60,7 +60,7 @@ router.get('/sales-metrics', async (req, res) => {
 });
 
 
-router.get("/", async (req, res) => {
+router.get("/", requireSession, async (req, res) => {
   try {
     const { page = 1, limit = 30, ...filters } = req.query;
     const pageNumber = parseInt(page, 10) || 1;
@@ -196,7 +196,7 @@ router.get("/", async (req, res) => {
       key.includes(cleanedId) || cleanedId.includes(key)
     );
     shipment_status = fallback?.[1] || "Not Available";
-  }4
+  }
 
       return {
         orderDate: order.orderDate,
@@ -249,7 +249,7 @@ router.get("/", async (req, res) => {
 // =====================
 // PUT /update-by-contact endpoint
 // =====================
-router.put("/update-by-contact", async (req, res) => {
+router.put("/update-by-contact", requireSession, async (req, res) => {
   const { contactNumber, healthExpertAssigned } = req.body;
   if (!contactNumber) {
     return res.status(400).json({ message: "contactNumber is required." });
