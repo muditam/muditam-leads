@@ -2,6 +2,7 @@
 const express = require("express");
 const axios = require("axios");
 const router = express.Router();
+const requireSession = require("../middleware/requireSession");
 
 /**
  * ENV needed:
@@ -77,7 +78,7 @@ function buildCdrQuery(q) {
  * Pass-through: GET /api/smartflo/call-records
  * Useful for debugging one token directly.
  */
-router.get("/call-records", async (req, res) => {
+router.get("/call-records", requireSession, async (req, res) => {
   try {
     const auth = normalizeAuthToken(process.env.SMARTFLO_TOKEN);
     if (!auth) {
@@ -151,7 +152,7 @@ async function fetchAllForToken(auth, from_date, to_date) {
  * - override: ?from_date=YYYY-MM-DD HH:mm:ss&to_date=...
  * - combines SMARTFLO_TOKEN + SMARTFLO_TOKEN_2
  */
-router.get("/overview", async (req, res) => {
+router.get("/overview", requireSession, async (req, res) => {
   try {
     const tokensRaw = [
       process.env.SMARTFLO_TOKEN,
