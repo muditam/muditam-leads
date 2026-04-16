@@ -101,24 +101,14 @@ function previewTextForType(type, filename = "") {
   return filename ? `📎 ${filename}` : "📎 Attachment";
 }
 
-function isObjectLike(v) {
-  return v !== null && typeof v === "object";
-}
-
 function deepPick(obj, candidates = []) {
-  if (!isObjectLike(obj) && !Array.isArray(obj)) return null;
-
   for (const key of candidates) {
     const parts = String(key).split(".");
     let cur = obj;
     let ok = true;
 
     for (const p of parts) {
-      if (!isObjectLike(cur) && !Array.isArray(cur)) {
-        ok = false;
-        break;
-      }
-      if (!(p in cur)) {
+      if (cur == null || !(p in cur)) {
         ok = false;
         break;
       }
@@ -143,20 +133,6 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
   throw err;
 }
 
-function buildHeaders(extra = {}) {
-  const headers = {
-    accept: "*/*",
-    ...extra,
-  };
-
-  if (TRUSTSIGNAL_API_KEY) {
-    headers["x-api-key"] = TRUSTSIGNAL_API_KEY;
-    headers["api-key"] = TRUSTSIGNAL_API_KEY;
-  }
-
-  return headers;
-}
-
 function tsAuthParams(extra = {}) {
   const out = { ...(extra || {}) };
   if (TRUSTSIGNAL_API_KEY) out.api_key = TRUSTSIGNAL_API_KEY;
@@ -175,7 +151,7 @@ async function tsRequest({
     url: path,
     params: tsAuthParams(params),
     data,
-    headers: buildHeaders(headers),
+    headers,
   });
 
   return okOrThrow(resp);
@@ -242,11 +218,7 @@ function buildPublicWasabiUrl({ endpoint, bucket, key }) {
 }
 
 async function uploadToWasabi({ buffer, mimetype, originalname }) {
-  if (!s3 || !WASABI_BUCKET) {
-    const err = new Error("Wasabi S3 not configured");
-    err.status = 500;
-    throw err;
-  }
+  if (!s3 || !WASABI_BUCKET) throw new Error("Wasabi S3 not configured");
 
   const ext = extFromName(originalname);
   const safe = safeFilename(
