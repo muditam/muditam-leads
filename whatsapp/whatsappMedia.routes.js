@@ -242,7 +242,11 @@ function buildPublicWasabiUrl({ endpoint, bucket, key }) {
 }
 
 async function uploadToWasabi({ buffer, mimetype, originalname }) {
-  if (!s3 || !WASABI_BUCKET) throw new Error("Wasabi S3 not configured");
+  if (!s3 || !WASABI_BUCKET) {
+    const err = new Error("Wasabi S3 not configured");
+    err.status = 500;
+    throw err;
+  }
 
   const ext = extFromName(originalname);
   const safe = safeFilename(
