@@ -14,10 +14,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
 });
-
-/* ----------------------------------------
-   TRUSTSIGNAL CONFIG
------------------------------------------ */
+ 
 const TRUSTSIGNAL_API_BASE = String(
   process.env.TRUSTSIGNAL_API_BASE || "https://wpapi.trustsignal.io"
 ).replace(/\/+$/, "");
@@ -66,7 +63,7 @@ function inferTypeAndMime({ mimetype = "", originalname = "" }) {
   const imgExts = ["png", "jpg", "jpeg", "webp", "gif"];
 
   const isAudio =
-    mime.startsWith("audio/") ||
+    mime.startsWith("audio/") || 
     mime.includes("ogg") ||
     mime.includes("opus") ||
     audioExts.includes(ext);
