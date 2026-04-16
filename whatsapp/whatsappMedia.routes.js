@@ -143,6 +143,20 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
   throw err;
 }
 
+function buildHeaders(extra = {}) {
+  const headers = {
+    accept: "*/*",
+    ...extra,
+  };
+
+  if (TRUSTSIGNAL_API_KEY) {
+    headers["x-api-key"] = TRUSTSIGNAL_API_KEY;
+    headers["api-key"] = TRUSTSIGNAL_API_KEY;
+  }
+
+  return headers;
+}
+
 function tsAuthParams(extra = {}) {
   const out = { ...(extra || {}) };
   if (TRUSTSIGNAL_API_KEY) out.api_key = TRUSTSIGNAL_API_KEY;
@@ -161,7 +175,7 @@ async function tsRequest({
     url: path,
     params: tsAuthParams(params),
     data,
-    headers,
+    headers: buildHeaders(headers),
   });
 
   return okOrThrow(resp);
