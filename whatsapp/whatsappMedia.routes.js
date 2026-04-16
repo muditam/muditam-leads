@@ -19,13 +19,22 @@ const upload = multer({
    TRUSTSIGNAL CONFIG
 ----------------------------------------- */
 const TRUSTSIGNAL_API_BASE = String(
-  process.env.TRUSTSIGNAL_API_BASE || "https://api.trustsignal.io"
+  process.env.TRUSTSIGNAL_MEDIA_API_BASE ||
+    process.env.TRUSTSIGNAL_API_BASE ||
+    "https://api.trustsignal.io"
 ).replace(/\/+$/, "");
 
-const TRUSTSIGNAL_API_KEY = String(process.env.TRUSTSIGNAL_API_KEY || "").trim();
+const TRUSTSIGNAL_API_KEY = String(
+  process.env.TRUSTSIGNAL_API_KEY || ""
+).trim();
 
-const TS_PATH_UPLOAD_MEDIA = "/v1/whatsapp/media";
-const TS_PATH_SEND_MEDIA = "/v1/whatsapp/messages/media";
+const TS_PATH_UPLOAD_MEDIA = String(
+  process.env.TRUSTSIGNAL_UPLOAD_MEDIA_PATH || "/v1/whatsapp/media"
+).trim();
+
+const TS_PATH_SEND_MEDIA = String(
+  process.env.TRUSTSIGNAL_SEND_MEDIA_PATH || "/v1/whatsapp/messages/media"
+).trim();
 
 const trustsignalClient = axios.create({
   baseURL: TRUSTSIGNAL_API_BASE,
@@ -44,6 +53,37 @@ const normalizeWaId = (v = "") => {
   if (d.length === 10) return `91${d}`;
   return d;
 };
+
+function isObjectLike(v) {
+  return v !== null && typeof v === "object";
+}
+
+function getTrustSignalSenderOrThrow() {
+  const senderRaw = String(
+    process.env.TRUSTSIGNAL_SENDER_ID ||
+      process.env.TRUSTSIGNAL_SENDER ||
+      process.env.WHATSAPP_BUSINESS_PHONE ||
+      ""
+  ).trim();
+
+  const sender = digitsOnly(senderRaw) || senderRaw;
+
+  if (!sender) {
+    const err = new Error(
+      "TrustSignal sender missing. Set TRUSTSIGNAL_SENDER_ID in env."
+    );
+    err.status = 500;
+    throw err;
+  }
+
+  return sender;
+}
+
+function senderForDb(sender = "") {
+  const raw = String(sender || "").trim();
+  const d = digitsOnly(raw);
+  return d ? normalizeWaId(d) : raw;
+}
 
 function safeFilename(name = "file") {
   return String(name || "file")
@@ -74,7 +114,13 @@ function inferTypeAndMime({ mimetype = "", originalname = "" }) {
   const isVideo = mime.startsWith("video/") || videoExts.includes(ext);
   const isImage = mime.startsWith("image/") || imgExts.includes(ext);
 
-  const type = isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : "document";
+  const type = isImage
+    ? "image"
+    : isVideo
+    ? "video"
+    : isAudio
+    ? "audio"
+    : "document";
 
   let bestMime = mime;
   if (!bestMime || bestMime === "application/octet-stream") {
@@ -87,10 +133,12 @@ function inferTypeAndMime({ mimetype = "", originalname = "" }) {
       bestMime = ext === "png" ? "image/png" : "image/jpeg";
     } else if (type === "video") {
       bestMime = "video/mp4";
+    } else if (type === "document" && ext === "pdf") {
+      bestMime = "application/pdf";
     }
   }
 
-  return { type, mime: bestMime };
+  return { type, mime: bestMime || "application/octet-stream" };
 }
 
 function previewTextForType(type, filename = "") {
@@ -102,13 +150,19 @@ function previewTextForType(type, filename = "") {
 }
 
 function deepPick(obj, candidates = []) {
+  if (!isObjectLike(obj) && !Array.isArray(obj)) return null;
+
   for (const key of candidates) {
     const parts = String(key).split(".");
     let cur = obj;
     let ok = true;
 
     for (const p of parts) {
-      if (cur == null || !(p in cur)) {
+      if (!isObjectLike(cur) && !Array.isArray(cur)) {
+        ok = false;
+        break;
+      }
+      if (!(p in cur)) {
         ok = false;
         break;
       }
@@ -124,7 +178,14 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
   if (resp.status >= 200 && resp.status < 300) return resp;
 
   const message =
-    deepPick(resp.data, ["message", "error.message", "error", "details", "result.message"]) ||
+    deepPick(resp.data, [
+      "message",
+      "error.message",
+      "error",
+      "details",
+      "result.message",
+    ]) ||
+    (typeof resp.data === "string" ? resp.data : "") ||
     `${fallbackMessage} (${resp.status})`;
 
   const err = new Error(String(message));
@@ -133,10 +194,26 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
   throw err;
 }
 
-function tsAuthParams(extra = {}) {
-  const out = { ...(extra || {}) };
-  if (TRUSTSIGNAL_API_KEY) out.api_key = TRUSTSIGNAL_API_KEY;
-  return out;
+function buildHeaders(extra = {}) {
+  const headers = {
+    accept: "*/*",
+    ...extra,
+  };
+
+  if (TRUSTSIGNAL_API_KEY) {
+    headers["x-api-key"] = TRUSTSIGNAL_API_KEY;
+    headers["api-key"] = TRUSTSIGNAL_API_KEY;
+  }
+
+  return headers;
+}
+
+function buildParams(extra = {}) {
+  const params = { ...(extra || {}) };
+  if (TRUSTSIGNAL_API_KEY) {
+    params.api_key = TRUSTSIGNAL_API_KEY;
+  }
+  return params;
 }
 
 async function tsRequest({
@@ -149,9 +226,9 @@ async function tsRequest({
   const resp = await trustsignalClient.request({
     method,
     url: path,
-    params: tsAuthParams(params),
+    params: buildParams(params),
     data,
-    headers,
+    headers: buildHeaders(headers),
   });
 
   return okOrThrow(resp);
@@ -218,35 +295,50 @@ function buildPublicWasabiUrl({ endpoint, bucket, key }) {
 }
 
 async function uploadToWasabi({ buffer, mimetype, originalname }) {
-  if (!s3 || !WASABI_BUCKET) throw new Error("Wasabi S3 not configured");
+  if (!s3 || !WASABI_BUCKET) {
+    return { url: "", key: "", skipped: true };
+  }
 
-  const ext = extFromName(originalname);
-  const safe = safeFilename(
-    originalname ||
-      `file.${
-        ext || (String(mimetype || "").toLowerCase().includes("ogg") ? "ogg" : "bin")
-      }`
-  );
+  try {
+    const ext = extFromName(originalname);
+    const safe = safeFilename(
+      originalname ||
+        `file.${
+          ext ||
+          (String(mimetype || "").toLowerCase().includes("ogg")
+            ? "ogg"
+            : "bin")
+        }`
+    );
 
-  const key = `whatsapp-media/${new Date().toISOString().slice(0, 10)}/${Date.now()}_${safe}`;
+    const key = `whatsapp-media/${new Date()
+      .toISOString()
+      .slice(0, 10)}/${Date.now()}_${safe}`;
 
-  const result = await s3
-    .upload({
-      Bucket: WASABI_BUCKET,
-      Key: key,
-      Body: buffer,
-      ContentType: mimetype || "application/octet-stream",
-      ContentDisposition: "inline",
-      CacheControl: "public, max-age=31536000",
-      ACL: "public-read",
-    })
-    .promise();
+    const result = await s3
+      .upload({
+        Bucket: WASABI_BUCKET,
+        Key: key,
+        Body: buffer,
+        ContentType: mimetype || "application/octet-stream",
+        ContentDisposition: "inline",
+        CacheControl: "public, max-age=31536000",
+      })
+      .promise();
 
-  const url =
-    result?.Location ||
-    buildPublicWasabiUrl({ endpoint: WASABI_ENDPOINT, bucket: WASABI_BUCKET, key });
+    const url =
+      result?.Location ||
+      buildPublicWasabiUrl({
+        endpoint: WASABI_ENDPOINT,
+        bucket: WASABI_BUCKET,
+        key,
+      });
 
-  return { url, key };
+    return { url: url || "", key, skipped: false };
+  } catch (err) {
+    console.error("Wasabi upload failed, continuing without Wasabi URL:", err);
+    return { url: "", key: "", skipped: false, error: err.message || String(err) };
+  }
 }
 
 /* ----------------------------------------
@@ -313,7 +405,10 @@ async function uploadMediaToTrustSignal({ buffer, filename, mime, size }) {
 }
 
 async function sendMediaViaTrustSignal({ to, type, mediaId, filename }) {
+  const sender = getTrustSignalSenderOrThrow();
+
   const payload = {
+    sender: normalizeWaId(sender),
     channel: "whatsapp",
     to: [to],
     recipient: to,
@@ -339,6 +434,7 @@ async function sendMediaViaTrustSignal({ to, type, mediaId, filename }) {
   return {
     messageId: extractProviderMessageId(r.data),
     raw: r.data,
+    sender,
   };
 }
 
@@ -364,20 +460,9 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     });
 
     const type = inferred.type;
-    const mime = req.file.mimetype || inferred.mime || "application/octet-stream";
+    const mime =
+      req.file.mimetype || inferred.mime || "application/octet-stream";
     const previewText = previewTextForType(type, req.file.originalname);
-
-    const wasabi = await uploadToWasabi({
-      buffer: req.file.buffer,
-      mimetype: mime,
-      originalname: req.file.originalname,
-    });
-
-    if (!wasabi?.url) {
-      return res.status(500).json({
-        message: "Wasabi upload failed (no url returned)",
-      });
-    }
 
     const uploaded = await uploadMediaToTrustSignal({
       buffer: req.file.buffer,
@@ -393,11 +478,17 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       filename: req.file.originalname || "",
     });
 
+    const wasabi = await uploadToWasabi({
+      buffer: req.file.buffer,
+      mimetype: mime,
+      originalname: req.file.originalname,
+    });
+
     const now = new Date();
 
     const created = await WhatsAppMessage.create({
       waId: sent.messageId,
-      from: process.env.WHATSAPP_BUSINESS_PHONE,
+      from: senderForDb(sent.sender),
       to,
       direction: "OUTBOUND",
       type,
@@ -405,12 +496,20 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       status: "sent",
       media: {
         id: uploaded.mediaId,
-        url: wasabi.url,
+        url: wasabi.url || "",
         mime: mime || "application/octet-stream",
         filename: req.file.originalname || "",
       },
       timestamp: now,
-      raw: sent.raw,
+      raw: {
+        ...(isObjectLike(sent.raw) ? sent.raw : { providerResponse: sent.raw }),
+        wasabi: {
+          url: wasabi.url || "",
+          key: wasabi.key || "",
+          skipped: !!wasabi.skipped,
+          error: wasabi.error || "",
+        },
+      },
     });
 
     const updatedConv = await WhatsAppConversation.findOneAndUpdate(
@@ -431,7 +530,8 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       phone10: p10,
       patch: {
         lastMessageAt: updatedConv?.lastMessageAt || now,
-        lastMessageText: updatedConv?.lastMessageText || previewText.slice(0, 200),
+        lastMessageText:
+          updatedConv?.lastMessageText || previewText.slice(0, 200),
         lastOutboundAt: updatedConv?.lastOutboundAt || now,
       },
     });
@@ -439,8 +539,10 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     return res.json({
       success: true,
       mediaId: uploaded.mediaId,
-      mediaUrl: wasabi.url,
+      mediaUrl: wasabi.url || "",
       type,
+      wasabiSkipped: !!wasabi.skipped,
+      wasabiError: wasabi.error || "",
     });
   } catch (e) {
     console.error("send-media error:", e?.data || e);
@@ -453,7 +555,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
 });
 
 router.use((err, req, res, next) => {
-  if (err) { 
+  if (err) {
     console.error("multer error:", err);
     return res.status(400).json({
       message: "Upload failed",
@@ -464,4 +566,4 @@ router.use((err, req, res, next) => {
   next();
 });
 
-module.exports = router; 
+module.exports = router;
