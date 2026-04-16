@@ -1668,7 +1668,7 @@ router.post("/webhook", async (req, res) => {
 
           media = {
             id: mediaId,
-            url: proxyUrlForMediaId(mediaId),
+            url: incomingMedia.url || proxyUrlForMediaId(mediaId),
             mime: baseMime,
             filename,
           };
@@ -1699,7 +1699,7 @@ router.post("/webhook", async (req, res) => {
 
             media = {
               id: mediaId,
-              url: wasabiUrl || proxyUrlForMediaId(mediaId),
+              url: wasabiUrl || incomingMedia.url || proxyUrlForMediaId(mediaId),
               mime: bestMime,
               filename,
             };
@@ -1737,7 +1737,7 @@ router.post("/webhook", async (req, res) => {
           if (!media) {
             media = {
               id: mediaId,
-              url: proxyUrlForMediaId(mediaId),
+              url: incomingMedia.url || proxyUrlForMediaId(mediaId),
               mime: incomingMedia.mime || "",
               filename: incomingMedia.filename || "",
             };
