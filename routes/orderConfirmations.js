@@ -10,6 +10,8 @@ const ShopifyOrder = require("../models/ShopifyOrder");
 const Order = require("../models/Order");
 const Employee = require("../models/Employee");
 
+const requireSession = require("../middleware/requireSession");
+
 // Keep these in sync with the schema enum
 const CallStatusEnum = {
   CNP: "CNP",
@@ -63,10 +65,21 @@ const stripHash = (n) =>
   String(n || "").startsWith("#") ? String(n).slice(1) : String(n || "");
 
 const getRoleFromReq = (req) =>
-  (req.user?.role || req.query.role || "").toString();
+  (
+    req.user?.role ||
+    req.session?.user?.role ||
+    req.query.role ||
+    ""
+  ).toString();
 
 const getUserIdFromReq = (req) =>
-  (req.user?._id || req.user?.id || req.query.userId || "").toString();
+  (
+    req.user?._id ||
+    req.user?.id ||
+    req.session?.user?.id ||
+    req.query.userId ||
+    ""
+  ).toString();
 
 /**
  * Parse yyyy-mm-dd as IST day start and convert to UTC instant.
@@ -291,7 +304,7 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
   }
 }
 
-router.get("/agents/active", async (_req, res) => {
+router.get("/agents/active", requireSession, async (_req, res) => {
   try {
     const agents = await Employee.find(
       {
@@ -310,7 +323,7 @@ router.get("/agents/active", async (_req, res) => {
   }
 });
 
-router.post("/agents/toggle", async (req, res) => {
+router.post("/agents/toggle", requireSession, async (req, res) => {
   try {
     const { agentId, active } = req.body || {};
 
@@ -338,7 +351,7 @@ router.post("/agents/toggle", async (req, res) => {
   }
 });
 
-router.get("/agents/:id/status", async (req, res) => {
+router.get("/agents/:id/status", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -365,7 +378,7 @@ router.get("/agents/:id/status", async (req, res) => {
   }
 });
 
-router.post("/assign/round-robin", async (req, res) => {
+router.post("/assign/round-robin", requireSession, async (req, res) => {
   try {
     const result = await assignRoundRobin({ batchSize: req.body?.batchSize });
 
@@ -385,7 +398,7 @@ router.post("/assign/round-robin", async (req, res) => {
 /* ============================================
    LIST (common Start Date / End Date for all tabs)
    ============================================ */
-router.get("/list", async (req, res) => {
+router.get("/list", requireSession, async (req, res) => {
   try {
     const {
       tab,
@@ -464,9 +477,9 @@ router.get("/list", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-                { contactNumber: { $regex: numericQ } },
-                { normalizedPhone: { $regex: numericQ } },
-              ]
+              { contactNumber: { $regex: numericQ } },
+              { normalizedPhone: { $regex: numericQ } },
+            ]
             : []),
         ],
       });
@@ -632,7 +645,7 @@ router.get("/list", async (req, res) => {
   }
 });
 
-router.post("/create-payment-link", async (req, res) => {
+router.post("/create-payment-link", requireSession, async (req, res) => {
   try {
     const { amount, currency = "INR", customer = {} } = req.body || {};
     const amt = Number(amount);
@@ -682,10 +695,7 @@ router.post("/create-payment-link", async (req, res) => {
   }
 });
 
-/* ============================================
-   PATCH update (+ allow manual assignment)
-   ============================================ */
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", requireSession, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -826,10 +836,7 @@ router.patch("/:id", async (req, res) => {
   }
 });
 
-/* ============================================
-   History by phone
-   ============================================ */
-router.get("/history-by-phone", async (req, res) => {
+router.get("/history-by-phone", requireSession, async (req, res) => {
   try {
     const raw = String(req.query.phone || "");
     const phone = normalizePhone(raw);
@@ -862,7 +869,7 @@ router.get("/history-by-phone", async (req, res) => {
 /* ============================================
    Shopify notes
    ============================================ */
-router.post("/shopify-notes", async (req, res) => {
+router.post("/shopify-notes", requireSession, async (req, res) => {
   try {
     const {
       orderName,
@@ -884,6 +891,7 @@ router.post("/shopify-notes", async (req, res) => {
     const userFullName =
       (typeof fromBody === "string" && fromBody.trim()) ||
       (req.user && (req.user.fullName || req.user.name)) ||
+      (req.session?.user && (req.session.user.fullName || req.session.user.name)) ||
       "";
 
     const STATUS_LABELS = {
@@ -990,7 +998,7 @@ router.post("/shopify-notes", async (req, res) => {
   }
 });
 
-router.post("/bulk-call-status", async (req, res) => {
+router.post("/bulk-call-status", requireSession, async (req, res) => {
   try {
     const { ids = [], callStatus } = req.body || {};
 
@@ -1030,11 +1038,7 @@ router.post("/bulk-call-status", async (req, res) => {
   }
 });
 
-/* ============================================
-   Counts (role-aware + ALL_CNPS global count)
-   Common Start Date / End Date filter for all tabs
-   ============================================ */
-router.get("/counts", async (req, res) => {
+router.get("/counts", requireSession, async (req, res) => {
   try {
     const {
       q = "",
@@ -1067,9 +1071,9 @@ router.get("/counts", async (req, res) => {
           { customerName: { $regex: q, $options: "i" } },
           ...(numericQ
             ? [
-                { contactNumber: { $regex: numericQ } },
-                { normalizedPhone: { $regex: numericQ } },
-              ]
+              { contactNumber: { $regex: numericQ } },
+              { normalizedPhone: { $regex: numericQ } },
+            ]
             : []),
         ],
       });
@@ -1149,9 +1153,9 @@ router.get("/counts", async (req, res) => {
             { customerName: { $regex: q, $options: "i" } },
             ...(numericQ
               ? [
-                  { contactNumber: { $regex: numericQ } },
-                  { normalizedPhone: { $regex: numericQ } },
-                ]
+                { contactNumber: { $regex: numericQ } },
+                { normalizedPhone: { $regex: numericQ } },
+              ]
               : []),
           ],
         });
@@ -1213,7 +1217,7 @@ router.get("/counts", async (req, res) => {
   }
 });
 
-router.get("/today-confirmed-count", async (req, res) => {
+router.get("/today-confirmed-count", requireSession, async (req, res) => {
   try {
     const maybeAgentId = String(req.query.agentId || "");
     const userId = getUserIdFromReq(req);
@@ -1221,8 +1225,8 @@ router.get("/today-confirmed-count", async (req, res) => {
     const agentId = isValidObjectId(maybeAgentId)
       ? new mongoose.Types.ObjectId(maybeAgentId)
       : isValidObjectId(userId)
-      ? new mongoose.Types.ObjectId(userId)
-      : null;
+        ? new mongoose.Types.ObjectId(userId)
+        : null;
 
     // IST day boundaries as UTC instants
     const now = new Date();
@@ -1270,7 +1274,7 @@ router.get("/today-confirmed-count", async (req, res) => {
   }
 });
 
-router.post("/cancel", async (req, res) => {
+router.post("/cancel", requireSession, async (req, res) => {
   try {
     const {
       orderName,
@@ -1414,8 +1418,7 @@ cron.schedule("*/59 * * * *", async () => {
   try {
     const rr = await assignRoundRobin({});
     console.log(
-      `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${
-        rr.agents || 0
+      `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${rr.agents || 0
       })`
     );
 
