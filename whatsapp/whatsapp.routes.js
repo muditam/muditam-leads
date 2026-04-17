@@ -367,13 +367,13 @@ function hasRealMedia(media = {}) {
 function sanitizeFilename(name = "") {
   return path
     .basename(String(name || "").trim() || "file")
-    .replace(/[^\w.\-() ]+/g, "_");
+    .replace(/[^\w.\-()]+/g, "_");
 }
 
 function buildWasabiPublicUrl(key = "") {
   const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
   if (!ep || !WASABI_BUCKET || !key) return "";
-  return `${ep}/${encodeURIComponent(WASABI_BUCKET)}/${key
+  return `${ep}/${encodeURIComponent(WASABI_BUCKET)}/${String(key)
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/")}`;
@@ -632,9 +632,16 @@ async function uploadBufferToWasabi({
     })
     .promise();
 
+  const publicUrl = up?.Location || buildWasabiPublicUrl(key);
+  if (!publicUrl) {
+    const err = new Error("Wasabi upload succeeded but URL could not be built.");
+    err.status = 500;
+    throw err;
+  }
+
   return {
     key,
-    url: up?.Location || buildWasabiPublicUrl(key),
+    url: publicUrl,
     filename: finalName,
     mime: mime || "application/octet-stream",
   };
@@ -1327,7 +1334,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       }
     }
 
-    if (!/^https?:\/\//i.test(mediaUrl)) {
+    if (!/^https?:\/\//i.test(String(mediaUrl || "").trim())) {
       return res.status(400).json({ message: "mediaUrl must be a public URL" });
     }
 
@@ -1789,7 +1796,12 @@ router.post("/webhook", async (req, res) => {
     const parsed = parseWebhookPayload(req.body || {});
     const businessPhone =
       normalizeWaId(parsed.businessPhone || "") ||
-      normalizeWaId(process.env.WHATSAPP_BUSINESS_PHONE || "");
+      normalizeWaId(
+        process.env.WHATSAPP_BUSINESS_PHONE ||
+          process.env.TRUSTSIGNAL_SENDER_ID ||
+          process.env.TRUSTSIGNAL_SENDER ||
+          ""
+      );
 
     for (const st of parsed.statuses || []) {
       const waId = st?.waId;
@@ -1855,7 +1867,7 @@ router.post("/webhook", async (req, res) => {
 
       if (hasIncomingMedia && type !== "text") {
         const mediaId = incomingMedia.id || waId || "";
-        const filename =
+        const finalFilename =
           sanitizeFilename(incomingMedia.filename || "") ||
           `${type}_${p10 || "unknown"}_${mediaId || Date.now()}.${extFromMime(
             incomingMedia.mime || ""
@@ -1864,7 +1876,7 @@ router.post("/webhook", async (req, res) => {
         const mirroredUrl = await maybeMirrorInboundMediaToWasabi({
           url: incomingMedia.url,
           mime: incomingMedia.mime,
-          filename,
+          filename: finalFilename,
           from10: p10,
           mediaId,
           msgType: type,
@@ -1874,11 +1886,11 @@ router.post("/webhook", async (req, res) => {
           id: incomingMedia.id || "",
           url: mirroredUrl || incomingMedia.url || "",
           mime: incomingMedia.mime || "",
-          filename,
+          filename: finalFilename,
         };
 
         if (!text) {
-          text = previewTextForType(type, filename);
+          text = previewTextForType(type, finalFilename);
         }
       }
 
@@ -1936,4 +1948,4 @@ router.post("/webhook", async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;
