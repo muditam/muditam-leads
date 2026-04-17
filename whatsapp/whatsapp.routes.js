@@ -4,6 +4,7 @@ const axios = require("axios");
 const AWS = require("aws-sdk");
 const multer = require("multer");
 const FormData = require("form-data");
+const path = require("path");
 
 const WhatsAppMessage = require("./whatsaapModels/WhatsAppMessage");
 const WhatsAppConversation = require("./whatsaapModels/WhatsAppConversation");
@@ -49,21 +50,37 @@ const trustsignalClient = axios.create({
 /* ----------------------------------------
    STORAGE CONFIG
 ----------------------------------------- */
-const WASABI_ENDPOINT = process.env.WASABI_ENDPOINT;
-const WASABI_REGION = process.env.WASABI_REGION || "ap-southeast-1";
-const WASABI_BUCKET = process.env.WASABI_BUCKET;
+const WASABI_ENDPOINT = String(process.env.WASABI_ENDPOINT || "").replace(
+  /\/+$/,
+  ""
+);
+const WASABI_REGION = process.env.WASABI_REGION || "ap-southeast-2";
+const WASABI_BUCKET = String(process.env.WASABI_BUCKET || "").trim();
+
+const WASABI_ACCESS_KEY = String(
+  process.env.WASABI_ACCESS_KEY ||
+    process.env.WASABI_ACCESS_KEY_ID ||
+    ""
+).trim();
+
+const WASABI_SECRET_KEY = String(
+  process.env.WASABI_SECRET_KEY ||
+    process.env.WASABI_SECRET_ACCESS_KEY ||
+    ""
+).trim();
 
 const s3 =
   WASABI_ENDPOINT &&
-  process.env.WASABI_ACCESS_KEY_ID &&
-  process.env.WASABI_SECRET_ACCESS_KEY &&
+  WASABI_ACCESS_KEY &&
+  WASABI_SECRET_KEY &&
   WASABI_BUCKET
     ? new AWS.S3({
         endpoint: new AWS.Endpoint(WASABI_ENDPOINT),
         region: WASABI_REGION,
-        accessKeyId: process.env.WASABI_ACCESS_KEY_ID,
-        secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY,
+        accessKeyId: WASABI_ACCESS_KEY,
+        secretAccessKey: WASABI_SECRET_KEY,
         signatureVersion: "v4",
+        s3ForcePathStyle: true,
       })
     : null;
 
@@ -239,6 +256,50 @@ function hasRealMedia(media = {}) {
       String(media?.mime || "").trim() ||
       String(media?.filename || "").trim()
   );
+}
+
+function sanitizeFilename(name = "") {
+  return path
+    .basename(String(name || "").trim() || "file")
+    .replace(/[^\w.\-() ]+/g, "_");
+}
+
+function buildWasabiPublicUrl(key = "") {
+  const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
+  if (!ep || !WASABI_BUCKET || !key) return "";
+  return `${ep}/${WASABI_BUCKET}/${key}`;
+}
+
+function inferOutboundMediaType({ mime = "", filename = "", mediaUrl = "" }) {
+  const m = String(mime || "").toLowerCase();
+  const f = String(filename || "").toLowerCase();
+  const u = String(mediaUrl || "").toLowerCase();
+
+  if (
+    m.startsWith("image/") ||
+    /\.(png|jpg|jpeg|webp|gif)$/i.test(f) ||
+    /\.(png|jpg|jpeg|webp|gif)$/i.test(u)
+  ) {
+    return "image";
+  }
+
+  if (
+    m.startsWith("video/") ||
+    /\.(mp4|mov|avi|mkv|webm)$/i.test(f) ||
+    /\.(mp4|mov|avi|mkv|webm)$/i.test(u)
+  ) {
+    return "video";
+  }
+
+  if (
+    m.startsWith("audio/") ||
+    /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(f) ||
+    /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(u)
+  ) {
+    return "audio";
+  }
+
+  return "document";
 }
 
 async function tsRequest({
@@ -478,6 +539,34 @@ async function sendFreeformTextViaTrustSignal({ sender, toNumber, text }) {
   });
 }
 
+async function sendFreeformMediaViaTrustSignal({
+  sender,
+  toNumber,
+  caption,
+  mediaType,
+  mediaUrl,
+  filename,
+}) {
+  const payload = {
+    message_type: "file",
+    sender: toE164Plus(sender),
+    to: toE164Plus(toNumber),
+    reply: {
+      message: String(caption || "").trim(),
+      media_type: mediaType,
+      media_file_url: mediaUrl,
+      ...(filename ? { filename } : {}),
+    },
+  };
+
+  return await tsRequest({
+    method: "POST",
+    path: TS_PATH_SEND_TEXT,
+    data: payload,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 /* ----------------------------------------
    TRUSTSIGNAL MEDIA HELPERS
 ----------------------------------------- */
@@ -611,6 +700,39 @@ async function uploadInboundToWasabi({
   if (!ep) return null;
 
   return `${ep}/${WASABI_BUCKET}/${key}`;
+}
+
+async function uploadOutboundToWasabi({ buffer, mime, filename, to10 }) {
+  if (!s3 || !WASABI_BUCKET) {
+    const err = new Error("Wasabi is not configured properly.");
+    err.status = 500;
+    throw err;
+  }
+
+  const safeName = sanitizeFilename(filename || "");
+  const ext = path.extname(safeName) || `.${extFromMime(mime)}`;
+  const finalName =
+    safeName ||
+    `media_${to10 || "unknown"}_${Date.now()}${
+      ext.startsWith(".") ? ext : `.${ext}`
+    }`;
+
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `whatsapp-outbound/${day}/${Date.now()}_${finalName}`;
+
+  const up = await s3
+    .upload({
+      Bucket: WASABI_BUCKET,
+      Key: key,
+      Body: buffer,
+      ContentType: mime || "application/octet-stream",
+      ContentDisposition: `inline; filename="${finalName}"`,
+      CacheControl: "public, max-age=31536000",
+      ACL: "public-read",
+    })
+    .promise();
+
+  return up?.Location || buildWasabiPublicUrl(key);
 }
 
 const proxyUrlForMediaId = (mediaId) =>
@@ -1144,6 +1266,166 @@ router.post("/send-text", async (req, res) => {
   }
 });
 
+router.post("/send-media", upload.single("file"), async (req, res) => {
+  try {
+    const toRaw = req.body?.to || "";
+    const caption = String(req.body?.caption || req.body?.message || "").trim();
+    const directMediaUrl = String(req.body?.mediaUrl || "").trim();
+    const directFilename = String(req.body?.filename || "").trim();
+    const directMime = String(req.body?.mime || "").trim();
+    const directType = String(req.body?.mediaType || "")
+      .trim()
+      .toLowerCase();
+
+    if (!toRaw) {
+      return res.status(400).json({ message: "to required" });
+    }
+
+    if (!req.file && !directMediaUrl) {
+      return res.status(400).json({ message: "file or mediaUrl required" });
+    }
+
+    const phone = normalizeWaId(toRaw);
+    const p10 = last10(phone);
+
+    const convo = await WhatsAppConversation.findOne({
+      phone: new RegExp(`${p10}$`),
+    }).lean();
+
+    const expiry =
+      freeformExpiryFromConvo(convo) || convo?.windowExpiresAt || null;
+
+    if (!expiry || expiry < new Date()) {
+      return res.status(400).json({
+        message: "Session expired. Use template message.",
+        code: "SESSION_EXPIRED",
+      });
+    }
+
+    const sender = getTrustSignalSenderOrThrow();
+    const toNumber = getTrustSignalRecipient(phone);
+
+    let mediaUrl = directMediaUrl;
+    let filename = sanitizeFilename(directFilename || "");
+    let mime = directMime;
+    let mediaType = directType;
+
+    if (req.file) {
+      mime = req.file.mimetype || "application/octet-stream";
+      filename = sanitizeFilename(req.file.originalname || "attachment");
+      mediaType =
+        mediaType ||
+        inferOutboundMediaType({
+          mime,
+          filename,
+        });
+
+      mediaUrl = await uploadOutboundToWasabi({
+        buffer: req.file.buffer,
+        mime,
+        filename,
+        to10: p10,
+      });
+    } else {
+      mediaType =
+        mediaType ||
+        inferOutboundMediaType({
+          mime,
+          filename,
+          mediaUrl,
+        });
+
+      if (!filename) {
+        filename = sanitizeFilename(
+          path.basename(mediaUrl.split("?")[0] || "attachment")
+        );
+      }
+    }
+
+    const r = await sendFreeformMediaViaTrustSignal({
+      sender,
+      toNumber,
+      caption,
+      mediaType,
+      mediaUrl,
+      filename,
+    });
+
+    const now = new Date();
+
+    const created = await WhatsAppMessage.create({
+      waId: extractProviderMessageId(r.data),
+      from: senderForDb(sender),
+      to: phone,
+      direction: "OUTBOUND",
+      type: mediaType,
+      text: caption,
+      status: "sent",
+      timestamp: now,
+      media: {
+        url: mediaUrl,
+        mime: mime || "",
+        filename: filename || "attachment",
+      },
+      raw: r.data,
+    });
+
+    const previewText =
+      caption ||
+      (mediaType === "image"
+        ? "📷 Photo"
+        : mediaType === "video"
+        ? "🎥 Video"
+        : mediaType === "audio"
+        ? "🎙️ Audio"
+        : `📎 ${filename || "Attachment"}`);
+
+    await WhatsAppConversation.findOneAndUpdate(
+      { phone: new RegExp(`${p10}$`) },
+      {
+        $set: {
+          phone,
+          lastMessageAt: now,
+          lastMessageText: previewText.slice(0, 200),
+          lastOutboundAt: now,
+        },
+      },
+      { upsert: true }
+    );
+
+    emitMessage(req, created);
+    emitConversationPatch(req, {
+      phone10: p10,
+      patch: {
+        lastMessageAt: now,
+        lastMessageText: previewText.slice(0, 200),
+        lastOutboundAt: now,
+      },
+    });
+
+    return res.json({
+      success: true,
+      mediaUrl,
+      providerResponse: r.data || null,
+    });
+  } catch (e) {
+    const status = e?.response?.status || e?.status || 400;
+    const data = e?.response?.data || e?.data || null;
+
+    console.error("Send media error:", {
+      status,
+      data,
+      message: e?.message,
+    });
+
+    return res.status(status).json({
+      success: false,
+      message: "Send media failed",
+      providerError: data || { error: e?.message },
+    });
+  }
+});
+
 router.post("/send-template", async (req, res) => {
   try {
     const {
@@ -1390,7 +1672,9 @@ router.post("/webhook", async (req, res) => {
     if (webhookType === "phone_number_quality_update") {
       const value = req.body?.value || {};
 
-      const displayPhoneNumber = String(value?.display_phone_number || "").trim();
+      const displayPhoneNumber = String(
+        value?.display_phone_number || ""
+      ).trim();
       const event = String(value?.event || "").trim();
       const currentLimit = String(value?.current_limit || "").trim();
       const oldLimit = String(value?.old_limit || "").trim();
@@ -1417,9 +1701,7 @@ router.post("/webhook", async (req, res) => {
             old_limit: oldLimit,
             sender_env: senderInEnv,
             sender_matches_env: Boolean(
-              displayDigits &&
-                envDigits &&
-                displayDigits === envDigits
+              displayDigits && envDigits && displayDigits === envDigits
             ),
           },
           null,
@@ -1659,8 +1941,11 @@ router.post("/webhook", async (req, res) => {
           const mimeFromMeta = String(meta?.mime_type || "").trim();
           const mimeFromWebhook = String(incomingMedia.mime || "").trim();
           const baseMime =
-            (mimeFromMeta || mimeFromWebhook || "application/octet-stream").trim() ||
-            "application/octet-stream";
+            (
+              mimeFromMeta ||
+              mimeFromWebhook ||
+              "application/octet-stream"
+            ).trim() || "application/octet-stream";
 
           const filename =
             String(incomingMedia.filename || "").trim() ||
