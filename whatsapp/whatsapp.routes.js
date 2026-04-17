@@ -15,9 +15,11 @@ const Customer = require("../models/Customer");
 
 const router = express.Router();
 
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: MAX_UPLOAD_BYTES },
 });
 
 /* ----------------------------------------
@@ -31,15 +33,9 @@ const TRUSTSIGNAL_API_KEY = String(
   process.env.TRUSTSIGNAL_API_KEY || ""
 ).trim();
 
-const TS_PATH_SEND_TEXT = "/api/v1/whatsapp/agent-reply";
+const TS_PATH_SEND_REPLY = "/api/v1/whatsapp/agent-reply";
 const TS_PATH_SEND_TEMPLATE = "/api/v1/whatsapp/single";
-
-/*
-  Keep these only if TrustSignal confirms these media endpoints for your account.
-*/
 const TS_PATH_UPLOAD_MEDIA = "/v1/whatsapp/media";
-const TS_PATH_MEDIA_META = "/v1/whatsapp/media/:id";
-const TS_PATH_MEDIA_DOWNLOAD = "/v1/whatsapp/media/:id/download";
 
 const trustsignalClient = axios.create({
   baseURL: TRUSTSIGNAL_API_BASE,
@@ -48,13 +44,15 @@ const trustsignalClient = axios.create({
 });
 
 /* ----------------------------------------
-   STORAGE CONFIG
+   WASABI CONFIG
 ----------------------------------------- */
 const WASABI_ENDPOINT = String(process.env.WASABI_ENDPOINT || "").replace(
   /\/+$/,
   ""
 );
-const WASABI_REGION = process.env.WASABI_REGION || "ap-southeast-2";
+const WASABI_REGION = String(
+  process.env.WASABI_REGION || "ap-southeast-2"
+).trim();
 const WASABI_BUCKET = String(process.env.WASABI_BUCKET || "").trim();
 
 const WASABI_ACCESS_KEY = String(
@@ -85,27 +83,25 @@ const s3 =
     : null;
 
 /* ----------------------------------------
-   HELPERS
+   GENERIC HELPERS
 ----------------------------------------- */
 const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
 const last10 = (v = "") => digitsOnly(v).slice(-10);
 
-const normalizeWaId = (v = "") => {
+function normalizeWaId(v = "") {
   const d = digitsOnly(v);
+  if (!d) return "";
   if (d.length === 10) return `91${d}`;
   return d;
-};
+}
 
-const toE164Plus = (v = "") => {
+function toE164Plus(v = "") {
   const d = digitsOnly(v);
   return d ? `+${d}` : "";
-};
+}
 
-// TrustSignal support asked to remove "+" from recipient number
 function getTrustSignalRecipient(v = "") {
-  const d = digitsOnly(v);
-  if (d.length === 10) return `91${d}`;
-  return d;
+  return normalizeWaId(v);
 }
 
 function normalizeTemplateName(v = "") {
@@ -167,6 +163,7 @@ function deepPick(obj, candidates = []) {
 
     if (ok && cur != null && cur !== "") return cur;
   }
+
   return null;
 }
 
@@ -174,6 +171,14 @@ function asArray(v) {
   if (Array.isArray(v)) return v;
   if (v == null) return [];
   return [v];
+}
+
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[unserializable]";
+  }
 }
 
 function okOrThrow(resp, fallbackMessage = "Provider request failed") {
@@ -236,112 +241,9 @@ function buildParams(extra = {}) {
   return params;
 }
 
-function safeStringify(value) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "[unserializable]";
-  }
-}
-
 function findProviderError(data, matcher) {
   const errors = Array.isArray(data?.errors) ? data.errors : [];
   return errors.find((err) => matcher(err)) || null;
-}
-
-function hasRealMedia(media = {}) {
-  return Boolean(
-    String(media?.id || "").trim() ||
-      String(media?.url || "").trim() ||
-      String(media?.mime || "").trim() ||
-      String(media?.filename || "").trim()
-  );
-}
-
-function sanitizeFilename(name = "") {
-  return path
-    .basename(String(name || "").trim() || "file")
-    .replace(/[^\w.\-() ]+/g, "_");
-}
-
-function buildWasabiPublicUrl(key = "") {
-  const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
-  if (!ep || !WASABI_BUCKET || !key) return "";
-  return `${ep}/${WASABI_BUCKET}/${key}`;
-}
-
-function inferOutboundMediaType({ mime = "", filename = "", mediaUrl = "" }) {
-  const m = String(mime || "").toLowerCase();
-  const f = String(filename || "").toLowerCase();
-  const u = String(mediaUrl || "").toLowerCase();
-
-  if (
-    m.startsWith("image/") ||
-    /\.(png|jpg|jpeg|webp|gif)$/i.test(f) ||
-    /\.(png|jpg|jpeg|webp|gif)$/i.test(u)
-  ) {
-    return "image";
-  }
-
-  if (
-    m.startsWith("video/") ||
-    /\.(mp4|mov|avi|mkv|webm)$/i.test(f) ||
-    /\.(mp4|mov|avi|mkv|webm)$/i.test(u)
-  ) {
-    return "video";
-  }
-
-  if (
-    m.startsWith("audio/") ||
-    /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(f) ||
-    /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(u)
-  ) {
-    return "audio";
-  }
-
-  return "document";
-}
-
-async function tsRequest({
-  method = "GET",
-  path = "",
-  pathParams = {},
-  params = {},
-  data = undefined,
-  headers = {},
-  responseType = undefined,
-}) {
-  const finalPath = compilePath(path, pathParams);
-  const finalUrl = `${TRUSTSIGNAL_API_BASE}${finalPath}`;
-
-  console.log("TS REQUEST =>", method, finalUrl, buildParams(params));
-  if (data !== undefined) {
-    console.log(
-      "TS BODY =>",
-      data instanceof FormData ? "[form-data]" : safeStringify(data)
-    );
-  }
-
-  const resp = await trustsignalClient.request({
-    method,
-    url: finalPath,
-    params: buildParams(params),
-    data,
-    headers: buildHeaders(headers),
-    ...(responseType ? { responseType } : {}),
-  });
-
-  okOrThrow(resp);
-
-  if (!responseType && isHtmlLikeResponse(resp.data, resp.headers || {})) {
-    const err = new Error("Received HTML page instead of API JSON");
-    err.status = 502;
-    err.data =
-      typeof resp.data === "string" ? resp.data.slice(0, 1000) : resp.data;
-    throw err;
-  }
-
-  return resp;
 }
 
 function extractProviderMessageId(data) {
@@ -377,21 +279,6 @@ function extractProviderMediaId(data) {
   );
 }
 
-function extractProviderMediaUrl(data) {
-  return (
-    deepPick(data, [
-      "url",
-      "data.url",
-      "media.url",
-      "result.url",
-      "download_url",
-      "data.download_url",
-      "result.download_url",
-      "file.url",
-    ]) || null
-  );
-}
-
 function getTrustSignalSenderOrThrow() {
   const senderRaw = String(
     process.env.TRUSTSIGNAL_SENDER_ID ||
@@ -401,7 +288,6 @@ function getTrustSignalSenderOrThrow() {
   ).trim();
 
   const sender = digitsOnly(senderRaw) || senderRaw;
-
   if (!sender) {
     const err = new Error(
       "TrustSignal sender missing. Set TRUSTSIGNAL_SENDER_ID in env."
@@ -469,6 +355,106 @@ function resolveTemplateIdentifier(tpl, fallback = "") {
   ).trim();
 }
 
+function hasRealMedia(media = {}) {
+  return Boolean(
+    String(media?.id || "").trim() ||
+      String(media?.url || "").trim() ||
+      String(media?.mime || "").trim() ||
+      String(media?.filename || "").trim()
+  );
+}
+
+function sanitizeFilename(name = "") {
+  return path
+    .basename(String(name || "").trim() || "file")
+    .replace(/[^\w.\-() ]+/g, "_");
+}
+
+function buildWasabiPublicUrl(key = "") {
+  const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
+  if (!ep || !WASABI_BUCKET || !key) return "";
+  return `${ep}/${encodeURIComponent(WASABI_BUCKET)}/${key
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/")}`;
+}
+
+function extFromMime(mime = "") {
+  const m = String(mime || "").toLowerCase();
+
+  if (m.includes("jpeg")) return "jpg";
+  if (m.includes("jpg")) return "jpg";
+  if (m.includes("png")) return "png";
+  if (m.includes("webp")) return "webp";
+  if (m.includes("gif")) return "gif";
+  if (m.includes("mp4")) return "mp4";
+  if (m.includes("mov")) return "mov";
+  if (m.includes("pdf")) return "pdf";
+
+  if (
+    m.includes("audio/ogg") ||
+    m.includes("application/ogg") ||
+    m.includes("ogg")
+  ) return "ogg";
+  if (m.includes("opus")) return "ogg";
+  if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("wav")) return "wav";
+  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac"))
+    return "m4a";
+
+  return "bin";
+}
+
+function inferMediaType({ type = "", mime = "", filename = "", url = "" }) {
+  const rawType = String(type || "").toLowerCase().trim();
+  const m = String(mime || "").toLowerCase();
+  const f = String(filename || "").toLowerCase();
+  const u = String(url || "").toLowerCase();
+
+  if (rawType === "sticker") return "image";
+  if (["image", "video", "audio", "document"].includes(rawType)) return rawType;
+
+  if (
+    m.startsWith("image/") ||
+    /\.(png|jpg|jpeg|webp|gif)$/i.test(f) ||
+    /\.(png|jpg|jpeg|webp|gif)$/i.test(u)
+  ) return "image";
+
+  if (
+    m.startsWith("video/") ||
+    /\.(mp4|mov|avi|mkv|webm)$/i.test(f) ||
+    /\.(mp4|mov|avi|mkv|webm)$/i.test(u)
+  ) return "video";
+
+  if (
+    m.startsWith("audio/") ||
+    /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(f) ||
+    /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(u)
+  ) return "audio";
+
+  if (rawType === "file" || rawType === "media" || m || f || u) {
+    return "document";
+  }
+
+  return "text";
+}
+
+function normalizeOutgoingMediaType(type = "") {
+  const t = String(type || "").toLowerCase().trim();
+  if (t === "image" || t === "video" || t === "document") return t;
+  return "document";
+}
+
+function previewTextForType(type = "", filename = "") {
+  if (type === "image") return "📷 Photo";
+  if (type === "video") return "🎥 Video";
+  if (type === "audio") return "🎙️ Audio";
+  return filename ? `📎 ${filename}` : "📎 Attachment";
+}
+
+/* ----------------------------------------
+   SOCKET EMITS
+----------------------------------------- */
 const roomForPhone10 = (p10) => `wa:${String(p10 || "").slice(-10)}`;
 
 const emitToPhone10 = (req, phone10, event, payload) => {
@@ -519,6 +505,51 @@ function freeformExpiryFromConvo(convo) {
   return new Date(t + 24 * 60 * 60 * 1000);
 }
 
+/* ----------------------------------------
+   TRUSTSIGNAL REQUESTS
+----------------------------------------- */
+async function tsRequest({
+  method = "GET",
+  path = "",
+  pathParams = {},
+  params = {},
+  data = undefined,
+  headers = {},
+  responseType = undefined,
+}) {
+  const finalPath = compilePath(path, pathParams);
+  const finalUrl = `${TRUSTSIGNAL_API_BASE}${finalPath}`;
+
+  console.log("TS REQUEST =>", method, finalUrl, buildParams(params));
+  if (data !== undefined) {
+    console.log(
+      "TS BODY =>",
+      data instanceof FormData ? "[form-data]" : safeStringify(data)
+    );
+  }
+
+  const resp = await trustsignalClient.request({
+    method,
+    url: finalPath,
+    params: buildParams(params),
+    data,
+    headers: buildHeaders(headers),
+    ...(responseType ? { responseType } : {}),
+  });
+
+  okOrThrow(resp);
+
+  if (!responseType && isHtmlLikeResponse(resp.data, resp.headers || {})) {
+    const err = new Error("Received HTML page instead of API JSON");
+    err.status = 502;
+    err.data =
+      typeof resp.data === "string" ? resp.data.slice(0, 1000) : resp.data;
+    throw err;
+  }
+
+  return resp;
+}
+
 async function sendFreeformTextViaTrustSignal({ sender, toNumber, text }) {
   const textValue = String(text || "").trim();
 
@@ -531,9 +562,9 @@ async function sendFreeformTextViaTrustSignal({ sender, toNumber, text }) {
     },
   };
 
-  return await tsRequest({
+  return tsRequest({
     method: "POST",
-    path: TS_PATH_SEND_TEXT,
+    path: TS_PATH_SEND_REPLY,
     data: payload,
     headers: { "Content-Type": "application/json" },
   });
@@ -553,156 +584,29 @@ async function sendFreeformMediaViaTrustSignal({
     to: toE164Plus(toNumber),
     reply: {
       message: String(caption || "").trim(),
-      media_type: mediaType,
-      media_file_url: mediaUrl,
+      media_type: normalizeOutgoingMediaType(mediaType),
+      media_file_url: String(mediaUrl || "").trim(),
       ...(filename ? { filename } : {}),
     },
   };
 
-  return await tsRequest({
+  return tsRequest({
     method: "POST",
-    path: TS_PATH_SEND_TEXT,
+    path: TS_PATH_SEND_REPLY,
     data: payload,
     headers: { "Content-Type": "application/json" },
   });
 }
 
 /* ----------------------------------------
-   TRUSTSIGNAL MEDIA HELPERS
+   WASABI HELPERS
 ----------------------------------------- */
-async function fetchMediaMeta(mediaId) {
-  const id = String(mediaId || "").trim();
-  if (!id) throw new Error("mediaId missing");
-
-  const r = await tsRequest({
-    method: "GET",
-    path: TS_PATH_MEDIA_META,
-    pathParams: { id },
-  });
-
-  return {
-    id,
-    downloadUrl: String(extractProviderMediaUrl(r.data) || "").trim(),
-    mime_type: String(
-      deepPick(r.data, ["mime_type", "mime", "data.mime", "media.mime"]) || ""
-    ).trim(),
-    raw: r.data || null,
-  };
-}
-
-async function downloadTrustSignalAttachment({
-  mediaId,
-  downloadUrl = "",
-  range = "",
-  asStream = false,
-}) {
-  const id = String(mediaId || "").trim();
-  const directUrl = String(downloadUrl || "").trim();
-  const responseType = asStream ? "stream" : "arraybuffer";
-
-  if (directUrl) {
-    const r = await axios.request({
-      method: "GET",
-      url: directUrl,
-      params: buildParams(),
-      headers: buildHeaders(range ? { Range: range } : {}),
-      timeout: 60000,
-      responseType,
-      validateStatus: () => true,
-    });
-
-    if (r.status >= 400) {
-      const e = new Error(`download failed: ${r.status}`);
-      e.status = r.status;
-      e.provider = r.data;
-      throw e;
-    }
-
-    return r;
-  }
-
-  if (!id) throw new Error("mediaId missing");
-
-  const r = await tsRequest({
-    method: "GET",
-    path: TS_PATH_MEDIA_DOWNLOAD,
-    pathParams: { id },
-    headers: range ? { Range: range } : {},
-    responseType,
-  });
-
-  return r;
-}
-
-function extFromMime(mime = "") {
-  const m = String(mime || "").toLowerCase();
-
-  if (m.includes("jpeg")) return "jpg";
-  if (m.includes("jpg")) return "jpg";
-  if (m.includes("png")) return "png";
-  if (m.includes("webp")) return "webp";
-  if (m.includes("gif")) return "gif";
-  if (m.includes("mp4")) return "mp4";
-  if (m.includes("pdf")) return "pdf";
-
-  if (
-    m.includes("audio/ogg") ||
-    m.includes("application/ogg") ||
-    m.includes("ogg")
-  )
-    return "ogg";
-  if (m.includes("opus")) return "ogg";
-  if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
-  if (m.includes("wav")) return "wav";
-  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac"))
-    return "m4a";
-
-  return "bin";
-}
-
-async function uploadInboundToWasabi({
+async function uploadBufferToWasabi({
   buffer,
   mime,
   filename,
-  from10,
-  mediaId,
-  msgType,
+  keyPrefix,
 }) {
-  if (!s3 || !WASABI_BUCKET) return null;
-
-  const day = new Date().toISOString().slice(0, 10);
-  const ext = extFromMime(mime);
-  const safeName = filename
-    ? String(filename).replace(/[^\w.\-() ]+/g, "_")
-    : "";
-  const base =
-    safeName ||
-    `${msgType || "media"}_${from10 || "unknown"}_${mediaId || Date.now()}.${ext}`;
-
-  const key = `whatsapp-inbound/${day}/${base}`;
-
-  const up = await s3
-    .upload({
-      Bucket: WASABI_BUCKET,
-      Key: key,
-      Body: buffer,
-      ContentType: mime || "application/octet-stream",
-      ContentDisposition: "inline",
-      CacheControl: "public, max-age=31536000",
-      ACL: "public-read",
-    })
-    .promise();
-
-  const loc = up?.Location || "";
-  if (loc) return loc;
-
-  const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
-  if (!ep) return null;
-
-  return `${ep}/${WASABI_BUCKET}/${key}`;
-}
-
-async function uploadOutboundToWasabi({ buffer, mime, filename, to10 }) {
   if (!s3 || !WASABI_BUCKET) {
     const err = new Error("Wasabi is not configured properly.");
     err.status = 500;
@@ -712,13 +616,9 @@ async function uploadOutboundToWasabi({ buffer, mime, filename, to10 }) {
   const safeName = sanitizeFilename(filename || "");
   const ext = path.extname(safeName) || `.${extFromMime(mime)}`;
   const finalName =
-    safeName ||
-    `media_${to10 || "unknown"}_${Date.now()}${
-      ext.startsWith(".") ? ext : `.${ext}`
-    }`;
+    safeName || `file_${Date.now()}${ext.startsWith(".") ? ext : `.${ext}`}`;
 
-  const day = new Date().toISOString().slice(0, 10);
-  const key = `whatsapp-outbound/${day}/${Date.now()}_${finalName}`;
+  const key = `${keyPrefix}/${Date.now()}_${finalName}`;
 
   const up = await s3
     .upload({
@@ -732,13 +632,72 @@ async function uploadOutboundToWasabi({ buffer, mime, filename, to10 }) {
     })
     .promise();
 
-  return up?.Location || buildWasabiPublicUrl(key);
+  return {
+    key,
+    url: up?.Location || buildWasabiPublicUrl(key),
+    filename: finalName,
+    mime: mime || "application/octet-stream",
+  };
 }
 
-const proxyUrlForMediaId = (mediaId) =>
-  `/api/whatsapp/media-proxy/${encodeURIComponent(
-    String(mediaId || "").trim()
-  )}`;
+async function uploadOutboundToWasabi({ buffer, mime, filename, to10 }) {
+  const day = new Date().toISOString().slice(0, 10);
+  return uploadBufferToWasabi({
+    buffer,
+    mime,
+    filename,
+    keyPrefix: `whatsapp-outbound/${day}/${to10 || "unknown"}`,
+  });
+}
+
+async function maybeMirrorInboundMediaToWasabi({
+  url,
+  mime,
+  filename,
+  from10,
+  mediaId,
+  msgType,
+}) {
+  const mediaUrl = String(url || "").trim();
+  if (!mediaUrl || !s3 || !WASABI_BUCKET) return mediaUrl;
+
+  if (WASABI_ENDPOINT && mediaUrl.startsWith(WASABI_ENDPOINT)) {
+    return mediaUrl;
+  }
+
+  try {
+    const resp = await axios.get(mediaUrl, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+
+    if (resp.status < 200 || resp.status >= 300) {
+      return mediaUrl;
+    }
+
+    const bestMime =
+      String(resp.headers?.["content-type"] || mime || "").trim() ||
+      "application/octet-stream";
+
+    const day = new Date().toISOString().slice(0, 10);
+    const finalFilename =
+      sanitizeFilename(filename || "") ||
+      `${msgType || "media"}_${from10 || "unknown"}_${mediaId || Date.now()}.${extFromMime(bestMime)}`;
+
+    const uploaded = await uploadBufferToWasabi({
+      buffer: Buffer.from(resp.data),
+      mime: bestMime,
+      filename: finalFilename,
+      keyPrefix: `whatsapp-inbound/${day}/${from10 || "unknown"}`,
+    });
+
+    return uploaded.url;
+  } catch (e) {
+    console.error("Inbound mirror to Wasabi failed:", e?.message || e);
+    return mediaUrl;
+  }
+}
 
 /* ----------------------------------------
    WEBHOOK PARSER
@@ -763,14 +722,15 @@ function textFromInboundMessage(msg = {}) {
 }
 
 function mediaFromInboundMessage(msg = {}, item = {}) {
-  const type = String(
+  const rawType = String(
     deepPick(msg, ["type", "message_type", "content.type", "payload.type"]) ||
       "text"
   ).toLowerCase();
 
   const node =
     deepPick(msg, [
-      `${type}`,
+      `${rawType}`,
+      "file",
       "media",
       "content.media",
       "payload.media",
@@ -788,17 +748,22 @@ function mediaFromInboundMessage(msg = {}, item = {}) {
   ).trim();
 
   const url = String(
-    deepPick(node, ["url", "download_url"]) ||
-      (mediaId ? item?.__fileurl : "") ||
+    deepPick(node, ["url", "download_url", "link", "media_file_url"]) ||
+      deepPick(msg, ["url", "download_url", "fileurl", "media_file_url"]) ||
+      item?.__fileurl ||
       ""
   ).trim();
 
   const mime = String(
-    deepPick(node, ["mime_type", "mime", "content_type"]) || ""
+    deepPick(node, ["mime_type", "mime", "content_type"]) ||
+      deepPick(msg, ["mime_type", "mime", "content_type"]) ||
+      ""
   ).trim();
 
   const filename = String(
-    deepPick(node, ["filename", "file_name", "name"]) || ""
+    deepPick(node, ["filename", "file_name", "name"]) ||
+      deepPick(msg, ["filename", "file_name", "name"]) ||
+      ""
   ).trim();
 
   if (!mediaId && !url && !mime && !filename) {
@@ -816,7 +781,7 @@ function mediaFromInboundMessage(msg = {}, item = {}) {
     url,
     mime,
     filename,
-    type,
+    type: rawType,
   };
 }
 
@@ -886,15 +851,18 @@ function parseWebhookPayload(body = {}) {
     const statuses = asArray(
       item?.statuses || item?.status_updates || item?.status || []
     );
+
     for (const st of statuses) {
       const waId = String(
         deepPick(st, ["id", "wa_id", "message_id"]) || ""
       ).trim();
+
       const status = String(
         deepPick(st, ["status", "state", "event"]) || ""
       )
         .toLowerCase()
         .trim();
+
       const phone = normalizeWaId(
         deepPick(st, ["recipient_id", "to", "phone", "customer_phone"]) || ""
       );
@@ -932,6 +900,7 @@ function parseWebhookPayload(body = {}) {
 
       const text = textFromInboundMessage(msg);
       const media = mediaFromInboundMessage(msg, item);
+
       const normalizedMedia = {
         id: media.id || "",
         url: media.url || "",
@@ -939,14 +908,22 @@ function parseWebhookPayload(body = {}) {
         filename: media.filename || "",
       };
 
-      const type = String(
+      const rawType = String(
         deepPick(msg, ["type", "message_type", "content.type"]) ||
           media.type ||
           "text"
       ).toLowerCase();
 
       const isRealMedia = hasRealMedia(normalizedMedia);
-      const safeType = isRealMedia ? type : "text";
+
+      const safeType = isRealMedia
+        ? inferMediaType({
+            type: rawType,
+            mime: normalizedMedia.mime,
+            filename: normalizedMedia.filename,
+            url: normalizedMedia.url,
+          })
+        : "text";
 
       out.messages.push({
         waId,
@@ -969,7 +946,9 @@ function parseWebhookPayload(body = {}) {
 ----------------------------------------- */
 router.post("/upload-template-media", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "file required" });
+    if (!req.file) {
+      return res.status(400).json({ message: "file required" });
+    }
 
     const fd = new FormData();
     fd.append("file", req.file.buffer, {
@@ -995,13 +974,10 @@ router.post("/upload-template-media", upload.single("file"), async (req, res) =>
 
     return res.json({ success: true, mediaId });
   } catch (e) {
-    console.error(
-      "upload-template-media error:",
-      e?.response?.data || e?.data || e
-    );
-    return res.status(e?.response?.status || e?.status || 400).json({
+    console.error("upload-template-media error:", e?.data || e);
+    return res.status(e?.status || e?.response?.status || 400).json({
       message: e?.message || "Upload template media failed",
-      providerError: e?.response?.data || e?.data || null,
+      providerError: e?.data || e?.response?.data || null,
     });
   }
 });
@@ -1054,10 +1030,14 @@ router.get("/conversations", async (req, res) => {
     ]);
 
     const leadMap = {};
-    leads.forEach((l) => (leadMap[last10(l.contactNumber)] = l));
+    leads.forEach((l) => {
+      leadMap[last10(l.contactNumber)] = l;
+    });
 
     const customerMap = {};
-    customers.forEach((c) => (customerMap[last10(c.phone)] = c));
+    customers.forEach((c) => {
+      customerMap[last10(c.phone)] = c;
+    });
 
     let enriched = conversations.map((conv) => {
       const p10 = last10(conv.phone);
@@ -1092,10 +1072,10 @@ router.get("/conversations", async (req, res) => {
       );
     }
 
-    res.json(enriched);
+    return res.json(enriched);
   } catch (e) {
     console.error("Conversation load error:", e);
-    res.status(500).json({ message: "Failed to load conversations" });
+    return res.status(500).json({ message: "Failed to load conversations" });
   }
 });
 
@@ -1118,10 +1098,10 @@ router.get("/messages", async (req, res) => {
       .sort({ timestamp: 1 })
       .lean();
 
-    res.json(msgs || []);
+    return res.json(msgs || []);
   } catch (e) {
     console.error("load messages error:", e);
-    res.status(500).json({ message: "Failed to load messages" });
+    return res.status(500).json({ message: "Failed to load messages" });
   }
 });
 
@@ -1130,10 +1110,10 @@ router.get("/templates", async (req, res) => {
     const tpls = await WhatsAppTemplate.find({})
       .sort({ updatedAt: -1 })
       .lean();
-    res.json(tpls || []);
+    return res.json(tpls || []);
   } catch (e) {
     console.error("load templates error:", e);
-    res.status(500).json({ message: "Failed to load templates" });
+    return res.status(500).json({ message: "Failed to load templates" });
   }
 });
 
@@ -1211,8 +1191,8 @@ router.post("/send-text", async (req, res) => {
 
     return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
-    const status = e?.response?.status || e?.status || 400;
-    const data = e?.response?.data || e?.data || null;
+    const status = e?.status || e?.response?.status || 400;
+    const data = e?.data || e?.response?.data || null;
 
     const countryBlocked = findProviderError(
       data,
@@ -1252,11 +1232,7 @@ router.post("/send-text", async (req, res) => {
       });
     }
 
-    console.error("Send text error:", {
-      status,
-      data,
-      message: e?.message,
-    });
+    console.error("Send text error:", { status, data, message: e?.message });
 
     return res.status(status).json({
       success: false,
@@ -1313,33 +1289,46 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     if (req.file) {
       mime = req.file.mimetype || "application/octet-stream";
       filename = sanitizeFilename(req.file.originalname || "attachment");
-      mediaType =
+      mediaType = normalizeOutgoingMediaType(
         mediaType ||
-        inferOutboundMediaType({
-          mime,
-          filename,
-        });
+          inferMediaType({
+            type: mediaType,
+            mime,
+            filename,
+            url: "",
+          })
+      );
 
-      mediaUrl = await uploadOutboundToWasabi({
+      const uploaded = await uploadOutboundToWasabi({
         buffer: req.file.buffer,
         mime,
         filename,
         to10: p10,
       });
+
+      mediaUrl = uploaded.url;
+      filename = uploaded.filename;
+      mime = uploaded.mime;
     } else {
-      mediaType =
+      mediaType = normalizeOutgoingMediaType(
         mediaType ||
-        inferOutboundMediaType({
-          mime,
-          filename,
-          mediaUrl,
-        });
+          inferMediaType({
+            type: mediaType,
+            mime,
+            filename,
+            url: mediaUrl,
+          })
+      );
 
       if (!filename) {
         filename = sanitizeFilename(
           path.basename(mediaUrl.split("?")[0] || "attachment")
         );
       }
+    }
+
+    if (!/^https?:\/\//i.test(mediaUrl)) {
+      return res.status(400).json({ message: "mediaUrl must be a public URL" });
     }
 
     const r = await sendFreeformMediaViaTrustSignal({
@@ -1352,6 +1341,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     });
 
     const now = new Date();
+    const previewText = caption || previewTextForType(mediaType, filename);
 
     const created = await WhatsAppMessage.create({
       waId: extractProviderMessageId(r.data),
@@ -1369,16 +1359,6 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       },
       raw: r.data,
     });
-
-    const previewText =
-      caption ||
-      (mediaType === "image"
-        ? "📷 Photo"
-        : mediaType === "video"
-        ? "🎥 Video"
-        : mediaType === "audio"
-        ? "🎙️ Audio"
-        : `📎 ${filename || "Attachment"}`);
 
     await WhatsAppConversation.findOneAndUpdate(
       { phone: new RegExp(`${p10}$`) },
@@ -1409,14 +1389,10 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       providerResponse: r.data || null,
     });
   } catch (e) {
-    const status = e?.response?.status || e?.status || 400;
-    const data = e?.response?.data || e?.data || null;
+    const status = e?.status || e?.response?.status || 400;
+    const data = e?.data || e?.response?.data || null;
 
-    console.error("Send media error:", {
-      status,
-      data,
-      message: e?.message,
-    });
+    console.error("Send media error:", { status, data, message: e?.message });
 
     return res.status(status).json({
       success: false,
@@ -1572,8 +1548,8 @@ router.post("/send-template", async (req, res) => {
 
     return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
-    const status = e?.response?.status || e?.status || 400;
-    const data = e?.response?.data || e?.data || null;
+    const status = e?.status || e?.response?.status || 400;
+    const data = e?.data || e?.response?.data || null;
 
     const countryBlocked = findProviderError(
       data,
@@ -1603,62 +1579,6 @@ router.post("/send-template", async (req, res) => {
       success: false,
       message: "Send template failed",
       providerError: data || { error: e?.message || "UNKNOWN_ERROR" },
-    });
-  }
-});
-
-router.get("/media-proxy/:id", async (req, res) => {
-  const mediaId = String(req.params.id || "").trim();
-  if (!mediaId) return res.status(400).send("mediaId required");
-
-  try {
-    let meta = null;
-    try {
-      meta = await fetchMediaMeta(mediaId);
-    } catch {
-      meta = null;
-    }
-
-    const range = req.headers.range || "";
-
-    const r = await downloadTrustSignalAttachment({
-      mediaId,
-      downloadUrl: meta?.downloadUrl || "",
-      range,
-      asStream: true,
-    });
-
-    res.status(r.status);
-
-    const ct =
-      r.headers["content-type"] ||
-      meta?.mime_type ||
-      "application/octet-stream";
-    res.setHeader("Content-Type", ct);
-
-    res.setHeader("Accept-Ranges", r.headers["accept-ranges"] || "bytes");
-    if (range && r.headers["content-range"]) {
-      res.setHeader("Content-Range", r.headers["content-range"]);
-    }
-    if (r.headers["content-length"]) {
-      res.setHeader("Content-Length", r.headers["content-length"]);
-    }
-
-    res.setHeader("Cache-Control", "no-store");
-    r.data.pipe(res);
-  } catch (e) {
-    console.error("media-proxy error:", {
-      code: e.code,
-      message: e.message,
-      status: e?.status,
-      data: e?.data,
-    });
-
-    return res.status(e?.status || 500).json({
-      message: "proxy failed",
-      error: e.message,
-      status: e?.status || null,
-      providerError: e?.data || null,
     });
   }
 });
@@ -1924,115 +1844,46 @@ router.post("/webhook", async (req, res) => {
 
       const hasIncomingMedia = hasRealMedia(incomingMedia);
 
-      const hasActualMedia =
-        hasIncomingMedia &&
-        ["image", "video", "audio", "document", "sticker"].includes(type);
+      type = inferMediaType({
+        type,
+        mime: incomingMedia.mime,
+        filename: incomingMedia.filename,
+        url: incomingMedia.url,
+      });
 
       let media = null;
 
-      if (hasActualMedia) {
-        const mediaId = incomingMedia.id;
+      if (hasIncomingMedia && type !== "text") {
+        const mediaId = incomingMedia.id || waId || "";
+        const filename =
+          sanitizeFilename(incomingMedia.filename || "") ||
+          `${type}_${p10 || "unknown"}_${mediaId || Date.now()}.${extFromMime(
+            incomingMedia.mime || ""
+          )}`;
 
-        if (type === "sticker") type = "image";
+        const mirroredUrl = await maybeMirrorInboundMediaToWasabi({
+          url: incomingMedia.url,
+          mime: incomingMedia.mime,
+          filename,
+          from10: p10,
+          mediaId,
+          msgType: type,
+        });
 
-        try {
-          const meta = await fetchMediaMeta(mediaId);
+        media = {
+          id: incomingMedia.id || "",
+          url: mirroredUrl || incomingMedia.url || "",
+          mime: incomingMedia.mime || "",
+          filename,
+        };
 
-          const mimeFromMeta = String(meta?.mime_type || "").trim();
-          const mimeFromWebhook = String(incomingMedia.mime || "").trim();
-          const baseMime =
-            (
-              mimeFromMeta ||
-              mimeFromWebhook ||
-              "application/octet-stream"
-            ).trim() || "application/octet-stream";
-
-          const filename =
-            String(incomingMedia.filename || "").trim() ||
-            `${type}_${p10 || "unknown"}_${mediaId}.${extFromMime(baseMime)}`;
-
-          media = {
-            id: mediaId,
-            url: incomingMedia.url || proxyUrlForMediaId(mediaId),
-            mime: baseMime,
-            filename,
-          };
-
-          try {
-            const dl = await downloadTrustSignalAttachment({
-              mediaId,
-              downloadUrl: meta?.downloadUrl || incomingMedia.url || "",
-              asStream: false,
-            });
-
-            const buffer = Buffer.isBuffer(dl.data)
-              ? dl.data
-              : Buffer.from(dl.data);
-
-            const bestMime =
-              String(dl.headers?.["content-type"] || baseMime || "").trim() ||
-              "application/octet-stream";
-
-            const wasabiUrl = await uploadInboundToWasabi({
-              buffer,
-              mime: bestMime,
-              filename,
-              from10: p10,
-              mediaId,
-              msgType: type,
-            });
-
-            media = {
-              id: mediaId,
-              url: wasabiUrl || incomingMedia.url || proxyUrlForMediaId(mediaId),
-              mime: bestMime,
-              filename,
-            };
-          } catch (uploadErr) {
-            console.error(
-              "Inbound Wasabi upload failed (keeping proxy url):",
-              uploadErr?.data || uploadErr
-            );
-          }
-
-          if (!text) {
-            text =
-              type === "image"
-                ? "📷 Photo"
-                : type === "video"
-                ? "🎥 Video"
-                : type === "audio"
-                ? "🎙️ Audio"
-                : "📎 Attachment";
-          }
-        } catch (e) {
-          console.error("Inbound media handling failed:", e?.data || e);
-
-          if (!text) {
-            text =
-              type === "image"
-                ? "📷 Photo"
-                : type === "video"
-                ? "🎥 Video"
-                : type === "audio"
-                ? "🎙️ Audio"
-                : "📎 Attachment";
-          }
-
-          if (!media) {
-            media = {
-              id: mediaId,
-              url: incomingMedia.url || proxyUrlForMediaId(mediaId),
-              mime: incomingMedia.mime || "",
-              filename: incomingMedia.filename || "",
-            };
-          }
+        if (!text) {
+          text = previewTextForType(type, filename);
         }
       }
 
-      if (!hasActualMedia || !media) {
+      if (!media) {
         type = "text";
-        media = null;
       }
 
       const created = await WhatsAppMessage.create({
@@ -2085,4 +1936,4 @@ router.post("/webhook", async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = router; 
