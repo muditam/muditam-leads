@@ -264,17 +264,19 @@ function extractProviderMessageId(data) {
   );
 }
 
-function extractProviderAcceptId(data) {
-  return (
-    extractProviderMessageId(data) ||
+function extractProviderTransactionId(data) {
+  return String(
     deepPick(data, [
       "transaction_id",
       "results.transaction_id",
       "data.transaction_id",
       "result.transaction_id",
-    ]) ||
-    null
-  );
+    ]) || ""
+  ).trim();
+}
+
+function extractProviderAcceptId(data) {
+  return extractProviderMessageId(data) || extractProviderTransactionId(data) || null;
 }
 
 function ensureTrustSignalAccepted(
@@ -445,13 +447,15 @@ function extFromMime(mime = "") {
     m.includes("audio/ogg") ||
     m.includes("application/ogg") ||
     m.includes("ogg")
-  )
+  ) {
     return "ogg";
+  }
   if (m.includes("opus")) return "ogg";
   if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
   if (m.includes("wav")) return "wav";
-  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac"))
+  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac")) {
     return "m4a";
+  }
 
   return "bin";
 }
@@ -469,22 +473,25 @@ function inferMediaType({ type = "", mime = "", filename = "", url = "" }) {
     m.startsWith("image/") ||
     /\.(png|jpg|jpeg|webp|gif)$/i.test(f) ||
     /\.(png|jpg|jpeg|webp|gif)$/i.test(u)
-  )
+  ) {
     return "image";
+  }
 
   if (
     m.startsWith("video/") ||
     /\.(mp4|mov|avi|mkv|webm)$/i.test(f) ||
     /\.(mp4|mov|avi|mkv|webm)$/i.test(u)
-  )
+  ) {
     return "video";
+  }
 
   if (
     m.startsWith("audio/") ||
     /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(f) ||
     /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(u)
-  )
+  ) {
     return "audio";
+  }
 
   if (rawType === "file" || rawType === "media" || m || f || u) {
     return "document";
@@ -920,6 +927,15 @@ function parseWebhookPayload(body = {}) {
         deepPick(st, ["id", "wa_id", "message_id"]) || ""
       ).trim();
 
+      const transactionId = String(
+        deepPick(st, [
+          "transaction_id",
+          "results.transaction_id",
+          "data.transaction_id",
+          "result.transaction_id",
+        ]) || ""
+      ).trim();
+
       const status = String(
         deepPick(st, ["status", "state", "event"]) || ""
       )
@@ -930,9 +946,10 @@ function parseWebhookPayload(body = {}) {
         deepPick(st, ["recipient_id", "to", "phone", "customer_phone"]) || ""
       );
 
-      if (waId && status) {
+      if (waId || transactionId) {
         out.statuses.push({
           waId,
+          transactionId,
           status,
           phone,
           errors: Array.isArray(st?.errors) ? st.errors : [],
@@ -1221,6 +1238,7 @@ router.post("/send-text", async (req, res) => {
 
     const created = await WhatsAppMessage.create({
       waId: extractProviderAcceptId(r.data),
+      providerTransactionId: extractProviderTransactionId(r.data),
       from: senderForDb(sender),
       to: phone,
       text: textValue,
@@ -1412,6 +1430,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
 
     const created = await WhatsAppMessage.create({
       waId: extractProviderAcceptId(r.data),
+      providerTransactionId: extractProviderTransactionId(r.data),
       from: senderForDb(sender),
       to: phone,
       direction: "OUTBOUND",
@@ -1567,6 +1586,7 @@ router.post("/send-template", async (req, res) => {
 
     const created = await WhatsAppMessage.create({
       waId: extractProviderAcceptId(r.data),
+      providerTransactionId: extractProviderTransactionId(r.data),
       from: senderForDb(sender),
       to: phone,
       direction: "OUTBOUND",
@@ -1656,6 +1676,8 @@ router.get("/webhook", (req, res) => res.sendStatus(200));
 
 router.post("/webhook", async (req, res) => {
   try {
+    console.log("TS WEBHOOK RAW =>", JSON.stringify(req.body || {}, null, 2));
+
     const webhookType = String(req.body?.webhook_type || "").trim();
 
     if (webhookType === "phone_number_quality_update") {
@@ -1866,15 +1888,25 @@ router.post("/webhook", async (req, res) => {
       );
 
     for (const st of parsed.statuses || []) {
-      const waId = st?.waId;
-      if (!waId) continue;
+      const waId = String(st?.waId || "").trim();
+      const transactionId = String(st?.transactionId || "").trim();
+      const newStatus = String(st?.status || "").toLowerCase().trim();
 
-      const newStatus = String(st.status || "").toLowerCase().trim();
       if (!newStatus) continue;
 
+      const match = [];
+      if (waId) match.push({ waId });
+      if (transactionId) match.push({ providerTransactionId: transactionId });
+      if (!match.length) continue;
+
       const updated = await WhatsAppMessage.findOneAndUpdate(
-        { waId },
-        { $set: { status: newStatus } },
+        { $or: match },
+        {
+          $set: {
+            status: newStatus,
+            ...(transactionId ? { providerTransactionId: transactionId } : {}),
+          },
+        },
         { new: true }
       ).lean();
 
@@ -1882,7 +1914,10 @@ router.post("/webhook", async (req, res) => {
         const dir = String(updated.direction || "").toUpperCase();
         const customerPhone = dir === "INBOUND" ? updated.from : updated.to;
         const p10 = last10(st.phone || customerPhone || "");
-        if (p10) emitStatus(req, { phone10: p10, waId, status: newStatus });
+        const liveId = String(updated.waId || transactionId || waId || "").trim();
+        if (p10 && liveId) {
+          emitStatus(req, { phone10: p10, waId: liveId, status: newStatus });
+        }
       }
     }
 
