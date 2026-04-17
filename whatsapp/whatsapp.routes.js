@@ -246,6 +246,48 @@ function findProviderError(data, matcher) {
   return errors.find((err) => matcher(err)) || null;
 }
 
+function ensureTrustSignalAccepted(
+  data,
+  fallbackMessage = "Provider rejected request"
+) {
+  const body = data || {};
+
+  const explicitFalse =
+    body?.success === false ||
+    body?.status === false ||
+    body?.ok === false;
+
+  const providerErrors = Array.isArray(body?.errors) ? body.errors : [];
+  const hasErrors = providerErrors.length > 0;
+
+  const messageId =
+    extractProviderMessageId(body) ||
+    deepPick(body, [
+      "data.message_id",
+      "result.message_id",
+      "messages.0.id",
+      "data.messages.0.id",
+    ]);
+
+  if (explicitFalse || hasErrors) {
+    const err = new Error(
+      providerErrors?.[0]?.message || body?.message || fallbackMessage
+    );
+    err.status = 400;
+    err.data = body;
+    throw err;
+  }
+
+  if (!messageId) {
+    const err = new Error(body?.message || "Provider did not return message id");
+    err.status = 400;
+    err.data = body;
+    throw err;
+  }
+
+  return body;
+}
+
 function extractProviderMessageId(data) {
   return (
     deepPick(data, [
@@ -395,7 +437,8 @@ function extFromMime(mime = "") {
     m.includes("audio/ogg") ||
     m.includes("application/ogg") ||
     m.includes("ogg")
-  ) return "ogg";
+  )
+    return "ogg";
   if (m.includes("opus")) return "ogg";
   if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
   if (m.includes("wav")) return "wav";
@@ -418,19 +461,22 @@ function inferMediaType({ type = "", mime = "", filename = "", url = "" }) {
     m.startsWith("image/") ||
     /\.(png|jpg|jpeg|webp|gif)$/i.test(f) ||
     /\.(png|jpg|jpeg|webp|gif)$/i.test(u)
-  ) return "image";
+  )
+    return "image";
 
   if (
     m.startsWith("video/") ||
     /\.(mp4|mov|avi|mkv|webm)$/i.test(f) ||
     /\.(mp4|mov|avi|mkv|webm)$/i.test(u)
-  ) return "video";
+  )
+    return "video";
 
   if (
     m.startsWith("audio/") ||
     /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(f) ||
     /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(u)
-  ) return "audio";
+  )
+    return "audio";
 
   if (rawType === "file" || rawType === "media" || m || f || u) {
     return "document";
@@ -677,6 +723,8 @@ async function maybeMirrorInboundMediaToWasabi({
       responseType: "arraybuffer",
       timeout: 30000,
       validateStatus: () => true,
+      headers: buildHeaders(),
+      params: buildParams(),
     });
 
     if (resp.status < 200 || resp.status >= 300) {
@@ -1159,6 +1207,8 @@ router.post("/send-text", async (req, res) => {
       text: textValue,
     });
 
+    ensureTrustSignalAccepted(r.data, "TrustSignal did not accept text send");
+
     const now = new Date();
 
     const created = await WhatsAppMessage.create({
@@ -1347,6 +1397,8 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       filename,
     });
 
+    ensureTrustSignalAccepted(r.data, "TrustSignal did not accept media send");
+
     const now = new Date();
     const previewText = caption || previewTextForType(mediaType, filename);
 
@@ -1492,6 +1544,8 @@ router.post("/send-template", async (req, res) => {
       data: payload,
       headers: { "Content-Type": "application/json" },
     });
+
+    ensureTrustSignalAccepted(r.data, "TrustSignal did not accept template send");
 
     const now = new Date();
 
