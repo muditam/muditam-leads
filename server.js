@@ -144,7 +144,7 @@ const notificationsRoutes = require("./routes/notifications");
 
 const WhatsAppRoutes = require("./whatsapp/whatsapp.routes");
 const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes");
-const whatsappMediaRoutes = require("./whatsapp/whatsappMedia.routes");
+// const whatsappMediaRoutes = require("./whatsapp/whatsappMedia.routes");
 const whatsappAiRoutes = require("./whatsapp/whatsapp.ai.routes");
 const bankReconciliationKotak = require("./PaymentGateway/bankReconciliationKotak");
 
@@ -707,7 +707,7 @@ app.use("/api/notifications", notificationsRoutes);
 
 app.use("/api/whatsapp", WhatsAppRoutes);
 app.use("/api/whatsapp/templates", whatsappTemplatesRoutes);
-app.use("/api/whatsapp", whatsappMediaRoutes);
+// app.use("/api/whatsapp", whatsappMediaRoutes);
 
 app.use("/api/whatsapp", whatsappAiRoutes);
 app.use("/api/bank-reconciliation", bankReconciliationKotak);
