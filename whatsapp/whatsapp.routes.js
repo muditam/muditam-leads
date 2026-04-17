@@ -246,48 +246,6 @@ function findProviderError(data, matcher) {
   return errors.find((err) => matcher(err)) || null;
 }
 
-function ensureTrustSignalAccepted(
-  data,
-  fallbackMessage = "Provider rejected request"
-) {
-  const body = data || {};
-
-  const explicitFalse =
-    body?.success === false ||
-    body?.status === false ||
-    body?.ok === false;
-
-  const providerErrors = Array.isArray(body?.errors) ? body.errors : [];
-  const hasErrors = providerErrors.length > 0;
-
-  const messageId =
-    extractProviderMessageId(body) ||
-    deepPick(body, [
-      "data.message_id",
-      "result.message_id",
-      "messages.0.id",
-      "data.messages.0.id",
-    ]);
-
-  if (explicitFalse || hasErrors) {
-    const err = new Error(
-      providerErrors?.[0]?.message || body?.message || fallbackMessage
-    );
-    err.status = 400;
-    err.data = body;
-    throw err;
-  }
-
-  if (!messageId) {
-    const err = new Error(body?.message || "Provider did not return message id");
-    err.status = 400;
-    err.data = body;
-    throw err;
-  }
-
-  return body;
-}
-
 function extractProviderMessageId(data) {
   return (
     deepPick(data, [
@@ -304,6 +262,56 @@ function extractProviderMessageId(data) {
       "result.id",
     ]) || null
   );
+}
+
+function extractProviderAcceptId(data) {
+  return (
+    extractProviderMessageId(data) ||
+    deepPick(data, [
+      "transaction_id",
+      "results.transaction_id",
+      "data.transaction_id",
+      "result.transaction_id",
+    ]) ||
+    null
+  );
+}
+
+function ensureTrustSignalAccepted(
+  data,
+  fallbackMessage = "Provider rejected request"
+) {
+  const body = data || {};
+
+  const explicitFalse =
+    body?.success === false ||
+    body?.status === false ||
+    body?.ok === false;
+
+  const providerErrors = Array.isArray(body?.errors) ? body.errors : [];
+  const hasErrors = providerErrors.length > 0;
+
+  const acceptId = extractProviderAcceptId(body);
+
+  if (explicitFalse || hasErrors) {
+    const err = new Error(
+      providerErrors?.[0]?.message || body?.message || fallbackMessage
+    );
+    err.status = 400;
+    err.data = body;
+    throw err;
+  }
+
+  if (!acceptId) {
+    const err = new Error(
+      body?.message || "Provider did not return acceptance id"
+    );
+    err.status = 400;
+    err.data = body;
+    throw err;
+  }
+
+  return body;
 }
 
 function extractProviderMediaId(data) {
@@ -1212,7 +1220,7 @@ router.post("/send-text", async (req, res) => {
     const now = new Date();
 
     const created = await WhatsAppMessage.create({
-      waId: extractProviderMessageId(r.data),
+      waId: extractProviderAcceptId(r.data),
       from: senderForDb(sender),
       to: phone,
       text: textValue,
@@ -1403,7 +1411,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     const previewText = caption || previewTextForType(mediaType, filename);
 
     const created = await WhatsAppMessage.create({
-      waId: extractProviderMessageId(r.data),
+      waId: extractProviderAcceptId(r.data),
       from: senderForDb(sender),
       to: phone,
       direction: "OUTBOUND",
@@ -1558,7 +1566,7 @@ router.post("/send-template", async (req, res) => {
       clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
 
     const created = await WhatsAppMessage.create({
-      waId: extractProviderMessageId(r.data),
+      waId: extractProviderAcceptId(r.data),
       from: senderForDb(sender),
       to: phone,
       direction: "OUTBOUND",
