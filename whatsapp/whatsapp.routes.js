@@ -261,26 +261,19 @@ function hasRealMedia(media = {}) {
 function sanitizeFilename(name = "") {
   return path
     .basename(String(name || "").trim() || "file")
-    .replace(/[^\w.\-]+/g, "_");
+    .replace(/[^\w.\-() ]+/g, "_");
 }
 
 function buildWasabiPublicUrl(key = "") {
   const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
   if (!ep || !WASABI_BUCKET || !key) return "";
-  return `${ep}/${encodeURIComponent(WASABI_BUCKET)}/${key
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/")}`;
+  return `${ep}/${WASABI_BUCKET}/${key}`;
 }
 
-function inferMediaType({ type = "", mime = "", filename = "", url = "" }) {
-  const rawType = String(type || "").toLowerCase().trim();
+function inferOutboundMediaType({ mime = "", filename = "", mediaUrl = "" }) {
   const m = String(mime || "").toLowerCase();
   const f = String(filename || "").toLowerCase();
-  const u = String(url || "").toLowerCase();
-
-  if (rawType === "sticker") return "image";
-  if (["image", "video", "audio", "document"].includes(rawType)) return rawType;
+  const u = String(mediaUrl || "").toLowerCase();
 
   if (
     m.startsWith("image/") ||
@@ -306,40 +299,7 @@ function inferMediaType({ type = "", mime = "", filename = "", url = "" }) {
     return "audio";
   }
 
-  if (rawType === "file" || rawType === "media" || m || f || u) {
-    return "document";
-  }
-
-  return "text";
-}
-
-async function assertPublicMediaUrl(url = "") {
-  const mediaUrl = String(url || "").trim();
-  if (!mediaUrl) {
-    const err = new Error("Public media URL missing after Wasabi upload");
-    err.status = 400;
-    throw err;
-  }
-
-  const resp = await axios.get(mediaUrl, {
-    timeout: 20000,
-    responseType: "stream",
-    validateStatus: () => true,
-  });
-
-  if (resp.status < 200 || resp.status >= 300) {
-    const err = new Error(
-      `Uploaded media URL is not publicly accessible (${resp.status})`
-    );
-    err.status = 400;
-    throw err;
-  }
-
-  if (resp.data && typeof resp.data.destroy === "function") {
-    resp.data.destroy();
-  }
-
-  return true;
+  return "document";
 }
 
 async function tsRequest({
@@ -689,15 +649,13 @@ function extFromMime(mime = "") {
     m.includes("audio/ogg") ||
     m.includes("application/ogg") ||
     m.includes("ogg")
-  ) {
+  )
     return "ogg";
-  }
   if (m.includes("opus")) return "ogg";
   if (m.includes("audio/mpeg") || m.includes("mp3")) return "mp3";
   if (m.includes("wav")) return "wav";
-  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac")) {
+  if (m.includes("m4a") || m.includes("mp4a") || m.includes("aac"))
     return "m4a";
-  }
 
   return "bin";
 }
@@ -738,7 +696,10 @@ async function uploadInboundToWasabi({
   const loc = up?.Location || "";
   if (loc) return loc;
 
-  return buildWasabiPublicUrl(key);
+  const ep = String(WASABI_ENDPOINT || "").replace(/\/+$/, "");
+  if (!ep) return null;
+
+  return `${ep}/${WASABI_BUCKET}/${key}`;
 }
 
 async function uploadOutboundToWasabi({ buffer, mime, filename, to10 }) {
@@ -771,10 +732,7 @@ async function uploadOutboundToWasabi({ buffer, mime, filename, to10 }) {
     })
     .promise();
 
-  const publicUrl = up?.Location || buildWasabiPublicUrl(key);
-  await assertPublicMediaUrl(publicUrl);
-
-  return publicUrl;
+  return up?.Location || buildWasabiPublicUrl(key);
 }
 
 const proxyUrlForMediaId = (mediaId) =>
@@ -813,7 +771,6 @@ function mediaFromInboundMessage(msg = {}, item = {}) {
   const node =
     deepPick(msg, [
       `${type}`,
-      "file",
       "media",
       "content.media",
       "payload.media",
@@ -825,26 +782,23 @@ function mediaFromInboundMessage(msg = {}, item = {}) {
     ]) || {};
 
   const mediaId = String(
-    deepPick(node, ["id", "media_id"]) || deepPick(msg, ["media_id"]) || ""
+    deepPick(node, ["id", "media_id"]) ||
+      deepPick(msg, ["media_id"]) ||
+      ""
   ).trim();
 
   const url = String(
     deepPick(node, ["url", "download_url"]) ||
-      deepPick(msg, ["url", "download_url"]) ||
-      (mediaId ? item?.__fileurl : item?.__fileurl || "") ||
+      (mediaId ? item?.__fileurl : "") ||
       ""
   ).trim();
 
   const mime = String(
-    deepPick(node, ["mime_type", "mime", "content_type"]) ||
-      deepPick(msg, ["mime_type", "mime", "content_type"]) ||
-      ""
+    deepPick(node, ["mime_type", "mime", "content_type"]) || ""
   ).trim();
 
   const filename = String(
-    deepPick(node, ["filename", "file_name", "name"]) ||
-      deepPick(msg, ["filename", "file_name", "name"]) ||
-      ""
+    deepPick(node, ["filename", "file_name", "name"]) || ""
   ).trim();
 
   if (!mediaId && !url && !mime && !filename) {
@@ -932,7 +886,6 @@ function parseWebhookPayload(body = {}) {
     const statuses = asArray(
       item?.statuses || item?.status_updates || item?.status || []
     );
-
     for (const st of statuses) {
       const waId = String(
         deepPick(st, ["id", "wa_id", "message_id"]) || ""
@@ -986,21 +939,14 @@ function parseWebhookPayload(body = {}) {
         filename: media.filename || "",
       };
 
-      const rawType = String(
+      const type = String(
         deepPick(msg, ["type", "message_type", "content.type"]) ||
           media.type ||
           "text"
       ).toLowerCase();
 
       const isRealMedia = hasRealMedia(normalizedMedia);
-      const safeType = isRealMedia
-        ? inferMediaType({
-            type: rawType,
-            mime: normalizedMedia.mime,
-            filename: normalizedMedia.filename,
-            url: normalizedMedia.url,
-          })
-        : "text";
+      const safeType = isRealMedia ? type : "text";
 
       out.messages.push({
         waId,
@@ -1369,11 +1315,9 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       filename = sanitizeFilename(req.file.originalname || "attachment");
       mediaType =
         mediaType ||
-        inferMediaType({
-          type: mediaType,
+        inferOutboundMediaType({
           mime,
           filename,
-          url: "",
         });
 
       mediaUrl = await uploadOutboundToWasabi({
@@ -1382,20 +1326,13 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
         filename,
         to10: p10,
       });
-
-      if (!mediaUrl) {
-        return res.status(400).json({
-          message: "Failed to upload media to Wasabi",
-        });
-      }
     } else {
       mediaType =
         mediaType ||
-        inferMediaType({
-          type: mediaType,
+        inferOutboundMediaType({
           mime,
           filename,
-          url: mediaUrl,
+          mediaUrl,
         });
 
       if (!filename) {
@@ -1404,8 +1341,6 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
         );
       }
     }
-
-    await assertPublicMediaUrl(mediaUrl);
 
     const r = await sendFreeformMediaViaTrustSignal({
       sender,
@@ -1989,29 +1924,19 @@ router.post("/webhook", async (req, res) => {
 
       const hasIncomingMedia = hasRealMedia(incomingMedia);
 
-      type = inferMediaType({
-        type,
-        mime: incomingMedia.mime,
-        filename: incomingMedia.filename,
-        url: incomingMedia.url,
-      });
-
-      const hasActualMedia = hasIncomingMedia && type !== "text";
+      const hasActualMedia =
+        hasIncomingMedia &&
+        ["image", "video", "audio", "document", "sticker"].includes(type);
 
       let media = null;
 
       if (hasActualMedia) {
         const mediaId = incomingMedia.id;
 
+        if (type === "sticker") type = "image";
+
         try {
-          let meta = null;
-          if (mediaId) {
-            try {
-              meta = await fetchMediaMeta(mediaId);
-            } catch {
-              meta = null;
-            }
-          }
+          const meta = await fetchMediaMeta(mediaId);
 
           const mimeFromMeta = String(meta?.mime_type || "").trim();
           const mimeFromWebhook = String(incomingMedia.mime || "").trim();
@@ -2024,52 +1949,48 @@ router.post("/webhook", async (req, res) => {
 
           const filename =
             String(incomingMedia.filename || "").trim() ||
-            `${type}_${p10 || "unknown"}_${mediaId || Date.now()}.${extFromMime(
-              baseMime
-            )}`;
+            `${type}_${p10 || "unknown"}_${mediaId}.${extFromMime(baseMime)}`;
 
           media = {
             id: mediaId,
-            url: incomingMedia.url || (mediaId ? proxyUrlForMediaId(mediaId) : ""),
+            url: incomingMedia.url || proxyUrlForMediaId(mediaId),
             mime: baseMime,
             filename,
           };
 
           try {
-            if (mediaId || incomingMedia.url) {
-              const dl = await downloadTrustSignalAttachment({
-                mediaId,
-                downloadUrl: meta?.downloadUrl || incomingMedia.url || "",
-                asStream: false,
-              });
+            const dl = await downloadTrustSignalAttachment({
+              mediaId,
+              downloadUrl: meta?.downloadUrl || incomingMedia.url || "",
+              asStream: false,
+            });
 
-              const buffer = Buffer.isBuffer(dl.data)
-                ? dl.data
-                : Buffer.from(dl.data);
+            const buffer = Buffer.isBuffer(dl.data)
+              ? dl.data
+              : Buffer.from(dl.data);
 
-              const bestMime =
-                String(dl.headers?.["content-type"] || baseMime || "").trim() ||
-                "application/octet-stream";
+            const bestMime =
+              String(dl.headers?.["content-type"] || baseMime || "").trim() ||
+              "application/octet-stream";
 
-              const wasabiUrl = await uploadInboundToWasabi({
-                buffer,
-                mime: bestMime,
-                filename,
-                from10: p10,
-                mediaId,
-                msgType: type,
-              });
+            const wasabiUrl = await uploadInboundToWasabi({
+              buffer,
+              mime: bestMime,
+              filename,
+              from10: p10,
+              mediaId,
+              msgType: type,
+            });
 
-              media = {
-                id: mediaId,
-                url: wasabiUrl || incomingMedia.url || (mediaId ? proxyUrlForMediaId(mediaId) : ""),
-                mime: bestMime,
-                filename,
-              };
-            }
+            media = {
+              id: mediaId,
+              url: wasabiUrl || incomingMedia.url || proxyUrlForMediaId(mediaId),
+              mime: bestMime,
+              filename,
+            };
           } catch (uploadErr) {
             console.error(
-              "Inbound Wasabi upload failed (keeping source url):",
+              "Inbound Wasabi upload failed (keeping proxy url):",
               uploadErr?.data || uploadErr
             );
           }
@@ -2101,7 +2022,7 @@ router.post("/webhook", async (req, res) => {
           if (!media) {
             media = {
               id: mediaId,
-              url: incomingMedia.url || (mediaId ? proxyUrlForMediaId(mediaId) : ""),
+              url: incomingMedia.url || proxyUrlForMediaId(mediaId),
               mime: incomingMedia.mime || "",
               filename: incomingMedia.filename || "",
             };
