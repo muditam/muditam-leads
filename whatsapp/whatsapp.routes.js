@@ -279,40 +279,30 @@ function extractProviderAcceptId(data) {
   return extractProviderMessageId(data) || extractProviderTransactionId(data) || null;
 }
 
-function ensureTrustSignalAccepted(
-  data,
-  fallbackMessage = "Provider rejected request"
-) {
+function ensureTrustSignalAccepted(data, fallbackMessage = "Provider rejected request") {
   const body = data || {};
-
   const explicitFalse =
     body?.success === false ||
     body?.status === false ||
-    body?.ok === false;
+    body?.ok === false ||
+    body?.message_delivered === false;  
 
   const providerErrors = Array.isArray(body?.errors) ? body.errors : [];
   const hasErrors = providerErrors.length > 0;
-
   const acceptId = extractProviderAcceptId(body);
 
   if (explicitFalse || hasErrors) {
-    const err = new Error(
-      providerErrors?.[0]?.message || body?.message || fallbackMessage
-    );
+    const err = new Error(providerErrors?.[0]?.message || body?.message || fallbackMessage);
     err.status = 400;
     err.data = body;
     throw err;
   }
-
   if (!acceptId) {
-    const err = new Error(
-      body?.message || "Provider did not return acceptance id"
-    );
+    const err = new Error(body?.message || "Provider did not return acceptance id");
     err.status = 400;
     err.data = body;
     throw err;
   }
-
   return body;
 }
 
@@ -502,7 +492,7 @@ function inferMediaType({ type = "", mime = "", filename = "", url = "" }) {
 
 function normalizeOutgoingMediaType(type = "") {
   const t = String(type || "").toLowerCase().trim();
-  if (t === "image" || t === "video" || t === "document") return t;
+  if (t === "image" || t === "video" || t === "audio" || t === "document") return t;
   return "document";
 }
 
@@ -645,8 +635,8 @@ async function sendFreeformMediaViaTrustSignal({
     to: toE164Plus(toNumber),
     reply: {
       message: String(caption || "").trim(),
-      media_type: normalizeOutgoingMediaType(mediaType),
-      media_file_url: String(mediaUrl || "").trim(),
+      type: normalizeOutgoingMediaType(mediaType),  
+      url: String(mediaUrl || "").trim(),              
       ...(filename ? { filename } : {}),
     },
   };
