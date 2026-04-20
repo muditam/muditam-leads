@@ -281,28 +281,35 @@ function extractProviderAcceptId(data) {
 
 function ensureTrustSignalAccepted(data, fallbackMessage = "Provider rejected request") {
   const body = data || {};
+
   const explicitFalse =
     body?.success === false ||
     body?.status === false ||
     body?.ok === false ||
-    body?.message_delivered === false;  
+    body?.message_delivered === false;
 
   const providerErrors = Array.isArray(body?.errors) ? body.errors : [];
   const hasErrors = providerErrors.length > 0;
   const acceptId = extractProviderAcceptId(body);
 
   if (explicitFalse || hasErrors) {
-    const err = new Error(providerErrors?.[0]?.message || body?.message || fallbackMessage);
+    const err = new Error(
+      providerErrors?.[0]?.message || body?.message || fallbackMessage
+    );
     err.status = 400;
     err.data = body;
     throw err;
   }
+
   if (!acceptId) {
-    const err = new Error(body?.message || "Provider did not return acceptance id");
+    const err = new Error(
+      body?.message || "Provider did not return acceptance id"
+    );
     err.status = 400;
     err.data = body;
     throw err;
   }
+
   return body;
 }
 
@@ -490,6 +497,7 @@ function inferMediaType({ type = "", mime = "", filename = "", url = "" }) {
   return "text";
 }
 
+// ─── FIXED: "audio" no longer falls through to "document" ───────────────────
 function normalizeOutgoingMediaType(type = "") {
   const t = String(type || "").toLowerCase().trim();
   if (t === "image" || t === "video" || t === "audio" || t === "document") return t;
@@ -621,6 +629,7 @@ async function sendFreeformTextViaTrustSignal({ sender, toNumber, text }) {
   });
 }
 
+// ─── FIXED: restored media_type + media_file_url (confirmed working by curl test 2) ──
 async function sendFreeformMediaViaTrustSignal({
   sender,
   toNumber,
@@ -629,17 +638,21 @@ async function sendFreeformMediaViaTrustSignal({
   mediaUrl,
   filename,
 }) {
+  const resolvedType = normalizeOutgoingMediaType(mediaType);
+
   const payload = {
-    message_type: "file",
+    message_type: "file",                 // confirmed: top-level stays "file"
     sender: toE164Plus(sender),
     to: toE164Plus(toNumber),
     reply: {
       message: String(caption || "").trim(),
-      type: normalizeOutgoingMediaType(mediaType),  
-      url: String(mediaUrl || "").trim(),              
+      media_type: resolvedType,            // confirmed: "media_type" not "type"
+      media_file_url: String(mediaUrl || "").trim(), // confirmed: "media_file_url" not "url"
       ...(filename ? { filename } : {}),
     },
   };
+
+  console.log("TS MEDIA PAYLOAD =>", JSON.stringify(payload, null, 2));
 
   return tsRequest({
     method: "POST",
