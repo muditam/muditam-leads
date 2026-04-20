@@ -291,7 +291,10 @@ function extractProviderAcceptId(data) {
   );
 }
 
-function ensureTrustSignalAccepted(data, fallbackMessage = "Provider rejected request") {
+function ensureTrustSignalAccepted(
+  data,
+  fallbackMessage = "Provider rejected request"
+) {
   const body = data || {};
 
   const explicitFalse =
@@ -524,7 +527,10 @@ function previewTextForType(type = "", filename = "") {
   return filename ? `📎 ${filename}` : "📎 Attachment";
 }
 
-function templateMessageTypeFromHeaderFormat(headerFormat = "", hasVars = false) {
+function templateMessageTypeFromHeaderFormat(
+  headerFormat = "",
+  hasVars = false
+) {
   const fmt = normalizeTemplateHeaderFormat(headerFormat);
   if (fmt === "IMAGE" || fmt === "VIDEO") return "image_video";
   if (fmt === "DOCUMENT") return "document";
@@ -596,6 +602,80 @@ function buildTrustSignalTemplatePayload({
   };
 
   return payload;
+}
+
+function isAbsoluteHttpUrl(v = "") {
+  try {
+    const u = new URL(String(v || "").trim());
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isClearlyUnsafeProxyTarget(v = "") {
+  try {
+    const u = new URL(String(v || "").trim());
+    const host = String(u.hostname || "").toLowerCase();
+
+    if (!["http:", "https:"].includes(u.protocol)) return true;
+    if (!host) return true;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+      return true;
+    }
+    if (host.endsWith(".local")) return true;
+
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function buildInboundMediaProxyUrl({ url = "", filename = "", mime = "" }) {
+  const qs = new URLSearchParams();
+  qs.set("url", String(url || "").trim());
+  if (filename) qs.set("filename", sanitizeFilename(filename));
+  if (mime) qs.set("mime", String(mime || "").trim());
+  return `/api/whatsapp/media-proxy?${qs.toString()}`;
+}
+
+async function ensurePublicMediaUrlReachable(url = "") {
+  const target = String(url || "").trim();
+  if (!isAbsoluteHttpUrl(target)) {
+    const err = new Error("mediaUrl must be a public http/https URL");
+    err.status = 400;
+    throw err;
+  }
+
+  let resp;
+  try {
+    resp = await axios.get(target, {
+      timeout: 20000,
+      maxRedirects: 5,
+      responseType: "stream",
+      validateStatus: () => true,
+    });
+
+    if (resp.status < 200 || resp.status >= 300) {
+      const err = new Error(
+        `Uploaded media URL is not publicly reachable (${resp.status})`
+      );
+      err.status = 400;
+      err.data = { mediaUrl: target, status: resp.status };
+      throw err;
+    }
+
+    return {
+      status: resp.status,
+      contentType: String(resp.headers?.["content-type"] || "").trim(),
+    };
+  } finally {
+    try {
+      if (resp?.data && typeof resp.data.destroy === "function") {
+        resp.data.destroy();
+      }
+    } catch {}
+  }
 }
 
 /* ----------------------------------------
@@ -816,10 +896,14 @@ async function maybeMirrorInboundMediaToWasabi({
   msgType,
 }) {
   const mediaUrl = String(url || "").trim();
-  if (!mediaUrl || !s3 || !WASABI_BUCKET) return mediaUrl;
+  if (!mediaUrl) return "";
 
   if (WASABI_ENDPOINT && mediaUrl.startsWith(WASABI_ENDPOINT)) {
     return mediaUrl;
+  }
+
+  if (!s3 || !WASABI_BUCKET) {
+    return "";
   }
 
   try {
@@ -832,7 +916,7 @@ async function maybeMirrorInboundMediaToWasabi({
     });
 
     if (resp.status < 200 || resp.status >= 300) {
-      return mediaUrl;
+      return "";
     }
 
     const bestMime =
@@ -851,10 +935,10 @@ async function maybeMirrorInboundMediaToWasabi({
       keyPrefix: `whatsapp-inbound/${day}/${from10 || "unknown"}`,
     });
 
-    return uploaded.url;
+    return uploaded.url || "";
   } catch (e) {
     console.error("Inbound mirror to Wasabi failed:", e?.message || e);
-    return mediaUrl;
+    return "";
   }
 }
 
@@ -1067,7 +1151,9 @@ function parseWebhookPayload(body = {}) {
 
       const timestampRaw = deepPick(msg, ["timestamp", "time", "created_at"]);
       const timestamp = timestampRaw
-        ? new Date(Number(timestampRaw) ? Number(timestampRaw) * 1000 : timestampRaw)
+        ? new Date(
+            Number(timestampRaw) ? Number(timestampRaw) * 1000 : timestampRaw
+          )
         : new Date();
 
       const text = textFromInboundMessage(msg);
@@ -1116,43 +1202,128 @@ function parseWebhookPayload(body = {}) {
 /* ----------------------------------------
    ROUTES
 ----------------------------------------- */
-router.post("/upload-template-media", upload.single("file"), async (req, res) => {
+router.get("/media-proxy", async (req, res) => {
+  let upstream;
+
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: "file required" });
+    const rawUrl = String(req.query?.url || "").trim();
+    const filename = sanitizeFilename(req.query?.filename || "attachment");
+    const fallbackMime = String(req.query?.mime || "").trim();
+
+    if (!rawUrl) {
+      return res.status(400).json({ message: "url required" });
     }
 
-    const fd = new FormData();
-    fd.append("file", req.file.buffer, {
-      filename: req.file.originalname || "file",
-      contentType: req.file.mimetype || "application/octet-stream",
-      knownLength: req.file.size,
+    if (!isAbsoluteHttpUrl(rawUrl) || isClearlyUnsafeProxyTarget(rawUrl)) {
+      return res.status(400).json({ message: "invalid media url" });
+    }
+
+    if (WASABI_ENDPOINT && rawUrl.startsWith(WASABI_ENDPOINT)) {
+      return res.redirect(rawUrl);
+    }
+
+    upstream = await axios.get(rawUrl, {
+      responseType: "stream",
+      timeout: 45000,
+      validateStatus: () => true,
+      headers: buildHeaders(),
+      params: buildParams(),
+      maxRedirects: 5,
     });
 
-    const r = await tsRequest({
-      method: "POST",
-      path: TS_PATH_UPLOAD_MEDIA,
-      data: fd,
-      headers: fd.getHeaders(),
-    });
+    if (upstream.status < 200 || upstream.status >= 300) {
+      try {
+        if (upstream.data && typeof upstream.data.destroy === "function") {
+          upstream.data.destroy();
+        }
+      } catch {}
 
-    const mediaId = extractProviderMediaId(r.data);
-    if (!mediaId) {
-      return res.status(400).json({
-        message: "Upload succeeded but provider did not return media id",
-        providerError: r.data || null,
+      return res.status(502).json({
+        message: "Failed to fetch provider media",
+        providerStatus: upstream.status,
       });
     }
 
-    return res.json({ success: true, mediaId });
+    const contentType =
+      String(upstream.headers?.["content-type"] || "").trim() ||
+      fallbackMime ||
+      "application/octet-stream";
+
+    const contentLength = String(
+      upstream.headers?.["content-length"] || ""
+    ).trim();
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${filename || "attachment"}"`
+    );
+    res.setHeader("Cache-Control", "private, max-age=300");
+
+    if (contentLength) {
+      res.setHeader("Content-Length", contentLength);
+    }
+
+    upstream.data.on("error", (err) => {
+      console.error("media-proxy stream error:", err?.message || err);
+      if (!res.headersSent) {
+        res.status(502).end("media proxy stream failed");
+      } else {
+        res.end();
+      }
+    });
+
+    return upstream.data.pipe(res);
   } catch (e) {
-    console.error("upload-template-media error:", e?.data || e);
-    return res.status(e?.status || e?.response?.status || 400).json({
-      message: e?.message || "Upload template media failed",
-      providerError: e?.data || e?.response?.data || null,
+    console.error("media-proxy error:", e?.message || e);
+    return res.status(502).json({
+      message: "Media proxy failed",
+      error: e?.message || "UNKNOWN_ERROR",
     });
   }
 });
+
+router.post(
+  "/upload-template-media",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "file required" });
+      }
+
+      const fd = new FormData();
+      fd.append("file", req.file.buffer, {
+        filename: req.file.originalname || "file",
+        contentType: req.file.mimetype || "application/octet-stream",
+        knownLength: req.file.size,
+      });
+
+      const r = await tsRequest({
+        method: "POST",
+        path: TS_PATH_UPLOAD_MEDIA,
+        data: fd,
+        headers: fd.getHeaders(),
+      });
+
+      const mediaId = extractProviderMediaId(r.data);
+      if (!mediaId) {
+        return res.status(400).json({
+          message: "Upload succeeded but provider did not return media id",
+          providerError: r.data || null,
+        });
+      }
+
+      return res.json({ success: true, mediaId });
+    } catch (e) {
+      console.error("upload-template-media error:", e?.data || e);
+      return res.status(e?.status || e?.response?.status || 400).json({
+        message: e?.message || "Upload template media failed",
+        providerError: e?.data || e?.response?.data || null,
+      });
+    }
+  }
+);
 
 router.post("/conversations/mark-read", async (req, res) => {
   try {
@@ -1502,9 +1673,11 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       }
     }
 
-    if (!/^https?:\/\//i.test(String(mediaUrl || "").trim())) {
+    if (!isAbsoluteHttpUrl(mediaUrl)) {
       return res.status(400).json({ message: "mediaUrl must be a public URL" });
     }
+
+    await ensurePublicMediaUrlReachable(mediaUrl);
 
     const r = await sendFreeformMediaViaTrustSignal({
       sender,
@@ -1514,6 +1687,8 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       mediaUrl,
       filename,
     });
+
+    console.log("TS MEDIA RESPONSE =>", safeStringify(r.data));
 
     ensureTrustSignalAccepted(r.data, "TrustSignal did not accept media send");
 
@@ -2016,7 +2191,9 @@ router.post("/webhook", async (req, res) => {
         const dir = String(updated.direction || "").toUpperCase();
         const customerPhone = dir === "INBOUND" ? updated.from : updated.to;
         const p10 = last10(st.phone || customerPhone || "");
-        const liveId = String(updated.waId || transactionId || waId || "").trim();
+        const liveId = String(
+          updated.waId || transactionId || waId || ""
+        ).trim();
         if (p10 && liveId) {
           emitStatus(req, { phone10: p10, waId: liveId, status: newStatus });
         }
@@ -2081,9 +2258,19 @@ router.post("/webhook", async (req, res) => {
           msgType: type,
         });
 
+        const finalUrl =
+          mirroredUrl ||
+          (incomingMedia.url
+            ? buildInboundMediaProxyUrl({
+                url: incomingMedia.url,
+                filename: finalFilename,
+                mime: incomingMedia.mime || "",
+              })
+            : "");
+
         media = {
           id: incomingMedia.id || "",
-          url: mirroredUrl || incomingMedia.url || "",
+          url: finalUrl,
           mime: incomingMedia.mime || "",
           filename: finalFilename,
         };
