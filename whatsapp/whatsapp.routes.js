@@ -1,4 +1,3 @@
-// routes/whatsapp.routes.js
 const express = require("express");
 const axios = require("axios");
 const AWS = require("aws-sdk");
@@ -124,6 +123,12 @@ function normalizeTemplateStatus(v = "") {
 
 function normalizeTemplateCategory(v = "") {
   return String(v || "").trim().toUpperCase();
+}
+
+function normalizeTemplateHeaderFormat(v = "") {
+  const f = String(v || "").trim().toUpperCase();
+  if (["IMAGE", "VIDEO", "DOCUMENT"].includes(f)) return f;
+  return "";
 }
 
 function isObjectLike(v) {
@@ -269,14 +274,21 @@ function extractProviderTransactionId(data) {
     deepPick(data, [
       "transaction_id",
       "results.transaction_id",
+      "results.0.transaction_id",
       "data.transaction_id",
+      "data.results.transaction_id",
+      "data.results.0.transaction_id",
       "result.transaction_id",
     ]) || ""
   ).trim();
 }
 
 function extractProviderAcceptId(data) {
-  return extractProviderMessageId(data) || extractProviderTransactionId(data) || null;
+  return (
+    extractProviderMessageId(data) ||
+    extractProviderTransactionId(data) ||
+    null
+  );
 }
 
 function ensureTrustSignalAccepted(data, fallbackMessage = "Provider rejected request") {
@@ -497,10 +509,11 @@ function inferMediaType({ type = "", mime = "", filename = "", url = "" }) {
   return "text";
 }
 
-// ─── FIXED: "audio" no longer falls through to "document" ───────────────────
 function normalizeOutgoingMediaType(type = "") {
   const t = String(type || "").toLowerCase().trim();
-  if (t === "image" || t === "video" || t === "audio" || t === "document") return t;
+  if (t === "image" || t === "video" || t === "audio" || t === "document") {
+    return t;
+  }
   return "document";
 }
 
@@ -509,6 +522,80 @@ function previewTextForType(type = "", filename = "") {
   if (type === "video") return "🎥 Video";
   if (type === "audio") return "🎙️ Audio";
   return filename ? `📎 ${filename}` : "📎 Attachment";
+}
+
+function templateMessageTypeFromHeaderFormat(headerFormat = "", hasVars = false) {
+  const fmt = normalizeTemplateHeaderFormat(headerFormat);
+  if (fmt === "IMAGE" || fmt === "VIDEO") return "image_video";
+  if (fmt === "DOCUMENT") return "document";
+  return hasVars ? "text_var" : "text";
+}
+
+function templateSvalFromMessageType(messageType = "") {
+  const t = String(messageType || "").toLowerCase().trim();
+  if (t === "text") return 1;
+  if (t === "text_var") return 2;
+  if (t === "image_video") return 3;
+  if (t === "document") return 4;
+  if (t === "carousel") return 5;
+  return undefined;
+}
+
+function normalizeTemplateHeaderMediaInput(headerMedia = null) {
+  if (!isObjectLike(headerMedia)) return null;
+
+  const format = normalizeTemplateHeaderFormat(headerMedia.format || "");
+  const id = String(headerMedia.id || "").trim();
+  const filename = sanitizeFilename(headerMedia.filename || "");
+  const url = String(headerMedia.url || "").trim();
+  const mime = String(headerMedia.mime || "").trim();
+
+  if (!format && !id && !url && !filename && !mime) return null;
+
+  return {
+    format,
+    id,
+    filename,
+    url,
+    mime,
+  };
+}
+
+function buildTrustSignalTemplatePayload({
+  sender,
+  to,
+  providerTemplateId,
+  parameters = [],
+  headerMedia = null,
+}) {
+  const normalizedHeader = normalizeTemplateHeaderMediaInput(headerMedia);
+  const paramValues = asArray(parameters).map((x) => String(x ?? "").trim());
+  const hasVars = paramValues.length > 0;
+  const messageType = templateMessageTypeFromHeaderFormat(
+    normalizedHeader?.format || "",
+    hasVars
+  );
+  const sval = templateSvalFromMessageType(messageType);
+
+  const sample = {};
+  if (paramValues.length) {
+    sample.bodyvar = paramValues;
+  }
+
+  if (normalizedHeader?.id) {
+    sample.media = normalizedHeader.id;
+  }
+
+  const payload = {
+    message_type: messageType,
+    sender: toE164Plus(sender),
+    to: toE164Plus(to),
+    template_id: providerTemplateId,
+    ...(typeof sval === "number" ? { sval } : {}),
+    ...(Object.keys(sample).length ? { sample } : {}),
+  };
+
+  return payload;
 }
 
 /* ----------------------------------------
@@ -629,7 +716,6 @@ async function sendFreeformTextViaTrustSignal({ sender, toNumber, text }) {
   });
 }
 
-// ─── FIXED: restored media_type + media_file_url (confirmed working by curl test 2) ──
 async function sendFreeformMediaViaTrustSignal({
   sender,
   toNumber,
@@ -641,13 +727,13 @@ async function sendFreeformMediaViaTrustSignal({
   const resolvedType = normalizeOutgoingMediaType(mediaType);
 
   const payload = {
-    message_type: "file",                 // confirmed: top-level stays "file"
+    message_type: "file",
     sender: toE164Plus(sender),
     to: toE164Plus(toNumber),
     reply: {
       message: String(caption || "").trim(),
-      media_type: resolvedType,            // confirmed: "media_type" not "type"
-      media_file_url: String(mediaUrl || "").trim(), // confirmed: "media_file_url" not "url"
+      media_type: resolvedType,
+      media_file_url: String(mediaUrl || "").trim(),
       ...(filename ? { filename } : {}),
     },
   };
@@ -934,7 +1020,10 @@ function parseWebhookPayload(body = {}) {
         deepPick(st, [
           "transaction_id",
           "results.transaction_id",
+          "results.0.transaction_id",
           "data.transaction_id",
+          "data.results.transaction_id",
+          "data.results.0.transaction_id",
           "result.transaction_id",
         ]) || ""
       ).trim();
@@ -1512,7 +1601,6 @@ router.post("/send-template", async (req, res) => {
     const normalizedTo = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
     const phone = normalizeWaId(normalizedTo);
     const p10 = last10(phone);
-    const toNumber = getTrustSignalRecipient(phone);
     const sender = getTrustSignalSenderOrThrow();
 
     const originalTemplateName = String(templateName || "").trim();
@@ -1551,20 +1639,15 @@ router.post("/send-template", async (req, res) => {
     }
 
     const paramValues = asArray(parameters).map((x) => String(x ?? "").trim());
+    const normalizedHeaderMedia = normalizeTemplateHeaderMediaInput(headerMedia);
 
-    const payload = {
-      message_type: paramValues.length ? "text_var" : "text",
+    const payload = buildTrustSignalTemplatePayload({
       sender,
-      to: toNumber,
-      template_id: providerTemplateId,
-      ...(paramValues.length
-        ? {
-            sample: {
-              bodyvar: paramValues,
-            },
-          }
-        : {}),
-    };
+      to: phone,
+      providerTemplateId,
+      parameters: paramValues,
+      headerMedia: normalizedHeaderMedia,
+    });
 
     console.log("TS TEMPLATE PAYLOAD =>", JSON.stringify(payload, null, 2));
 
@@ -1587,7 +1670,7 @@ router.post("/send-template", async (req, res) => {
     const finalText =
       clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
 
-    const created = await WhatsAppMessage.create({
+    const messageDoc = {
       waId: extractProviderAcceptId(r.data),
       providerTransactionId: extractProviderTransactionId(r.data),
       from: senderForDb(sender),
@@ -1601,19 +1684,35 @@ router.post("/send-template", async (req, res) => {
         templateId: providerTemplateId,
         language: String(tpl.language || "").trim(),
         parameters: paramValues,
-        ...(headerMedia?.id
+        ...(normalizedHeaderMedia
           ? {
               headerMedia: {
-                format: String(headerMedia.format || ""),
-                id: String(headerMedia.id),
-                filename: String(headerMedia.filename || ""),
+                format: String(normalizedHeaderMedia.format || ""),
+                id: String(normalizedHeaderMedia.id || ""),
+                filename: String(normalizedHeaderMedia.filename || ""),
+                ...(normalizedHeaderMedia.url
+                  ? { url: normalizedHeaderMedia.url }
+                  : {}),
+                ...(normalizedHeaderMedia.mime
+                  ? { mime: normalizedHeaderMedia.mime }
+                  : {}),
               },
             }
           : {}),
       },
       timestamp: now,
       raw: r.data,
-    });
+    };
+
+    if (normalizedHeaderMedia?.url) {
+      messageDoc.media = {
+        url: normalizedHeaderMedia.url,
+        mime: normalizedHeaderMedia.mime || "",
+        filename: normalizedHeaderMedia.filename || "attachment",
+      };
+    }
+
+    const created = await WhatsAppMessage.create(messageDoc);
 
     await WhatsAppConversation.findOneAndUpdate(
       { phone: new RegExp(`${p10}$`) },
