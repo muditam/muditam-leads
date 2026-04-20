@@ -639,6 +639,25 @@ function buildInboundMediaProxyUrl({ url = "", filename = "", mime = "" }) {
   return `/api/whatsapp/media-proxy?${qs.toString()}`;
 }
 
+function getHostSafe(raw = "") {
+  try {
+    return new URL(String(raw || "").trim()).host.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function trustSignalHost() {
+  return getHostSafe(TRUSTSIGNAL_API_BASE);
+}
+
+function isTrustSignalMediaUrl(raw = "") {
+  const h = getHostSafe(raw);
+  const tsHost = trustSignalHost();
+  if (!h) return false;
+  return h === tsHost || h.endsWith(".trustsignal.io");
+}
+
 async function ensurePublicMediaUrlReachable(url = "") {
   const target = String(url || "").trim();
   if (!isAbsoluteHttpUrl(target)) {
@@ -676,6 +695,80 @@ async function ensurePublicMediaUrlReachable(url = "") {
       }
     } catch {}
   }
+}
+
+async function fetchMediaStreamWithBestAuth(rawUrl) {
+  const url = String(rawUrl || "").trim();
+  const common = {
+    url,
+    responseType: "stream",
+    timeout: 45000,
+    validateStatus: () => true,
+    maxRedirects: 5,
+  };
+
+  let resp = await axios.get(url, common);
+  if (resp.status >= 200 && resp.status < 300) return resp;
+
+  try {
+    if (resp?.data && typeof resp.data.destroy === "function") {
+      resp.data.destroy();
+    }
+  } catch {}
+
+  if (isTrustSignalMediaUrl(url) && (resp.status === 401 || resp.status === 403)) {
+    resp = await axios.get(url, {
+      ...common,
+      headers: buildHeaders(),
+    });
+    if (resp.status >= 200 && resp.status < 300) return resp;
+
+    try {
+      if (resp?.data && typeof resp.data.destroy === "function") {
+        resp.data.destroy();
+      }
+    } catch {}
+
+    resp = await axios.get(url, {
+      ...common,
+      headers: buildHeaders(),
+      params: buildParams(),
+    });
+    if (resp.status >= 200 && resp.status < 300) return resp;
+  }
+
+  return resp;
+}
+
+async function fetchMediaBufferWithBestAuth(rawUrl) {
+  const url = String(rawUrl || "").trim();
+  const common = {
+    url,
+    responseType: "arraybuffer",
+    timeout: 30000,
+    validateStatus: () => true,
+    maxRedirects: 5,
+  };
+
+  let resp = await axios.get(url, common);
+  if (resp.status >= 200 && resp.status < 300) return resp;
+
+  if (isTrustSignalMediaUrl(url) && (resp.status === 401 || resp.status === 403)) {
+    resp = await axios.get(url, {
+      ...common,
+      headers: buildHeaders(),
+    });
+    if (resp.status >= 200 && resp.status < 300) return resp;
+
+    resp = await axios.get(url, {
+      ...common,
+      headers: buildHeaders(),
+      params: buildParams(),
+    });
+    if (resp.status >= 200 && resp.status < 300) return resp;
+  }
+
+  return resp;
 }
 
 /* ----------------------------------------
@@ -907,15 +1000,10 @@ async function maybeMirrorInboundMediaToWasabi({
   }
 
   try {
-    const resp = await axios.get(mediaUrl, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-      validateStatus: () => true,
-      headers: buildHeaders(),
-      params: buildParams(),
-    });
+    const resp = await fetchMediaBufferWithBestAuth(mediaUrl);
 
     if (resp.status < 200 || resp.status >= 300) {
+      console.error("Inbound mirror fetch failed:", resp.status, mediaUrl);
       return "";
     }
 
@@ -1222,14 +1310,8 @@ router.get("/media-proxy", async (req, res) => {
       return res.redirect(rawUrl);
     }
 
-    upstream = await axios.get(rawUrl, {
-      responseType: "stream",
-      timeout: 45000,
-      validateStatus: () => true,
-      headers: buildHeaders(),
-      params: buildParams(),
-      maxRedirects: 5,
-    });
+    upstream = await fetchMediaStreamWithBestAuth(rawUrl);
+    console.log("media-proxy upstream status:", upstream.status, rawUrl);
 
     if (upstream.status < 200 || upstream.status >= 300) {
       try {
