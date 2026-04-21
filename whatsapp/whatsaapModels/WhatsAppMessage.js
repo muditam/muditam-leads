@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const WhatsAppMessageSchema = new mongoose.Schema(
   {
     waId: { type: String, index: true },
+    providerTransactionId: { type: String, index: true },
     from: { type: String, index: true },
     to: { type: String, index: true },
 

@@ -805,11 +805,16 @@ const emitMessage = (req, msgDoc) => {
   emitToPhone10(req, p10, "wa:message", { phone10: p10, message: msgDoc });
 };
 
-const emitStatus = (req, { phone10, waId, status }) => {
+const emitStatus = (req, { phone10, waId, status, providerTransactionId }) => {
   if (!waId) return;
   const p10 = last10(phone10);
   if (!p10) return;
-  emitToPhone10(req, p10, "wa:status", { phone10: p10, waId, status });
+  emitToPhone10(req, p10, "wa:status", {
+    phone10: p10,
+    waId,
+    status,
+    ...(providerTransactionId ? { providerTransactionId } : {}),
+  });
 };
 
 const emitConversationPatch = (req, { phone10, patch }) => {
@@ -828,6 +833,28 @@ function freeformExpiryFromConvo(convo) {
     : 0;
   if (!t) return null;
   return new Date(t + 24 * 60 * 60 * 1000);
+}
+
+function normalizeDeliveryStatus(status = "") {
+  const s = String(status || "").toLowerCase().trim();
+  if (["read", "seen"].includes(s)) return "read";
+  if (["delivered", "deliver", "received"].includes(s)) return "delivered";
+  if (["sent", "submitted", "queued", "accepted"].includes(s)) return "sent";
+  if (["failed", "error", "undelivered", "rejected"].includes(s)) return "failed";
+  return s;
+}
+
+function deliveryStatusRank(status = "") {
+  const s = normalizeDeliveryStatus(status);
+  if (s === "failed") return 99;
+  if (s === "read") return 3;
+  if (s === "delivered") return 2;
+  if (s === "sent") return 1;
+  return 0;
+}
+
+function isKnownDeliveryStatus(status = "") {
+  return deliveryStatusRank(status) > 0;
 }
 
 /* ----------------------------------------
@@ -1209,13 +1236,36 @@ function parseWebhookPayload(body = {}) {
     );
     if (businessPhone && !out.businessPhone) out.businessPhone = businessPhone;
 
-    const statuses = asArray(
-      item?.statuses || item?.status_updates || item?.status || []
-    );
+    const statusContainers = [];
+    if (item?.statuses) statusContainers.push(...asArray(item.statuses));
+    if (item?.status_updates) statusContainers.push(...asArray(item.status_updates));
+    if (isObjectLike(item?.status)) statusContainers.push(...asArray(item.status));
 
-    for (const st of statuses) {
+    const directStatus = normalizeDeliveryStatus(
+      deepPick(item, ["status", "state", "event", "message_status"]) || ""
+    );
+    const directStatusId = String(
+      deepPick(item, ["id", "wa_id", "message_id", "data.message_id"]) || ""
+    ).trim();
+    const directTransactionId = String(
+      deepPick(item, [
+        "transaction_id",
+        "results.transaction_id",
+        "results.0.transaction_id",
+        "data.transaction_id",
+        "data.results.transaction_id",
+        "data.results.0.transaction_id",
+        "result.transaction_id",
+      ]) || ""
+    ).trim();
+
+    if (isKnownDeliveryStatus(directStatus) && (directStatusId || directTransactionId)) {
+      statusContainers.push(item);
+    }
+
+    for (const st of statusContainers) {
       const waId = String(
-        deepPick(st, ["id", "wa_id", "message_id"]) || ""
+        deepPick(st, ["id", "wa_id", "message_id", "data.message_id"]) || ""
       ).trim();
 
       const transactionId = String(
@@ -1230,17 +1280,15 @@ function parseWebhookPayload(body = {}) {
         ]) || ""
       ).trim();
 
-      const status = String(
-        deepPick(st, ["status", "state", "event"]) || ""
-      )
-        .toLowerCase()
-        .trim();
+      const status = normalizeDeliveryStatus(
+        deepPick(st, ["status", "state", "event", "message_status"]) || ""
+      );
 
       const phone = normalizeWaId(
         deepPick(st, ["recipient_id", "to", "phone", "customer_phone"]) || ""
       );
 
-      if (waId || transactionId) {
+      if (isKnownDeliveryStatus(status) && (waId || transactionId)) {
         out.statuses.push({
           waId,
           transactionId,
@@ -2322,25 +2370,43 @@ router.post("/webhook", async (req, res) => {
     for (const st of parsed.statuses || []) {
       const waId = String(st?.waId || "").trim();
       const transactionId = String(st?.transactionId || "").trim();
-      const newStatus = String(st?.status || "").toLowerCase().trim();
+      const newStatus = normalizeDeliveryStatus(st?.status || "");
 
-      if (!newStatus) continue;
+      if (!isKnownDeliveryStatus(newStatus)) continue;
 
       const match = [];
       if (waId) match.push({ waId });
-      if (transactionId) match.push({ providerTransactionId: transactionId });
+      if (transactionId) {
+        match.push(
+          { providerTransactionId: transactionId },
+          { waId: transactionId },
+          { "raw.transaction_id": transactionId },
+          { "raw.results.transaction_id": transactionId },
+          { "raw.results.0.transaction_id": transactionId },
+          { "raw.data.transaction_id": transactionId },
+          { "raw.data.results.transaction_id": transactionId },
+          { "raw.data.results.0.transaction_id": transactionId },
+          { "raw.result.transaction_id": transactionId }
+        );
+      }
       if (!match.length) continue;
 
-      const updated = await WhatsAppMessage.findOneAndUpdate(
-        { $or: match },
-        {
-          $set: {
-            status: newStatus,
-            ...(transactionId ? { providerTransactionId: transactionId } : {}),
-          },
-        },
-        { new: true }
-      ).lean();
+      const existing = await WhatsAppMessage.findOne({ $or: match });
+      if (!existing) continue;
+
+      const currentRank = deliveryStatusRank(existing.status);
+      const nextRank = deliveryStatusRank(newStatus);
+      const shouldUpdate =
+        newStatus === "failed" ||
+        nextRank >= currentRank;
+
+      if (shouldUpdate) {
+        existing.status = newStatus;
+        if (transactionId) existing.providerTransactionId = transactionId;
+        await existing.save();
+      }
+
+      const updated = existing.toObject();
 
       if (updated) {
         const dir = String(updated.direction || "").toUpperCase();
@@ -2350,7 +2416,12 @@ router.post("/webhook", async (req, res) => {
           updated.waId || transactionId || waId || ""
         ).trim();
         if (p10 && liveId) {
-          emitStatus(req, { phone10: p10, waId: liveId, status: newStatus });
+          emitStatus(req, {
+            phone10: p10,
+            waId: liveId,
+            status: updated.status,
+            providerTransactionId: updated.providerTransactionId,
+          });
         }
       }
     }
