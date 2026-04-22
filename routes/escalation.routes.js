@@ -45,9 +45,16 @@ const normalizeProducts = (val) => {
   return Array.from(set);
 };
 
+async function purgeOldEscalations() {
+  const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  await Escalation.deleteMany({ createdAt: { $lt: cutoff } });
+}
+
 
 router.get('/', async (req, res) => {
   try {
+    await purgeOldEscalations();
+
     const {
       page = 1,
       limit = 50,
@@ -270,4 +277,3 @@ router.delete('/:id', async (req, res) => {
 
 
 module.exports = router;
-

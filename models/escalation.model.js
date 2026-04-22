@@ -24,5 +24,7 @@ EscalationSchema.index({ status: 1, createdAt: -1 });
 EscalationSchema.index({ assignedTo: 1, status: 1, createdAt: -1 });
 EscalationSchema.index({ orderId: 1 });
 EscalationSchema.index({ contactNumber: 1 });
+// Permanently remove escalations older than 60 days.
+EscalationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 24 * 60 * 60 });
 
 module.exports = mongoose.model('Escalation', EscalationSchema);
