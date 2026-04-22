@@ -1229,6 +1229,14 @@ function mediaFromInboundMessage(msg = {}, item = {}) {
 function parseWebhookPayload(body = {}) {
   const buckets = [];
   const topWebhookType = String(body?.webhook_type || "").trim();
+  const topTransactionId = String(
+    deepPick(body, [
+      "transaction_id",
+      "transactionId",
+      "data.transaction_id",
+      "data.transactionId",
+    ]) || ""
+  ).trim();
   const topFileUrl = String(
     deepPick(body, ["fileurl", "value.fileurl", "data.fileurl"]) || ""
   ).trim();
@@ -1244,6 +1252,14 @@ function parseWebhookPayload(body = {}) {
             deepPick(change, ["fileurl", "value.fileurl"]) || topFileUrl || ""
           ).trim(),
           __acid: change?.acid || topAcid || "",
+          __transaction_id: String(
+            deepPick(change, [
+              "transaction_id",
+              "transactionId",
+              "value.transaction_id",
+              "value.transactionId",
+            ]) || topTransactionId || ""
+          ).trim(),
         });
       }
     }
@@ -1254,6 +1270,9 @@ function parseWebhookPayload(body = {}) {
         __webhook_type: ev?.webhook_type || topWebhookType || "",
         __fileurl: String(ev?.fileurl || topFileUrl || "").trim(),
         __acid: ev?.acid || topAcid || "",
+        __transaction_id: String(
+          ev?.transaction_id || ev?.transactionId || topTransactionId || ""
+        ).trim(),
       });
     }
   } else if (body?.value && isObjectLike(body.value)) {
@@ -1264,6 +1283,7 @@ function parseWebhookPayload(body = {}) {
         deepPick(body, ["value.fileurl", "fileurl"]) || ""
       ).trim(),
       __acid: topAcid || "",
+      __transaction_id: topTransactionId || "",
     });
   } else if (body?.data || body?.messages || body?.statuses) {
     buckets.push({
@@ -1273,6 +1293,7 @@ function parseWebhookPayload(body = {}) {
         deepPick(body, ["data.fileurl", "fileurl"]) || ""
       ).trim(),
       __acid: topAcid || "",
+      __transaction_id: topTransactionId || "",
     });
   } else {
     buckets.push({
@@ -1280,6 +1301,7 @@ function parseWebhookPayload(body = {}) {
       __webhook_type: topWebhookType || "",
       __fileurl: topFileUrl || "",
       __acid: topAcid || "",
+      __transaction_id: topTransactionId || "",
     });
   }
 
@@ -1307,6 +1329,15 @@ function parseWebhookPayload(body = {}) {
         topWebhookType ||
         "",
       __acid: candidate?.__acid || candidate?.acid || item?.__acid || item?.acid || topAcid || "",
+      __transaction_id:
+        candidate?.__transaction_id ||
+        candidate?.transaction_id ||
+        candidate?.transactionId ||
+        item?.__transaction_id ||
+        item?.transaction_id ||
+        item?.transactionId ||
+        topTransactionId ||
+        "",
       __phone: deepPick(candidate, ["to", "recipient_id", "phone", "customer_phone"]) ||
         deepPick(item, ["to", "recipient_id", "phone", "customer_phone", "results.to", "data.results.to"]) ||
         "",
@@ -1351,6 +1382,7 @@ function parseWebhookPayload(body = {}) {
       deepPick(item, [
         "acid",
         "__acid",
+        "__transaction_id",
         "transaction_id",
         "transactionId",
         "results.transaction_id",
@@ -1387,6 +1419,7 @@ function parseWebhookPayload(body = {}) {
         deepPick(st, [
           "acid",
           "__acid",
+          "__transaction_id",
           "transaction_id",
           "transactionId",
           "results.transaction_id",
