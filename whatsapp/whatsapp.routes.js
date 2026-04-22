@@ -4,6 +4,7 @@ const AWS = require("aws-sdk");
 const multer = require("multer");
 const FormData = require("form-data");
 const path = require("path");
+const mongoose = require("mongoose");
 
 const WhatsAppMessage = require("./whatsaapModels/WhatsAppMessage");
 const WhatsAppConversation = require("./whatsaapModels/WhatsAppConversation");
@@ -13,6 +14,27 @@ const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
 
 const router = express.Router();
+
+const WhatsAppWebhookDebug =
+  mongoose.models.WhatsAppWebhookDebug ||
+  mongoose.model(
+    "WhatsAppWebhookDebug",
+    new mongoose.Schema(
+      {
+        webhookType: String,
+        outcome: String,
+        status: String,
+        waId: String,
+        transactionId: String,
+        phone: String,
+        matchedMessageId: String,
+        matchedStatus: String,
+        raw: Object,
+        receivedAt: { type: Date, default: Date.now, index: true },
+      },
+      { minimize: false }
+    )
+  );
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
@@ -2278,6 +2300,39 @@ router.post("/send-template", async (req, res) => {
 
 router.get("/webhook", (req, res) => res.sendStatus(200));
 
+router.get("/webhook-debug", async (req, res) => {
+  try {
+    const phone = last10(req.query.phone || "");
+    const filter = phone ? { phone: new RegExp(`${phone}$`) } : {};
+    const rows = await WhatsAppWebhookDebug.find(filter)
+      .sort({ receivedAt: -1 })
+      .limit(50)
+      .lean();
+    return res.json(rows || []);
+  } catch (e) {
+    console.error("webhook debug load error:", e);
+    return res.status(500).json({ message: "Failed to load webhook debug" });
+  }
+});
+
+async function recordWebhookDebug(doc = {}) {
+  try {
+    await WhatsAppWebhookDebug.create({
+      webhookType: String(doc.webhookType || ""),
+      outcome: String(doc.outcome || ""),
+      status: String(doc.status || ""),
+      waId: String(doc.waId || ""),
+      transactionId: String(doc.transactionId || ""),
+      phone: doc.phone ? normalizeWaId(doc.phone) : "",
+      matchedMessageId: doc.matchedMessageId ? String(doc.matchedMessageId) : "",
+      matchedStatus: String(doc.matchedStatus || ""),
+      raw: doc.raw || {},
+    });
+  } catch (e) {
+    console.error("webhook debug write error:", e?.message || e);
+  }
+}
+
 function buildInboundMessageMatch({
   waId,
   from,
@@ -2517,6 +2572,14 @@ router.post("/webhook", async (req, res) => {
     }
 
     const parsed = parseWebhookPayload(req.body || {});
+    if (!(parsed.statuses || []).length && !(parsed.messages || []).length) {
+      await recordWebhookDebug({
+        webhookType,
+        outcome: "ignored_no_status_or_message",
+        raw: req.body || {},
+      });
+    }
+
     const businessPhone =
       normalizeWaId(parsed.businessPhone || "") ||
       normalizeWaId(
@@ -2531,7 +2594,18 @@ router.post("/webhook", async (req, res) => {
       const transactionId = String(st?.transactionId || "").trim();
       const newStatus = normalizeDeliveryStatus(st?.status || "");
 
-      if (!isKnownDeliveryStatus(newStatus)) continue;
+      if (!isKnownDeliveryStatus(newStatus)) {
+        await recordWebhookDebug({
+          webhookType,
+          outcome: "ignored_unknown_status",
+          status: newStatus,
+          waId,
+          transactionId,
+          phone: st.phone || "",
+          raw: st.raw || st,
+        });
+        continue;
+      }
 
       const match = [];
       if (waId) match.push({ waId });
@@ -2558,6 +2632,13 @@ router.post("/webhook", async (req, res) => {
           status: newStatus,
           raw: st.raw || st,
         });
+        await recordWebhookDebug({
+          webhookType,
+          outcome: "skipped_missing_id",
+          status: newStatus,
+          phone: st.phone || "",
+          raw: st.raw || st,
+        });
         continue;
       }
 
@@ -2567,6 +2648,15 @@ router.post("/webhook", async (req, res) => {
           waId,
           transactionId,
           status: newStatus,
+          phone: st.phone || "",
+          raw: st.raw || st,
+        });
+        await recordWebhookDebug({
+          webhookType,
+          outcome: "unmatched",
+          status: newStatus,
+          waId,
+          transactionId,
           phone: st.phone || "",
           raw: st.raw || st,
         });
@@ -2586,6 +2676,17 @@ router.post("/webhook", async (req, res) => {
       }
 
       const updated = existing.toObject();
+      await recordWebhookDebug({
+        webhookType,
+        outcome: shouldUpdate ? "updated" : "matched_no_rank_change",
+        status: newStatus,
+        waId,
+        transactionId,
+        phone: st.phone || customerPhoneFromMsg(updated) || "",
+        matchedMessageId: updated._id,
+        matchedStatus: updated.status,
+        raw: st.raw || st,
+      });
 
       if (updated) {
         const dir = String(updated.direction || "").toUpperCase();
