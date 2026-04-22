@@ -86,12 +86,30 @@ const s3 =
 ----------------------------------------- */
 const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
 const last10 = (v = "") => digitsOnly(v).slice(-10);
+const normalizeText = (v = "") => String(v || "").trim().toLowerCase();
 
 function normalizeWaId(v = "") {
   const d = digitsOnly(v);
   if (!d) return "";
   if (d.length === 10) return `91${d}`;
   return d;
+}
+
+function messageIdentityKeyForList(msg = {}) {
+  const waId = String(msg?.waId || "").trim();
+  if (waId) return `wa:${waId}`;
+  const dbId = String(msg?._id || "").trim();
+  if (dbId) return `id:${dbId}`;
+  const dir = String(msg?.direction || "").toUpperCase();
+  const from = last10(msg?.from || "");
+  const to = last10(msg?.to || "");
+  const type = String(msg?.type || "text").toLowerCase();
+  const text = normalizeText(msg?.text || "");
+  const mediaId = String(msg?.media?.id || "").trim();
+  const mediaUrl = String(msg?.media?.url || "").trim();
+  const ts = msg?.timestamp ? new Date(msg.timestamp).getTime() : 0;
+  const tsBucket = ts ? Math.floor(ts / 1000) : "";
+  return `sig:${dir}|${from}|${to}|${type}|${text}|${mediaId}|${mediaUrl}|${tsBucket}`;
 }
 
 function toE164Plus(v = "") {
@@ -255,7 +273,11 @@ function extractProviderMessageId(data) {
   return (
     deepPick(data, [
       "message_id",
+      "results.message_id",
+      "results.0.message_id",
       "data.message_id",
+      "data.results.message_id",
+      "data.results.0.message_id",
       "msg_id",
       "data.msg_id",
       "id",
@@ -837,10 +859,27 @@ function freeformExpiryFromConvo(convo) {
 
 function normalizeDeliveryStatus(status = "") {
   const s = String(status || "").toLowerCase().trim();
-  if (["read", "seen"].includes(s)) return "read";
-  if (["delivered", "deliver", "received"].includes(s)) return "delivered";
-  if (["sent", "submitted", "queued", "accepted"].includes(s)) return "sent";
-  if (["failed", "error", "undelivered", "rejected"].includes(s)) return "failed";
+  if (!s) return s;
+  if (["read", "seen"].includes(s) || s.includes("read") || s.includes("seen")) return "read";
+  if (
+    ["delivered", "deliver", "received"].includes(s) ||
+    s.includes("deliver") ||
+    s.includes("receive")
+  ) return "delivered";
+  if (
+    ["sent", "submitted", "queued", "accepted"].includes(s) ||
+    s.includes("sent") ||
+    s.includes("submit") ||
+    s.includes("queue") ||
+    s.includes("accept")
+  ) return "sent";
+  if (
+    ["failed", "error", "undelivered", "rejected"].includes(s) ||
+    s.includes("fail") ||
+    s.includes("error") ||
+    s.includes("reject") ||
+    s.includes("undeliver")
+  ) return "failed";
   return s;
 }
 
@@ -1236,23 +1275,66 @@ function parseWebhookPayload(body = {}) {
     );
     if (businessPhone && !out.businessPhone) out.businessPhone = businessPhone;
 
+    const enrichStatusCandidate = (candidate) => ({
+      ...(isObjectLike(candidate) ? candidate : { status: candidate }),
+      __webhook_type:
+        candidate?.__webhook_type ||
+        candidate?.webhook_type ||
+        item?.__webhook_type ||
+        item?.webhook_type ||
+        topWebhookType ||
+        "",
+      __acid: candidate?.__acid || candidate?.acid || item?.__acid || item?.acid || topAcid || "",
+      __phone: deepPick(candidate, ["to", "recipient_id", "phone", "customer_phone"]) ||
+        deepPick(item, ["to", "recipient_id", "phone", "customer_phone", "results.to", "data.results.to"]) ||
+        "",
+    });
+
     const statusContainers = [];
-    if (item?.statuses) statusContainers.push(...asArray(item.statuses));
-    if (item?.status_updates) statusContainers.push(...asArray(item.status_updates));
-    if (isObjectLike(item?.status)) statusContainers.push(...asArray(item.status));
+    if (item?.statuses) statusContainers.push(...asArray(item.statuses).map(enrichStatusCandidate));
+    if (item?.status_updates) statusContainers.push(...asArray(item.status_updates).map(enrichStatusCandidate));
+    if (item?.statusUpdates) statusContainers.push(...asArray(item.statusUpdates).map(enrichStatusCandidate));
+    if (item?.delivery_statuses) statusContainers.push(...asArray(item.delivery_statuses).map(enrichStatusCandidate));
+    if (item?.deliveryStatuses) statusContainers.push(...asArray(item.deliveryStatuses).map(enrichStatusCandidate));
+    if (isObjectLike(item?.status)) statusContainers.push(...asArray(item.status).map(enrichStatusCandidate));
 
     const directStatus = normalizeDeliveryStatus(
-      deepPick(item, ["status", "state", "event", "message_status"]) || ""
+      deepPick(item, [
+        "status",
+        "state",
+        "event",
+        "message_status",
+        "messageStatus",
+        "delivery_status",
+        "deliveryStatus",
+        "webhook_type",
+        "__webhook_type",
+      ]) || ""
     );
     const directStatusId = String(
-      deepPick(item, ["id", "wa_id", "message_id", "data.message_id"]) || ""
+      deepPick(item, [
+        "id",
+        "wa_id",
+        "message_id",
+        "results.message_id",
+        "results.0.message_id",
+        "data.message_id",
+        "data.results.message_id",
+        "data.results.0.message_id",
+        "acid",
+        "__acid",
+      ]) || ""
     ).trim();
     const directTransactionId = String(
       deepPick(item, [
+        "acid",
+        "__acid",
         "transaction_id",
+        "transactionId",
         "results.transaction_id",
         "results.0.transaction_id",
         "data.transaction_id",
+        "data.transactionId",
         "data.results.transaction_id",
         "data.results.0.transaction_id",
         "result.transaction_id",
@@ -1260,20 +1342,35 @@ function parseWebhookPayload(body = {}) {
     ).trim();
 
     if (isKnownDeliveryStatus(directStatus) && (directStatusId || directTransactionId)) {
-      statusContainers.push(item);
+      statusContainers.push(enrichStatusCandidate(item));
     }
 
     for (const st of statusContainers) {
       const waId = String(
-        deepPick(st, ["id", "wa_id", "message_id", "data.message_id"]) || ""
+        deepPick(st, [
+          "id",
+          "wa_id",
+          "message_id",
+          "results.message_id",
+          "results.0.message_id",
+          "data.message_id",
+          "data.results.message_id",
+          "data.results.0.message_id",
+          "acid",
+          "__acid",
+        ]) || ""
       ).trim();
 
       const transactionId = String(
         deepPick(st, [
+          "acid",
+          "__acid",
           "transaction_id",
+          "transactionId",
           "results.transaction_id",
           "results.0.transaction_id",
           "data.transaction_id",
+          "data.transactionId",
           "data.results.transaction_id",
           "data.results.0.transaction_id",
           "result.transaction_id",
@@ -1281,11 +1378,33 @@ function parseWebhookPayload(body = {}) {
       ).trim();
 
       const status = normalizeDeliveryStatus(
-        deepPick(st, ["status", "state", "event", "message_status"]) || ""
+        deepPick(st, [
+          "status",
+          "state",
+          "event",
+          "message_status",
+          "messageStatus",
+          "delivery_status",
+          "deliveryStatus",
+          "webhook_type",
+          "__webhook_type",
+        ]) || ""
       );
 
       const phone = normalizeWaId(
-        deepPick(st, ["recipient_id", "to", "phone", "customer_phone"]) || ""
+        deepPick(st, [
+          "recipient_id",
+          "to",
+          "phone",
+          "customer_phone",
+          "recipient",
+          "destination",
+          "mobile",
+          "msisdn",
+          "results.to",
+          "data.results.to",
+          "__phone",
+        ]) || ""
       );
 
       if (isKnownDeliveryStatus(status) && (waId || transactionId)) {
@@ -1609,7 +1728,47 @@ router.get("/messages", async (req, res) => {
       .sort({ timestamp: 1 })
       .lean();
 
-    return res.json(msgs || []);
+    const latestInboundAt = (msgs || []).reduce((latest, msg) => {
+      if (String(msg?.direction || "").toUpperCase() !== "INBOUND") return latest;
+      const ts = msg?.timestamp ? new Date(msg.timestamp).getTime() : 0;
+      return ts > latest ? ts : latest;
+    }, 0);
+
+    if (latestInboundAt) {
+      const readCandidateIds = [];
+      for (const msg of msgs || []) {
+        if (String(msg?.direction || "").toUpperCase() !== "OUTBOUND") continue;
+        if (["read", "failed"].includes(String(msg?.status || "").toLowerCase())) continue;
+        const ts = msg?.timestamp ? new Date(msg.timestamp).getTime() : 0;
+        if (ts && ts <= latestInboundAt) {
+          msg.status = "read";
+          readCandidateIds.push(msg._id);
+        }
+      }
+
+      if (readCandidateIds.length) {
+        await WhatsAppMessage.updateMany(
+          { _id: { $in: readCandidateIds } },
+          { $set: { status: "read" } }
+        );
+      }
+    }
+
+    const byIdentity = new Map();
+    for (const msg of msgs || []) {
+      const k = messageIdentityKeyForList(msg);
+      const prev = byIdentity.get(k);
+      if (!prev) {
+        byIdentity.set(k, msg);
+        continue;
+      }
+      const prevStatus = deliveryStatusRank(prev?.status);
+      const nextStatus = deliveryStatusRank(msg?.status);
+      if (nextStatus >= prevStatus) {
+        byIdentity.set(k, { ...prev, ...msg });
+      }
+    }
+    return res.json(Array.from(byIdentity.values()));
   } catch (e) {
     console.error("load messages error:", e);
     return res.status(500).json({ message: "Failed to load messages" });
@@ -2380,19 +2539,39 @@ router.post("/webhook", async (req, res) => {
         match.push(
           { providerTransactionId: transactionId },
           { waId: transactionId },
+          { "raw.message_id": transactionId },
+          { "raw.data.message_id": transactionId },
+          { "raw.results.message_id": transactionId },
+          { "raw.results.0.message_id": transactionId },
           { "raw.transaction_id": transactionId },
           { "raw.results.transaction_id": transactionId },
           { "raw.results.0.transaction_id": transactionId },
           { "raw.data.transaction_id": transactionId },
+          { "raw.data.results.message_id": transactionId },
           { "raw.data.results.transaction_id": transactionId },
           { "raw.data.results.0.transaction_id": transactionId },
           { "raw.result.transaction_id": transactionId }
         );
       }
-      if (!match.length) continue;
+      if (!match.length) {
+        console.log("WHATSAPP STATUS SKIPPED: missing id", {
+          status: newStatus,
+          raw: st.raw || st,
+        });
+        continue;
+      }
 
       const existing = await WhatsAppMessage.findOne({ $or: match });
-      if (!existing) continue;
+      if (!existing) {
+        console.log("WHATSAPP STATUS UNMATCHED", {
+          waId,
+          transactionId,
+          status: newStatus,
+          phone: st.phone || "",
+          raw: st.raw || st,
+        });
+        continue;
+      }
 
       const currentRank = deliveryStatusRank(existing.status);
       const nextRank = deliveryStatusRank(newStatus);
@@ -2587,6 +2766,36 @@ router.post("/webhook", async (req, res) => {
         },
         { upsert: true, new: true }
       ).lean();
+
+      const readOutbounds = await WhatsAppMessage.find({
+        direction: "OUTBOUND",
+        to: new RegExp(`${p10}$`),
+        timestamp: { $lte: now },
+        status: { $nin: ["read", "failed"] },
+      })
+        .select("_id waId providerTransactionId status")
+        .lean();
+
+      if (readOutbounds.length) {
+        await WhatsAppMessage.updateMany(
+          { _id: { $in: readOutbounds.map((m) => m._id) } },
+          { $set: { status: "read" } }
+        );
+
+        for (const outbound of readOutbounds) {
+          const liveId = String(
+            outbound.waId || outbound.providerTransactionId || ""
+          ).trim();
+          if (liveId) {
+            emitStatus(req, {
+              phone10: p10,
+              waId: liveId,
+              status: "read",
+              providerTransactionId: outbound.providerTransactionId,
+            });
+          }
+        }
+      }
 
       emitMessage(req, created);
 

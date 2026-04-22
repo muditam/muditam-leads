@@ -120,6 +120,12 @@ const LeadSchema = new mongoose.Schema({
 
 LeadSchema.index({ contactNumber: 1 });
 LeadSchema.index({ salesStatus: 1, agentAssigned: 1 });
+LeadSchema.index({ agentAssigned: 1, _id: -1 });
+LeadSchema.index({ date: 1, _id: -1 });
+LeadSchema.index({ leadSource: 1, _id: -1 });
+LeadSchema.index({ leadStatus: 1, _id: -1 });
+LeadSchema.index({ lastOrderDate: 1, _id: -1 });
+LeadSchema.index({ nextFollowup: 1, _id: -1 });
 
 LeadSchema.index({ healthExpertAssigned: 1, salesStatus: 1, retentionStatus: 1, lastOrderDate: -1 });
 

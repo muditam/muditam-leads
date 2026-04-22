@@ -2105,13 +2105,11 @@ function hasFullAccess(user = {}) {
 
 const INCENTIVE_SLABS = [
   { min: 0, max: 200000, percent: 1 },
-  { min: 200000, max: 300000, percent: 1.5 },
-  { min: 300000, max: 400000, percent: 2 },
-  { min: 400000, max: 500000, percent: 2.5 },
-  { min: 500000, max: 600000, percent: 3 },
-  { min: 600000, max: 800000, percent: 3.5 },
-  { min: 800000, max: 1000000, percent: 4 },
-  { min: 1000000, max: Number.MAX_SAFE_INTEGER, percent: 4 },
+  { min: 200000, max: 300000, percent: 2.5 },
+  { min: 300000, max: 400000, percent: 3.5 },
+  { min: 400000, max: 500000, percent: 5 },
+  { min: 500000, max: 600000, percent: 6 },
+  { min: 600000, max: Number.MAX_SAFE_INTEGER, percent: 7 },
 ];
 
 function round2(n) {
@@ -3321,6 +3319,7 @@ router.get("/api/incentives-new", requireSession, async (req, res) => {
   try {
     const sessionUser = req.sessionUser || {};
     let { agentName, startDate, endDate } = req.query;
+    const summaryOnly = String(req.query.summaryOnly || "").toLowerCase() === "true";
 
     if (hasFullAccess(sessionUser)) {
       if (!agentName) {
@@ -3342,38 +3341,41 @@ router.get("/api/incentives-new", requireSession, async (req, res) => {
       return res.status(404).json({ message: "Agent not found" });
     }
 
-    const cashData = await buildCashWalletData({
+    const walletCoinPromise = buildVKRWalletData({
       agentName,
       startDate,
       endDate,
       employee,
+      strictSop: false,
+    }).catch((walletErr) => {
+      console.error("Error building wallet coin inside /api/incentives-new:", walletErr);
+      return null;
     });
 
-    let walletCoinData = null;
-    try {
-      walletCoinData = await buildVKRWalletData({
+    const [
+      cashData,
+      walletCoinData,
+      conversionSummary,
+      redemptionSummary,
+    ] = await Promise.all([
+      buildCashWalletData({
         agentName,
         startDate,
         endDate,
         employee,
-        strictSop: false,
-      });
-    } catch (walletErr) {
-      console.error("Error building wallet coin inside /api/incentives-new:", walletErr);
-      walletCoinData = null;
-    }
-
-    const conversionSummary = await getCashToCoinConversionSummary({
-      agentName,
-      startDate,
-      endDate,
-    });
-
-    const redemptionSummary = await getWalletCoinRedemptionSummary({
-      agentName,
-      startDate,
-      endDate,
-    });
+      }),
+      walletCoinPromise,
+      getCashToCoinConversionSummary({
+        agentName,
+        startDate,
+        endDate,
+      }),
+      getWalletCoinRedemptionSummary({
+        agentName,
+        startDate,
+        endDate,
+      }),
+    ]);
 
     const merged = applyCashToCoinConversions({
       cashData,
@@ -3381,6 +3383,16 @@ router.get("/api/incentives-new", requireSession, async (req, res) => {
       conversionSummary,
       redemptionSummary,
     });
+
+    if (summaryOnly) {
+      merged.rows = [];
+      merged.detailsIncluded = false;
+      if (merged.walletCoin) {
+        merged.walletCoin.rows = [];
+      }
+    } else {
+      merged.detailsIncluded = true;
+    }
 
     return res.json(merged);
   } catch (error) {

@@ -1438,9 +1438,39 @@ app.get('/api/leads/check-duplicate', async (req, res) => {
 });
 
 
+const leadTableProjection = [
+  "date",
+  "time",
+  "name",
+  "contactNumber",
+  "leadSource",
+  "enquiryFor",
+  "customerType",
+  "agentAssigned",
+  "productPitched",
+  "leadStatus",
+  "salesStatus",
+  "nextFollowup",
+  "agentsRemarks",
+  "productsOrdered",
+  "dosageOrdered",
+  "amountPaid",
+  "modeOfPayment",
+  "deliveryStatus",
+  "healthExpertAssigned",
+  "orderId",
+  "dosageExpiring",
+  "rtNextFollowupDate",
+  "rtFollowupReminder",
+  "rtFollowupStatus",
+  "lastOrderDate",
+  "repeatDosageOrdered",
+  "retentionStatus",
+  "rtRemark",
+].join(" ");
+
 app.get('/api/leads', requireSession, async (req, res) => {
-  const { page = 1, limit = 30, filters = '{}', agentAssignedName, salesStatus, sortBy = '_id', sortOrder = 'desc' } = req.query;
-  const filterCriteria = JSON.parse(filters);
+  const { filters = '{}', agentAssignedName, salesStatus, sortBy = '_id', sortOrder = 'desc' } = req.query;
 
   const parseDate = (dateString) => {
     if (!dateString) return null;
@@ -1449,11 +1479,21 @@ app.get('/api/leads', requireSession, async (req, res) => {
   };
 
   try {
+    const filterCriteria = typeof filters === "string" ? JSON.parse(filters) : filters;
+    const pageNumber = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+    const defaultLimit = req.query.view === "master-leads" ? 10 : 30;
+    const maxLimit = req.query.view === "master-leads" ? 20 : 50;
+    const limitNumber = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || defaultLimit, 1), maxLimit);
+    const asArray = (value) => {
+      if (Array.isArray(value)) return value.filter(Boolean);
+      return value ? [value] : [];
+    };
     const query = {};
 
     if (filterCriteria.name) query.name = { $regex: filterCriteria.name, $options: 'i' };
     if (filterCriteria.contactNumber) query.contactNumber = filterCriteria.contactNumber;
-    if (filterCriteria.leadSource?.length) query.leadSource = { $in: filterCriteria.leadSource };
+    const leadSources = asArray(filterCriteria.leadSource);
+    if (leadSources.length) query.leadSource = { $in: leadSources };
 
     if (filterCriteria.startDate || filterCriteria.endDate) {
       query.date = {};
@@ -1475,15 +1515,20 @@ app.get('/api/leads', requireSession, async (req, res) => {
       }
     }
 
-    if (filterCriteria.agentAssigned?.length) query.agentAssigned = { $in: filterCriteria.agentAssigned };
-    if (filterCriteria.leadStatus?.length) query.leadStatus = { $in: filterCriteria.leadStatus };
-    if (filterCriteria.salesStatus?.length) query.salesStatus = { $in: filterCriteria.salesStatus };
+    const agentAssignedFilters = asArray(filterCriteria.agentAssigned);
+    if (agentAssignedFilters.length) query.agentAssigned = { $in: agentAssignedFilters };
+    const leadStatusFilters = asArray(filterCriteria.leadStatus);
+    if (leadStatusFilters.length) query.leadStatus = { $in: leadStatusFilters };
+    const salesStatusFilters = asArray(filterCriteria.salesStatus);
+    if (salesStatusFilters.length) query.salesStatus = { $in: salesStatusFilters };
     if (filterCriteria.deliveryStatus) query.deliveryStatus = filterCriteria.deliveryStatus;
     if (filterCriteria.customerType) query.customerType = filterCriteria.customerType;
     if (filterCriteria.healthExpertAssigned) query.healthExpertAssigned = filterCriteria.healthExpertAssigned;
-    if (filterCriteria.rtFollowupStatus?.length) query.rtFollowupStatus = { $in: filterCriteria.rtFollowupStatus };
+    const rtFollowupStatusFilters = asArray(filterCriteria.rtFollowupStatus);
+    if (rtFollowupStatusFilters.length) query.rtFollowupStatus = { $in: rtFollowupStatusFilters };
     if (filterCriteria.retentionStatus) query.retentionStatus = filterCriteria.retentionStatus;
-    if (filterCriteria.enquiryFor?.length) query.enquiryFor = { $in: filterCriteria.enquiryFor };
+    const enquiryForFilters = asArray(filterCriteria.enquiryFor);
+    if (enquiryForFilters.length) query.enquiryFor = { $in: enquiryForFilters };
 
     if (filterCriteria.reminder) {
       const today = new Date();
@@ -1518,17 +1563,25 @@ app.get('/api/leads', requireSession, async (req, res) => {
     if (agentAssignedName) query.agentAssigned = agentAssignedName;
     if (salesStatus) query.salesStatus = salesStatus;
 
-    const totalLeads = await Lead.countDocuments(query);
-    const leads = await Lead.find(query)
-      .sort({ _id: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+    const allowedSortFields = new Set(["_id", "date", "lastOrderDate", "nextFollowup", "rtNextFollowupDate"]);
+    const sortField = allowedSortFields.has(sortBy) ? sortBy : "_id";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+
+    const [totalLeads, leads] = await Promise.all([
+      Lead.countDocuments(query),
+      Lead.find(query)
+        .select(leadTableProjection)
+        .sort({ [sortField]: sortDirection })
+        .skip((pageNumber - 1) * limitNumber)
+        .limit(limitNumber)
+        .lean(),
+    ]);
 
     res.status(200).json({
       leads,
       totalLeads,
-      totalPages: Math.ceil(totalLeads / limit),
-      currentPage: Number(page),
+      totalPages: Math.ceil(totalLeads / limitNumber),
+      currentPage: pageNumber,
     });
   } catch (error) {
     console.error('Error fetching leads:', error);
