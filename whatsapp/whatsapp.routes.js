@@ -5,6 +5,7 @@ const multer = require("multer");
 const FormData = require("form-data");
 const path = require("path");
 const mongoose = require("mongoose");
+const OpenAI = require("openai");
 
 const WhatsAppMessage = require("./whatsaapModels/WhatsAppMessage");
 const WhatsAppConversation = require("./whatsaapModels/WhatsAppConversation");
@@ -42,6 +43,44 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_UPLOAD_BYTES },
 });
+
+const AUTO_REPLY_ENABLED =
+  String(process.env.WHATSAPP_AUTO_REPLY_ENABLED ?? "true").toLowerCase() !==
+  "false";
+const AUTO_REPLY_DELAY_MINUTES = Math.max(
+  1,
+  Number(process.env.WHATSAPP_AUTO_REPLY_DELAY_MINUTES || 15)
+);
+const AUTO_REPLY_SCAN_INTERVAL_MS = Math.max(
+  15000,
+  Number(process.env.WHATSAPP_AUTO_REPLY_SCAN_INTERVAL_MS || 60000)
+);
+const AUTO_REPLY_TEXT = String(
+  process.env.WHATSAPP_AUTO_REPLY_TEXT ||
+    "Thanks for waiting. I'm checking this for you and will get back shortly."
+).trim();
+const AUTO_REPLY_AI_ENABLED =
+  String(process.env.WHATSAPP_AUTO_REPLY_AI_ENABLED ?? "true").toLowerCase() !==
+  "false";
+const AUTO_REPLY_AI_MAX_OUTPUT_TOKENS = Math.max(
+  80,
+  Number(process.env.WHATSAPP_AUTO_REPLY_AI_MAX_OUTPUT_TOKENS || 220)
+);
+const AUTO_REPLY_AI_MAX_CONTEXT_MESSAGES = Math.max(
+  4,
+  Number(process.env.WHATSAPP_AUTO_REPLY_AI_MAX_CONTEXT_MESSAGES || 10)
+);
+const AUTO_REPLY_AI_MODEL = String(
+  process.env.WHATSAPP_AUTO_REPLY_AI_MODEL ||
+    process.env.OPENAI_MODEL ||
+    "gpt-5-mini"
+).trim();
+const openaiApiKey = String(process.env.OPENAI_API_KEY || "").trim();
+const openai = openaiApiKey ? new OpenAI({ apiKey: openaiApiKey }) : null;
+const AUTO_REPLY_CAN_SEND = Boolean(
+  AUTO_REPLY_TEXT || (AUTO_REPLY_AI_ENABLED && openai)
+);
+let autoReplyWatchdogRunning = false;
 
 /* ----------------------------------------
    TRUSTSIGNAL CONFIG
@@ -115,6 +154,10 @@ function normalizeWaId(v = "") {
   if (!d) return "";
   if (d.length === 10) return `91${d}`;
   return d;
+}
+
+function safeStr(v = "") {
+  return String(v ?? "").trim();
 }
 
 function messageIdentityKeyForList(msg = {}) {
@@ -877,6 +920,213 @@ function freeformExpiryFromConvo(convo) {
     : 0;
   if (!t) return null;
   return new Date(t + 24 * 60 * 60 * 1000);
+}
+
+function buildAutoReplyTranscript(messages = []) {
+  return (messages || [])
+    .slice()
+    .reverse()
+    .map((m) => {
+      const dir =
+        String(m?.direction || "").toUpperCase() === "OUTBOUND"
+          ? "AGENT"
+          : "CUSTOMER";
+      const text = safeStr(m?.text);
+      if (text) return `${dir}: ${text}`;
+      const type = safeStr(m?.type || "message").toUpperCase();
+      return `${dir}: [${type}]`;
+    })
+    .join("\n")
+    .slice(0, 5000);
+}
+
+function appendAutoReplyAISignature(text = "") {
+  const base = safeStr(text);
+  if (!base) return "";
+  const signature = "~ AI ✨";
+  if (base.endsWith(signature)) return base;
+  return `${base}\n\n${signature}`;
+}
+
+async function generateSmartAutoReplyText({ p10 = "", inboundAt = null }) {
+  if (!AUTO_REPLY_AI_ENABLED || !openai || !p10) return "";
+
+  const phoneRegex = new RegExp(`${p10}$`);
+  const query = {
+    $or: [{ from: phoneRegex }, { to: phoneRegex }],
+  };
+  if (inboundAt) {
+    query.timestamp = { $lte: new Date(inboundAt) };
+  }
+
+  const recentMessages = await WhatsAppMessage.find(query)
+    .sort({ timestamp: -1, createdAt: -1 })
+    .limit(AUTO_REPLY_AI_MAX_CONTEXT_MESSAGES)
+    .select("direction text type timestamp")
+    .lean();
+
+  if (!recentMessages.length) return "";
+
+  const latestInbound = recentMessages.find(
+    (m) =>
+      String(m?.direction || "").toUpperCase() !== "OUTBOUND" &&
+      safeStr(m?.text)
+  );
+  const customerQuestion = safeStr(latestInbound?.text);
+  if (!customerQuestion) return "";
+
+  const transcript = buildAutoReplyTranscript(recentMessages);
+  const input = `
+Customer asked on WhatsApp:
+${customerQuestion}
+
+Recent conversation:
+${transcript || "(no transcript)"}
+
+Write the next helpful support reply now.
+`.trim();
+
+  const instructions = `
+You are an expert WhatsApp support assistant.
+
+Rules:
+- Reply with only the message text (no headings or markdown).
+- Keep it concise and WhatsApp-friendly (2-6 lines).
+- Directly answer the customer's latest question using plain language.
+- If medical/legal/financial advice is requested, provide general guidance and suggest consulting a qualified professional.
+- If required details are missing, ask at most one clarifying question.
+- Do not mention internal delays, teams, tickets, or that you are an AI.
+`.trim();
+
+  try {
+    const resp = await openai.responses.create({
+      model: AUTO_REPLY_AI_MODEL,
+      instructions,
+      input,
+      max_output_tokens: AUTO_REPLY_AI_MAX_OUTPUT_TOKENS,
+    });
+    return appendAutoReplyAISignature(safeStr(resp?.output_text)).slice(0, 1800);
+  } catch (e) {
+    console.error("[WA auto-reply] AI generation failed:", e?.message || e);
+    return "";
+  }
+}
+
+async function runAutoReplyWatchdog() {
+  if (
+    !AUTO_REPLY_ENABLED ||
+    autoReplyWatchdogRunning ||
+    !AUTO_REPLY_CAN_SEND
+  ) {
+    return;
+  }
+  autoReplyWatchdogRunning = true;
+
+  try {
+    const sender = getTrustSignalSenderOrThrow();
+    const cutoff = new Date(Date.now() - AUTO_REPLY_DELAY_MINUTES * 60 * 1000);
+
+    const candidates = await WhatsAppConversation.find({
+      lastInboundAt: { $ne: null, $lte: cutoff },
+    })
+      .select(
+        "_id phone lastInboundAt lastOutboundAt autoReplyForInboundAt windowExpiresAt"
+      )
+      .lean();
+
+    for (const convo of candidates || []) {
+      const inboundAt = convo?.lastInboundAt ? new Date(convo.lastInboundAt) : null;
+      if (!inboundAt || Number.isNaN(inboundAt.getTime())) continue;
+
+      const outboundAt = convo?.lastOutboundAt
+        ? new Date(convo.lastOutboundAt)
+        : null;
+
+      // Agent already replied for this inbound cycle.
+      if (outboundAt && outboundAt.getTime() >= inboundAt.getTime()) continue;
+
+      const autoRepliedAt = convo?.autoReplyForInboundAt
+        ? new Date(convo.autoReplyForInboundAt)
+        : null;
+
+      // Already auto-replied for this inbound cycle.
+      if (autoRepliedAt && autoRepliedAt.getTime() >= inboundAt.getTime()) {
+        continue;
+      }
+
+      const expiry =
+        freeformExpiryFromConvo(convo) || convo?.windowExpiresAt || null;
+      if (!expiry || new Date(expiry).getTime() < Date.now()) continue;
+
+      const phone = normalizeWaId(convo?.phone || "");
+      const p10 = last10(phone);
+      if (!phone || !p10) continue;
+
+      try {
+        const aiReplyText = await generateSmartAutoReplyText({ p10, inboundAt });
+        const replyText = aiReplyText || AUTO_REPLY_TEXT;
+        if (!replyText) continue;
+
+        const toNumber = getTrustSignalRecipient(phone);
+        const r = await sendFreeformTextViaTrustSignal({
+          sender,
+          toNumber,
+          text: replyText,
+        });
+        ensureTrustSignalAccepted(
+          r.data,
+          "TrustSignal did not accept auto-reply send"
+        );
+
+        const now = new Date();
+        await WhatsAppMessage.create({
+          waId: extractProviderAcceptId(r.data),
+          providerTransactionId: extractProviderTransactionId(r.data),
+          from: senderForDb(sender),
+          to: phone,
+          text: replyText,
+          direction: "OUTBOUND",
+          type: "text",
+          status: "sent",
+          timestamp: now,
+          raw: {
+            ...(r.data || {}),
+            autoReply: true,
+            autoReplyMode: aiReplyText ? "ai" : "fallback",
+          },
+        });
+
+        await WhatsAppConversation.updateOne(
+          {
+            _id: convo._id,
+            $or: [{ lastOutboundAt: null }, { lastOutboundAt: { $lt: inboundAt } }],
+          },
+          {
+            $set: {
+              lastMessageAt: now,
+              lastMessageText: replyText.slice(0, 200),
+              lastOutboundAt: now,
+              autoReplySentAt: now,
+              autoReplyForInboundAt: inboundAt,
+            },
+          }
+        );
+
+        console.log(
+          `[WA auto-reply] sent (${aiReplyText ? "ai" : "fallback"}) to ${p10} after ${AUTO_REPLY_DELAY_MINUTES}m inactivity`
+        );
+      } catch (sendErr) {
+        console.error(
+          `[WA auto-reply] failed for ${p10}:`,
+          sendErr?.message || sendErr
+        );
+      }
+    }
+  } catch (e) {
+    console.error("[WA auto-reply] watchdog error:", e?.message || e);
+  } finally {
+    autoReplyWatchdogRunning = false;
+  }
 }
 
 function normalizeDeliveryStatus(status = "") {
@@ -1782,32 +2032,6 @@ router.get("/messages", async (req, res) => {
     })
       .sort({ timestamp: 1 })
       .lean();
-
-    const latestInboundAt = (msgs || []).reduce((latest, msg) => {
-      if (String(msg?.direction || "").toUpperCase() !== "INBOUND") return latest;
-      const ts = msg?.timestamp ? new Date(msg.timestamp).getTime() : 0;
-      return ts > latest ? ts : latest;
-    }, 0);
-
-    if (latestInboundAt) {
-      const readCandidateIds = [];
-      for (const msg of msgs || []) {
-        if (String(msg?.direction || "").toUpperCase() !== "OUTBOUND") continue;
-        if (["read", "failed"].includes(String(msg?.status || "").toLowerCase())) continue;
-        const ts = msg?.timestamp ? new Date(msg.timestamp).getTime() : 0;
-        if (ts && ts <= latestInboundAt) {
-          msg.status = "read";
-          readCandidateIds.push(msg._id);
-        }
-      }
-
-      if (readCandidateIds.length) {
-        await WhatsAppMessage.updateMany(
-          { _id: { $in: readCandidateIds } },
-          { $set: { status: "read" } }
-        );
-      }
-    }
 
     const byIdentity = new Map();
     for (const msg of msgs || []) {
@@ -2901,36 +3125,6 @@ router.post("/webhook", async (req, res) => {
         { upsert: true, new: true }
       ).lean();
 
-      const readOutbounds = await WhatsAppMessage.find({
-        direction: "OUTBOUND",
-        to: new RegExp(`${p10}$`),
-        timestamp: { $lte: now },
-        status: { $nin: ["read", "failed"] },
-      })
-        .select("_id waId providerTransactionId status")
-        .lean();
-
-      if (readOutbounds.length) {
-        await WhatsAppMessage.updateMany(
-          { _id: { $in: readOutbounds.map((m) => m._id) } },
-          { $set: { status: "read" } }
-        );
-
-        for (const outbound of readOutbounds) {
-          const liveId = String(
-            outbound.waId || outbound.providerTransactionId || ""
-          ).trim();
-          if (liveId) {
-            emitStatus(req, {
-              phone10: p10,
-              waId: liveId,
-              status: "read",
-              providerTransactionId: outbound.providerTransactionId,
-            });
-          }
-        }
-      }
-
       emitMessage(req, created);
 
       emitConversationPatch(req, {
@@ -2953,4 +3147,20 @@ router.post("/webhook", async (req, res) => {
   }
 });
 
+if (AUTO_REPLY_ENABLED && AUTO_REPLY_CAN_SEND) {
+  setTimeout(() => {
+    runAutoReplyWatchdog().catch((e) =>
+      console.error("[WA auto-reply] startup run error:", e?.message || e)
+    );
+  }, 15000);
+
+  setInterval(() => {
+    runAutoReplyWatchdog().catch((e) =>
+      console.error("[WA auto-reply] interval run error:", e?.message || e)
+    );
+  }, AUTO_REPLY_SCAN_INTERVAL_MS);
+}
+
 module.exports = router;
+
+

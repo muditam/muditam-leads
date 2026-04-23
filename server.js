@@ -158,6 +158,8 @@ const shopifyCatalog = require("./routes/shopifyCatalog");
 const unicommerceViewRoutes = require("./routes/unicommerceViewRoutes");
 const sopRoutes = require("./routes/Wallet/sopRoutes");
 const walletRewardsRoutes = require("./routes/Wallet/walletRewardsRoutes");
+const leadsCaptureRoutes = require("./KnowledgeBase/leadsCaptureRoutes");
+const knowledgeBaseRoutes = require("./KnowledgeBase/knowledgeBaseRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -723,6 +725,9 @@ app.use("/api/shopify-catalog", shopifyCatalog);
 app.use("/api", unicommerceViewRoutes);
 app.use("/api/sops", sopRoutes);
 app.use(walletRewardsRoutes);
+
+app.use("/api/leads", leadsCaptureRoutes);
+app.use("/api/knowledge-base", knowledgeBaseRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
