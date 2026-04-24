@@ -219,6 +219,8 @@ const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
 const last10 = (v = "") => digitsOnly(v).slice(-10);
 
 io.on("connection", (socket) => {
+  socket.join("wa:inbox");
+
   socket.on("wa:join", ({ phone10, phone } = {}) => {
     const p10 = last10(phone10 || phone || "");
     if (!p10) return;

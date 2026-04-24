@@ -914,6 +914,12 @@ const emitConversationPatch = (req, { phone10, patch }) => {
   });
 };
 
+const emitInboxUpdate = (req) => {
+  const io = req?.app?.get("io");
+  if (!io) return;
+  io.to("wa:inbox").emit("wa:inbox:update", { at: new Date().toISOString() });
+};
+
 function freeformExpiryFromConvo(convo) {
   const t = convo?.lastInboundAt
     ? new Date(convo.lastInboundAt).getTime()
@@ -1935,6 +1941,7 @@ router.post("/conversations/mark-read", async (req, res) => {
       phone10: p10,
       patch: { unreadCount: 0, lastReadAt: now },
     });
+    emitInboxUpdate(req);
 
     return res.json({ success: true, conversation: updated || null });
   } catch (e) {
@@ -2140,6 +2147,7 @@ router.post("/send-text", async (req, res) => {
         lastOutboundAt: now,
       },
     });
+    emitInboxUpdate(req);
 
     return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
@@ -2341,6 +2349,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
         lastOutboundAt: now,
       },
     });
+    emitInboxUpdate(req);
 
     return res.json({
       success: true,
@@ -2517,6 +2526,7 @@ router.post("/send-template", async (req, res) => {
         lastOutboundAt: now,
       },
     });
+    emitInboxUpdate(req);
 
     return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
@@ -3138,6 +3148,7 @@ router.post("/webhook", async (req, res) => {
           unreadCount: updatedConv?.unreadCount ?? 1,
         },
       });
+      emitInboxUpdate(req);
     }
 
     return res.sendStatus(200);
@@ -3162,5 +3173,3 @@ if (AUTO_REPLY_ENABLED && AUTO_REPLY_CAN_SEND) {
 }
 
 module.exports = router;
-
-
