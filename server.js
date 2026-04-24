@@ -726,7 +726,7 @@ app.use("/api", unicommerceViewRoutes);
 app.use("/api/sops", sopRoutes);
 app.use(walletRewardsRoutes);
 
-app.use("/api/leads", leadsCaptureRoutes);
+app.use("/api/knowledge-leads", leadsCaptureRoutes);
 app.use("/api/knowledge-base", knowledgeBaseRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
@@ -1929,7 +1929,7 @@ app.get("/api/leads/retention", requireSession, async (req, res) => {
       if (s._id === "Lost") topCounts.Lost = s.count;
       else topCounts.Active += s.count;
       total += s.count;
-    }
+    } 
     topCounts.All = total;
 
     res.json({
