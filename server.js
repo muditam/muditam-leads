@@ -1596,16 +1596,41 @@ app.get('/api/leads', requireSession, async (req, res) => {
 
 app.post('/api/leads', requireSession, async (req, res) => {
   try {
-    if (req.body.contactNumber) {
-      req.body.contactNumber = phoneLast10(req.body.contactNumber);
+    const { __draft, ...body } = req.body || {};
+    const payload = { ...body };
+
+    if (payload.contactNumber) {
+      payload.contactNumber = phoneLast10(payload.contactNumber);
     }
 
-    const newLead = new Lead(req.body);
-    await newLead.save();
+    ["amountPaid", "partialPayment"].forEach((field) => {
+      if (payload[field] === "") {
+        delete payload[field];
+      }
+    });
+
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] === "") {
+        delete payload[key];
+      }
+    });
+
+    const newLead = new Lead(payload);
+    if (__draft) {
+      await newLead.save({ validateBeforeSave: false });
+    } else {
+      await newLead.save();
+    }
+
     res.status(201).json({ message: 'Lead added successfully', lead: newLead });
   } catch (error) {
     console.error('Error adding lead:', error);
-    res.status(500).json({ message: 'Error adding lead', error });
+    const statusCode =
+      error.name === "ValidationError" || error.name === "CastError" ? 400 : 500;
+    res.status(statusCode).json({
+      message: error.message || 'Error adding lead',
+      error,
+    });
   }
 });
 
