@@ -13,6 +13,7 @@ const WhatsAppTemplate = require("./whatsaapModels/WhatsAppTemplate");
 
 const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
+const Employee = require("../models/Employee");
 
 const router = express.Router();
 
@@ -912,12 +913,6 @@ const emitConversationPatch = (req, { phone10, patch }) => {
     phone: p10,
     patch,
   });
-};
-
-const emitInboxUpdate = (req) => {
-  const io = req?.app?.get("io");
-  if (!io) return;
-  io.to("wa:inbox").emit("wa:inbox:update", { at: new Date().toISOString() });
 };
 
 function freeformExpiryFromConvo(convo) {
@@ -1941,7 +1936,6 @@ router.post("/conversations/mark-read", async (req, res) => {
       phone10: p10,
       patch: { unreadCount: 0, lastReadAt: now },
     });
-    emitInboxUpdate(req);
 
     return res.json({ success: true, conversation: updated || null });
   } catch (e) {
@@ -1952,7 +1946,7 @@ router.post("/conversations/mark-read", async (req, res) => {
 
 router.get("/conversations", async (req, res) => {
   try {
-    const { role, userName } = req.query;
+    const { role, userName, userId, hasTeam, chatScope } = req.query;
 
     const conversations = await WhatsAppConversation.find({})
       .sort({ lastMessageAt: -1 })
@@ -2002,15 +1996,108 @@ router.get("/conversations", async (req, res) => {
     });
 
     const r = String(role || "");
+    const normalizedRole = String(role || "").trim().toLowerCase();
+    const normalizedUserName = String(userName || "").trim().toLowerCase();
+    const userHasTeam = String(hasTeam || "").trim().toLowerCase() === "true";
+    const scope = String(chatScope || "").trim().toLowerCase();
     const isAdmin =
       ["Manager", "Developer", "Super Admin", "Admin"].includes(r) ||
       r.toLowerCase().includes("admin") ||
       r.toLowerCase().includes("manager");
 
+    const isAssistantTeamLeadLike =
+      userHasTeam &&
+      (normalizedRole === "assistant team lead" ||
+        normalizedRole === "retention agent");
+    const isTeamLeaderLike =
+      userHasTeam &&
+      (normalizedRole === "team leader" || normalizedRole === "team-leader");
+
+    if (userHasTeam && (normalizedUserName || String(userId || "").trim())) {
+      let employee = null;
+      const rawUserId = String(userId || "").trim();
+
+      if (mongoose.Types.ObjectId.isValid(rawUserId)) {
+        employee = await Employee.findById(rawUserId)
+          .select("_id fullName teamMembers")
+          .lean();
+      }
+
+      if (!employee && normalizedUserName) {
+        employee = await Employee.findOne({
+          fullName: {
+            $regex: new RegExp(
+              `^${String(userName).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+              "i"
+            ),
+          },
+        })
+          .select("_id fullName teamMembers")
+          .lean();
+      }
+
+      if (employee?._id) {
+        const employeeNameNormalized = String(employee?.fullName || "")
+          .trim()
+          .toLowerCase();
+        let directReports = await Employee.find({
+          teamLeader: employee._id,
+          status: "active",
+        })
+          .select("fullName")
+          .lean();
+
+        if (!directReports.length && Array.isArray(employee?.teamMembers) && employee.teamMembers.length) {
+          directReports = await Employee.find({
+            _id: { $in: employee.teamMembers },
+            status: "active",
+          })
+            .select("fullName")
+            .lean();
+        }
+
+        const teamNames = new Set(
+          (directReports || [])
+            .map((emp) => String(emp?.fullName || "").trim().toLowerCase())
+            .filter(Boolean)
+        );
+
+        const filterByNames = (allowedNames) =>
+          enriched.filter((chat) =>
+            allowedNames.has(String(chat.assignedToLabel || "").trim().toLowerCase())
+          );
+
+        if (scope === "team" || (isTeamLeaderLike && !scope)) {
+          enriched = filterByNames(teamNames);
+          return res.json(enriched);
+        }
+
+        if (scope === "self") {
+          enriched = enriched.filter(
+            (chat) =>
+              String(chat.assignedToLabel || "").trim().toLowerCase() ===
+              (employeeNameNormalized || normalizedUserName)
+          );
+          return res.json(enriched);
+        }
+
+        if (
+          scope === "combined" ||
+          (!scope && isAssistantTeamLeadLike)
+        ) {
+          const combined = new Set(teamNames);
+          combined.add(employeeNameNormalized || normalizedUserName);
+          enriched = filterByNames(combined);
+          return res.json(enriched);
+        }
+      }
+    }
+
     if (!isAdmin) {
-      const u = String(userName || "").toLowerCase();
       enriched = enriched.filter(
-        (chat) => String(chat.assignedToLabel || "").toLowerCase() === u
+        (chat) =>
+          String(chat.assignedToLabel || "").trim().toLowerCase() ===
+          normalizedUserName
       );
     }
 
@@ -2147,7 +2234,6 @@ router.post("/send-text", async (req, res) => {
         lastOutboundAt: now,
       },
     });
-    emitInboxUpdate(req);
 
     return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
@@ -2349,7 +2435,6 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
         lastOutboundAt: now,
       },
     });
-    emitInboxUpdate(req);
 
     return res.json({
       success: true,
@@ -2526,7 +2611,6 @@ router.post("/send-template", async (req, res) => {
         lastOutboundAt: now,
       },
     });
-    emitInboxUpdate(req);
 
     return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
@@ -3148,7 +3232,6 @@ router.post("/webhook", async (req, res) => {
           unreadCount: updatedConv?.unreadCount ?? 1,
         },
       });
-      emitInboxUpdate(req);
     }
 
     return res.sendStatus(200);
