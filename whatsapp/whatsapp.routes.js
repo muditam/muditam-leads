@@ -1998,7 +1998,6 @@ router.get("/conversations", async (req, res) => {
     const r = String(role || "");
     const normalizedRole = String(role || "").trim().toLowerCase();
     const normalizedUserName = String(userName || "").trim().toLowerCase();
-    const userHasTeam = String(hasTeam || "").trim().toLowerCase() === "true";
     const scope = String(chatScope || "").trim().toLowerCase();
     const isAdmin =
       ["Manager", "Developer", "Super Admin", "Admin"].includes(r) ||
@@ -2006,12 +2005,14 @@ router.get("/conversations", async (req, res) => {
       r.toLowerCase().includes("manager");
 
     const isAssistantTeamLeadLike =
-      userHasTeam &&
       (normalizedRole === "assistant team lead" ||
         normalizedRole === "retention agent");
     const isTeamLeaderLike =
-      userHasTeam &&
       (normalizedRole === "team leader" || normalizedRole === "team-leader");
+    const userHasTeam =
+      String(hasTeam || "").trim().toLowerCase() === "true" ||
+      isAssistantTeamLeadLike ||
+      isTeamLeaderLike;
 
     if (userHasTeam && (normalizedUserName || String(userId || "").trim())) {
       let employee = null;
@@ -2047,6 +2048,14 @@ router.get("/conversations", async (req, res) => {
           .select("fullName")
           .lean();
 
+        if (!directReports.length) {
+          directReports = await Employee.find({
+            teamLeader: employee._id,
+          })
+            .select("fullName")
+            .lean();
+        }
+
         if (!directReports.length && Array.isArray(employee?.teamMembers) && employee.teamMembers.length) {
           directReports = await Employee.find({
             _id: { $in: employee.teamMembers },
@@ -2054,6 +2063,14 @@ router.get("/conversations", async (req, res) => {
           })
             .select("fullName")
             .lean();
+
+          if (!directReports.length) {
+            directReports = await Employee.find({
+              _id: { $in: employee.teamMembers },
+            })
+              .select("fullName")
+              .lean();
+          }
         }
 
         const teamNames = new Set(
@@ -2068,7 +2085,19 @@ router.get("/conversations", async (req, res) => {
           );
 
         if (scope === "team" || (isTeamLeaderLike && !scope)) {
-          enriched = filterByNames(teamNames);
+          if (teamNames.size > 0) {
+            enriched = filterByNames(teamNames);
+            return res.json(enriched);
+          }
+          // Team leader fallback: if no resolvable team members, at least return self chats.
+          const fallbackSelf = employeeNameNormalized || normalizedUserName;
+          if (fallbackSelf) {
+            enriched = enriched.filter(
+              (chat) =>
+                String(chat.assignedToLabel || "").trim().toLowerCase() ===
+                fallbackSelf
+            );
+          }
           return res.json(enriched);
         }
 
