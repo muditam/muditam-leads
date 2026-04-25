@@ -2537,12 +2537,20 @@ async function buildCashWalletData({
   endDate,
   employee,
 }) {
-  const role = employee.role;
+  const role = String(employee?.role || "").trim();
+  const normalizedRole = role.toLowerCase();
+  const isSalesAgentRole = normalizedRole === "sales agent";
+  const isRetentionLikeRole = [
+    "retention agent",
+    "assistant team lead",
+    "team leader",
+    "team-leader",
+  ].includes(normalizedRole);
   const { startObj, endObj } = getDateRangeObjects(startDate, endDate);
 
   let rows = [];
 
-  if (role === "Sales Agent") {
+  if (isSalesAgentRole) {
     const leadQuery = { agentAssigned: agentName };
 
     if (startDate || endDate) {
@@ -2595,7 +2603,7 @@ async function buildCashWalletData({
         };
       }),
     ];
-  } else if (role === "Retention Agent") {
+  } else if (isRetentionLikeRole) {
     const retentionQuery = { orderCreatedBy: agentName };
 
     if (startDate || endDate) {
