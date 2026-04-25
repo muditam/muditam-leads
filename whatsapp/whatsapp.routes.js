@@ -1038,6 +1038,9 @@ async function runAutoReplyWatchdog() {
     for (const convo of candidates || []) {
       const inboundAt = convo?.lastInboundAt ? new Date(convo.lastInboundAt) : null;
       if (!inboundAt || Number.isNaN(inboundAt.getTime())) continue;
+      const previousAutoReplyForInboundAt = convo?.autoReplyForInboundAt
+        ? new Date(convo.autoReplyForInboundAt)
+        : null;
 
       const outboundAt = convo?.lastOutboundAt
         ? new Date(convo.lastOutboundAt)
@@ -1064,6 +1067,41 @@ async function runAutoReplyWatchdog() {
       if (!phone || !p10) continue;
 
       try {
+        // Atomically claim this inbound cycle before generating/sending to prevent
+        // duplicate auto-replies from concurrent watchdog runs/processes.
+        const claimResult = await WhatsAppConversation.updateOne(
+          {
+            _id: convo._id,
+            lastInboundAt: inboundAt,
+            $and: [
+              {
+                $or: [
+                  { lastOutboundAt: null },
+                  { lastOutboundAt: { $lt: inboundAt } },
+                ],
+              },
+              {
+                $or: [
+                  { autoReplyForInboundAt: null },
+                  { autoReplyForInboundAt: { $lt: inboundAt } },
+                ],
+              },
+            ],
+          },
+          {
+            $set: {
+              autoReplyForInboundAt: inboundAt,
+            },
+          }
+        );
+
+        const claimed = Boolean(
+          claimResult?.modifiedCount || claimResult?.nModified
+        );
+        if (!claimed) {
+          continue;
+        }
+
         const aiReplyText = await generateSmartAutoReplyText({ p10, inboundAt });
         const replyText = aiReplyText || AUTO_REPLY_TEXT;
         if (!replyText) continue;
@@ -1117,6 +1155,30 @@ async function runAutoReplyWatchdog() {
           `[WA auto-reply] sent (${aiReplyText ? "ai" : "fallback"}) to ${p10} after ${AUTO_REPLY_DELAY_MINUTES}m inactivity`
         );
       } catch (sendErr) {
+        // Release claim so watchdog can retry this inbound cycle later.
+        try {
+          await WhatsAppConversation.updateOne(
+            {
+              _id: convo._id,
+              autoReplyForInboundAt: inboundAt,
+              $or: [{ lastOutboundAt: null }, { lastOutboundAt: { $lt: inboundAt } }],
+            },
+            {
+              $set: {
+                autoReplyForInboundAt:
+                  previousAutoReplyForInboundAt &&
+                  !Number.isNaN(previousAutoReplyForInboundAt.getTime())
+                    ? previousAutoReplyForInboundAt
+                    : null,
+              },
+            }
+          );
+        } catch (releaseErr) {
+          console.error(
+            `[WA auto-reply] release claim failed for ${p10}:`,
+            releaseErr?.message || releaseErr
+          );
+        }
         console.error(
           `[WA auto-reply] failed for ${p10}:`,
           sendErr?.message || sendErr
@@ -2141,23 +2203,36 @@ router.get("/messages", async (req, res) => {
   try {
     const q = digitsOnly(req.query.phone);
     if (!q) return res.status(400).json({ message: "phone required" });
+    const limitRaw = Number(req.query.limit || 0);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0
+      ? Math.min(100, Math.floor(limitRaw))
+      : null;
+    const beforeRaw = String(req.query.before || "").trim();
+    const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
 
     const waId = normalizeWaId(q);
     const l10 = waId.slice(-10);
 
-    const msgs = await WhatsAppMessage.find({
+    const baseQuery = {
       $or: [
         { from: waId },
         { to: waId },
         { from: new RegExp(`${l10}$`) },
         { to: new RegExp(`${l10}$`) },
       ],
-    })
-      .sort({ timestamp: 1 })
-      .lean();
+    };
+    if (beforeDate && !Number.isNaN(beforeDate.getTime())) {
+      baseQuery.timestamp = { $lt: beforeDate };
+    }
+
+    const query = WhatsAppMessage.find(baseQuery)
+      .sort(limit ? { timestamp: -1, createdAt: -1 } : { timestamp: 1, createdAt: 1 });
+    if (limit) query.limit(limit);
+    const msgs = await query.lean();
+    const rows = limit ? msgs.slice().reverse() : msgs;
 
     const byIdentity = new Map();
-    for (const msg of msgs || []) {
+    for (const msg of rows || []) {
       const k = messageIdentityKeyForList(msg);
       const prev = byIdentity.get(k);
       if (!prev) {
