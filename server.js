@@ -688,7 +688,7 @@ app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
 app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes);
 app.use("/api/tasks", taskBoardRoutes);
 app.use("/api/tasks/reporting", taskReportingRoutes);
-app.use("/api/employees", SwitchEmployee);
+app.use("/api/switch-dashboard", SwitchEmployee);
 app.use("/api/order-confirmation", ConfirmedOrders);
 app.use('/api/invoices', invoiceRoutes);
 
