@@ -7,7 +7,9 @@ const AWS = require('aws-sdk');
 const path = require('path');
 const axios = require('axios');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const requireSession = require('../middleware/requireSession');
+const FoodByCat = require('../models/FoodByCat');
 
 const router = express.Router();
 const upload = multer({
@@ -238,6 +240,106 @@ router.post('/api/upload-image-from-url', requireUploadApiKey, uploadImageFromUr
 
 // Session route (for internal frontend users)
 router.post('/api/diet-image-migration/upload-from-url', requireSession, uploadImageFromUrlHandler);
+
+// Push reviewed image-link updates to DB.
+// Body:
+// {
+//   collectionName?: "food_by_cat",
+//   rows: [{ _id: "50", update: { imageId?: "...", brandLogo?: "..." } }]
+// }
+router.post('/api/diet-image-migration/push-to-db', requireUploadApiKey, async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const collectionName = String(req.body?.collectionName || 'food_by_cat').trim();
+
+    if (!rows.length) {
+      return res.status(400).json({ ok: false, message: 'rows array is required' });
+    }
+    if (!collectionName) {
+      return res.status(400).json({ ok: false, message: 'collectionName is required' });
+    }
+
+    if (collectionName !== 'food_by_cat') {
+      return res.status(400).json({
+        ok: false,
+        message: 'Unsupported collectionName. Allowed value: food_by_cat',
+      });
+    }
+
+    let matched = 0;
+    let modified = 0;
+    const notFound = [];
+    const errors = [];
+
+    for (const row of rows) {
+      const rawId = String(row?._id ?? '').trim();
+      const incomingRow = row?.row && typeof row.row === 'object' ? row.row : null;
+      const update = row?.update && typeof row.update === 'object' ? row.update : null;
+      const fullRowPayload = incomingRow || update;
+
+      if (!rawId || !fullRowPayload || !Object.keys(fullRowPayload).length) {
+        errors.push({ _id: rawId || '', error: 'Invalid row payload' });
+        continue;
+      }
+
+      const nextRow = { ...fullRowPayload };
+      // Keep migration helper columns out of persisted record.
+      delete nextRow.New_Image_ID;
+      delete nextRow.NewBrandLogo;
+
+      const filterOptions = [{ _id: rawId }];
+      const asNumber = Number(rawId);
+      if (!Number.isNaN(asNumber)) filterOptions.push({ _id: asNumber });
+      if (mongoose.Types.ObjectId.isValid(rawId)) {
+        filterOptions.push({ _id: new mongoose.Types.ObjectId(rawId) });
+      }
+
+      try {
+        const existing = await FoodByCat.findOne({ $or: filterOptions }).lean();
+
+        // Build the exact document shape to persist from sheet row.
+        // If doc exists, preserve existing _id type; otherwise derive from incoming row/raw id.
+        const replacementDoc = { ...nextRow };
+        if (existing?._id !== undefined) {
+          replacementDoc._id = existing._id;
+        } else if (nextRow?._id !== undefined && nextRow?._id !== "") {
+          replacementDoc._id = nextRow._id;
+        } else if (!Number.isNaN(asNumber)) {
+          replacementDoc._id = asNumber;
+        } else if (mongoose.Types.ObjectId.isValid(rawId)) {
+          replacementDoc._id = new mongoose.Types.ObjectId(rawId);
+        } else {
+          replacementDoc._id = rawId;
+        }
+
+        if (existing?._id !== undefined) {
+          const result = await FoodByCat.replaceOne({ _id: existing._id }, replacementDoc);
+          matched += Number(result.matchedCount || 0);
+          modified += Number(result.modifiedCount || 0);
+        } else {
+          await FoodByCat.create(replacementDoc);
+          modified += 1;
+          notFound.push(rawId);
+        }
+      } catch (error) {
+        errors.push({ _id: rawId, error: error.message || 'Update failed' });
+      }
+    }
+
+    return res.status(200).json({
+      ok: true,
+      collectionName,
+      total: rows.length,
+      matched,
+      modified,
+      notFound,
+      errors,
+    });
+  } catch (error) {
+    console.error('Error in /api/diet-image-migration/push-to-db:', error);
+    return res.status(500).json({ ok: false, message: 'Push failed', error: error.message });
+  }
+});
 
 module.exports = router;
  
