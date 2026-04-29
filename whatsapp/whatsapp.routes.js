@@ -10,6 +10,7 @@ const OpenAI = require("openai");
 const WhatsAppMessage = require("./whatsaapModels/WhatsAppMessage");
 const WhatsAppConversation = require("./whatsaapModels/WhatsAppConversation");
 const WhatsAppTemplate = require("./whatsaapModels/WhatsAppTemplate");
+const WhatsAppAutoReplySettings = require("../models/WhatsAppAutoReplySettings");
 
 const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
@@ -45,10 +46,10 @@ const upload = multer({
   limits: { fileSize: MAX_UPLOAD_BYTES },
 });
 
-const AUTO_REPLY_ENABLED =
+const DEFAULT_AUTO_REPLY_ENABLED =
   String(process.env.WHATSAPP_AUTO_REPLY_ENABLED ?? "true").toLowerCase() !==
   "false";
-const AUTO_REPLY_DELAY_MINUTES = Math.max(
+const DEFAULT_AUTO_REPLY_DELAY_MINUTES = Math.max(
   1,
   Number(process.env.WHATSAPP_AUTO_REPLY_DELAY_MINUTES || 15)
 );
@@ -82,6 +83,32 @@ const AUTO_REPLY_CAN_SEND = Boolean(
   AUTO_REPLY_TEXT || (AUTO_REPLY_AI_ENABLED && openai)
 );
 let autoReplyWatchdogRunning = false;
+
+async function getAutoReplyRuntimeSettings() {
+  try {
+    const doc = await WhatsAppAutoReplySettings.findOne({
+      singletonKey: "default",
+    })
+      .select("enabled delayMinutes")
+      .lean();
+    return {
+      enabled:
+        typeof doc?.enabled === "boolean"
+          ? doc.enabled
+          : DEFAULT_AUTO_REPLY_ENABLED,
+      delayMinutes: Math.max(
+        1,
+        Number(doc?.delayMinutes || DEFAULT_AUTO_REPLY_DELAY_MINUTES)
+      ),
+    };
+  } catch (e) {
+    console.error("[WA auto-reply] settings read failed:", e?.message || e);
+    return {
+      enabled: DEFAULT_AUTO_REPLY_ENABLED,
+      delayMinutes: DEFAULT_AUTO_REPLY_DELAY_MINUTES,
+    };
+  }
+}
 
 /* ----------------------------------------
    TRUSTSIGNAL CONFIG
@@ -1014,18 +1041,18 @@ Rules:
 }
 
 async function runAutoReplyWatchdog() {
-  if (
-    !AUTO_REPLY_ENABLED ||
-    autoReplyWatchdogRunning ||
-    !AUTO_REPLY_CAN_SEND
-  ) {
+  if (autoReplyWatchdogRunning || !AUTO_REPLY_CAN_SEND) {
     return;
   }
   autoReplyWatchdogRunning = true;
 
   try {
+    const runtimeSettings = await getAutoReplyRuntimeSettings();
+    if (!runtimeSettings.enabled) return;
+
     const sender = getTrustSignalSenderOrThrow();
-    const cutoff = new Date(Date.now() - AUTO_REPLY_DELAY_MINUTES * 60 * 1000);
+    const delayMinutes = Math.max(1, Number(runtimeSettings.delayMinutes || 15));
+    const cutoff = new Date(Date.now() - delayMinutes * 60 * 1000);
 
     const candidates = await WhatsAppConversation.find({
       lastInboundAt: { $ne: null, $lte: cutoff },
@@ -1152,7 +1179,7 @@ async function runAutoReplyWatchdog() {
         );
 
         console.log(
-          `[WA auto-reply] sent (${aiReplyText ? "ai" : "fallback"}) to ${p10} after ${AUTO_REPLY_DELAY_MINUTES}m inactivity`
+          `[WA auto-reply] sent (${aiReplyText ? "ai" : "fallback"}) to ${p10} after ${delayMinutes}m inactivity`
         );
       } catch (sendErr) {
         // Release claim so watchdog can retry this inbound cycle later.
@@ -3345,7 +3372,7 @@ router.post("/webhook", async (req, res) => {
   }
 });
 
-if (AUTO_REPLY_ENABLED && AUTO_REPLY_CAN_SEND) {
+if (AUTO_REPLY_CAN_SEND) {
   setTimeout(() => {
     runAutoReplyWatchdog().catch((e) =>
       console.error("[WA auto-reply] startup run error:", e?.message || e)

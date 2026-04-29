@@ -19,9 +19,25 @@ router.get("/products/from-orders", async (req, res) => {
   try {
     const { page = 1, limit = 50 } = req.query;
     const pageNum = toInt(page, 1);
-    const perPage = Math.min(toInt(limit, 50), 200);
+    const perPage = Math.min(toInt(limit, 50), 5000);
+    const startDate = (req.query.startDate || "").trim();
+    const endDate = (req.query.endDate || "").trim();
+
+    const match = {};
+    if (startDate || endDate) {
+      const gte = startDate ? new Date(`${startDate}T00:00:00.000Z`) : null;
+      const lte = endDate ? new Date(`${endDate}T23:59:59.999Z`) : null;
+      const dateCond = {};
+      if (gte) dateCond.$gte = gte;
+      if (lte) dateCond.$lte = lte;
+      match.$or = [
+        { orderDate: dateCond },
+        { $and: [{ orderDate: { $exists: false } }, { createdAt: dateCond }] },
+      ];
+    }
 
     const pipeline = [
+      { $match: match },
       { $project: { productsOrdered: 1 } },
       { $unwind: "$productsOrdered" },
 
@@ -63,6 +79,11 @@ router.get("/products/from-orders", async (req, res) => {
           variantId: { $first: "$productsOrdered.variant_id" },
           month:     { $first: "$productsOrdered.month" },
           cohort:    { $first: "$productsOrdered.cohort" },
+          soldCount: {
+            $sum: {
+              $ifNull: ["$productsOrdered.quantity", 0],
+            },
+          },
         },
       },
 
@@ -83,6 +104,7 @@ router.get("/products/from-orders", async (req, res) => {
                 price: { $ifNull: ["$price", 0] },
                 month: { $ifNull: ["$month", ""] },
                 cohort: { $ifNull: ["$cohort", "Yes"] },
+                soldCount: { $ifNull: ["$soldCount", 0] },
               },
             },
           ],

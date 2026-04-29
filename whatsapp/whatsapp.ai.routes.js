@@ -7,6 +7,7 @@ const requireSession = require("../middleware/requireSession");
 const WhatsAppMessage = require("./whatsaapModels/WhatsAppMessage");
 const WhatsAppConversation = require("./whatsaapModels/WhatsAppConversation");
 const WhatsAppAIPromptSettings = require("../models/WhatsAppAIPromptSettings");
+const WhatsAppAutoReplySettings = require("../models/WhatsAppAutoReplySettings");
 const {
  findBestKnowledgeEntry,
  touchKnowledgeUsage,
@@ -56,6 +57,13 @@ Rules:
 - Never claim "not available" or "not found" unless the provided context explicitly says that.
 - If missing info is required, ask 1-2 clarifying questions inside the message.
 `.trim();
+const DEFAULT_AUTO_REPLY_ENABLED =
+ String(process.env.WHATSAPP_AUTO_REPLY_ENABLED ?? "true").toLowerCase() !==
+ "false";
+const DEFAULT_AUTO_REPLY_DELAY_MINUTES = Math.max(
+ 1,
+ Number(process.env.WHATSAPP_AUTO_REPLY_DELAY_MINUTES || 15)
+);
 
 
 function safeStr(x) {
@@ -207,6 +215,31 @@ async function getOrCreateAIPromptSettings() {
  }
 
 
+ return doc;
+}
+
+async function getOrCreateAutoReplySettings() {
+ let doc = await WhatsAppAutoReplySettings.findOne({ singletonKey: "default" });
+ if (!doc) {
+   doc = await WhatsAppAutoReplySettings.create({
+     singletonKey: "default",
+     enabled: DEFAULT_AUTO_REPLY_ENABLED,
+     delayMinutes: DEFAULT_AUTO_REPLY_DELAY_MINUTES,
+     updatedBy: { id: "", name: "system", email: "" },
+   });
+   return doc;
+ }
+
+ if (typeof doc.enabled !== "boolean") {
+   doc.enabled = DEFAULT_AUTO_REPLY_ENABLED;
+ }
+ if (!Number.isFinite(Number(doc.delayMinutes))) {
+   doc.delayMinutes = DEFAULT_AUTO_REPLY_DELAY_MINUTES;
+ }
+ doc.delayMinutes = clamp(Number(doc.delayMinutes), 1, 1440);
+ if (doc.isModified()) {
+   await doc.save();
+ }
  return doc;
 }
 
@@ -754,6 +787,60 @@ router.patch("/ai-prompt-settings", requireSession, async (req, res) => {
  }
 });
 
+router.get("/auto-reply-settings", requireSession, async (_req, res) => {
+ try {
+   const settings = await getOrCreateAutoReplySettings();
+   return res.json({
+     settings: {
+       enabled: Boolean(settings.enabled),
+       delayMinutes: clamp(Number(settings.delayMinutes), 1, 1440),
+       updatedAt: settings.updatedAt || null,
+       updatedBy: {
+         id: safeStr(settings?.updatedBy?.id),
+         name: safeStr(settings?.updatedBy?.name),
+         email: safeStr(settings?.updatedBy?.email),
+       },
+     },
+   });
+ } catch (e) {
+   console.error("auto reply settings get error:", e);
+   return res.status(500).json({ message: "Failed to fetch auto reply settings" });
+ }
+});
+
+router.patch("/auto-reply-settings", requireSession, async (req, res) => {
+ try {
+   const actor = actorFromRequest(req);
+   const settings = await getOrCreateAutoReplySettings();
+
+   if (Object.prototype.hasOwnProperty.call(req.body || {}, "enabled")) {
+     settings.enabled = Boolean(req.body.enabled);
+   }
+   if (Object.prototype.hasOwnProperty.call(req.body || {}, "delayMinutes")) {
+     settings.delayMinutes = clamp(Number(req.body.delayMinutes), 1, 1440);
+   }
+   settings.updatedBy = actor;
+   await settings.save();
+
+   return res.json({
+     ok: true,
+     settings: {
+       enabled: Boolean(settings.enabled),
+       delayMinutes: clamp(Number(settings.delayMinutes), 1, 1440),
+       updatedAt: settings.updatedAt || null,
+       updatedBy: {
+         id: safeStr(settings?.updatedBy?.id),
+         name: safeStr(settings?.updatedBy?.name),
+         email: safeStr(settings?.updatedBy?.email),
+       },
+     },
+   });
+ } catch (e) {
+   console.error("auto reply settings update error:", e);
+   return res.status(500).json({ message: "Failed to update auto reply settings" });
+ }
+});
+
 
 /**
 * POST /api/whatsapp/help-me-write
@@ -1069,6 +1156,5 @@ Rewrite now.
 
 
 module.exports = router;
-
 
 
