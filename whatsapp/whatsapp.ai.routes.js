@@ -64,6 +64,9 @@ const DEFAULT_AUTO_REPLY_DELAY_MINUTES = Math.max(
  1,
  Number(process.env.WHATSAPP_AUTO_REPLY_DELAY_MINUTES || 15)
 );
+const DEFAULT_AUTO_REPLY_AI_SIGNATURE = String(
+ process.env.WHATSAPP_AUTO_REPLY_AI_SIGNATURE || "~ AI ✨"
+).trim();
 
 
 function safeStr(x) {
@@ -225,6 +228,7 @@ async function getOrCreateAutoReplySettings() {
      singletonKey: "default",
      enabled: DEFAULT_AUTO_REPLY_ENABLED,
      delayMinutes: DEFAULT_AUTO_REPLY_DELAY_MINUTES,
+     aiSignature: DEFAULT_AUTO_REPLY_AI_SIGNATURE,
      updatedBy: { id: "", name: "system", email: "" },
    });
    return doc;
@@ -235,6 +239,9 @@ async function getOrCreateAutoReplySettings() {
  }
  if (!Number.isFinite(Number(doc.delayMinutes))) {
    doc.delayMinutes = DEFAULT_AUTO_REPLY_DELAY_MINUTES;
+ }
+ if (!safeStr(doc.aiSignature)) {
+   doc.aiSignature = DEFAULT_AUTO_REPLY_AI_SIGNATURE;
  }
  doc.delayMinutes = clamp(Number(doc.delayMinutes), 1, 1440);
  if (doc.isModified()) {
@@ -794,6 +801,7 @@ router.get("/auto-reply-settings", requireSession, async (_req, res) => {
      settings: {
        enabled: Boolean(settings.enabled),
        delayMinutes: clamp(Number(settings.delayMinutes), 1, 1440),
+       aiSignature: safeStr(settings.aiSignature || DEFAULT_AUTO_REPLY_AI_SIGNATURE),
        updatedAt: settings.updatedAt || null,
        updatedBy: {
          id: safeStr(settings?.updatedBy?.id),
@@ -819,6 +827,9 @@ router.patch("/auto-reply-settings", requireSession, async (req, res) => {
    if (Object.prototype.hasOwnProperty.call(req.body || {}, "delayMinutes")) {
      settings.delayMinutes = clamp(Number(req.body.delayMinutes), 1, 1440);
    }
+   if (Object.prototype.hasOwnProperty.call(req.body || {}, "aiSignature")) {
+     settings.aiSignature = safeStr(req.body.aiSignature).slice(0, 80);
+   }
    settings.updatedBy = actor;
    await settings.save();
 
@@ -827,6 +838,7 @@ router.patch("/auto-reply-settings", requireSession, async (req, res) => {
      settings: {
        enabled: Boolean(settings.enabled),
        delayMinutes: clamp(Number(settings.delayMinutes), 1, 1440),
+       aiSignature: safeStr(settings.aiSignature || DEFAULT_AUTO_REPLY_AI_SIGNATURE),
        updatedAt: settings.updatedAt || null,
        updatedBy: {
          id: safeStr(settings?.updatedBy?.id),
@@ -1156,5 +1168,4 @@ Rewrite now.
 
 
 module.exports = router;
-
 

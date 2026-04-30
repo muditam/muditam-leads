@@ -152,6 +152,36 @@ function categorizeDaysRemaining(daysRemaining) {
   return "supply20PlusDays";
 }
 
+const PHONE_IN_CHUNK_SIZE = 1500;
+
+async function fetchOrdersForPhones({ phones, lowerBound, projection }) {
+  const normalizedPhones = Array.from(
+    new Set((phones || []).map((p) => normalizePhone(p)).filter(Boolean))
+  );
+  if (!normalizedPhones.length) return [];
+
+  const chunks = [];
+  for (let i = 0; i < normalizedPhones.length; i += PHONE_IN_CHUNK_SIZE) {
+    chunks.push(normalizedPhones.slice(i, i + PHONE_IN_CHUNK_SIZE));
+  }
+
+  const out = [];
+  for (const chunk of chunks) {
+    const rows = await ShopifyOrder.find(
+      {
+        orderDate: { $gte: lowerBound },
+        $or: [
+          { normalizedPhone: { $in: chunk } },
+          { contactNumber: { $in: chunk } },
+        ],
+      },
+      projection
+    ).lean();
+    out.push(...rows);
+  }
+  return out;
+}
+
 /**
  * GET /cohart-dataApi/combined-overview
  * Query params:
@@ -216,19 +246,17 @@ router.get("/combined-overview", async (req, res) => {
       }
     }
 
-    const phonesForQuery = assignedActivePhones;
-    const docs = phonesForQuery.length
-      ? await ShopifyOrder.find(
-          {
-            orderDate: { $gte: lowerBound },
-            $or: [
-              { normalizedPhone: { $in: phonesForQuery } },
-              { contactNumber: { $in: phonesForQuery } },
-            ],
-          },
+    const phonesForQuery = allowedPhones ? Array.from(allowedPhones) : null;
+    const docs = phonesForQuery
+      ? await fetchOrdersForPhones({
+          phones: phonesForQuery,
+          lowerBound,
+          projection: "customerName contactNumber normalizedPhone orderDate productsOrdered orderName orderId",
+        })
+      : await ShopifyOrder.find(
+          { orderDate: { $gte: lowerBound } },
           "customerName contactNumber normalizedPhone orderDate productsOrdered orderName orderId"
-        ).lean()
-      : [];
+        ).lean();
 
     const latestByCustomerProduct = new Map();
 
@@ -393,13 +421,19 @@ router.get("/active-customers-expert-summary", async (req, res) => {
     const now = new Date();
     const lowerBound = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
 
-    const activeLeadRows = await Lead.find(
-      {
-        retentionStatus: { $regex: /^active$/i },
-        contactNumber: { $exists: true, $ne: null, $ne: "" },
-      },
-      "contactNumber healthExpertAssigned"
-    ).lean();
+    const [activeLeadRows, retentionExperts] = await Promise.all([
+      Lead.find(
+        {
+          retentionStatus: { $regex: /^active$/i },
+          contactNumber: { $exists: true, $ne: null, $ne: "" },
+        },
+        "contactNumber healthExpertAssigned"
+      ).lean(),
+      Employee.find(
+        { status: "active", role: { $regex: /^retention agent$/i } },
+        "fullName"
+      ).lean(),
+    ]);
 
     const phoneToExpert = new Map();
     for (const lead of activeLeadRows || []) {
@@ -416,21 +450,21 @@ router.get("/active-customers-expert-summary", async (req, res) => {
     const activePhones = Array.from(phoneToExpert.keys());
     const activePhoneSet = new Set(activePhones);
 
-    const retentionExperts = await Employee.find(
-      { status: "active", role: { $regex: /^retention agent$/i } },
-      "fullName"
-    ).lean();
     const expertNames = Array.from(
       new Set((retentionExperts || []).map((e) => String(e?.fullName || "").trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
     const expertNameSet = new Set(expertNames);
 
-    const docs = await ShopifyOrder.find(
-      { orderDate: { $gte: lowerBound } },
-      "customerName contactNumber normalizedPhone orderDate productsOrdered orderName orderId"
-    )
-      .sort({ orderDate: 1, _id: 1 })
-      .lean();
+    const assignedActivePhones = Array.from(activePhoneSet).filter((phone) => {
+      const expert = String(phoneToExpert.get(phone) || "").trim();
+      return expertNameSet.has(expert);
+    });
+
+    const docs = await fetchOrdersForPhones({
+      phones: assignedActivePhones,
+      lowerBound,
+      projection: "customerName contactNumber normalizedPhone orderDate productsOrdered orderName orderId",
+    });
 
     const latestByCustomerProduct = new Map();
     for (const order of docs) {
@@ -478,11 +512,6 @@ router.get("/active-customers-expert-summary", async (req, res) => {
       next10Days: 0,
       next10to20Days: 0,
       supply20PlusDays: 0,
-    });
-
-    const assignedActivePhones = Array.from(activePhoneSet).filter((phone) => {
-      const expert = String(phoneToExpert.get(phone) || "").trim();
-      return expertNameSet.has(expert);
     });
 
     const combined = mkCounts();
@@ -584,19 +613,11 @@ router.get("/active-customers-category-details", async (req, res) => {
     }
     const assignedSet = new Set(assignedActivePhones);
 
-    const phonesForQuery = assignedActivePhones;
-    const docs = phonesForQuery.length
-      ? await ShopifyOrder.find(
-          {
-            orderDate: { $gte: lowerBound },
-            $or: [
-              { normalizedPhone: { $in: phonesForQuery } },
-              { contactNumber: { $in: phonesForQuery } },
-            ],
-          },
-          "customerName contactNumber normalizedPhone orderDate productsOrdered"
-        ).lean()
-      : [];
+    const docs = await fetchOrdersForPhones({
+      phones: assignedActivePhones,
+      lowerBound,
+      projection: "customerName contactNumber normalizedPhone orderDate productsOrdered",
+    });
 
     const hasPack = (v) => String(v || "").trim().length > 0;
     const variantPackMap = new Map(); // variant_id -> { pack, ts }

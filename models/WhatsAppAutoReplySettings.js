@@ -18,6 +18,10 @@ const WhatsAppAutoReplySettingsSchema = new mongoose.Schema(
       min: 1,
       max: 1440,
     },
+    aiSignature: {
+      type: String,
+      default: "~ AI ✨",
+    },
     updatedBy: {
       id: { type: String, default: "" },
       name: { type: String, default: "" },

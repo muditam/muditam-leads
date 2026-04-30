@@ -53,6 +53,9 @@ const DEFAULT_AUTO_REPLY_DELAY_MINUTES = Math.max(
   1,
   Number(process.env.WHATSAPP_AUTO_REPLY_DELAY_MINUTES || 15)
 );
+const DEFAULT_AUTO_REPLY_AI_SIGNATURE = String(
+  process.env.WHATSAPP_AUTO_REPLY_AI_SIGNATURE || "~ AI ✨"
+).trim();
 const AUTO_REPLY_SCAN_INTERVAL_MS = Math.max(
   15000,
   Number(process.env.WHATSAPP_AUTO_REPLY_SCAN_INTERVAL_MS || 60000)
@@ -89,7 +92,7 @@ async function getAutoReplyRuntimeSettings() {
     const doc = await WhatsAppAutoReplySettings.findOne({
       singletonKey: "default",
     })
-      .select("enabled delayMinutes")
+      .select("enabled delayMinutes aiSignature")
       .lean();
     return {
       enabled:
@@ -100,12 +103,14 @@ async function getAutoReplyRuntimeSettings() {
         1,
         Number(doc?.delayMinutes || DEFAULT_AUTO_REPLY_DELAY_MINUTES)
       ),
+      aiSignature: safeStr(doc?.aiSignature || DEFAULT_AUTO_REPLY_AI_SIGNATURE),
     };
   } catch (e) {
     console.error("[WA auto-reply] settings read failed:", e?.message || e);
     return {
       enabled: DEFAULT_AUTO_REPLY_ENABLED,
       delayMinutes: DEFAULT_AUTO_REPLY_DELAY_MINUTES,
+      aiSignature: DEFAULT_AUTO_REPLY_AI_SIGNATURE,
     };
   }
 }
@@ -968,15 +973,20 @@ function buildAutoReplyTranscript(messages = []) {
     .slice(0, 5000);
 }
 
-function appendAutoReplyAISignature(text = "") {
+function appendAutoReplyAISignature(text = "", signatureText = "") {
   const base = safeStr(text);
   if (!base) return "";
-  const signature = "~ AI ✨";
+  const signature = safeStr(signatureText || DEFAULT_AUTO_REPLY_AI_SIGNATURE);
+  if (!signature) return base;
   if (base.endsWith(signature)) return base;
   return `${base}\n\n${signature}`;
 }
 
-async function generateSmartAutoReplyText({ p10 = "", inboundAt = null }) {
+async function generateSmartAutoReplyText({
+  p10 = "",
+  inboundAt = null,
+  aiSignature = "",
+}) {
   if (!AUTO_REPLY_AI_ENABLED || !openai || !p10) return "";
 
   const phoneRegex = new RegExp(`${p10}$`);
@@ -1033,7 +1043,10 @@ Rules:
       input,
       max_output_tokens: AUTO_REPLY_AI_MAX_OUTPUT_TOKENS,
     });
-    return appendAutoReplyAISignature(safeStr(resp?.output_text)).slice(0, 1800);
+    return appendAutoReplyAISignature(
+      safeStr(resp?.output_text),
+      aiSignature
+    ).slice(0, 1800);
   } catch (e) {
     console.error("[WA auto-reply] AI generation failed:", e?.message || e);
     return "";
@@ -1129,7 +1142,11 @@ async function runAutoReplyWatchdog() {
           continue;
         }
 
-        const aiReplyText = await generateSmartAutoReplyText({ p10, inboundAt });
+        const aiReplyText = await generateSmartAutoReplyText({
+          p10,
+          inboundAt,
+          aiSignature: runtimeSettings.aiSignature,
+        });
         const replyText = aiReplyText || AUTO_REPLY_TEXT;
         if (!replyText) continue;
 
