@@ -10,6 +10,7 @@ const SALES_DEPARTMENTS = new Set(["sales"]);
 const ROLE_TO_DEPARTMENT = {
  "sales agent": "Sales",
  "retention agent": "Retention",
+ "team leader": "Sales",
  manager: "Management",
  "super admin": "Management",
  finance: "Finance",
@@ -35,6 +36,15 @@ function normalizeDepartment(department = "", role = "") {
  const clean = String(department || "").trim().replace(/\s+/g, " ");
  if (clean) return clean;
  return ROLE_TO_DEPARTMENT[String(role || "").toLowerCase()] || "";
+}
+
+function normalizeRole(role = "") {
+ return String(role || "").trim().toLowerCase();
+}
+
+function isTeamLeaderRole(role = "") {
+ const normalized = normalizeRole(role);
+ return normalized === "team leader" || normalized === "team-leader" || normalized === "teamleader";
 }
 
 
@@ -161,6 +171,8 @@ function buildHierarchyTree(employees = []) {
      status: emp.status,
      joiningDate: emp.joiningDate || null,
      joiningSalary: emp.joiningSalary ?? null,
+     currentSalary: emp.currentSalary ?? null,
+     teamLeaderStartDate: emp.teamLeaderStartDate || null,
      target: emp.target || 0,
      reportsTo: emp.teamLeader || null,
      reports: [],
@@ -230,7 +242,7 @@ router.get("/api/employees", async (req, res) => {
 
    const employees = await Employee.find(query)
      .select(
-       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary languages permissions"
+       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate monthlyDeliveredSales totalDeliveredSales languages permissions"
      )
      .populate("teamLeader", "fullName")
      .sort({ fullName: 1 });
@@ -263,7 +275,7 @@ router.get("/api/employees/hierarchy-tree", async (req, res) => {
 
    const employees = await Employee.find(query)
      .select(
-       "fullName email role department status target joiningDate joiningSalary teamLeader"
+       "fullName email role department status target joiningDate joiningSalary currentSalary teamLeaderStartDate teamLeader"
      )
      .sort({ fullName: 1 })
      .lean();
@@ -293,12 +305,12 @@ router.get("/api/employees/:id", async (req, res) => {
 
    const emp = await Employee.findById(id)
      .select(
-       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary languages permissions auditLogs"
+       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate monthlyDeliveredSales totalDeliveredSales languages permissions auditLogs"
      )
      .populate({
        path: "teamMembers",
        select:
-         "fullName email role department status target teamLeader joiningDate joiningSalary permissions",
+         "fullName email role department status target teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate monthlyDeliveredSales totalDeliveredSales permissions",
        populate: {
          path: "teamLeader",
          select: "fullName",
@@ -339,10 +351,13 @@ router.post("/api/employees", async (req, res) => {
    role,
    password,
    target,
+   hasTeam,
    isDoctor,
    teamLeader,
    joiningDate,
    joiningSalary,
+   currentSalary,
+   teamLeaderStartDate,
    languages,
    status,
    permissions,
@@ -355,7 +370,10 @@ router.post("/api/employees", async (req, res) => {
  const isSalesDept = isSalesDepartment(normalizedDepartment);
  const isDoctorChecked = !!isDoctor;
  const salary = toPositiveNumberOrNull(joiningSalary);
- const effectiveTarget = isSalesDept && !isDoctorChecked
+ const liveSalary = toPositiveNumberOrNull(currentSalary);
+ const normalizedRole = normalizeRole(role);
+ const tlStartDate = teamLeaderStartDate || null;
+ const effectiveTarget = isSalesDept && !isDoctorChecked && !isTeamLeaderRole(normalizedRole)
    ? Number(target)
    : 0;
 
@@ -375,7 +393,7 @@ router.post("/api/employees", async (req, res) => {
  }
 
 
- if (isSalesDept && !isDoctorChecked && (!Number.isFinite(effectiveTarget) || effectiveTarget <= 0)) {
+ if (isSalesDept && !isDoctorChecked && !isTeamLeaderRole(normalizedRole) && (!Number.isFinite(effectiveTarget) || effectiveTarget <= 0)) {
    return res
      .status(400)
      .json({ message: "Sales department employees must have a valid target." });
@@ -416,11 +434,15 @@ router.post("/api/employees", async (req, res) => {
      async: 1,
      status: status || "active",
      target: effectiveTarget,
-     hasTeam: false,
+     hasTeam: !!hasTeam,
      isDoctor: isDoctorChecked,
      teamLeader: teamLeader || null,
      joiningDate,
      joiningSalary: salary,
+     currentSalary: liveSalary !== null ? liveSalary : salary,
+     teamLeaderStartDate: isTeamLeaderRole(normalizedRole)
+       ? (tlStartDate || joiningDate || new Date())
+       : null,
      languages: Array.isArray(languages)
        ? [...new Set(languages.map((s) => String(s).trim()))].filter(Boolean)
        : [],
@@ -463,20 +485,25 @@ router.put("/api/employees/:id", async (req, res) => {
 
 
  const {
+   fullName,
+   email,
+   role,
+   department,
    callerId,
    agentNumber,
    password,
    target,
+   hasTeam,
    isDoctor,
    teamLeader,
    joiningDate,
    joiningSalary,
-   department,
+   currentSalary,
+   teamLeaderStartDate,
    languages,
    permissions,
    status,
    changedByName,
-   ...rest
  } = req.body;
 
 
@@ -502,16 +529,16 @@ router.put("/api/employees/:id", async (req, res) => {
 
    const oldStatus = employee.status;
    const previousLeaderId = employee.teamLeader ? String(employee.teamLeader) : null;
-   const updateData = { ...rest };
+   const updateData = {};
 
 
-   if (updateData.fullName !== undefined) {
-     updateData.fullName = normalizeName(updateData.fullName);
+   if (fullName !== undefined) {
+     updateData.fullName = normalizeName(fullName);
    }
 
 
-   if (updateData.email !== undefined) {
-     updateData.email = normalizeEmail(updateData.email);
+   if (email !== undefined) {
+     updateData.email = normalizeEmail(email);
 
 
      const existingEmployee = await Employee.findOne({
@@ -526,9 +553,15 @@ router.put("/api/employees/:id", async (req, res) => {
    }
 
 
+   if (role !== undefined) {
+     updateData.role = role;
+   }
+
+
    if (callerId !== undefined) updateData.callerId = callerId;
    if (agentNumber !== undefined) updateData.agentNumber = agentNumber;
    if (password) updateData.password = password;
+   if (typeof hasTeam !== "undefined") updateData.hasTeam = !!hasTeam;
    if (typeof isDoctor !== "undefined") updateData.isDoctor = isDoctor;
    if (status !== undefined) updateData.status = status;
 
@@ -572,6 +605,22 @@ router.put("/api/employees/:id", async (req, res) => {
    }
 
 
+   if (currentSalary !== undefined) {
+     const salary = toPositiveNumberOrNull(currentSalary);
+     if (salary === null) {
+       return res
+         .status(400)
+         .json({ message: "Current salary must be a valid non-negative number." });
+     }
+     updateData.currentSalary = salary;
+   }
+
+
+   if (teamLeaderStartDate !== undefined) {
+     updateData.teamLeaderStartDate = teamLeaderStartDate || null;
+   }
+
+
    if (department !== undefined) {
      const normalizedDepartment = normalizeDepartment(
        department,
@@ -610,21 +659,21 @@ router.put("/api/employees/:id", async (req, res) => {
      updateData.department ||
      employee.department ||
      normalizeDepartment("", updateData.role || employee.role);
+   const nextRole = updateData.role !== undefined ? updateData.role : employee.role;
+   const previousWasTeamLeader = isTeamLeaderRole(employee.role);
+   const nextIsTeamLeader = isTeamLeaderRole(nextRole);
    const effectiveIsSalesDepartment = isSalesDepartment(effectiveDepartment);
    const effectiveIsDoctor =
      updateData.isDoctor !== undefined ? !!updateData.isDoctor : !!employee.isDoctor;
-   const effectiveHasTeam =
-     typeof employee.hasTeam === "boolean" ? employee.hasTeam : false;
-   const effectiveTarget =
-     updateData.target !== undefined ? updateData.target : employee.target || 0;
+  const effectiveTarget =
+    updateData.target !== undefined ? updateData.target : employee.target || 0;
 
-
-   if (effectiveIsSalesDepartment && !effectiveIsDoctor && !effectiveHasTeam) {
-     if (!Number.isFinite(effectiveTarget) || effectiveTarget <= 0) {
-       return res
-         .status(400)
-         .json({ message: "Sales department employees must have a valid target." });
-     }
+  if (effectiveIsSalesDepartment && !effectiveIsDoctor && !nextIsTeamLeader) {
+    if (!Number.isFinite(effectiveTarget) || effectiveTarget <= 0) {
+      return res
+        .status(400)
+        .json({ message: "Sales department employees must have a valid target." });
+    }
    }
 
 
@@ -634,8 +683,23 @@ router.put("/api/employees/:id", async (req, res) => {
    }
 
 
-   if (!effectiveIsSalesDepartment || effectiveIsDoctor || effectiveHasTeam) {
-     updateData.target = 0;
+  if (!effectiveIsSalesDepartment || effectiveIsDoctor || nextIsTeamLeader) {
+    updateData.target = 0;
+  }
+
+
+   if (nextIsTeamLeader) {
+     if (updateData.teamLeaderStartDate === undefined) {
+       if (previousWasTeamLeader && employee.teamLeaderStartDate) {
+         updateData.teamLeaderStartDate = employee.teamLeaderStartDate;
+       } else if (previousWasTeamLeader && employee.joiningDate) {
+         updateData.teamLeaderStartDate = employee.joiningDate;
+       } else {
+         updateData.teamLeaderStartDate = new Date();
+       }
+     }
+   } else if (updateData.role !== undefined) {
+     updateData.teamLeaderStartDate = null;
    }
 
 
@@ -653,6 +717,24 @@ router.put("/api/employees/:id", async (req, res) => {
    Object.assign(employee, { async: 1, ...updateData });
    await employee.save();
 
+   const savedEmployee = await Employee.findById(employee._id)
+     .select(
+       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate monthlyDeliveredSales totalDeliveredSales languages permissions auditLogs"
+     )
+     .populate("teamLeader", "fullName");
+
+   const responseEmployee = savedEmployee
+     ? {
+         ...safeEmployeeResponse(savedEmployee),
+         teamLeader: savedEmployee.teamLeader
+           ? {
+               _id: savedEmployee.teamLeader._id,
+               fullName: savedEmployee.teamLeader.fullName,
+             }
+           : null,
+       }
+     : safeEmployeeResponse(employee);
+
 
    const nextLeaderId = employee.teamLeader ? String(employee.teamLeader) : null;
    await syncManagerLinks({
@@ -664,7 +746,7 @@ router.put("/api/employees/:id", async (req, res) => {
 
    return res.status(200).json({
      message: "Employee updated successfully",
-     employee: safeEmployeeResponse(employee),
+     employee: responseEmployee,
    });
  } catch (error) {
    console.error("Error updating employee:", error);
@@ -717,7 +799,7 @@ router.delete("/api/employees/:id", async (req, res) => {
 
    const employees = await Employee.find({})
      .select(
-       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary languages permissions"
+       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate languages permissions"
      )
      .populate("teamLeader", "fullName")
      .sort({ fullName: 1 });
@@ -805,7 +887,7 @@ router.put("/api/employees/:id/team", async (req, res) => {
 
    const populated = await Employee.findById(id)
      .select(
-       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary languages permissions"
+       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate languages permissions"
      )
      .populate("teamMembers", "fullName email role department status target");
 
@@ -855,6 +937,3 @@ router.get("/api/employees/:id/audit-logs", async (req, res) => {
 
 
 module.exports = router;
-
-
-

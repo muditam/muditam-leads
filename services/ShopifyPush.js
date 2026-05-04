@@ -233,18 +233,53 @@ router.post("/create-customer", async (req, res) => {
   const { phone, first_name, last_name } = req.body;
   const shopifyStore = process.env.SHOPIFY_STORE_NAME;
   const accessToken = process.env.SHOPIFY_API_SECRET;
-  const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers.json`;
 
-  const payload = {
-    customer: {
-      first_name,
-      last_name,
-      phone,
-    },
-  };
+  if (!phone || !String(first_name || "").trim() || !String(last_name || "").trim()) {
+    return res.status(400).json({
+      message: "phone, first_name and last_name are required",
+    });
+  }
 
   try {
-    const response = await axios.post(url, payload, {
+    const headers = {
+      "X-Shopify-Access-Token": accessToken,
+      "Content-Type": "application/json",
+    };
+    const searchUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers/search.json?query=phone:${encodeURIComponent(
+      phone
+    )}`;
+    const existingResponse = await axios.get(searchUrl, { headers });
+    const existingCustomer = existingResponse.data.customers?.[0];
+
+    if (existingCustomer?.id) {
+      const updateUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers/${existingCustomer.id}.json`;
+      const updatePayload = {
+        customer: {
+          id: existingCustomer.id,
+          first_name,
+          last_name,
+          phone,
+        },
+      };
+      const updatedResponse = await axios.put(updateUrl, updatePayload, {
+        headers,
+      });
+
+      return res.status(200).json({
+        message: "Customer updated successfully",
+        customer: updatedResponse.data.customer,
+      });
+    }
+
+    const createUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers.json`;
+    const createPayload = {
+      customer: {
+        first_name,
+        last_name,
+        phone,
+      },
+    };
+    const response = await axios.post(createUrl, createPayload, {
       headers: {
         "X-Shopify-Access-Token": accessToken,
         "Content-Type": "application/json",
@@ -256,8 +291,10 @@ router.post("/create-customer", async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating customer:", error.response?.data || error.message);
-    res.status(500).json({
-      message: "Error creating customer",
+    res.status(error.response?.status || 500).json({
+      message: error.response?.data?.errors
+        ? "Unable to save customer on Shopify"
+        : "Error creating customer",
       error: error.response?.data || error.message,
     });
   }

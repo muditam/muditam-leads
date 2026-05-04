@@ -18,6 +18,8 @@ const EmployeeSchema = new mongoose.Schema({
  isDoctor: { type: Boolean, default: false },
  joiningDate: { type: Date, default: null },
  joiningSalary: { type: Number, default: null, min: 0 },
+ currentSalary: { type: Number, default: null, min: 0 },
+ teamLeaderStartDate: { type: Date, default: null },
  monthlyDeliveredSales: { type: mongoose.Schema.Types.Mixed, default: {} },
  totalDeliveredSales: { type: Number, default: 0 },
  languages: { type: [String], default: [] },
@@ -73,6 +75,4 @@ EmployeeSchema.methods.addAuditLog = function (actionType, changedBy) {
 
 
 module.exports = mongoose.model("Employee", EmployeeSchema);
-
-
 

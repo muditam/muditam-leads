@@ -94,6 +94,120 @@ const express = require("express");
   );
 }
 
+function startOfUtcDay(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function endOfUtcDay(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
+}
+
+function buildRollingBuckets() {
+  const now = new Date();
+  const todayStart = startOfUtcDay(now);
+  const bucketDefs = [
+    { key: "today", label: "Today", days: 1 },
+    { key: "last2Days", label: "Last 2 Days", days: 2 },
+    { key: "last7Days", label: "Last 7 Days", days: 7 },
+    { key: "last30Days", label: "Last 30 Days", days: 30 },
+    { key: "last90Days", label: "Last 90 Days", days: 90 },
+  ];
+
+  return bucketDefs.map((bucket) => {
+    const start = new Date(todayStart);
+    start.setUTCDate(start.getUTCDate() - (bucket.days - 1));
+    return {
+      ...bucket,
+      start,
+      end: endOfUtcDay(now),
+    };
+  });
+}
+
+function avgHours(values = []) {
+  if (!values.length) return 0;
+  return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2));
+}
+
+function formatUtcDateKey(date) {
+  return new Date(date).toISOString().slice(0, 10);
+}
+
+function buildTrailingWindow(days, offsetDays = 0) {
+  const todayStart = startOfUtcDay(new Date());
+  const start = new Date(todayStart);
+  start.setUTCDate(start.getUTCDate() - (days - 1 + offsetDays));
+  const end = new Date(todayStart);
+  end.setUTCDate(end.getUTCDate() - offsetDays);
+  return {
+    start,
+    end: endOfUtcDay(end),
+  };
+}
+
+function getWindowLabel(window) {
+  return {
+    start: formatUtcDateKey(window.start),
+    end: formatUtcDateKey(window.end),
+  };
+}
+
+function getTimingDirection(current, previous) {
+  const diff = Number((current - previous).toFixed(2));
+  if (Math.abs(diff) < 0.01) return "flat";
+  return diff < 0 ? "improving" : "declining";
+}
+
+function getTimingPercentChange(current, previous) {
+  if (previous > 0) {
+    return Number((((current - previous) / previous) * 100).toFixed(2));
+  }
+  if (current === 0) return 0;
+  return 100;
+}
+
+function summarizeTiming(currentDurations, previousDurations, currentTrendMap, bucketDefs) {
+  const currentAverageHours = avgHours(currentDurations);
+  const previousAverageHours = avgHours(previousDurations);
+  const absoluteChangeHours = Number((currentAverageHours - previousAverageHours).toFixed(2));
+  const percentChange = getTimingPercentChange(currentAverageHours, previousAverageHours);
+  const direction = getTimingDirection(currentAverageHours, previousAverageHours);
+
+  const trend = [];
+  const currentWindow = buildTrailingWindow(30, 0);
+  let cursor = new Date(currentWindow.start);
+  while (cursor <= currentWindow.end) {
+    const key = formatUtcDateKey(cursor);
+    trend.push({
+      date: key,
+      currentHours: avgHours(currentTrendMap.get(key) || []),
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  const totalEligible = currentDurations.length;
+  const buckets = bucketDefs.map((bucket) => {
+    const count = currentDurations.filter((value) => bucket.match(value)).length;
+    return {
+      key: bucket.key,
+      label: bucket.label,
+      count,
+      percent: totalEligible > 0 ? Number(((count / totalEligible) * 100).toFixed(1)) : 0,
+    };
+  });
+
+  return {
+    currentAverageHours,
+    previousAverageHours,
+    absoluteChangeHours,
+    percentChange,
+    direction,
+    eligibleCount: totalEligible,
+    trend,
+    buckets,
+  };
+}
+
   router.get("/orders", async (req, res) => {
     try {
       const { start, end } = req.query;
@@ -2647,6 +2761,201 @@ router.get("/cancelled-orders", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch cancelled orders" });
   }
 });
+router.get("/dashboard-fulfillment-overview", async (req, res) => {
+  try {
+    const cacheKey = "dashboard_fulfillment_overview";
+    const cached = getCache(cacheKey);
+    if (cached) return res.json(cached);
+
+    const unfulfilledBucketsDef = buildRollingBuckets();
+    const earliestStart = unfulfilledBucketsDef.reduce(
+      (min, bucket) => (bucket.start < min ? bucket.start : min),
+      unfulfilledBucketsDef[0].start
+    );
+    const latestEnd = unfulfilledBucketsDef[0].end;
+
+    const recentShopifyOrders = await ShopifyOrder.find(
+      { shopifyCreatedAt: { $gte: earliestStart, $lte: latestEnd } },
+      { orderName: 1, amount: 1, shopifyCreatedAt: 1 }
+    ).lean();
+
+    const keyedRecentOrders = recentShopifyOrders
+      .map((order) => ({
+        ...order,
+        orderKey: (order.orderName || "").replace(/#/g, "").trim(),
+      }))
+      .filter((order) => order.orderKey && isValidDate(new Date(order.shopifyCreatedAt)));
+
+    const recentOrderKeys = [...new Set(keyedRecentOrders.map((order) => order.orderKey))];
+
+    const recentOrderDocs = await Order.find(
+      { order_id: { $in: recentOrderKeys } },
+      { order_id: 1, shipment_status: 1, createdAt: 1, last_updated_at: 1 }
+    ).lean();
+
+    const recentOrderMap = new Map(
+      recentOrderDocs.map((order) => [
+        order.order_id,
+        {
+          createdAt: order.createdAt,
+          lastUpdatedAt: order.last_updated_at,
+          shipmentStatus: String(order.shipment_status || "").trim().toLowerCase(),
+        },
+      ])
+    );
+
+    const unfulfilledBuckets = unfulfilledBucketsDef.map((bucket) => {
+      let count = 0;
+      let amount = 0;
+
+      keyedRecentOrders.forEach((order) => {
+        const createdAt = new Date(order.shopifyCreatedAt);
+        if (createdAt < bucket.start || createdAt > bucket.end) return;
+        if (recentOrderMap.has(order.orderKey)) return;
+
+        count += 1;
+        amount += Number(order.amount || 0);
+      });
+
+      return {
+        key: bucket.key,
+        label: bucket.label,
+        count,
+        amount: Number(amount.toFixed(2)),
+      };
+    });
+
+    const currentWindow = buildTrailingWindow(30, 0);
+    const previousWindow = buildTrailingWindow(30, 30);
+    const timingWindowStart = previousWindow.start;
+    const timingWindowEnd = currentWindow.end;
+
+    const timingOrders = await Order.find(
+      {
+        $or: [
+          { createdAt: { $gte: timingWindowStart, $lte: timingWindowEnd } },
+          { last_updated_at: { $gte: timingWindowStart, $lte: timingWindowEnd } },
+        ],
+      },
+      { order_id: 1, shipment_status: 1, createdAt: 1, last_updated_at: 1 }
+    ).lean();
+
+    const timingLookupKeys = [
+      ...new Set(
+        timingOrders.flatMap((order) => {
+          const normalized = String(order.order_id || "").trim();
+          return normalized ? [normalized, `#${normalized}`] : [];
+        })
+      ),
+    ];
+
+    const timingShopifyOrders = await ShopifyOrder.find(
+      { orderName: { $in: timingLookupKeys } },
+      { orderName: 1, shopifyCreatedAt: 1 }
+    ).lean();
+
+    const timingShopifyMap = new Map();
+    timingShopifyOrders.forEach((order) => {
+      const key = String(order.orderName || "").replace(/#/g, "").trim();
+      if (!key || timingShopifyMap.has(key)) return;
+      timingShopifyMap.set(key, order);
+    });
+
+    const dispatchCurrentDurations = [];
+    const dispatchPreviousDurations = [];
+    const deliveryCurrentDurations = [];
+    const deliveryPreviousDurations = [];
+    const dispatchTrendMap = new Map();
+    const deliveryTrendMap = new Map();
+
+    const pushTrendValue = (map, dateKey, durationHours) => {
+      if (!map.has(dateKey)) map.set(dateKey, []);
+      map.get(dateKey).push(durationHours);
+    };
+
+    timingOrders.forEach((shipment) => {
+      const shopifyOrder = timingShopifyMap.get(String(shipment.order_id || "").trim());
+      if (!shopifyOrder) return;
+
+      const orderCreatedAt = shopifyOrder.shopifyCreatedAt ? new Date(shopifyOrder.shopifyCreatedAt) : null;
+      const dispatchAt = shipment.createdAt ? new Date(shipment.createdAt) : null;
+      const deliveryAt = shipment.last_updated_at ? new Date(shipment.last_updated_at) : null;
+      const shipmentStatus = String(shipment.shipment_status || "").trim().toLowerCase();
+
+      if (isValidDate(orderCreatedAt) && isValidDate(dispatchAt) && dispatchAt >= orderCreatedAt) {
+        const dispatchHours = (dispatchAt - orderCreatedAt) / (1000 * 60 * 60);
+        if (dispatchAt >= currentWindow.start && dispatchAt <= currentWindow.end) {
+          dispatchCurrentDurations.push(dispatchHours);
+          pushTrendValue(dispatchTrendMap, formatUtcDateKey(dispatchAt), dispatchHours);
+        } else if (dispatchAt >= previousWindow.start && dispatchAt <= previousWindow.end) {
+          dispatchPreviousDurations.push(dispatchHours);
+        }
+      }
+
+      if (
+        shipmentStatus === "delivered" &&
+        isValidDate(orderCreatedAt) &&
+        isValidDate(deliveryAt) &&
+        deliveryAt >= orderCreatedAt
+      ) {
+        const deliveryHours = (deliveryAt - orderCreatedAt) / (1000 * 60 * 60);
+        if (deliveryAt >= currentWindow.start && deliveryAt <= currentWindow.end) {
+          deliveryCurrentDurations.push(deliveryHours);
+          pushTrendValue(deliveryTrendMap, formatUtcDateKey(deliveryAt), deliveryHours);
+        } else if (deliveryAt >= previousWindow.start && deliveryAt <= previousWindow.end) {
+          deliveryPreviousDurations.push(deliveryHours);
+        }
+      }
+    });
+
+    const dispatchBucketDefs = [
+      { key: "under6h", label: "0-6h", match: (hours) => hours >= 0 && hours < 6 },
+      { key: "sixTo24h", label: "6-24h", match: (hours) => hours >= 6 && hours < 24 },
+      { key: "oneTo2d", label: "1-2d", match: (hours) => hours >= 24 && hours <= 48 },
+      { key: "over2d", label: "2d+", match: (hours) => hours > 48 },
+    ];
+
+    const deliveryBucketDefs = [
+      { key: "under2d", label: "0-2d", match: (hours) => hours >= 0 && hours <= 48 },
+      { key: "threeTo5d", label: "3-5d", match: (hours) => hours > 48 && hours <= 120 },
+      { key: "sixTo7d", label: "6-7d", match: (hours) => hours > 120 && hours <= 168 },
+      { key: "over7d", label: "7d+", match: (hours) => hours > 168 },
+    ];
+
+    const dispatchTiming = summarizeTiming(
+      dispatchCurrentDurations,
+      dispatchPreviousDurations,
+      dispatchTrendMap,
+      dispatchBucketDefs
+    );
+
+    const deliveryTiming = summarizeTiming(
+      deliveryCurrentDurations,
+      deliveryPreviousDurations,
+      deliveryTrendMap,
+      deliveryBucketDefs
+    );
+
+    const response = {
+      generatedAt: new Date().toISOString(),
+      timingWindows: {
+        current: getWindowLabel(currentWindow),
+        previous: getWindowLabel(previousWindow),
+      },
+      unfulfilledBuckets,
+      avgOrderToDispatchHours: dispatchTiming.currentAverageHours,
+      avgOrderToDeliveryHours: deliveryTiming.currentAverageHours,
+      dispatchTiming,
+      deliveryTiming,
+    };
+
+    setCache(cacheKey, response, 30000);
+    return res.json(response);
+  } catch (err) {
+    console.error("DASHBOARD FULFILLMENT OVERVIEW ERROR:", err);
+    return res.status(500).json({ error: "Failed to fetch dashboard fulfillment overview" });
+  }
+});
 router.get("/unfulfilled", async (req, res) => {
   try {
     const { start, end } = req.query;
@@ -2687,5 +2996,3 @@ router.get("/unfulfilled", async (req, res) => {
   }
 });
   module.exports = router;   
-
-
