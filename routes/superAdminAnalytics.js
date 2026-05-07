@@ -1,12 +1,12 @@
 const express = require("express");
-  const router = express.Router();
-  const ShopifyOrder = require("../models/ShopifyOrder");
-  const Lead = require("../models/Lead"); 
-  const Order = require("../models/Order");
-  const MyOrder = require("../models/MyOrder");
-  const Escalation = require("../models/escalation.model");
-  const DietPlan = require("../models/DietPlan");
-  const Employee = require("../models/Employee");
+const router = express.Router();
+const ShopifyOrder = require("../models/ShopifyOrder");
+const Lead = require("../models/Lead"); 
+const Order = require("../models/Order");
+const MyOrder = require("../models/MyOrder");
+const Escalation = require("../models/escalation.model");
+const DietPlan = require("../models/DietPlan");
+const Employee = require("../models/Employee");
   function getDateFilter(start, end) {
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
@@ -1359,7 +1359,7 @@ router.get("/find-status-values", async (req, res) => {
 
       const leads = await Lead.find(
         { contactNumber: { $exists: true, $ne: "" } },
-        { contactNumber: 1, retentionStatus: 1, lastOrderDate: 1, createdAt: 1 }
+        { contactNumber: 1, retentionStatus: 1, salesStatus: 1, leadStatus: 1, healthExpertAssigned: 1, createdAt: 1 }
       ).lean();
 
       if (!leads.length) {
@@ -1380,11 +1380,10 @@ router.get("/find-status-values", async (req, res) => {
 
       while (currentDate <= endDate) {
         const pointDate = new Date(currentDate);
-        const cutoffDate = new Date(pointDate);
-        cutoffDate.setDate(cutoffDate.getDate() - 60); 
         let total = 0;
         let active = 0;
         let lost = 0;
+        let unassigned = 0;
 
         uniqueCustomers.forEach((cust) => {
           const customerCreated = cust.createdAt ? new Date(cust.createdAt) : new Date(0);
@@ -1392,20 +1391,16 @@ router.get("/find-status-values", async (req, res) => {
             return;       }
           total++;
           const status = (cust.retentionStatus || "").toUpperCase();
-          const lastOrder = cust.lastOrderDate ? new Date(cust.lastOrderDate) : null;
-
-          const isActive =
-            status !== "LOST" &&
-            lastOrder &&
-            lastOrder >= cutoffDate &&
-            lastOrder <= pointDate;
-
-          const isLost =
-            status === "LOST" ||
-            (lastOrder && lastOrder < cutoffDate && lastOrder <= pointDate);
+          const salesDone = String(cust.salesStatus || "").trim().toUpperCase() === "SALES DONE";
+          const leadDone = String(cust.leadStatus || "").trim().toUpperCase() === "SALES DONE";
+          const isActive = status === "ACTIVE" && salesDone && leadDone;
+          const isLost = status === "LOST";
+          const noHealthExpert = !String(cust.healthExpertAssigned || "").trim();
+          const isUnassigned = salesDone && noHealthExpert;
 
           if (isActive) active++;
           else if (isLost) lost++;
+          if (isUnassigned) unassigned++;
         });
 
         trends.push({
@@ -1413,6 +1408,7 @@ router.get("/find-status-values", async (req, res) => {
           total,
           active,
           lost,
+          unassigned,
         });
 
         currentDate.setDate(currentDate.getDate() + interval);
@@ -2763,7 +2759,7 @@ router.get("/cancelled-orders", async (req, res) => {
 });
 router.get("/dashboard-fulfillment-overview", async (req, res) => {
   try {
-    const cacheKey = "dashboard_fulfillment_overview";
+    const cacheKey = "dashboard_fulfillment_overview_v6";
     const cached = getCache(cacheKey);
     if (cached) return res.json(cached);
 
@@ -2774,44 +2770,31 @@ router.get("/dashboard-fulfillment-overview", async (req, res) => {
     );
     const latestEnd = unfulfilledBucketsDef[0].end;
 
+    const UNFULFILLED_STATUS_QUERY = {
+      $or: [
+        { fulfillment_status: { $regex: /^\s*unfulfilled\s*$/i } },
+        { fulfillment_status: { $exists: false } },
+        { fulfillment_status: null },
+        { fulfillment_status: "" },
+      ],
+    };
+
     const recentShopifyOrders = await ShopifyOrder.find(
-      { shopifyCreatedAt: { $gte: earliestStart, $lte: latestEnd } },
-      { orderName: 1, amount: 1, shopifyCreatedAt: 1 }
+      {
+        shopifyCreatedAt: { $gte: earliestStart, $lte: latestEnd },
+        ...UNFULFILLED_STATUS_QUERY,
+      },
+      { amount: 1, shopifyCreatedAt: 1, fulfillment_status: 1 }
     ).lean();
-
-    const keyedRecentOrders = recentShopifyOrders
-      .map((order) => ({
-        ...order,
-        orderKey: (order.orderName || "").replace(/#/g, "").trim(),
-      }))
-      .filter((order) => order.orderKey && isValidDate(new Date(order.shopifyCreatedAt)));
-
-    const recentOrderKeys = [...new Set(keyedRecentOrders.map((order) => order.orderKey))];
-
-    const recentOrderDocs = await Order.find(
-      { order_id: { $in: recentOrderKeys } },
-      { order_id: 1, shipment_status: 1, createdAt: 1, last_updated_at: 1 }
-    ).lean();
-
-    const recentOrderMap = new Map(
-      recentOrderDocs.map((order) => [
-        order.order_id,
-        {
-          createdAt: order.createdAt,
-          lastUpdatedAt: order.last_updated_at,
-          shipmentStatus: String(order.shipment_status || "").trim().toLowerCase(),
-        },
-      ])
-    );
 
     const unfulfilledBuckets = unfulfilledBucketsDef.map((bucket) => {
       let count = 0;
       let amount = 0;
 
-      keyedRecentOrders.forEach((order) => {
+      recentShopifyOrders.forEach((order) => {
         const createdAt = new Date(order.shopifyCreatedAt);
+        if (!isValidDate(createdAt)) return;
         if (createdAt < bucket.start || createdAt > bucket.end) return;
-        if (recentOrderMap.has(order.orderKey)) return;
 
         count += 1;
         amount += Number(order.amount || 0);
@@ -2865,8 +2848,11 @@ router.get("/dashboard-fulfillment-overview", async (req, res) => {
     const dispatchPreviousDurations = [];
     const deliveryCurrentDurations = [];
     const deliveryPreviousDurations = [];
+    const fulfillmentToDeliveryCurrentDurations = [];
+    const fulfillmentToDeliveryPreviousDurations = [];
     const dispatchTrendMap = new Map();
     const deliveryTrendMap = new Map();
+    const fulfillmentToDeliveryTrendMap = new Map();
 
     const pushTrendValue = (map, dateKey, durationHours) => {
       if (!map.has(dateKey)) map.set(dateKey, []);
@@ -2906,20 +2892,50 @@ router.get("/dashboard-fulfillment-overview", async (req, res) => {
           deliveryPreviousDurations.push(deliveryHours);
         }
       }
+
+      if (
+        shipmentStatus === "delivered" &&
+        isValidDate(dispatchAt) &&
+        isValidDate(deliveryAt) &&
+        deliveryAt >= dispatchAt
+      ) {
+        const fulfillmentToDeliveryHours = (deliveryAt - dispatchAt) / (1000 * 60 * 60);
+        if (deliveryAt >= currentWindow.start && deliveryAt <= currentWindow.end) {
+          fulfillmentToDeliveryCurrentDurations.push(fulfillmentToDeliveryHours);
+          pushTrendValue(fulfillmentToDeliveryTrendMap, formatUtcDateKey(deliveryAt), fulfillmentToDeliveryHours);
+        } else if (deliveryAt >= previousWindow.start && deliveryAt <= previousWindow.end) {
+          fulfillmentToDeliveryPreviousDurations.push(fulfillmentToDeliveryHours);
+        }
+      }
     });
 
     const dispatchBucketDefs = [
-      { key: "under6h", label: "0-6h", match: (hours) => hours >= 0 && hours < 6 },
-      { key: "sixTo24h", label: "6-24h", match: (hours) => hours >= 6 && hours < 24 },
-      { key: "oneTo2d", label: "1-2d", match: (hours) => hours >= 24 && hours <= 48 },
-      { key: "over2d", label: "2d+", match: (hours) => hours > 48 },
+      { key: "sameDay", label: "Same Day", match: (hours) => hours >= 0 && hours < 24 },
+      { key: "nextDay", label: "Next Day", match: (hours) => hours >= 24 && hours < 48 },
+      { key: "thirdDay", label: "3rd Day", match: (hours) => hours >= 48 && hours < 72 },
+      { key: "fourthDay", label: "4th Day", match: (hours) => hours >= 72 && hours < 96 },
+      { key: "fifthDayPlus", label: "5th Day+", match: (hours) => hours >= 96 },
     ];
 
     const deliveryBucketDefs = [
-      { key: "under2d", label: "0-2d", match: (hours) => hours >= 0 && hours <= 48 },
-      { key: "threeTo5d", label: "3-5d", match: (hours) => hours > 48 && hours <= 120 },
-      { key: "sixTo7d", label: "6-7d", match: (hours) => hours > 120 && hours <= 168 },
-      { key: "over7d", label: "7d+", match: (hours) => hours > 168 },
+      { key: "sameDay", label: "Same Day", match: (hours) => hours >= 0 && hours < 24 },
+      { key: "nextDay", label: "Next Day", match: (hours) => hours >= 24 && hours < 48 },
+      { key: "thirdDay", label: "3rd Day", match: (hours) => hours >= 48 && hours < 72 },
+      { key: "fourthDay", label: "4th Day", match: (hours) => hours >= 72 && hours < 96 },
+      { key: "fifthDayPlus", label: "5th Day+", match: (hours) => hours >= 96 },
+    ];
+
+    const fulfillmentToDeliveryBucketDefs = [
+      { key: "sameDay", label: "Same Day", match: (hours) => hours >= 0 && hours < 24 },
+      { key: "nextDay", label: "Next Day", match: (hours) => hours >= 24 && hours < 48 },
+      { key: "thirdDay", label: "3rd Day", match: (hours) => hours >= 48 && hours < 72 },
+      { key: "fourthDay", label: "4th Day", match: (hours) => hours >= 72 && hours < 96 },
+      { key: "fifthDay", label: "5th Day", match: (hours) => hours >= 96 && hours < 120 },
+      { key: "sixthDay", label: "6th Day", match: (hours) => hours >= 120 && hours < 144 },
+      { key: "seventhDay", label: "7th Day", match: (hours) => hours >= 144 && hours < 168 },
+      { key: "eighthDay", label: "8th Day", match: (hours) => hours >= 168 && hours < 192 },
+      { key: "ninthDay", label: "9th Day", match: (hours) => hours >= 192 && hours < 216 },
+      { key: "tenthDayPlus", label: "10th Day+", match: (hours) => hours >= 216 },
     ];
 
     const dispatchTiming = summarizeTiming(
@@ -2936,6 +2952,13 @@ router.get("/dashboard-fulfillment-overview", async (req, res) => {
       deliveryBucketDefs
     );
 
+    const fulfillmentToDeliveryTiming = summarizeTiming(
+      fulfillmentToDeliveryCurrentDurations,
+      fulfillmentToDeliveryPreviousDurations,
+      fulfillmentToDeliveryTrendMap,
+      fulfillmentToDeliveryBucketDefs
+    );
+
     const response = {
       generatedAt: new Date().toISOString(),
       timingWindows: {
@@ -2945,8 +2968,10 @@ router.get("/dashboard-fulfillment-overview", async (req, res) => {
       unfulfilledBuckets,
       avgOrderToDispatchHours: dispatchTiming.currentAverageHours,
       avgOrderToDeliveryHours: deliveryTiming.currentAverageHours,
+      avgFulfillmentToDeliveryHours: fulfillmentToDeliveryTiming.currentAverageHours,
       dispatchTiming,
       deliveryTiming,
+      fulfillmentToDeliveryTiming,
     };
 
     setCache(cacheKey, response, 30000);
@@ -2956,6 +2981,65 @@ router.get("/dashboard-fulfillment-overview", async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch dashboard fulfillment overview" });
   }
 });
+
+router.get("/dashboard-fulfillment-orders", async (req, res) => {
+  try {
+    const { bucketKey } = req.query;
+    if (!bucketKey) {
+      return res.status(400).json({ error: "bucketKey is required" });
+    }
+
+    const unfulfilledBucketsDef = buildRollingBuckets();
+    const bucket = unfulfilledBucketsDef.find((b) => b.key === bucketKey);
+    if (!bucket) {
+      return res.status(400).json({ error: "Invalid bucketKey" });
+    }
+
+    const normalizeFulfillmentStatus = (status) =>
+      String(status || "").trim().toLowerCase();
+
+    const UNFULFILLED_STATUS_QUERY = {
+      $or: [
+        { fulfillment_status: { $regex: /^\s*unfulfilled\s*$/i } },
+        { fulfillment_status: { $exists: false } },
+        { fulfillment_status: null },
+        { fulfillment_status: "" },
+      ],
+    };
+
+    const orders = await ShopifyOrder.find(
+      {
+        shopifyCreatedAt: { $gte: bucket.start, $lte: bucket.end },
+        ...UNFULFILLED_STATUS_QUERY,
+      },
+      { orderName: 1, fulfillment_status: 1, shopifyCreatedAt: 1 }
+    )
+      .sort({ shopifyCreatedAt: -1 })
+      .lean();
+
+    const filteredOrders = orders
+      .map((order) => ({
+        orderNumber: String(order?.orderName || "").trim() || "-",
+        fulfillmentStatus: normalizeFulfillmentStatus(order?.fulfillment_status) || "blank",
+        createdAt: order?.shopifyCreatedAt || null,
+      }));
+
+    return res.json({
+      bucket: {
+        key: bucket.key,
+        label: bucket.label,
+        start: formatYMD(bucket.start),
+        end: formatYMD(bucket.end),
+      },
+      total: filteredOrders.length,
+      orders: filteredOrders,
+    });
+  } catch (err) {
+    console.error("DASHBOARD FULFILLMENT ORDERS ERROR:", err);
+    return res.status(500).json({ error: "Failed to fetch unfulfilled orders for bucket" });
+  }
+});
+
 router.get("/unfulfilled", async (req, res) => {
   try {
     const { start, end } = req.query;
@@ -2996,3 +3080,6 @@ router.get("/unfulfilled", async (req, res) => {
   }
 });
   module.exports = router;   
+
+
+ 

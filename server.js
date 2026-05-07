@@ -41,6 +41,7 @@ const orderByIdRoutes = require("./routes/orderById");
 const combinedOrdersRoute = require("./routes/combinedOrders");
 const customerRoutes = require("./routes/customerRoutes");
 const consultationDetailsRoutes = require("./routes/consultationDetailsRoutes");
+const redcliffeRoutes = require("./routes/redcliffeRoutes");
 const consultationProxyRoutes = require("./routes/consultationProxy");
 const dietPlanProxy = require("./routes/dietPlanProxy");
 const consultationFullHistoryRoute = require("./routes/consultationFullHistory");
@@ -574,6 +575,7 @@ app.use("/api/orders/combined", combinedOrdersRoute);
 app.use(customerRoutes);
 
 app.use("/api/consultation-details", consultationDetailsRoutes);
+app.use("/api/redcliffe", redcliffeRoutes);
 
 app.use("/", consultationProxyRoutes);
 app.use("/proxy/consultation", dietPlanProxy);
