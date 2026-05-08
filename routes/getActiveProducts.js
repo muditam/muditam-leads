@@ -169,6 +169,8 @@ router.post("/api/shopify/place-order", async (req, res) => {
       cartItems,
       paymentMethod,
       transactionId,
+      partialPaidAmount,
+      orderTotal,
       shippingCharge,
       discount,
       discountType,
@@ -204,12 +206,53 @@ router.post("/api/shopify/place-order", async (req, res) => {
       : parseAddressString(customer.address);
     let billing_address = shipping_address;
 
-    // Build note_attributes for transactionId if prepaid
+    const lineItemsTotal = line_items.reduce(
+      (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+      0
+    );
+    const calculatedOrderTotal =
+      lineItemsTotal + Number(shippingCharge || 0) - Number(discount || 0);
+    const safeOrderTotal = Number(orderTotal || calculatedOrderTotal || 0);
+    const safePartialPaidAmount = Number(partialPaidAmount || 0);
+    const isPrepaid = paymentMethod === "Prepaid";
+    const isPartialPaid = paymentMethod === "Partial Paid";
+
     const note_attributes = [];
-    if (paymentMethod === "Prepaid" && transactionId) {
+    if ((isPrepaid || isPartialPaid) && transactionId) {
       note_attributes.push({
-        name: "Transaction ID",
+        name: "transaction_id",
         value: transactionId
+      });
+    }
+
+    if (isPartialPaid) {
+      if (!(safePartialPaidAmount > 0)) {
+        return res.status(400).json({ error: "partialPaidAmount is required for Partial Paid orders" });
+      }
+      if (!(safeOrderTotal > 0) || safePartialPaidAmount >= safeOrderTotal) {
+        return res.status(400).json({ error: "partialPaidAmount must be less than the order total" });
+      }
+      if (!String(transactionId || "").trim()) {
+        return res.status(400).json({ error: "transactionId is required for Partial Paid orders" });
+      }
+
+      note_attributes.push(
+        { name: "payment_mode", value: "Partial Paid" },
+        { name: "partial_paid_amount", value: String(safePartialPaidAmount.toFixed(2)) },
+        {
+          name: "remaining_cod_amount",
+          value: String(Math.max(0, safeOrderTotal - safePartialPaidAmount).toFixed(2)),
+        }
+      );
+    } else if (isPrepaid) {
+      note_attributes.push({
+        name: "payment_mode",
+        value: "Prepaid",
+      });
+    } else {
+      note_attributes.push({
+        name: "payment_mode",
+        value: "COD",
       });
     }
 
@@ -219,7 +262,7 @@ router.post("/api/shopify/place-order", async (req, res) => {
         customer: shopifyCustomer,
         shipping_address,
         billing_address,
-        financial_status: paymentMethod === "Prepaid" ? "paid" : "pending",
+        financial_status: isPrepaid ? "paid" : "pending",
         note: "", // Blank, can be set after order placement
         note_attributes,
         discount_codes: discount
@@ -241,15 +284,13 @@ router.post("/api/shopify/place-order", async (req, res) => {
             ]
           : [],
         transactions:
-          paymentMethod === "Prepaid" && transactionId
+          isPrepaid && transactionId
             ? [
                 {
                   kind: "sale",
                   status: "success",
                   amount: String(
-                    line_items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0) +
-                      Number(shippingCharge || 0) -
-                      Number(discount || 0)
+                    safeOrderTotal
                   ),
                   gateway: "razorpay",
                   authorization: transactionId,
@@ -269,6 +310,29 @@ router.post("/api/shopify/place-order", async (req, res) => {
         },
       }
     );
+
+    if (isPartialPaid && transactionId) {
+      await axios.post(
+        `https://${SHOPIFY_STORE}/admin/api/2023-10/orders/${response.data.order.id}/transactions.json?source=external`,
+        {
+          transaction: {
+            kind: "sale",
+            status: "success",
+            amount: String(safePartialPaidAmount.toFixed(2)),
+            currency: response.data.order?.currency || "INR",
+            gateway: "manual",
+            source: "external",
+            authorization: transactionId,
+          },
+        },
+        {
+          headers: {
+            "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    }
 
     res.json({ success: true, shopifyOrder: response.data.order });
   } catch (error) {

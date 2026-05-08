@@ -52,24 +52,32 @@ router.get("/sales-summary", async (req, res) => {
     const orderEndDate = new Date(eDate);
     orderEndDate.setHours(23, 59, 59, 999);
 
-    // only active sales agents
-    const salesAgents = await Employee.find(
-      { role: "Sales Agent", status: "active" },
-      "fullName"
-    );
-    const salesAgentNames = salesAgents.map((a) => a.fullName);
+    const SALES_SUMMARY_EXCLUDED_AGENT_NAMES = ["Admin", "Online Order"];
 
     // Lead schema counts
     const leadAgg = await Lead.aggregate([
       {
         $match: {
           date: { $gte: sDate, $lte: eDate },
-          agentAssigned: { $in: salesAgentNames },
+          agentAssigned: { $exists: true, $ne: null },
+        },
+      },
+      {
+        $project: {
+          agentName: { $trim: { input: { $ifNull: ["$agentAssigned", ""] } } },
+          salesStatus: 1,
+        },
+      },
+      {
+        $match: {
+          agentName: {
+            $nin: ["", ...SALES_SUMMARY_EXCLUDED_AGENT_NAMES],
+          },
         },
       },
       {
         $group: {
-          _id: "$agentAssigned",
+          _id: "$agentName",
           leadsAssigned: { $sum: 1 },
           openLeads: {
             $sum: {
@@ -95,12 +103,25 @@ router.get("/sales-summary", async (req, res) => {
       {
         $match: {
           leadDate: { $gte: orderStartDate, $lte: orderEndDate },
-          assignedTo: { $in: salesAgentNames },
+          assignedTo: { $exists: true, $ne: null },
+        },
+      },
+      {
+        $project: {
+          agentName: { $trim: { input: { $ifNull: ["$assignedTo", ""] } } },
+          leadStatus: 1,
+        },
+      },
+      {
+        $match: {
+          agentName: {
+            $nin: ["", ...SALES_SUMMARY_EXCLUDED_AGENT_NAMES],
+          },
         },
       },
       {
         $group: {
-          _id: "$assignedTo",
+          _id: "$agentName",
           leadsAssigned: { $sum: 1 },
           openLeads: {
             $sum: {
@@ -154,7 +175,20 @@ router.get("/sales-summary", async (req, res) => {
     const openLeadsLeadAgg = await Lead.aggregate([
       {
         $match: {
-          agentAssigned: { $in: salesAgentNames },
+          agentAssigned: { $exists: true, $ne: null },
+        },
+      },
+      {
+        $project: {
+          agentName: { $trim: { input: { $ifNull: ["$agentAssigned", ""] } } },
+          salesStatus: 1,
+        },
+      },
+      {
+        $match: {
+          agentName: {
+            $nin: ["", ...SALES_SUMMARY_EXCLUDED_AGENT_NAMES],
+          },
           $or: [
             { salesStatus: null },
             { salesStatus: "" },
@@ -168,7 +202,20 @@ router.get("/sales-summary", async (req, res) => {
     const openLeadsCustomerAgg = await Customer.aggregate([
       {
         $match: {
-          assignedTo: { $in: salesAgentNames },
+          assignedTo: { $exists: true, $ne: null },
+        },
+      },
+      {
+        $project: {
+          agentName: { $trim: { input: { $ifNull: ["$assignedTo", ""] } } },
+          leadStatus: 1,
+        },
+      },
+      {
+        $match: {
+          agentName: {
+            $nin: ["", ...SALES_SUMMARY_EXCLUDED_AGENT_NAMES],
+          },
           $or: [
             {
               leadStatus: {
@@ -199,15 +246,27 @@ router.get("/sales-summary", async (req, res) => {
       {
         $match: {
           orderDate: { $gte: orderStartDate, $lte: orderEndDate },
-          agentName: { $in: salesAgentNames },
+          agentName: { $exists: true, $ne: null },
+        },
+      },
+      {
+        $project: {
+          agentName: { $trim: { input: { $ifNull: ["$agentName", ""] } } },
+          orderId: 1,
+          totalPrice: { $ifNull: ["$totalPrice", "$amountPaid"] },
+        },
+      },
+      {
+        $match: {
+          agentName: {
+            $nin: ["", ...SALES_SUMMARY_EXCLUDED_AGENT_NAMES],
+          },
         },
       },
       {
         $group: {
           _id: { agentName: "$agentName", orderId: "$orderId" },
-          totalPrice: {
-            $first: { $ifNull: ["$totalPrice", "$amountPaid"] },
-          },
+          totalPrice: { $first: "$totalPrice" },
         },
       },
       {
@@ -227,8 +286,12 @@ router.get("/sales-summary", async (req, res) => {
       };
     });
 
+    const agentNames = Array.from(
+      new Set([...Object.keys(perAgentLeads), ...Object.keys(agentOrderStats)])
+    );
+
     const perAgent = [];
-    for (const agent of salesAgentNames) {
+    for (const agent of agentNames) {
       const leadStats = perAgentLeads[agent] || {
         leadsAssigned: 0,
         openLeads: 0,

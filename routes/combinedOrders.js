@@ -7,6 +7,8 @@ const Employee = require("../models/Employee");
 const Order = require("../models/Order");
 const requireSession = require("../middleware/requireSession");
 
+const SALES_SUMMARY_EXCLUDED_AGENT_NAMES = ["Admin", "Online Order"];
+
 // =====================
 // /sales-metrics endpoint
 // =====================
@@ -19,7 +21,9 @@ router.get('/sales-metrics', requireSession, async (req, res) => {
 
 
     const salesAgents = await Employee.find({ role: "Sales Agent" }, "fullName"); 
-    const salesAgentNames = salesAgents.map(agent => agent.fullName);
+    const salesAgentNames = salesAgents
+      .map(agent => agent.fullName)
+      .filter(name => name && !SALES_SUMMARY_EXCLUDED_AGENT_NAMES.includes(name));
 
 
     const orderIds = await MyOrder.distinct("orderId", {
