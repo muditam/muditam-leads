@@ -132,6 +132,34 @@ LeadSchema.index({ healthExpertAssigned: 1, salesStatus: 1, retentionStatus: 1, 
 LeadSchema.index({ rtNextFollowupDate: 1 });
 LeadSchema.index({ rtFollowupReminder: 1 });
 
+async function enqueueLeadForZoomSync(docLike) {
+  try {
+    const svc = require("../services/zoomContactSyncService");
+    const name = String(docLike?.name || "").trim();
+    const phone = String(docLike?.contactNumber || "").trim();
+    if (!phone) return;
+    svc.enqueueContact({ name, phone, source: "Lead" });
+  } catch (_) {
+    // best-effort async sync hook
+  }
+}
+
+LeadSchema.post("save", function (doc) {
+  enqueueLeadForZoomSync(doc);
+});
+
+LeadSchema.post("findOneAndUpdate", function (doc) {
+  enqueueLeadForZoomSync(doc);
+});
+
+LeadSchema.post("updateOne", async function () {
+  try {
+    const filter = this.getQuery() || {};
+    const doc = await mongoose.model("Lead").findOne(filter, { name: 1, contactNumber: 1 }).lean();
+    enqueueLeadForZoomSync(doc);
+  } catch (_) {}
+});
+
 const Lead = mongoose.model('Lead', LeadSchema);
 
 module.exports = Lead; 

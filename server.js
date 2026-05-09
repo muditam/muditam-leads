@@ -89,7 +89,9 @@ const smartfloRoutes = require("./routes/smartflo");
 const zoomAuthRoutes = require("./routes/zoomAuth");
 const zoomWebhookRoutes = require("./routes/zoomWebhooks");
 const zoomCallRoutes = require("./routes/zoomCalls");
+const zoomContactsRoutes = require("./routes/zoomContacts");
 const zoomRecordingQueue = require("./queues/zoomRecordingQueue");
+const zoomContactSyncService = require("./services/zoomContactSyncService");
 
 const ReturnDeliveredRoutes = require("./routes/ReturnDelivered");
 
@@ -630,6 +632,26 @@ app.use('/api', authRoutes);
 app.use('/api', clickToCallRoutes);
 app.use("/api/zoom/auth", zoomAuthRoutes);
 app.use("/api/zoom/calls", zoomCallRoutes);
+app.use("/api/zoom/contacts", zoomContactsRoutes);
+
+// Nightly contact reconciliation (2:15 AM server time) for Zoom contact auto-sync healing.
+cron.schedule("15 2 * * *", async () => {
+  try {
+    const out = await zoomContactSyncService.runFullSync();
+    console.log("[zoom-contact-sync] nightly reconcile:", out);
+  } catch (err) {
+    console.error("[zoom-contact-sync] nightly reconcile failed:", err.message || err);
+  }
+});
+
+setTimeout(async () => {
+  try {
+    const out = await zoomContactSyncService.runFullSync();
+    console.log("[zoom-contact-sync] startup reconcile:", out);
+  } catch (err) {
+    console.error("[zoom-contact-sync] startup reconcile failed:", err.message || err);
+  }
+}, 30000);
 
 app.use("/api/finance", financeRoutes);
 

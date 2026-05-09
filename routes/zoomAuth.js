@@ -5,6 +5,7 @@ const requireSession = require("../middleware/requireSession");
 const ZoomToken = require("../models/ZoomToken");
 const { encrypt } = require("../services/zoomCrypto");
 const { basicAuthHeader, getUserIdFromReq, getValidAccessTokenForUser } = require("../services/zoomAuthService");
+const { hasContactScopes } = require("../services/zoomContactSyncService");
 
 const router = express.Router();
 
@@ -13,6 +14,8 @@ const SCOPES = [
   "phone_call:read:user",
   "phone_call_recording:read",
   "phone_call_history:read:user",
+  "phone:read:admin",
+  "phone:write:admin",
 ].join(" ");
 
 router.get("/authorize", requireSession, (req, res) => {
@@ -94,10 +97,14 @@ router.post("/refresh", requireSession, async (req, res) => {
 router.get("/status", requireSession, async (req, res) => {
   const userId = getUserIdFromReq(req);
   const rec = await ZoomToken.findOne({ userId }).lean();
+  const contactSyncScopeOk = rec ? hasContactScopes(rec.scopes || []) : false;
   res.json({
     connected: Boolean(rec),
     zoomEmail: rec?.zoomEmail || "",
     expiresAt: rec?.tokenExpiresAt || null,
+    grantedScopes: rec?.scopes || [],
+    contactSyncScopeOk,
+    reconnectRequiredForContactSync: Boolean(rec) && !contactSyncScopeOk,
   });
 });
 

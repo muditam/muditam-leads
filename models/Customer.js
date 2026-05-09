@@ -18,5 +18,32 @@ const CustomerSchema = new mongoose.Schema({
 
 CustomerSchema.index({ phone: 1 });
 
-module.exports = mongoose.model("Customer", CustomerSchema);
+async function enqueueCustomerForZoomSync(docLike) {
+  try {
+    const svc = require("../services/zoomContactSyncService");
+    const name = String(docLike?.name || "").trim();
+    const phone = String(docLike?.phone || "").trim();
+    if (!phone) return;
+    svc.enqueueContact({ name, phone, source: "Customer" });
+  } catch (_) {
+    // best-effort async sync hook
+  }
+}
 
+CustomerSchema.post("save", function (doc) {
+  enqueueCustomerForZoomSync(doc);
+});
+
+CustomerSchema.post("findOneAndUpdate", function (doc) {
+  enqueueCustomerForZoomSync(doc);
+});
+
+CustomerSchema.post("updateOne", async function () {
+  try {
+    const filter = this.getQuery() || {};
+    const doc = await mongoose.model("Customer").findOne(filter, { name: 1, phone: 1 }).lean();
+    enqueueCustomerForZoomSync(doc);
+  } catch (_) {}
+});
+
+module.exports = mongoose.model("Customer", CustomerSchema);
