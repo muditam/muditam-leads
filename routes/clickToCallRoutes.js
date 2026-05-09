@@ -1,8 +1,11 @@
 // routes/clickToCall.routes.js
 const express = require("express");
 const axios = require("axios");
+const ZoomCallLog = require("../models/ZoomCallLog");
+const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
+router.use(requireSession);
 
 const SMARTFLO_BASE_URL =
   (process.env.SMARTFLO_BASE_URL || "https://api-smartflo.tatateleservices.com").replace(/\/+$/, "");
@@ -45,6 +48,39 @@ function pickSmartfloToken({ caller_id, agent_number }) {
 }
 
 router.post("/click_to_call", async (req, res) => {
+  const zoomCutover = String(process.env.ZOOM_PHONE_CUTOVER || "true").toLowerCase() !== "false";
+  if (zoomCutover) {
+    try {
+      const destination_number = toE164India(req.body.destination_number);
+      if (!destination_number) {
+        return res.status(400).json({ status: "error", message: "Missing destination_number" });
+      }
+
+      const user = req.sessionUser || req.session?.user || null;
+      const callId = `crm-manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await ZoomCallLog.create({
+        callId,
+        agentId: user?.id || user?._id || undefined,
+        direction: "outbound",
+        phoneNumber: destination_number,
+        calleeNumber: destination_number,
+        status: "dial_requested_from_crm",
+        metadata: {
+          source: "legacy_click_to_call_endpoint",
+          note: "Zoom call placement is triggered via frontend Smart Embed postMessage.",
+        },
+      });
+
+      return res.json({
+        status: "success",
+        message: "Dial request captured. Open Calling Center to place the call in Zoom softphone.",
+        zoom: { callId, destination_number },
+      });
+    } catch (err) {
+      return res.status(500).json({ status: "error", message: err.message || "Failed to queue Zoom call" });
+    }
+  }
+
   try {
     const destination_number = toE164India(req.body.destination_number);
     const agent_number = digitsOnly(req.body.agent_number);

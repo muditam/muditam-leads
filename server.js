@@ -86,6 +86,10 @@ const UndeliveredordersRoute = require('./operations/undelivered-orders');
 const zohoMailRoutes = require("./routes/zohoMail");
 
 const smartfloRoutes = require("./routes/smartflo");
+const zoomAuthRoutes = require("./routes/zoomAuth");
+const zoomWebhookRoutes = require("./routes/zoomWebhooks");
+const zoomCallRoutes = require("./routes/zoomCalls");
+const zoomRecordingQueue = require("./queues/zoomRecordingQueue");
 
 const ReturnDeliveredRoutes = require("./routes/ReturnDelivered");
 
@@ -548,6 +552,8 @@ function sseSend(did, payload) {
   console.log("[SSE] Sent event", { key, listeners: set.size, type: payload?.type });
 }
 
+// Keep Zoom webhook raw-body verification before global JSON parser
+app.use("/api/zoom/webhooks", zoomWebhookRoutes);
 app.use(express.json());
 
 app.use("/api/templates", templateRoutes);
@@ -622,6 +628,8 @@ app.use(Addemployee);
 app.use('/api', authRoutes);
 
 app.use('/api', clickToCallRoutes);
+app.use("/api/zoom/auth", zoomAuthRoutes);
+app.use("/api/zoom/calls", zoomCallRoutes);
 
 app.use("/api/finance", financeRoutes);
 
@@ -650,7 +658,9 @@ app.use('/api/orders', UndeliveredordersRoute);
 
 app.use("/api/zoho", zohoMailRoutes);
 
-app.use("/api/smartflo", smartfloRoutes);
+if (String(process.env.ZOOM_PHONE_CUTOVER || "true").toLowerCase() === "false") {
+  app.use("/api/smartflo", smartfloRoutes);
+}
 
 app.use("/api", ReturnDeliveredRoutes);
 
@@ -2519,5 +2529,6 @@ app.get('/api/leads/first-call-stats', async (req, res) => {
 });
 
 httpServer.listen(PORT, () => { 
+  zoomRecordingQueue.start();
   console.log(`Server running on port ${PORT}`);
 });
