@@ -101,6 +101,70 @@ router.get("/status", requireSession, async (req, res) => {
   });
 });
 
+router.get("/debug", requireSession, async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    const sessionUser = req.sessionUser || req.session?.user || null;
+    const tokenRecord = await ZoomToken.findOne({ userId }).lean();
+
+    const out = {
+      now: new Date().toISOString(),
+      session: {
+        hasSessionUser: Boolean(sessionUser),
+        userId: sessionUser?.id || sessionUser?._id || null,
+        fullName: sessionUser?.fullName || sessionUser?.name || null,
+        email: sessionUser?.email || null,
+        role: sessionUser?.role || null,
+      },
+      token: {
+        exists: Boolean(tokenRecord),
+        zoomUserId: tokenRecord?.zoomUserId || null,
+        zoomEmail: tokenRecord?.zoomEmail || null,
+        tokenExpiresAt: tokenRecord?.tokenExpiresAt || null,
+        expiresInSeconds: tokenRecord?.tokenExpiresAt
+          ? Math.floor((new Date(tokenRecord.tokenExpiresAt).getTime() - Date.now()) / 1000)
+          : null,
+      },
+      zoomMe: {
+        ok: false,
+        id: null,
+        email: null,
+        type: null,
+        message: null,
+      },
+    };
+
+    if (!tokenRecord) return res.json(out);
+
+    try {
+      const accessToken = await getValidAccessTokenForUser(userId);
+      const meResp = await axios.get("https://api.zoom.us/v2/users/me", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 20000,
+      });
+      out.zoomMe = {
+        ok: true,
+        id: meResp.data?.id || null,
+        email: meResp.data?.email || null,
+        type: meResp.data?.type ?? null,
+        message: "Zoom token valid and users/me reachable",
+      };
+    } catch (err) {
+      out.zoomMe = {
+        ok: false,
+        id: null,
+        email: null,
+        type: null,
+        message: err.response?.data?.message || err.message || "users/me failed",
+      };
+    }
+
+    return res.json(out);
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message || "Debug failed" });
+  }
+});
+
 router.delete("/disconnect", requireSession, async (req, res) => {
   const userId = getUserIdFromReq(req);
   await ZoomToken.deleteOne({ userId });
