@@ -27,8 +27,32 @@ const s3 = new S3Client({
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
+    if (req.query.light === "1") {
+      const assets = await Asset.aggregate([
+        { $sort: { assetCode: 1 } },
+        {
+          $project: {
+            name: 1,
+            company: 1,
+            model: 1,
+            assetCode: 1,
+            brand: 1,
+            allottedTo: 1,
+            emp_id: 1,
+            isFaulty: 1,
+            faultyRemark: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            imageUrls: { $slice: [{ $ifNull: ["$imageUrls", []] }, 3] },
+            imageCount: { $size: { $ifNull: ["$imageUrls", []] } },
+          },
+        },
+      ]);
+      return res.json(assets);
+    }
+
     const assets = await Asset.find().sort({ assetCode: 1 }).lean();
     res.json(assets);
   } catch (err) {
@@ -56,6 +80,17 @@ router.get("/employees", async (_req, res) => {
   } catch (err) {
     console.error("GET /assets/employees error:", err);
     res.status(500).json({ message: "Failed to fetch employees" });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  try {
+    const asset = await Asset.findById(req.params.id).lean();
+    if (!asset) return res.status(404).json({ message: "Asset not found" });
+    res.json(asset);
+  } catch (err) {
+    console.error("GET /assets/:id error:", err);
+    res.status(500).json({ message: "Failed to fetch asset" });
   }
 });
 

@@ -9,7 +9,8 @@ router.get("/", async (_req, res) => {
   try {
     const items = await AssetAllotment.find()
       .populate("employee", "fullName email")
-      .sort({ allottedAt: -1, createdAt: -1 });
+      .sort({ allottedAt: -1, createdAt: -1 })
+      .lean();
 
 
     res.json(items);
@@ -126,7 +127,8 @@ router.get("/journey/:assetCode", async (req, res) => {
       returnedAt: { $ne: null },
     })
       .populate("employee", "fullName email")
-      .sort({ allottedAt: 1, createdAt: 1 });
+      .sort({ allottedAt: 1, createdAt: 1 })
+      .lean();
  
     const timeline = rows.map((doc) => ({
       _id: doc._id,
@@ -172,7 +174,8 @@ router.get("/employee/:employeeId", async (req, res) => {
  
     const items = await AssetAllotment.find(filter)
       .populate("employee", "fullName email")
-      .sort({ allottedAt: -1, createdAt: -1 });
+      .sort({ allottedAt: -1, createdAt: -1 })
+      .lean();
  
     res.json(items);
   } catch (err) {
