@@ -4,43 +4,102 @@ const ZoomToken = require("../models/ZoomToken");
 
 const MANAGER_OVERVIEW_EVENT = "manager_overview_update";
 const clients = new Set();
+const IST_TIME_ZONE = "Asia/Kolkata";
+
+function getDatePartsInTimeZone(date, timeZone = IST_TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: Number(lookup.year),
+    month: Number(lookup.month),
+    day: Number(lookup.day),
+  };
+}
+
+function buildIstDate(year, month, day, hour = 0, minute = 0, second = 0, ms = 0) {
+  const pad = (value, size = 2) => String(value).padStart(size, "0");
+  return new Date(
+    `${pad(year, 4)}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}:${pad(second)}.${pad(ms, 3)}+05:30`
+  );
+}
+
+function addDaysAtUtc(date, days) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function getIstDayBounds(baseDate = new Date()) {
+  const { year, month, day } = getDatePartsInTimeZone(baseDate);
+  return {
+    start: buildIstDate(year, month, day, 0, 0, 0, 0),
+    end: buildIstDate(year, month, day, 23, 59, 59, 999),
+  };
+}
+
+function getIstMonthBounds(baseDate = new Date()) {
+  const { year, month } = getDatePartsInTimeZone(baseDate);
+  const nextMonthYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  return {
+    start: buildIstDate(year, month, 1, 0, 0, 0, 0),
+    end: new Date(buildIstDate(nextMonthYear, nextMonth, 1, 0, 0, 0, 0).getTime() - 1),
+  };
+}
 
 function getDateRange(range = {}) {
   const now = new Date();
   const preset = String(range?.preset || "").toLowerCase();
 
-  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const endOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
-  const mondayStart = (d) => {
-    const day = d.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    const x = new Date(d);
-    x.setDate(d.getDate() + diff);
-    return startOfDay(x);
+  const getWeekBounds = (baseDate) => {
+    const dayBounds = getIstDayBounds(baseDate);
+    const weekday = new Intl.DateTimeFormat("en-US", {
+      timeZone: IST_TIME_ZONE,
+      weekday: "short",
+    }).format(baseDate);
+    const weekdayIndex = {
+      Mon: 0,
+      Tue: 1,
+      Wed: 2,
+      Thu: 3,
+      Fri: 4,
+      Sat: 5,
+      Sun: 6,
+    }[weekday] ?? 0;
+    return {
+      start: addDaysAtUtc(dayBounds.start, -weekdayIndex),
+      end: new Date(addDaysAtUtc(addDaysAtUtc(dayBounds.start, -weekdayIndex), 7).getTime() - 1),
+    };
   };
 
-  if (preset === "today") return { start: startOfDay(now), end: now };
-  if (preset === "yesterday") {
-    const y = new Date(now);
-    y.setDate(now.getDate() - 1);
-    return { start: startOfDay(y), end: endOfDay(y) };
+  if (preset === "today") {
+    const { start } = getIstDayBounds(now);
+    return { start, end: now };
   }
-  if (preset === "this_week") return { start: mondayStart(now), end: now };
+  if (preset === "yesterday") {
+    const y = addDaysAtUtc(now, -1);
+    return getIstDayBounds(y);
+  }
+  if (preset === "this_week") {
+    const { start } = getWeekBounds(now);
+    return { start, end: now };
+  }
   if (preset === "last_week") {
-    const thisWeekStart = mondayStart(now);
-    const lastWeekEnd = new Date(thisWeekStart.getTime() - 1);
-    const lastWeekStart = new Date(lastWeekEnd);
-    lastWeekStart.setDate(lastWeekEnd.getDate() - 6);
-    return { start: startOfDay(lastWeekStart), end: endOfDay(lastWeekEnd) };
+    return getWeekBounds(addDaysAtUtc(now, -7));
   }
   if (preset === "this_month") {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const { start } = getIstMonthBounds(now);
     return { start, end: now };
   }
   if (preset === "last_month") {
-    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-    return { start, end };
+    const { year, month } = getDatePartsInTimeZone(now);
+    const lastMonthDate = addDaysAtUtc(buildIstDate(year, month, 1, 0, 0, 0, 0), -1);
+    return getIstMonthBounds(lastMonthDate);
   }
 
   const startRaw = range?.start ? new Date(range.start) : null;

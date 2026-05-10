@@ -8,6 +8,7 @@ const {
   runIncrementalSync,
   getSyncDiagnostics,
 } = require("../services/zoomPhoneHistorySyncService");
+const { hasS2SConfig } = require("../services/zoomS2SService");
 const {
   MANAGER_OVERVIEW_EVENT,
   addManagerOverviewClient,
@@ -128,7 +129,25 @@ router.get("/manager/overview", requireSession, async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 
-  const overview = await buildManagerOverview(getOverviewRangeFromQuery(req.query));
+  const range = getOverviewRangeFromQuery(req.query);
+  let overview = await buildManagerOverview(range);
+
+  const shouldWarmToday =
+    range.preset === "today" &&
+    Number(overview?.total || 0) === 0 &&
+    hasS2SConfig();
+
+  if (shouldWarmToday) {
+    try {
+      await runIncrementalSync(24);
+      overview = await buildManagerOverview(range);
+    } catch (err) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[calling-center] on-demand today sync failed", err.message || err);
+      }
+    }
+  }
+
   res.json(overview);
 });
 
