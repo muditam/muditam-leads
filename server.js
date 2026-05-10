@@ -89,9 +89,14 @@ const smartfloRoutes = require("./routes/smartflo");
 const zoomAuthRoutes = require("./routes/zoomAuth");
 const zoomWebhookRoutes = require("./routes/zoomWebhooks");
 const zoomCallRoutes = require("./routes/zoomCalls");
+const zoomCallIntentRoutes = require("./routes/zoomCallIntents");
 const zoomContactsRoutes = require("./routes/zoomContacts");
 const zoomRecordingQueue = require("./queues/zoomRecordingQueue");
 const zoomContactSyncService = require("./services/zoomContactSyncService");
+const {
+  runIncrementalSync,
+  runNightlyReconcile,
+} = require("./services/zoomPhoneHistorySyncService");
 
 const ReturnDeliveredRoutes = require("./routes/ReturnDelivered");
 
@@ -632,6 +637,7 @@ app.use('/api', authRoutes);
 app.use('/api', clickToCallRoutes);
 app.use("/api/zoom/auth", zoomAuthRoutes);
 app.use("/api/zoom/calls", zoomCallRoutes);
+app.use("/api/zoom/call-intents", zoomCallIntentRoutes);
 app.use("/api/zoom/contacts", zoomContactsRoutes);
 
 // Nightly contact reconciliation (2:15 AM server time) for Zoom contact auto-sync healing.
@@ -652,6 +658,36 @@ setTimeout(async () => {
     console.error("[zoom-contact-sync] startup reconcile failed:", err.message || err);
   }
 }, 30000);
+
+// Zoom Phone manager analytics accuracy jobs (S2S call-history reconciliation).
+// - Incremental: every 10 minutes over rolling 24h
+// - Nightly: deep 45-day reconcile
+cron.schedule("*/10 * * * *", async () => {
+  try {
+    const out = await runIncrementalSync(24);
+    console.log("[zoom-phone-sync] incremental:", out);
+  } catch (err) {
+    console.error("[zoom-phone-sync] incremental failed:", err.message || err);
+  }
+});
+
+cron.schedule("35 2 * * *", async () => {
+  try {
+    const out = await runNightlyReconcile(45);
+    console.log("[zoom-phone-sync] nightly:", out);
+  } catch (err) {
+    console.error("[zoom-phone-sync] nightly failed:", err.message || err);
+  }
+});
+
+setTimeout(async () => {
+  try {
+    const out = await runIncrementalSync(24);
+    console.log("[zoom-phone-sync] startup incremental:", out);
+  } catch (err) {
+    console.error("[zoom-phone-sync] startup incremental failed:", err.message || err);
+  }
+}, 45000);
 
 app.use("/api/finance", financeRoutes);
 

@@ -1,13 +1,37 @@
 const express = require("express");
+const axios = require("axios");
 const requireSession = require("../middleware/requireSession");
 const ZoomCallLog = require("../models/ZoomCallLog");
-const { getUserIdFromReq } = require("../services/zoomAuthService");
+const { getUserIdFromReq, getValidAccessTokenForUser } = require("../services/zoomAuthService");
+const { isManagerRole, normalizeRole } = require("../utils/managerRoles");
+const {
+  runIncrementalSync,
+  getSyncDiagnostics,
+} = require("../services/zoomPhoneHistorySyncService");
+const {
+  MANAGER_OVERVIEW_EVENT,
+  addManagerOverviewClient,
+  removeManagerOverviewClient,
+  buildManagerOverview,
+} = require("../services/callingManagerOverviewStream");
 
 const router = express.Router();
 
-function isManagerRole(role = "") {
-  const r = String(role || "").toLowerCase();
-  return ["manager", "admin", "super admin", "super-admin", "developer"].includes(r);
+function getOverviewRangeFromQuery(query = {}) {
+  const preset = String(query.preset || "").trim().toLowerCase();
+  const start = String(query.start || "").trim();
+  const end = String(query.end || "").trim();
+  return { preset, start, end };
+}
+
+async function zoomPhoneGet(userId, url, params = {}) {
+  const token = await getValidAccessTokenForUser(userId);
+  const resp = await axios.get(`https://api.zoom.us/v2${url}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    params,
+    timeout: 20000,
+  });
+  return resp.data || {};
 }
 
 router.get("/", requireSession, async (req, res) => {
@@ -38,30 +62,157 @@ router.get("/", requireSession, async (req, res) => {
   res.json({ rows, total, page, limit });
 });
 
+router.get("/history", requireSession, async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.page_size || 30)));
+    const nextPageToken = String(req.query.next_page_token || "");
+    const from = String(req.query.from || "");
+    const to = String(req.query.to || "");
+
+    const data = await zoomPhoneGet(userId, "/phone/call_history", {
+      page_size: pageSize,
+      next_page_token: nextPageToken || undefined,
+      from: from || undefined,
+      to: to || undefined,
+    });
+
+    const rows = Array.isArray(data.call_history) ? data.call_history : [];
+    return res.json({
+      rows,
+      next_page_token: data.next_page_token || "",
+      page_size: data.page_size || pageSize,
+      total_records: data.total_records || rows.length,
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.response?.data?.message || err.message || "Failed to fetch call history" });
+  }
+});
+
+router.get("/history/:callHistoryUuid", requireSession, async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    const callHistoryUuid = String(req.params.callHistoryUuid || "");
+    const data = await zoomPhoneGet(userId, `/phone/call_history/${encodeURIComponent(callHistoryUuid)}`);
+    return res.json({
+      call_id: data.call_id || "",
+      call_history_uuid: data.call_history_uuid || callHistoryUuid,
+      call_elements: Array.isArray(data.call_elements) ? data.call_elements : [],
+      raw: data,
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.response?.data?.message || err.message || "Failed to fetch call history detail" });
+  }
+});
+
+router.get("/element/:callElementId", requireSession, async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    const callElementId = String(req.params.callElementId || "");
+    const data = await zoomPhoneGet(userId, `/phone/call_element/${encodeURIComponent(callElementId)}`);
+    return res.json(data);
+  } catch (err) {
+    return res.status(400).json({ message: err.response?.data?.message || err.message || "Failed to fetch call element" });
+  }
+});
+
 router.get("/manager/overview", requireSession, async (req, res) => {
   const role = req.sessionUser?.role || "";
-  if (!isManagerRole(role)) return res.status(403).json({ message: "Forbidden" });
-
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const rows = await ZoomCallLog.find({ createdAt: { $gte: since } }).lean();
-
-  const total = rows.length;
-  const answered = rows.filter((r) => Number(r.duration || 0) > 0).length;
-  const missed = total - answered;
-  const avgDuration = total ? Math.round(rows.reduce((s, r) => s + Number(r.duration || 0), 0) / total) : 0;
-
-  const perAgent = {};
-  for (const r of rows) {
-    const key = String(r.agentId || "unassigned");
-    if (!perAgent[key]) perAgent[key] = { agentId: key, calls: 0, answered: 0, missed: 0, duration: 0 };
-    perAgent[key].calls += 1;
-    perAgent[key].duration += Number(r.duration || 0);
-    if (Number(r.duration || 0) > 0) perAgent[key].answered += 1;
-    else perAgent[key].missed += 1;
+  if (!isManagerRole(role)) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[calling-center] manager overview forbidden", {
+        userId: String(getUserIdFromReq(req) || ""),
+        normalizedRole: normalizeRole(role),
+      });
+    }
+    return res.status(403).json({ message: "Forbidden" });
   }
 
-  res.json({ total, answered, missed, avgDuration, perAgent: Object.values(perAgent) });
+  const overview = await buildManagerOverview(getOverviewRangeFromQuery(req.query));
+  res.json(overview);
 });
+
+router.get("/manager/diagnostics", requireSession, async (req, res) => {
+  try {
+    const role = req.sessionUser?.role || "";
+    if (!isManagerRole(role)) return res.status(403).json({ message: "Forbidden" });
+    const diag = await getSyncDiagnostics({
+      from: req.query.from,
+      to: req.query.to,
+    });
+    res.json(diag);
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Failed to fetch diagnostics" });
+  }
+});
+
+router.post("/manager/sync-now", requireSession, async (req, res) => {
+  try {
+    const role = req.sessionUser?.role || "";
+    if (!isManagerRole(role)) return res.status(403).json({ message: "Forbidden" });
+    const hours = Math.max(1, Math.min(72, Number(req.body?.hours || 24)));
+    const out = await runIncrementalSync(hours);
+    res.json({ ok: true, sync: out });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message || "Sync failed" });
+  }
+});
+
+router.get(
+  "/manager/stream",
+  (req, _res, next) => {
+    if (!req.headers["x-session-user"] && req.query?.sessionUser) {
+      req.headers["x-session-user"] = String(req.query.sessionUser);
+    }
+    next();
+  },
+  requireSession,
+  async (req, res) => {
+  const role = req.sessionUser?.role || "";
+  if (!isManagerRole(role)) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[calling-center] manager stream forbidden", {
+        userId: String(getUserIdFromReq(req) || ""),
+        normalizedRole: normalizeRole(role),
+      });
+    }
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  req.socket?.setKeepAlive?.(true);
+  req.socket?.setNoDelay?.(true);
+  res.flushHeaders?.();
+
+  const range = getOverviewRangeFromQuery(req.query);
+  addManagerOverviewClient(res, range);
+
+  const ping = setInterval(() => {
+    try {
+      res.write(":\n\n");
+    } catch (_) {
+      // handled on close
+    }
+  }, 15000);
+
+  const initial = await buildManagerOverview(range);
+  res.write(`event: ${MANAGER_OVERVIEW_EVENT}\n`);
+  res.write(`data: ${JSON.stringify(initial)}\n\n`);
+
+  req.on("close", () => {
+    clearInterval(ping);
+    removeManagerOverviewClient(res);
+    try {
+      res.end();
+    } catch (_) {
+      // noop
+    }
+  });
+}
+);
 
 router.get("/:callId", requireSession, async (req, res) => {
   const row = await ZoomCallLog.findOne({ callId: req.params.callId }).lean();

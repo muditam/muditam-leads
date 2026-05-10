@@ -16,21 +16,30 @@ async function processOne(job) {
   call.recordingStatus = "downloading";
   await call.save();
 
-  // Placeholder implementation: fetch recording metadata and mark completed.
-  // You can replace this with actual download/upload stream logic when Zoom account-level endpoint is finalized.
+  // v3 hard-cutover: fetch call element details and read recording metadata from element payload.
   const accessToken = await getValidAccessTokenForUser(call.agentId);
-  const url = `https://api.zoom.us/v2/phone/call_logs/${encodeURIComponent(call.callId)}/recordings`;
+  const callElementId = String(job.callElementId || call.callElementId || "");
+  if (!callElementId) {
+    call.recordingStatus = "failed";
+    call.transcriptStatus = "failed";
+    await call.save();
+    return;
+  }
+
+  const url = `https://api.zoom.us/v2/phone/call_element/${encodeURIComponent(callElementId)}`;
 
   const resp = await axios.get(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     timeout: 20000,
   });
 
-  const first = resp.data?.recordings?.[0] || {};
-  call.recordingId = call.recordingId || first.id || "";
-  call.recordingUrl = first.download_url || call.recordingUrl || "";
+  const recording = resp.data?.recording || {};
+  call.recordingId = call.recordingId || recording.recording_id || recording.id || "";
+  call.recordingUrl = recording.download_url || recording.recording_download_url || call.recordingUrl || "";
   call.recordingStatus = call.recordingUrl ? "completed" : "failed";
   call.transcriptStatus = call.recordingUrl ? "pending" : call.transcriptStatus;
+  call.callHistoryUuid = call.callHistoryUuid || String(resp.data?.call_history_uuid || "");
+  call.callElementId = call.callElementId || callElementId;
   await call.save();
 }
 
