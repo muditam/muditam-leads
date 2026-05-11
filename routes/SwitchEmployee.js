@@ -44,9 +44,50 @@ const contactAdminError = () => ({
   message: 'contact admin for permissions',
 });
 
+function getHeaderSessionUser(req) {
+  try {
+    const headerUser = req.headers['x-session-user'];
+    if (!headerUser) return null;
+    const parsed = JSON.parse(headerUser);
+    if (parsed && (parsed.fullName || parsed.name || parsed.email || parsed.id || parsed._id)) {
+      return parsed;
+    }
+  } catch (_) {
+    // ignore malformed header
+  }
+  return null;
+}
+
+function buildSessionUserFromAny(user = {}) {
+  return {
+    id: toId(user.id || user._id),
+    email: user.email || '',
+    fullName: user.fullName || user.name || '',
+    role: user.role || '',
+    department: user.department || '',
+  };
+}
+
+function ensureSwitchSessionUser(req) {
+  if (req.session?.user) return req.session.user;
+  const headerUser = getHeaderSessionUser(req);
+  if (!headerUser || !req.session) return null;
+  req.session.user = buildSessionUserFromAny(headerUser);
+  return req.session.user;
+}
+
+function hasActiveImpersonation(req) {
+  const sessionUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req) || null;
+  const originalUserId = toId(req.session?.originalUserId);
+  const currentUserId = toId(req.session?.userId || req.session?.user?.id || sessionUser?.id || sessionUser?._id);
+
+  return Boolean(originalUserId && currentUserId && originalUserId !== currentUserId);
+}
+
 async function getActorEmployee(req) {
-  const sessionUser = req.session?.user || null;
-  const actorId = toId(sessionUser?.id || sessionUser?._id);
+  const sessionUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req) || null;
+  const originalUserId = toId(req.session?.originalUserId);
+  const actorId = originalUserId || toId(sessionUser?.id || sessionUser?._id);
   const actorEmail = String(sessionUser?.email || '').trim();
 
   if (!actorId && !actorEmail) return null;
@@ -180,8 +221,14 @@ async function getSwitchScope(actor) {
 // 🔍 Search employees (used by SwitchDashboard)
 router.get('/', async (req, res) => {
  try {
-   if (!req.session?.user) {
+   const requestUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req);
+   if (!requestUser) {
      return res.status(401).json({ message: 'Unauthorized' });
+   }
+
+   if (hasActiveImpersonation(req)) {
+     res.set('x-switch-state', 'impersonating');
+     return res.json([]);
    }
 
    const { search = '' } = req.query;
@@ -255,9 +302,16 @@ router.post('/impersonate', async (req, res) => {
        .json({ message: 'Session middleware not configured' });
    }
 
-
-   if (!req.session.user) {
+   const requestUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req);
+   if (!requestUser) {
      return res.status(401).json({ message: 'Unauthorized' });
+   }
+
+   if (hasActiveImpersonation(req)) {
+     return res.status(409).json({
+       message: 'Return to your original account before switching again.',
+       requiresRevert: true,
+     });
    }
 
    const { employeeId } = req.body || {};
@@ -303,7 +357,7 @@ router.post('/impersonate', async (req, res) => {
 
    // Save original user once
    if (!req.session.originalUserId) {
-     req.session.originalUserId = toId(req.session.user?.id || req.session.user?._id) || null;
+     req.session.originalUserId = toId(requestUser?.id || requestUser?._id) || null;
    }
 
 
@@ -339,7 +393,26 @@ router.post('/revert', async (req, res) => {
 
    const originalId = req.session.originalUserId;
    if (!originalId) {
-     return res.status(400).json({ message: 'No impersonation session found' });
+     const currentUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req);
+     if (!currentUser) {
+       return res.status(401).json({ message: 'Unauthorized' });
+     }
+
+     return res.json({
+       user: buildSwitchResponseUser({
+         _id: currentUser.id || currentUser._id,
+         fullName: currentUser.fullName || currentUser.name || '',
+         email: currentUser.email || '',
+         role: currentUser.role || '',
+         department: currentUser.department || '',
+         hasTeam: !!currentUser.hasTeam,
+         callerId: currentUser.callerId,
+         agentNumber: currentUser.agentNumber,
+         orderConfirmActive: currentUser.orderConfirmActive,
+         permissions: currentUser.permissions || { menubar: {}, navbar: {} },
+       }),
+       alreadyRestored: true,
+     });
    }
 
 

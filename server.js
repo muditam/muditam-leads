@@ -660,9 +660,9 @@ setTimeout(async () => {
 }, 30000);
 
 // Zoom Phone manager analytics accuracy jobs (S2S call-history reconciliation).
-// - Incremental: every 10 minutes over rolling 24h
+// - Incremental: every 1 hour over rolling 24h
 // - Nightly: deep 45-day reconcile
-cron.schedule("*/10 * * * *", async () => {
+cron.schedule("0 * * * *", async () => {
   try {
     const out = await runIncrementalSync(24);
     console.log("[zoom-phone-sync] incremental:", out);

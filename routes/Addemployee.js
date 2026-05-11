@@ -266,6 +266,83 @@ router.get("/api/employees", async (req, res) => {
  }
 });
 
+router.post("/api/employees/revert", async (req, res) => {
+ try {
+   if (!req.session) {
+     return res.status(500).json({ message: "Session middleware not configured" });
+   }
+
+   const originalId = req.session.originalUserId;
+   if (!originalId) {
+     const currentUser = req.session?.user || null;
+     if (!currentUser) {
+       return res.status(401).json({ message: "Unauthorized" });
+     }
+
+     return res.status(200).json({
+       user: {
+         id: currentUser.id || currentUser._id,
+         fullName: currentUser.fullName || currentUser.name || "",
+         email: currentUser.email || "",
+         role: currentUser.role || "",
+         department: currentUser.department || "",
+         hasTeam: !!currentUser.hasTeam,
+         callerId: currentUser.callerId,
+         agentNumber: currentUser.agentNumber,
+         orderConfirmActive: currentUser.orderConfirmActive,
+         permissions: currentUser.permissions || { menubar: {}, navbar: {} },
+       },
+       alreadyRestored: true,
+     });
+   }
+
+   const original = await Employee.findById(originalId)
+     .select(
+       "_id fullName email role department hasTeam callerId agentNumber orderConfirmActive permissions"
+     )
+     .lean();
+
+   if (!original) {
+     return res.status(404).json({ message: "Original user not found" });
+   }
+
+   req.session.user = {
+     id: String(original._id),
+     email: original.email || "",
+     fullName: original.fullName || "",
+     role: original.role || "",
+     department: original.department || "",
+   };
+   req.session.userId = String(original._id);
+   req.session.originalUserId = null;
+
+   req.session.save((saveErr) => {
+     if (saveErr) {
+       console.error("Session save error (legacy revert):", saveErr);
+       return res.status(500).json({ message: "Failed to restore session" });
+     }
+
+     return res.status(200).json({
+       user: {
+         id: original._id,
+         fullName: original.fullName,
+         email: original.email,
+         role: original.role,
+         department: original.department || "",
+         hasTeam: !!original.hasTeam,
+         callerId: original.callerId,
+         agentNumber: original.agentNumber,
+         orderConfirmActive: original.orderConfirmActive,
+         permissions: original.permissions || { menubar: {}, navbar: {} },
+       },
+     });
+   });
+ } catch (err) {
+   console.error("Legacy revert error:", err);
+   res.status(500).json({ message: "Unable to revert impersonation" });
+ }
+});
+
 
 router.get("/api/employees/hierarchy-tree", async (req, res) => {
  try {
