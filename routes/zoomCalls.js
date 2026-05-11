@@ -5,6 +5,8 @@ const ZoomCallLog = require("../models/ZoomCallLog");
 const { getUserIdFromReq, getValidAccessTokenForUser } = require("../services/zoomAuthService");
 const { isManagerRole, normalizeRole } = require("../utils/managerRoles");
 const {
+  syncCallHistoryWindow,
+  syncCallHistoryWindowViaConnectedUsers,
   runIncrementalSync,
   getSyncDiagnostics,
 } = require("../services/zoomPhoneHistorySyncService");
@@ -118,37 +120,45 @@ router.get("/element/:callElementId", requireSession, async (req, res) => {
 });
 
 router.get("/manager/overview", requireSession, async (req, res) => {
-  const role = req.sessionUser?.role || "";
-  if (!isManagerRole(role)) {
-    if (process.env.NODE_ENV !== "production") {
-      console.warn("[calling-center] manager overview forbidden", {
-        userId: String(getUserIdFromReq(req) || ""),
-        normalizedRole: normalizeRole(role),
-      });
-    }
-    return res.status(403).json({ message: "Forbidden" });
-  }
-
-  const range = getOverviewRangeFromQuery(req.query);
-  let overview = await buildManagerOverview(range);
-
-  const shouldWarmToday =
-    range.preset === "today" &&
-    Number(overview?.total || 0) === 0 &&
-    hasS2SConfig();
-
-  if (shouldWarmToday) {
-    try {
-      await runIncrementalSync(24);
-      overview = await buildManagerOverview(range);
-    } catch (err) {
+  try {
+    const role = req.sessionUser?.role || "";
+    if (!isManagerRole(role)) {
       if (process.env.NODE_ENV !== "production") {
-        console.warn("[calling-center] on-demand today sync failed", err.message || err);
+        console.warn("[calling-center] manager overview forbidden", {
+          userId: String(getUserIdFromReq(req) || ""),
+          normalizedRole: normalizeRole(role),
+        });
+      }
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const range = getOverviewRangeFromQuery(req.query);
+    let overview = await buildManagerOverview(range);
+    const shouldWarmFromZoom = Number(overview?.total || 0) === 0;
+
+    if (shouldWarmFromZoom) {
+      try {
+        const from = overview?.range?.start ? new Date(overview.range.start) : null;
+        const to = overview?.range?.end ? new Date(overview.range.end) : null;
+        if (from && to && !Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime())) {
+          if (hasS2SConfig()) {
+            await syncCallHistoryWindow({ from, to, mode: "manual", pageSize: 100 });
+          } else {
+            await syncCallHistoryWindowViaConnectedUsers({ from, to, pageSize: 100 });
+          }
+          overview = await buildManagerOverview(range);
+        }
+      } catch (err) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[calling-center] on-demand manager sync failed", err.message || err);
+        }
       }
     }
-  }
 
-  res.json(overview);
+    return res.json(overview);
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to build manager overview" });
+  }
 });
 
 router.get("/manager/diagnostics", requireSession, async (req, res) => {
@@ -170,7 +180,13 @@ router.post("/manager/sync-now", requireSession, async (req, res) => {
     const role = req.sessionUser?.role || "";
     if (!isManagerRole(role)) return res.status(403).json({ message: "Forbidden" });
     const hours = Math.max(1, Math.min(72, Number(req.body?.hours || 24)));
-    const out = await runIncrementalSync(hours);
+    const out = hasS2SConfig()
+      ? await runIncrementalSync(hours)
+      : await syncCallHistoryWindowViaConnectedUsers({
+          from: new Date(Date.now() - hours * 60 * 60 * 1000),
+          to: new Date(),
+          pageSize: 100,
+        });
     res.json({ ok: true, sync: out });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message || "Sync failed" });

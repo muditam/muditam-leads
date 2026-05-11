@@ -1,8 +1,10 @@
+const axios = require("axios");
 const ZoomCallLog = require("../models/ZoomCallLog");
 const ZoomToken = require("../models/ZoomToken");
 const Employee = require("../models/Employee");
 const ZoomPhoneSyncRun = require("../models/ZoomPhoneSyncRun");
 const { zoomPhoneS2SGet, hasS2SConfig } = require("./zoomS2SService");
+const { getValidAccessTokenForUser } = require("./zoomAuthService");
 const { broadcastManagerOverviewUpdate } = require("./callingManagerOverviewStream");
 
 function digitsOnly(v = "") {
@@ -28,6 +30,12 @@ function toDateMaybe(v) {
   if (!v) return null;
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function toZoomApiDate(v) {
+  const d = v instanceof Date ? v : toDateMaybe(v);
+  if (!d) return "";
+  return d.toISOString().slice(0, 10);
 }
 
 function parseDurationToSec(v) {
@@ -158,6 +166,84 @@ function buildCanonicalCallId(row = {}) {
   return `hash-${Buffer.from(`${start}|${from}|${to}`).toString("base64").slice(0, 24)}`;
 }
 
+async function zoomPhoneUserGet(userId, path, params = {}) {
+  const token = await getValidAccessTokenForUser(userId);
+  const resp = await axios.get(`https://api.zoom.us/v2${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    params,
+    timeout: 30000,
+  });
+  return resp.data || {};
+}
+
+async function upsertCallHistoryRows(rows, { maps, mode, metadataExtra = {} }) {
+  let upserts = 0;
+  let inserts = 0;
+  let updates = 0;
+  let unresolvedAgentRows = 0;
+
+  for (const row of rows) {
+    const callId = buildCanonicalCallId(row);
+    const direction = deriveDirection(row);
+    const durationSec = parseDurationToSec(firstNonEmpty(row.duration, row.call_duration, row.talk_time));
+    const { outcome, status } = deriveOutcomeStatus(row, durationSec);
+    const startTime = toDateMaybe(firstNonEmpty(row.start_time, row.startTime, row.time));
+    const endTime = toDateMaybe(firstNonEmpty(row.end_time, row.endTime));
+    const callHistoryUuid = String(firstNonEmpty(row.call_history_uuid, row.callHistoryUuid) || "");
+    const callElementId = String(firstNonEmpty(row.call_element_id, row.callElementId) || "");
+    const callElementIds = Array.isArray(row.call_elements)
+      ? row.call_elements.map((x) => String(firstNonEmpty(x?.call_element_id, x?.id) || "")).filter(Boolean)
+      : [];
+
+    const agent = resolveAgent(row, maps);
+    if (!agent) unresolvedAgentRows += 1;
+
+    const callerNumber = String(firstNonEmpty(row.caller_number, row.from_phone_number, row.from_number) || "").trim();
+    const calleeNumber = String(firstNonEmpty(row.callee_number, row.to_phone_number, row.to_number) || "").trim();
+
+    const updateDoc = {
+      callHistoryUuid,
+      callElementId,
+      callElementIds,
+      agentId: agent?._id || null,
+      zoomUserId: String(firstNonEmpty(row.user_id, row.owner_id, row.zoom_user_id) || ""),
+      direction,
+      outcome,
+      status,
+      phoneNumber: direction === "outbound" ? calleeNumber : callerNumber,
+      callerNumber,
+      calleeNumber,
+      startTime: startTime || undefined,
+      endTime: endTime || undefined,
+      duration: durationSec,
+      eventType: "call_history_sync",
+      metadata: {
+        ...(row || {}),
+        ...metadataExtra,
+        syncMode: mode,
+      },
+    };
+
+    const existing = await ZoomCallLog.findOne({ callId }).select("_id").lean();
+    await ZoomCallLog.findOneAndUpdate(
+      { callId },
+      { $set: updateDoc, $setOnInsert: { callId } },
+      { upsert: true, new: false }
+    );
+
+    upserts += 1;
+    if (existing?._id) updates += 1;
+    else inserts += 1;
+  }
+
+  return {
+    upserts,
+    inserts,
+    updates,
+    unresolvedAgentRows,
+  };
+}
+
 async function syncCallHistoryWindow({ from, to, mode = "incremental", pageSize = 100 }) {
   if (!hasS2SConfig()) {
     throw new Error("Zoom S2S not configured");
@@ -177,8 +263,8 @@ async function syncCallHistoryWindow({ from, to, mode = "incremental", pageSize 
   try {
     do {
       const data = await zoomPhoneS2SGet("/phone/call_history", {
-        from: from.toISOString(),
-        to: to.toISOString(),
+        from: toZoomApiDate(from),
+        to: toZoomApiDate(to),
         page_size: pageSize,
         next_page_token: nextPageToken || undefined,
       });
@@ -186,60 +272,15 @@ async function syncCallHistoryWindow({ from, to, mode = "incremental", pageSize 
       const rows = Array.isArray(data.call_history) ? data.call_history : [];
       apiRows += rows.length;
       pagesFetched += 1;
-
-      for (const row of rows) {
-        const callId = buildCanonicalCallId(row);
-        const direction = deriveDirection(row);
-        const durationSec = parseDurationToSec(firstNonEmpty(row.duration, row.call_duration, row.talk_time));
-        const { outcome, status } = deriveOutcomeStatus(row, durationSec);
-        const startTime = toDateMaybe(firstNonEmpty(row.start_time, row.startTime, row.time));
-        const endTime = toDateMaybe(firstNonEmpty(row.end_time, row.endTime));
-        const callHistoryUuid = String(firstNonEmpty(row.call_history_uuid, row.callHistoryUuid) || "");
-        const callElementId = String(firstNonEmpty(row.call_element_id, row.callElementId) || "");
-        const callElementIds = Array.isArray(row.call_elements)
-          ? row.call_elements.map((x) => String(firstNonEmpty(x?.call_element_id, x?.id) || "")).filter(Boolean)
-          : [];
-
-        const agent = resolveAgent(row, maps);
-        if (!agent) unresolvedAgentRows += 1;
-
-        const callerNumber = String(firstNonEmpty(row.caller_number, row.from_phone_number, row.from_number) || "").trim();
-        const calleeNumber = String(firstNonEmpty(row.callee_number, row.to_phone_number, row.to_number) || "").trim();
-
-        const updateDoc = {
-          callHistoryUuid,
-          callElementId,
-          callElementIds,
-          agentId: agent?._id || null,
-          zoomUserId: String(firstNonEmpty(row.user_id, row.owner_id, row.zoom_user_id) || ""),
-          direction,
-          outcome,
-          status,
-          phoneNumber: direction === "outbound" ? calleeNumber : callerNumber,
-          callerNumber,
-          calleeNumber,
-          startTime: startTime || undefined,
-          endTime: endTime || undefined,
-          duration: durationSec,
-          eventType: "call_history_sync",
-          metadata: {
-            ...(row || {}),
-            source: "zoom_call_history_api",
-            syncMode: mode,
-          },
-        };
-
-        const existing = await ZoomCallLog.findOne({ callId }).select("_id").lean();
-        await ZoomCallLog.findOneAndUpdate(
-          { callId },
-          { $set: updateDoc, $setOnInsert: { callId } },
-          { upsert: true, new: false }
-        );
-
-        upserts += 1;
-        if (existing?._id) updates += 1;
-        else inserts += 1;
-      }
+      const result = await upsertCallHistoryRows(rows, {
+        maps,
+        mode,
+        metadataExtra: { source: "zoom_call_history_api" },
+      });
+      upserts += result.upserts;
+      inserts += result.inserts;
+      updates += result.updates;
+      unresolvedAgentRows += result.unresolvedAgentRows;
 
       nextPageToken = String(data.next_page_token || "");
     } while (nextPageToken);
@@ -283,6 +324,120 @@ async function syncCallHistoryWindow({ from, to, mode = "incremental", pageSize 
   }
 }
 
+async function syncCallHistoryWindowViaConnectedUsers({ from, to, pageSize = 100 }) {
+  const run = await ZoomPhoneSyncRun.create({
+    mode: "manual",
+    from,
+    to,
+    status: "running",
+    notes: { source: "oauth_fallback" },
+  });
+
+  const maps = await loadAgentMaps();
+  const tokens = await ZoomToken.find({}, { userId: 1 }).lean();
+  const userIds = Array.from(new Set(tokens.map((t) => String(t.userId || "").trim()).filter(Boolean)));
+
+  let pagesFetched = 0;
+  let apiRows = 0;
+  let upserts = 0;
+  let inserts = 0;
+  let updates = 0;
+  let unresolvedAgentRows = 0;
+  const syncErrors = [];
+
+  try {
+    if (!userIds.length) {
+      throw new Error("No Zoom users connected for manager fallback sync");
+    }
+
+    for (const userId of userIds) {
+      let nextPageToken = "";
+
+      try {
+        do {
+          const data = await zoomPhoneUserGet(userId, "/phone/call_history", {
+            from: toZoomApiDate(from),
+            to: toZoomApiDate(to),
+            page_size: pageSize,
+            next_page_token: nextPageToken || undefined,
+          });
+
+          const rows = Array.isArray(data.call_history) ? data.call_history : [];
+          apiRows += rows.length;
+          pagesFetched += 1;
+
+          const result = await upsertCallHistoryRows(rows, {
+            maps,
+            mode: "oauth_fallback",
+            metadataExtra: {
+              source: "zoom_call_history_user_api",
+              syncedForUserId: userId,
+            },
+          });
+          upserts += result.upserts;
+          inserts += result.inserts;
+          updates += result.updates;
+          unresolvedAgentRows += result.unresolvedAgentRows;
+
+          nextPageToken = String(data.next_page_token || "");
+        } while (nextPageToken);
+      } catch (err) {
+        syncErrors.push(
+          `user:${userId} ${String(err?.response?.data?.message || err.message || err)}`
+        );
+      }
+    }
+
+    if (upserts === 0 && syncErrors.length) {
+      throw new Error(syncErrors[0]);
+    }
+
+    run.status = "ok";
+    run.finishedAt = new Date();
+    run.pagesFetched = pagesFetched;
+    run.apiRows = apiRows;
+    run.upserts = upserts;
+    run.inserts = inserts;
+    run.updates = updates;
+    run.unresolvedAgentRows = unresolvedAgentRows;
+    run.syncErrors = syncErrors;
+    await run.save();
+
+    if (upserts > 0) {
+      await broadcastManagerOverviewUpdate();
+    }
+
+    return {
+      ok: true,
+      from,
+      to,
+      mode: "oauth_fallback",
+      usersScanned: userIds.length,
+      pagesFetched,
+      apiRows,
+      upserts,
+      inserts,
+      updates,
+      unresolvedAgentRows,
+      syncErrors,
+    };
+  } catch (err) {
+    run.status = "failed";
+    run.finishedAt = new Date();
+    run.pagesFetched = pagesFetched;
+    run.apiRows = apiRows;
+    run.upserts = upserts;
+    run.inserts = inserts;
+    run.updates = updates;
+    run.unresolvedAgentRows = unresolvedAgentRows;
+    run.syncErrors = syncErrors.length
+      ? syncErrors
+      : [String(err?.response?.data?.message || err.message || err)];
+    await run.save();
+    throw err;
+  }
+}
+
 async function runIncrementalSync(hours = 6) {
   const to = new Date();
   const from = new Date(Date.now() - hours * 60 * 60 * 1000);
@@ -320,6 +475,7 @@ async function getSyncDiagnostics({ from, to }) {
 
 module.exports = {
   syncCallHistoryWindow,
+  syncCallHistoryWindowViaConnectedUsers,
   runIncrementalSync,
   runNightlyReconcile,
   getSyncDiagnostics,
