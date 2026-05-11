@@ -2557,20 +2557,33 @@ app.post('/api/leads/:id/first-call-connected', async (req, res) => {
 
 app.get('/api/leads/first-call-stats', async (req, res) => {
   try {
-    const { healthExpertAssigned } = req.query;
+    const rawHealthExpertAssigned = Array.isArray(req.query.healthExpertAssigned)
+      ? req.query.healthExpertAssigned[0]
+      : req.query.healthExpertAssigned;
+    const rawEmail = Array.isArray(req.query.email)
+      ? req.query.email[0]
+      : req.query.email;
+    const healthExpertAssigned = String(rawHealthExpertAssigned || "").trim();
+    const email = String(rawEmail || "").trim();
  
     if (!healthExpertAssigned) {
       return res.status(400).json({ message: "Health expert name required" });
     }
- 
-    const total = await Lead.countDocuments({
-      healthExpertAssigned: { $in: [healthExpertAssigned, `${healthExpertAssigned} (${req.query.email})`] },
+
+    const assigneeCandidates = [healthExpertAssigned];
+    if (email) {
+      assigneeCandidates.push(`${healthExpertAssigned} (${email})`);
+    }
+
+    const baseQuery = {
+      healthExpertAssigned: { $in: assigneeCandidates },
       salesStatus: 'Sales Done'
-    });
+    };
+ 
+    const total = await Lead.countDocuments(baseQuery);
  
     const connected = await Lead.countDocuments({
-      healthExpertAssigned: { $in: [healthExpertAssigned, `${healthExpertAssigned} (${req.query.email})`] },
-      salesStatus: 'Sales Done',
+      ...baseQuery,
       firstCallConnected: true
     });
  
