@@ -85,7 +85,6 @@ const UndeliveredordersRoute = require('./operations/undelivered-orders');
 
 const zohoMailRoutes = require("./routes/zohoMail");
 
-const smartfloRoutes = require("./routes/smartflo");
 const zoomAuthRoutes = require("./routes/zoomAuth");
 const zoomWebhookRoutes = require("./routes/zoomWebhooks");
 const zoomCallRoutes = require("./routes/zoomCalls");
@@ -715,10 +714,6 @@ app.use("/api/finance", financeDashboard);
 app.use('/api/orders', UndeliveredordersRoute);
 
 app.use("/api/zoho", zohoMailRoutes);
-
-if (String(process.env.ZOOM_PHONE_CUTOVER || "true").toLowerCase() === "false") {
-  app.use("/api/smartflo", smartfloRoutes);
-}
 
 app.use("/api", ReturnDeliveredRoutes);
 

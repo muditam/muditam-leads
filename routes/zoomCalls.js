@@ -73,6 +73,15 @@ function getDisplayCallee(row = {}) {
   ).trim();
 }
 
+function normalizeCallRow(row = {}) {
+  return {
+    ...row,
+    displayPhone: getDisplayPhone(row),
+    displayCaller: getDisplayCaller(row),
+    displayCallee: getDisplayCallee(row),
+  };
+}
+
 router.get("/", requireSession, async (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(200, Math.max(1, Number(req.query.limit || 20)));
@@ -101,12 +110,7 @@ router.get("/", requireSession, async (req, res) => {
   ]);
 
   res.json({
-    rows: rows.map((row) => ({
-      ...row,
-      displayPhone: getDisplayPhone(row),
-      displayCaller: getDisplayCaller(row),
-      displayCallee: getDisplayCallee(row),
-    })),
+    rows: rows.map(normalizeCallRow),
     total,
     page,
     limit,
@@ -306,7 +310,7 @@ router.get("/:callId", requireSession, async (req, res) => {
   if (!isManagerRole(role) && String(row.agentId || "") !== myId) {
     return res.status(403).json({ message: "Forbidden" });
   }
-  res.json(row);
+  res.json(normalizeCallRow(row));
 });
 
 router.put("/:callId/notes", requireSession, async (req, res) => {

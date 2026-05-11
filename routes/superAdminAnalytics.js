@@ -7,6 +7,7 @@ const MyOrder = require("../models/MyOrder");
 const Escalation = require("../models/escalation.model");
 const DietPlan = require("../models/DietPlan");
 const Employee = require("../models/Employee");
+const ZoomCallLog = require("../models/ZoomCallLog");
   function getDateFilter(start, end) {
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
@@ -477,23 +478,24 @@ router.get("/delivered", async (req, res) => {
         return res.status(400).json({ error: "start and end required" });
       }
 
-      // Do NOT convert to UTC — DB stores plain IST strings
-      // Example: “2025-01-30”
-      const s = start.trim();
-      const e = end.trim();
+      const startDate = new Date(`${start.trim()}T00:00:00.000Z`);
+      const endDate = new Date(`${end.trim()}T23:59:59.999Z`);
 
-      // Query SmartfloDaily by STRING date (exact match)
-      const docs = await SmartfloDaily.find({
-        date: { $gte: s, $lte: e }
-      }).lean();
+      const docs = await ZoomCallLog.find({
+        $or: [
+          { startTime: { $gte: startDate, $lte: endDate } },
+          { startTime: { $exists: false }, createdAt: { $gte: startDate, $lte: endDate } },
+          { startTime: null, createdAt: { $gte: startDate, $lte: endDate } },
+        ],
+      }, { direction: 1 }).lean();
 
       let incoming = 0;
       let outgoing = 0;
 
       docs.forEach((d) => {
-        const sum = d.summary || {};
-        incoming += sum.incomingCalls || 0;
-        outgoing += sum.dialledCalls || 0;
+        const direction = String(d.direction || "").toLowerCase();
+        if (direction === "inbound") incoming += 1;
+        if (direction === "outbound") outgoing += 1;
       });
 
       return res.json({ incoming, outgoing });
