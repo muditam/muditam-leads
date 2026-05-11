@@ -37,6 +37,18 @@ async function zoomPhoneGet(userId, url, params = {}) {
   return resp.data || {};
 }
 
+function getDisplayPhone(row = {}) {
+  return String(
+    row.phoneNumber ||
+    row.callerNumber ||
+    row.calleeNumber ||
+    row.metadata?.phone_number ||
+    row.metadata?.caller_number ||
+    row.metadata?.callee_number ||
+    ""
+  ).trim();
+}
+
 router.get("/", requireSession, async (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(200, Math.max(1, Number(req.query.limit || 20)));
@@ -52,6 +64,8 @@ router.get("/", requireSession, async (req, res) => {
   if (q) {
     filter.$or = [
       { phoneNumber: { $regex: q, $options: "i" } },
+      { callerNumber: { $regex: q, $options: "i" } },
+      { calleeNumber: { $regex: q, $options: "i" } },
       { transcriptContent: { $regex: q, $options: "i" } },
       { notes: { $regex: q, $options: "i" } },
     ];
@@ -62,7 +76,15 @@ router.get("/", requireSession, async (req, res) => {
     ZoomCallLog.countDocuments(filter),
   ]);
 
-  res.json({ rows, total, page, limit });
+  res.json({
+    rows: rows.map((row) => ({
+      ...row,
+      displayPhone: getDisplayPhone(row),
+    })),
+    total,
+    page,
+    limit,
+  });
 });
 
 router.get("/history", requireSession, async (req, res) => {
