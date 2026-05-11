@@ -45,6 +45,30 @@ function getDisplayPhone(row = {}) {
     row.metadata?.phone_number ||
     row.metadata?.caller_number ||
     row.metadata?.callee_number ||
+    row.metadata?.from_phone_number ||
+    row.metadata?.to_phone_number ||
+    row.metadata?.from_number ||
+    row.metadata?.to_number ||
+    ""
+  ).trim();
+}
+
+function getDisplayCaller(row = {}) {
+  return String(
+    row.callerNumber ||
+    row.metadata?.caller_number ||
+    row.metadata?.from_phone_number ||
+    row.metadata?.from_number ||
+    ""
+  ).trim();
+}
+
+function getDisplayCallee(row = {}) {
+  return String(
+    row.calleeNumber ||
+    row.metadata?.callee_number ||
+    row.metadata?.to_phone_number ||
+    row.metadata?.to_number ||
     ""
   ).trim();
 }
@@ -80,6 +104,8 @@ router.get("/", requireSession, async (req, res) => {
     rows: rows.map((row) => ({
       ...row,
       displayPhone: getDisplayPhone(row),
+      displayCaller: getDisplayCaller(row),
+      displayCallee: getDisplayCallee(row),
     })),
     total,
     page,
