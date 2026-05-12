@@ -154,8 +154,7 @@ const shopifyExport = require("./routes/shopifyExport");
 const notificationsRoutes = require("./routes/notifications");
 
 const WhatsAppRoutes = require("./whatsapp/whatsapp.routes");
-const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes");
-// const whatsappMediaRoutes = require("./whatsapp/whatsappMedia.routes");
+const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes"); 
 const whatsappAiRoutes = require("./whatsapp/whatsapp.ai.routes");
 const bankReconciliationKotak = require("./PaymentGateway/bankReconciliationKotak");
 
@@ -188,6 +187,28 @@ const allowedOrigins = ['https://www.60brands.com', 'https://60brands.com', 'htt
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const rawSaver = (req, res, buf) => { req.rawBody = buf; };
+
+app.get("/api/whatsapp/webhook", (_req, res) => res.sendStatus(200));
+app.post(
+  "/api/whatsapp/webhook",
+  bodyParser.json({
+    verify: rawSaver,
+    limit: "2mb",
+    type: ["application/json", "application/cloudevents+json", "text/json"],
+  }),
+  bodyParser.urlencoded({
+    verify: rawSaver,
+    extended: false,
+    limit: "2mb",
+    type: ["application/x-www-form-urlencoded"],
+  }),
+  bodyParser.text({
+    verify: rawSaver,
+    type: ["text/plain"],
+    limit: "2mb",
+  }),
+  WhatsAppRoutes.handlePublicWebhook
+);
 
 // Start Server
 const httpServer = http.createServer(app);
@@ -732,8 +753,7 @@ app.use("/api/shopify", shopifyExport);
 app.use("/api/notifications", notificationsRoutes);
 
 app.use("/api/whatsapp", WhatsAppRoutes);
-app.use("/api/whatsapp/templates", whatsappTemplatesRoutes);
-// app.use("/api/whatsapp", whatsappMediaRoutes);
+app.use("/api/whatsapp/templates", whatsappTemplatesRoutes); 
 
 app.use("/api/whatsapp", whatsappAiRoutes);
 app.use("/api/bank-reconciliation", bankReconciliationKotak);

@@ -2722,7 +2722,7 @@ function buildInboundMessageMatch({
   return match;
 }
 
-router.post("/webhook", async (req, res) => {
+async function handlePublicWebhook(req, res) {
   try {
     const incomingBody = normalizeWebhookBody(req.body);
     await recordWebhookDebug({
@@ -3284,6 +3284,9 @@ router.post("/webhook", async (req, res) => {
     console.error("webhook error:", e?.data || e);
     return res.sendStatus(200);
   }
-});
+}
+
+router.post("/webhook", handlePublicWebhook);
+router.handlePublicWebhook = handlePublicWebhook;
 
 module.exports = router;
