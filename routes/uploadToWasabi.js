@@ -15,6 +15,7 @@ const FoodItem = require('../models/FoodItem');
 const FoodRecipe = require('../models/FoodRecipe');
 const HomeBased = require('../models/HomeBased');
 const Packaged = require('../models/Packaged');
+const Restaurant = require('../models/Restaurant');
 
 
 const router = express.Router();
@@ -310,6 +311,11 @@ const COLLECTION_CONFIGS = {
    idField: '_id',
    helperColumns: ['New_Image_ID', 'NewBrandLogo'],
  },
+ restaurants: {
+   model: Restaurant,
+   idField: '_id',
+   helperColumns: ['New_Image_ID', 'NewBrandLogo'],
+ },
 };
 
 
@@ -340,7 +346,7 @@ function resolveIdentityValue({ idField, rawId, incomingRow, existingId, asNumbe
 // Push reviewed image-link updates to DB.
 // Body:
 // {
-//   collectionName?: "food_by_cat" | "food_items" | "food_recipes" | "homeBased" | "Packaged",
+//   collectionName?: "food_by_cat" | "food_items" | "food_recipes" | "homeBased" | "Packaged" | "restaurants",
 //   replaceCollection?: boolean,
 //   batchIndex?: number,
 //   rows: [{ _id?: "50", code?: "F001", row?: {...}, update?: {...} }]
@@ -476,6 +482,4 @@ router.post('/api/diet-image-migration/push-to-db', requireUploadApiKey, async (
 
 
 module.exports = router;
-
-
 

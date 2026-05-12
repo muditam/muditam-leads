@@ -1,9 +1,7 @@
 const express = require("express");
 const RedcliffeWebhookEvent = require("../models/RedcliffeWebhookEvent");
 
-
 const router = express.Router();
-
 
 const DEFAULT_BASE_URL = "https://apiv3.redcliffelabs.com";
 const baseUrl = String(
@@ -784,6 +782,19 @@ function normalizeBookingRecord(item = {}) {
  const bookingStatus = normalizeStatusValue(item.booking_status);
  const reportSummary = summarizeReports(item.report);
  const slotMeta = normalizeCollectionSlot(item);
+ const compactRaw = {
+   booking_id: item.booking_id ?? item.pk ?? null,
+   collection_slot:
+     item.collection_slot && typeof item.collection_slot === "object"
+       ? item.collection_slot
+       : null,
+   slot_time:
+     item.slot_time && typeof item.slot_time === "object" ? item.slot_time : null,
+   collection_time:
+     item.collection_time && typeof item.collection_time === "object"
+       ? item.collection_time
+       : null,
+ };
 
 
  return {
@@ -836,7 +847,7 @@ function normalizeBookingRecord(item = {}) {
    packages: flatPackages,
    reportSummary,
    report: toArray(item.report),
-   raw: item,
+   raw: compactRaw,
  };
 }
 
@@ -1541,47 +1552,68 @@ router.post("/bookings/:bookingId/add-member", async (req, res) => {
 
 
 router.get("/bookings", async (req, res) => {
- const upstreamQuery = {
-   booking_id: req.query.booking_id,
-   client_ref_id: req.query.client_ref_id || req.query.reference_data,
-   booking_status: req.query.booking_status,
-   booking_date: req.query.booking_date,
-   collection_date: req.query.collection_date,
- };
+ try {
+   const todayIso = new Date().toISOString().slice(0, 10);
+   const upstreamQuery = {
+     booking_id: req.query.booking_id,
+     client_ref_id: req.query.client_ref_id || req.query.reference_data,
+     booking_status: req.query.booking_status,
+     booking_date: req.query.booking_date,
+     collection_date: req.query.collection_date,
+   };
 
+   const hasExplicitLookup = Object.values(upstreamQuery).some(
+     (value) => value !== undefined && value !== null && String(value).trim() !== ""
+   );
+   if (!hasExplicitLookup) {
+     upstreamQuery.collection_date = todayIso;
+   }
 
- const result = await proxyWithMockFallback({
-   method: "GET",
-   path: withQuery("/api/external/v2/center-get-booking/", upstreamQuery),
-   query: upstreamQuery,
- });
+   const result = await proxyWithMockFallback({
+     method: "GET",
+     path: withQuery("/api/external/v2/center-get-booking/", upstreamQuery),
+     query: upstreamQuery,
+   });
 
+   if (result.status >= 400) {
+     return res.status(result.status).json(result.data);
+   }
 
- if (result.status >= 400) {
-   return res.status(result.status).json(result.data);
+   const upstreamRecords = Array.isArray(result.data)
+     ? result.data
+     : toArray(result.data?.data);
+   const normalized = upstreamRecords.map(normalizeBookingRecord);
+   const filtered = filterBookings(normalized, req.query || {});
+
+   return res.status(200).json({
+     status: result.data?.status || "success",
+     message: result.data?.message || "Booking details fetched successfully",
+     count: filtered.length,
+     summary: {
+       total: filtered.length,
+       bookingStatus: buildStatusSummary(
+         filtered,
+         (item) => item.bookingStatus.value || "unknown"
+       ),
+       pickupStatus: buildStatusSummary(
+         filtered,
+         (item) => item.pickupStatus || "unknown"
+       ),
+       reportStatus: buildStatusSummary(
+         filtered,
+         (item) => item.reportStatus || "none"
+       ),
+     },
+     results: filtered,
+   });
+ } catch (error) {
+   console.error("Redcliffe bookings route error:", error);
+   return res.status(500).json({
+     status: "failure",
+     message: "Failed to load booking details.",
+     detail: error?.message || "Unknown server error",
+   });
  }
-
-
- const upstreamRecords = Array.isArray(result.data)
-   ? result.data
-   : toArray(result.data?.data);
- const normalized = upstreamRecords.map(normalizeBookingRecord);
- const filtered = filterBookings(normalized, req.query || {});
-
-
- return res.status(200).json({
-   status: result.data?.status || "success",
-   message: result.data?.message || "Booking details fetched successfully",
-   count: filtered.length,
-   summary: {
-     total: filtered.length,
-     bookingStatus: buildStatusSummary(filtered, (item) => item.bookingStatus.value || "unknown"),
-     pickupStatus: buildStatusSummary(filtered, (item) => item.pickupStatus || "unknown"),
-     reportStatus: buildStatusSummary(filtered, (item) => item.reportStatus || "none"),
-   },
-   results: filtered,
-   raw: result.data,
- });
 });
 
 

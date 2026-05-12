@@ -2,6 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const AWS = require("aws-sdk");
 const multer = require("multer");
+const bodyParser = require("body-parser");
 const FormData = require("form-data");
 const path = require("path");
 const mongoose = require("mongoose");
@@ -14,6 +15,23 @@ const Customer = require("../models/Customer");
 const Employee = require("../models/Employee");
 
 const router = express.Router();
+
+router.use(
+  "/webhook",
+  bodyParser.json({
+    limit: "2mb",
+    type: ["application/json", "application/cloudevents+json", "text/json"],
+  }),
+  bodyParser.urlencoded({
+    extended: false,
+    limit: "2mb",
+    type: ["application/x-www-form-urlencoded"],
+  }),
+  bodyParser.text({
+    type: ["text/plain"],
+    limit: "2mb",
+  })
+);
 
 const WhatsAppWebhookDebug =
   mongoose.models.WhatsAppWebhookDebug ||
@@ -220,6 +238,43 @@ function asArray(v) {
   if (Array.isArray(v)) return v;
   if (v == null) return [];
   return [v];
+}
+
+function tryParseJson(value) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeWebhookBody(body) {
+  if (body == null) return {};
+
+  if (Buffer.isBuffer(body)) {
+    return normalizeWebhookBody(body.toString("utf8"));
+  }
+
+  if (typeof body === "string") {
+    const parsed = tryParseJson(body);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  }
+
+  if (!isObjectLike(body)) return {};
+
+  const wrapped =
+    tryParseJson(body.payload) ||
+    tryParseJson(body.data) ||
+    tryParseJson(body.body) ||
+    null;
+
+  if (wrapped && typeof wrapped === "object") {
+    return wrapped;
+  }
+
+  return body;
 }
 
 function safeStringify(value) {
@@ -2516,12 +2571,14 @@ function buildInboundMessageMatch({
 
 router.post("/webhook", async (req, res) => {
   try {
-    console.log("TS WEBHOOK RAW =>", JSON.stringify(req.body || {}, null, 2));
+    const incomingBody = normalizeWebhookBody(req.body);
 
-    const webhookType = String(req.body?.webhook_type || "").trim();
+    console.log("TS WEBHOOK RAW =>", JSON.stringify(incomingBody || {}, null, 2));
+
+    const webhookType = String(incomingBody?.webhook_type || "").trim();
 
     if (webhookType === "phone_number_quality_update") {
-      const value = req.body?.value || {};
+      const value = incomingBody?.value || {};
 
       const displayPhoneNumber = String(
         value?.display_phone_number || ""
@@ -2529,7 +2586,7 @@ router.post("/webhook", async (req, res) => {
       const event = String(value?.event || "").trim();
       const currentLimit = String(value?.current_limit || "").trim();
       const oldLimit = String(value?.old_limit || "").trim();
-      const acid = String(req.body?.acid || "").trim();
+      const acid = String(incomingBody?.acid || "").trim();
 
       const senderInEnv = String(
         process.env.TRUSTSIGNAL_SENDER_ID ||
@@ -2564,13 +2621,13 @@ router.post("/webhook", async (req, res) => {
     }
 
     if (webhookType === "phone_number_name_update") {
-      const value = req.body?.value || {};
+      const value = incomingBody?.value || {};
       console.log(
         "TS PHONE NAME WEBHOOK =>",
         JSON.stringify(
           {
             webhook_type: "phone_number_name_update",
-            acid: String(req.body?.acid || "").trim(),
+            acid: String(incomingBody?.acid || "").trim(),
             display_phone_number: String(
               value?.display_phone_number || ""
             ).trim(),
@@ -2590,13 +2647,13 @@ router.post("/webhook", async (req, res) => {
     if (webhookType === "embedded") {
       console.log(
         "TS EMBEDDED WEBHOOK =>",
-        JSON.stringify(req.body || {}, null, 2)
+        JSON.stringify(incomingBody || {}, null, 2)
       );
       return res.sendStatus(200);
     }
 
     if (webhookType === "message_template_status_update") {
-      const value = req.body?.value || {};
+      const value = incomingBody?.value || {};
       const templateId = String(value?.message_template_id || "").trim();
       const templateName = normalizeTemplateName(
         value?.message_template_name || ""
@@ -2639,7 +2696,7 @@ router.post("/webhook", async (req, res) => {
                 : {}),
               ...(event ? { status: event } : {}),
               rejectionReason: reason === "NONE" ? "" : reason,
-              raw360: req.body,
+              raw360: incomingBody,
             },
           },
           { upsert: true }
@@ -2648,13 +2705,13 @@ router.post("/webhook", async (req, res) => {
 
       console.log(
         "TS TEMPLATE STATUS WEBHOOK =>",
-        JSON.stringify(req.body || {}, null, 2)
+        JSON.stringify(incomingBody || {}, null, 2)
       );
       return res.sendStatus(200);
     }
 
     if (webhookType === "template_category_update") {
-      const value = req.body?.value || {};
+      const value = incomingBody?.value || {};
       const templateId = String(value?.message_template_id || "").trim();
       const templateName = normalizeTemplateName(
         value?.message_template_name || ""
@@ -2695,7 +2752,7 @@ router.post("/webhook", async (req, res) => {
                 }
                 : {}),
               ...(newCategory ? { category: newCategory } : {}),
-              raw360: req.body,
+              raw360: incomingBody,
             },
           },
           { upsert: true }
@@ -2704,7 +2761,7 @@ router.post("/webhook", async (req, res) => {
 
       console.log(
         "TS TEMPLATE CATEGORY WEBHOOK =>",
-        JSON.stringify(req.body || {}, null, 2)
+        JSON.stringify(incomingBody || {}, null, 2)
       );
       return res.sendStatus(200);
     }
@@ -2712,26 +2769,26 @@ router.post("/webhook", async (req, res) => {
     if (webhookType === "message_template_quality_update") {
       console.log(
         "TS TEMPLATE QUALITY WEBHOOK =>",
-        JSON.stringify(req.body || {}, null, 2)
+        JSON.stringify(incomingBody || {}, null, 2)
       );
       return res.sendStatus(200);
     }
 
-    const parsed = parseWebhookPayload(req.body || {});
+    const parsed = parseWebhookPayload(incomingBody || {});
     if (!(parsed.statuses || []).length && !(parsed.messages || []).length) {
       await recordWebhookDebug({
         webhookType,
         outcome: "ignored_no_status_or_message",
-        raw: req.body || {},
+        raw: incomingBody || {},
       });
     }
 
     const businessPhone =
       normalizeWaId(parsed.businessPhone || "") ||
       normalizeWaId(
-        process.env.WHATSAPP_BUSINESS_PHONE ||
         process.env.TRUSTSIGNAL_SENDER_ID ||
         process.env.TRUSTSIGNAL_SENDER ||
+        process.env.WHATSAPP_BUSINESS_PHONE ||
         ""
       );
 
@@ -2970,6 +3027,14 @@ router.post("/webhook", async (req, res) => {
       } catch (e) {
         if (e?.code === 11000) {
           console.log("Duplicate inbound message skipped:", waId || inboundMatch);
+          await recordWebhookDebug({
+            webhookType,
+            outcome: "inbound_duplicate",
+            status: "received",
+            waId,
+            phone: from,
+            raw: msg.raw || msg,
+          });
           continue;
         }
         throw e;
@@ -2987,6 +3052,14 @@ router.post("/webhook", async (req, res) => {
 
       if (!wasInserted) {
         console.log("Inbound duplicate skipped:", waId || inboundMatch);
+        await recordWebhookDebug({
+          webhookType,
+          outcome: "inbound_duplicate",
+          status: "received",
+          waId,
+          phone: from,
+          raw: msg.raw || msg,
+        });
         continue;
       }
 
@@ -2996,6 +3069,14 @@ router.post("/webhook", async (req, res) => {
 
       if (!created) {
         console.log("Inbound inserted but could not reload message:", waId || inboundMatch);
+        await recordWebhookDebug({
+          webhookType,
+          outcome: "inbound_insert_reload_failed",
+          status: "received",
+          waId,
+          phone: from,
+          raw: msg.raw || msg,
+        });
         continue;
       }
 
@@ -3026,6 +3107,17 @@ router.post("/webhook", async (req, res) => {
           windowExpiresAt: updatedConv?.windowExpiresAt || windowExpiry,
           unreadCount: updatedConv?.unreadCount ?? 1,
         },
+      });
+
+      await recordWebhookDebug({
+        webhookType,
+        outcome: "inbound_inserted",
+        status: "received",
+        waId,
+        phone: from,
+        matchedMessageId: created._id,
+        matchedStatus: created.status,
+        raw: msg.raw || msg,
       });
     }
 
