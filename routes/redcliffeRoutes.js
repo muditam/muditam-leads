@@ -1724,6 +1724,52 @@ router.get("/bookings/:bookingId/reports/digital", async (req, res) => {
 });
 
 
+router.get("/packages", async (_req, res) => {
+ const result = await proxyWithMockFallback({
+   method: "GET",
+   path: "/api/external/v2/center-package-data/",
+ });
+
+
+ if (result.status >= 400) {
+   return res.status(result.status).json({
+     ...result.data,
+     message:
+       result.data?.message ||
+       result.data?.detail ||
+       "Unable to fetch Redcliffe package catalog.",
+   });
+ }
+
+
+ const items = Array.isArray(result.data?.data)
+   ? result.data.data
+   : Array.isArray(result.data?.results)
+     ? result.data.results
+     : [];
+
+
+ const normalized = items
+   .map((item) => ({
+     id: item?.id ?? null,
+     code: String(item?.code || "").trim(),
+     name: String(item?.name || item?.test_name || item?.package_name || "").trim(),
+     description: String(item?.description || "").trim(),
+     type: String(item?.type || "").trim(),
+   }))
+   .filter((item) => item.code && item.name);
+
+
+ return res.status(200).json({
+   status: result.data?.status || "success",
+   message: result.data?.message || "Package catalog fetched successfully",
+   count: normalized.length,
+   results: normalized,
+   raw: result.data,
+ });
+});
+
+
 router.get("/packages/:code/details", async (req, res) => {
  const code = String(req.params.code || "").trim();
 
@@ -1908,6 +1954,5 @@ router.post("/webhooks/redcliffe", async (req, res) => {
 
 
 module.exports = router;
-
 
 
