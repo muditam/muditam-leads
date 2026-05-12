@@ -1552,7 +1552,7 @@ router.get("/bookings", async (req, res) => {
 
  const result = await proxyWithMockFallback({
    method: "GET",
-   path: withQuery("/api/external/v2/center-get-booking", upstreamQuery),
+   path: withQuery("/api/external/v2/center-get-booking/", upstreamQuery),
    query: upstreamQuery,
  });
 
@@ -1960,4 +1960,3 @@ router.post("/webhooks/redcliffe", async (req, res) => {
 
 
 module.exports = router;
-
