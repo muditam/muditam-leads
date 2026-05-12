@@ -642,19 +642,17 @@ app.use("/api/zoom/contacts", zoomContactsRoutes);
 // Nightly contact reconciliation (2:15 AM server time) for Zoom contact auto-sync healing.
 cron.schedule("15 2 * * *", async () => {
   try {
-    const out = await zoomContactSyncService.runFullSync();
-    console.log("[zoom-contact-sync] nightly reconcile:", out);
-  } catch (err) {
-    console.error("[zoom-contact-sync] nightly reconcile failed:", err.message || err);
+    await zoomContactSyncService.runFullSync();
+  } catch (_err) {
+    // noop
   }
 });
 
 setTimeout(async () => {
   try {
-    const out = await zoomContactSyncService.runFullSync();
-    console.log("[zoom-contact-sync] startup reconcile:", out);
-  } catch (err) {
-    console.error("[zoom-contact-sync] startup reconcile failed:", err.message || err);
+    await zoomContactSyncService.runFullSync();
+  } catch (_err) {
+    // noop
   }
 }, 30000);
 
@@ -663,28 +661,25 @@ setTimeout(async () => {
 // - Nightly: deep 45-day reconcile
 cron.schedule("0 * * * *", async () => {
   try {
-    const out = await runIncrementalSync(24);
-    console.log("[zoom-phone-sync] incremental:", out);
-  } catch (err) {
-    console.error("[zoom-phone-sync] incremental failed:", err.message || err);
+    await runIncrementalSync(24);
+  } catch (_err) {
+    // noop
   }
 });
 
 cron.schedule("35 2 * * *", async () => {
   try {
-    const out = await runNightlyReconcile(45);
-    console.log("[zoom-phone-sync] nightly:", out);
-  } catch (err) {
-    console.error("[zoom-phone-sync] nightly failed:", err.message || err);
+    await runNightlyReconcile(45);
+  } catch (_err) {
+    // noop
   }
 });
 
 setTimeout(async () => {
   try {
-    const out = await runIncrementalSync(24);
-    console.log("[zoom-phone-sync] startup incremental:", out);
-  } catch (err) {
-    console.error("[zoom-phone-sync] startup incremental failed:", err.message || err);
+    await runIncrementalSync(24);
+  } catch (_err) {
+    // noop
   }
 }, 45000);
 

@@ -2,6 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const requireSession = require("../middleware/requireSession");
 const ZoomCallLog = require("../models/ZoomCallLog");
+const ZoomToken = require("../models/ZoomToken");
 const { getUserIdFromReq, getValidAccessTokenForUser } = require("../services/zoomAuthService");
 const { isManagerRole, normalizeRole } = require("../utils/managerRoles");
 const {
@@ -92,16 +93,29 @@ router.get("/", requireSession, async (req, res) => {
   const myId = String(getUserIdFromReq(req) || "");
   const filter = {};
 
-  if (!isManagerRole(role)) filter.agentId = myId;
+  if (!isManagerRole(role)) {
+    const zoomToken = await ZoomToken.findOne({ userId: myId }, { zoomUserId: 1 }).lean();
+    const myZoomUserId = String(zoomToken?.zoomUserId || "").trim();
+    filter.$or = [{ agentId: myId }];
+    if (myZoomUserId) {
+      filter.$or.push({ zoomUserId: myZoomUserId });
+    }
+  }
   if (isManagerRole(role) && agentId) filter.agentId = agentId;
   if (q) {
-    filter.$or = [
+    const qFilter = [
       { phoneNumber: { $regex: q, $options: "i" } },
       { callerNumber: { $regex: q, $options: "i" } },
       { calleeNumber: { $regex: q, $options: "i" } },
       { transcriptContent: { $regex: q, $options: "i" } },
       { notes: { $regex: q, $options: "i" } },
     ];
+    if (filter.$or) {
+      filter.$and = [{ $or: filter.$or }, { $or: qFilter }];
+      delete filter.$or;
+    } else {
+      filter.$or = qFilter;
+    }
   }
 
   const [rows, total] = await Promise.all([
@@ -301,35 +315,11 @@ router.get(
 }
 );
 
-router.get("/:callId", requireSession, async (req, res) => {
-  const row = await ZoomCallLog.findOne({ callId: req.params.callId }).lean();
-  if (!row) return res.status(404).json({ message: "Not found" });
-
-  const role = req.sessionUser?.role || "";
-  const myId = String(getUserIdFromReq(req) || "");
-  if (!isManagerRole(role) && String(row.agentId || "") !== myId) {
-    return res.status(403).json({ message: "Forbidden" });
-  }
-  res.json(normalizeCallRow(row));
-});
-
 router.put("/:callId/notes", requireSession, async (req, res) => {
   const notes = String(req.body?.notes || "");
   const row = await ZoomCallLog.findOneAndUpdate({ callId: req.params.callId }, { notes }, { new: true });
   if (!row) return res.status(404).json({ message: "Not found" });
   res.json({ ok: true, row });
-});
-
-router.get("/:callId/recording", requireSession, async (req, res) => {
-  const row = await ZoomCallLog.findOne({ callId: req.params.callId }).lean();
-  if (!row) return res.status(404).json({ message: "Not found" });
-  res.json({ url: row.recordingUrl || "", status: row.recordingStatus || "none" });
-});
-
-router.get("/:callId/transcript", requireSession, async (req, res) => {
-  const row = await ZoomCallLog.findOne({ callId: req.params.callId }).lean();
-  if (!row) return res.status(404).json({ message: "Not found" });
-  res.json({ transcript: row.transcriptContent || "", status: row.transcriptStatus || "none" });
 });
 
 module.exports = router;
