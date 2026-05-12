@@ -5,7 +5,7 @@ const RedcliffeWebhookEvent = require("../models/RedcliffeWebhookEvent");
 const router = express.Router();
 
 
-const DEFAULT_BASE_URL = "https://apiqa.redcliffelabs.com";
+const DEFAULT_BASE_URL = "https://apiv3.redcliffelabs.com";
 const baseUrl = String(
  process.env.REDCLIFFE_API_BASE_URL || DEFAULT_BASE_URL
 ).replace(/\/+$/, "");
