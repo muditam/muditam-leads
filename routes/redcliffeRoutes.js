@@ -1756,6 +1756,12 @@ router.get("/packages", async (_req, res) => {
      name: String(item?.name || item?.test_name || item?.package_name || "").trim(),
      description: String(item?.description || "").trim(),
      type: String(item?.type || "").trim(),
+     price:
+       item?.package_center_prices?.offer_price ??
+       item?.package_center_prices?.package_price ??
+       item?.offer_price ??
+       item?.package_price ??
+       null,
    }))
    .filter((item) => item.code && item.name);
 
@@ -1954,5 +1960,4 @@ router.post("/webhooks/redcliffe", async (req, res) => {
 
 
 module.exports = router;
-
 

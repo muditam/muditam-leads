@@ -178,11 +178,6 @@ const PORT = process.env.PORT || 5001;
 app.use(
   compression({  
     filter: (req, res) => {
-      if (req.path === '/api/sse') return false;
-
-      const type = String(res.getHeader('Content-Type') || '');
-      if (type.includes('text/event-stream')) return false;
-
       return compression.filter(req, res);
     },
   })
@@ -525,39 +520,6 @@ app.post(
   }
 );
 
-const sseClients = new Map();
-
-function didKey(v) {
-  return String(v || "").replace(/\D/g, "").slice(-10);
-}
-
-function addSseClient(did, res) {
-  const key = didKey(did);
-  if (!key) return;
-  if (!sseClients.has(key)) sseClients.set(key, new Set());
-  sseClients.get(key).add(res);
-}
-
-function removeSseClient(did, res) {
-  const key = didKey(did);
-  const set = sseClients.get(key);
-  if (!set) return;
-  set.delete(res);
-  if (set.size === 0) sseClients.delete(key);
-}
-
-function sseSend(did, payload) {
-  const key = didKey(did);
-  const set = sseClients.get(key);
-  if (!set || set.size === 0) {
-    console.log("[SSE] No clients for DID", { did, key });
-    return;
-  }
-  const data = `data: ${JSON.stringify(payload)}\n\n`;
-  for (const res of set) { try { res.write(data); } catch { } }
-  console.log("[SSE] Sent event", { key, listeners: set.size, type: payload?.type });
-}
-
 // Keep Zoom webhook raw-body verification before global JSON parser
 app.use("/api/zoom/webhooks", zoomWebhookRoutes);
 app.use(express.json());
@@ -796,90 +758,6 @@ mongoose.connect(process.env.MONGO_URI, {
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
-
-app.get('/api/sse', (req, res) => {
-  const { did } = req.query;
-  if (!did) return res.status(400).send('Missing did');
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-
-  req.socket?.setKeepAlive?.(true);
-  req.socket?.setNoDelay?.(true);
-
-  res.flushHeaders?.();
-
-  addSseClient(String(did), res);
-
-  const ping = setInterval(() => {
-    try { res.write(':\n\n'); } catch { }
-  }, 15000);
-
-  req.on('close', () => {
-    clearInterval(ping);
-    removeSseClient(String(did), res);
-    try { res.end(); } catch { }
-  });
-
-  res.write(`data: ${JSON.stringify({ type: 'connected', did: String(did) })}\n\n`);
-});
-
-
-const urlencoded = bodyParser.urlencoded({ extended: false });
-const jsonParser = bodyParser.json();
-
-app.post('/api/webhooks/crm', urlencoded, jsonParser, async (req, res) => {
-  try {
-    const p = req.body || {};
-
-    const uuid = p.$uuid || p.uuid || p.$UUID || p.UUID;
-    const callId = p.$call_id || p.call_id;
-    const didRaw = p.$call_to_number || p.call_to_number;
-    const callerRaw =
-      p.$caller_id_number || p.caller_id_number ||
-      p.$customer_no_with_prefix || p.customer_no_with_prefix || '';
-
-    const didKeyStr = didKey(didRaw);
-    const ani = String(callerRaw || '').replace(/\D/g, '').slice(-10);
-
-    console.log("[CRM webhook] incoming call", {
-      uuid, callId, didRaw, didKey: didKeyStr, ani
-    });
-
-    let lead = null;
-    if (ani) {
-      lead = await Lead.findOne({
-        contactNumber: { $regex: new RegExp(`${ani}$`) }
-      }).select('_id name agentAssigned lastOrderDate');
-    }
-
-    const event = {
-      type: 'incoming_call',
-      callId: callId || uuid,
-      uuid: uuid || callId,
-      did: didKeyStr,
-      ani,
-      start_stamp: p.$start_stamp || p.start_stamp || new Date().toISOString(),
-      known: !!lead,
-      lead: lead ? {
-        _id: String(lead._id),
-        name: lead.name || '',
-        agentAssigned: lead.agentAssigned || '',
-        lastOrderDate: lead.lastOrderDate || ''
-      } : null,
-    };
-
-    if (didKeyStr) sseSend(didKeyStr, event);
-
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error('Webhook error:', err);
-    return res.status(500).json({ success: false });
-  }
-});
-
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: true,
