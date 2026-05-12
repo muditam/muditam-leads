@@ -1,5 +1,6 @@
 const express = require("express");
 const axios = require("axios");
+const https = require("https");
 const AWS = require("aws-sdk");
 const multer = require("multer");
 const bodyParser = require("body-parser");
@@ -80,6 +81,11 @@ const trustsignalClient = axios.create({
   baseURL: TRUSTSIGNAL_API_BASE,
   timeout: 60000,
   validateStatus: () => true,
+  httpsAgent: new https.Agent({
+    keepAlive: true,
+    maxSockets: 50,
+    family: 4,
+  }),
 });
 
 /* ----------------------------------------
@@ -283,6 +289,35 @@ function safeStringify(value) {
   } catch {
     return "[unserializable]";
   }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isRetryableTrustSignalError(err) {
+  const code = String(err?.code || err?.cause?.code || "").toUpperCase();
+  const msg = String(err?.message || "").toLowerCase();
+
+  if (
+    [
+      "ECONNRESET",
+      "ECONNABORTED",
+      "ETIMEDOUT",
+      "EPIPE",
+      "EHOSTUNREACH",
+      "ENETUNREACH",
+      "EAI_AGAIN",
+      "UND_ERR_CONNECT_TIMEOUT",
+    ].includes(code)
+  ) {
+    return true;
+  }
+
+  return (
+    msg.includes("client network socket disconnected before secure tls connection was established") ||
+    msg.includes("socket hang up") ||
+    msg.includes("timeout") ||
+    msg.includes("network error")
+  );
 }
 
 function okOrThrow(resp, fallbackMessage = "Provider request failed") {
@@ -490,6 +525,22 @@ function extractTemplateBodyText(tpl) {
 
   if (typeof bodyComp?.text === "string") return bodyComp.text;
   return "";
+}
+
+function extractVarIndexesFromText(text = "") {
+  const set = new Set();
+  for (const match of String(text || "").matchAll(/{{\s*(\d+)\s*}}/g)) {
+    const n = Number(match[1] || 0);
+    if (n > 0) set.add(n);
+  }
+  return Array.from(set).sort((a, b) => a - b);
+}
+
+function getTemplateHeaderFormat(tpl = null) {
+  const header = templateComponents(tpl).find(
+    (c) => String(c?.type || "").toUpperCase() === "HEADER"
+  );
+  return normalizeTemplateHeaderFormat(header?.format || "");
 }
 
 function applyTemplateVars(bodyText, vars) {
@@ -1000,14 +1051,44 @@ async function tsRequest({
     );
   }
 
-  const resp = await trustsignalClient.request({
+  const requestConfig = {
     method,
     url: finalPath,
     params: buildParams(params),
     data,
     headers: buildHeaders(headers),
     ...(responseType ? { responseType } : {}),
-  });
+  };
+
+  let resp;
+  let lastErr = null;
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      resp = await trustsignalClient.request(requestConfig);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      const retryable = isRetryableTrustSignalError(err);
+      console.error("TS REQUEST NETWORK ERROR =>", {
+        attempt,
+        maxAttempts,
+        method,
+        url: finalUrl,
+        code: err?.code || err?.cause?.code || "",
+        message: err?.message || "",
+        retryable,
+      });
+      if (!retryable || attempt === maxAttempts) {
+        throw err;
+      }
+      await sleep(400 * attempt);
+    }
+  }
+
+  if (!resp && lastErr) throw lastErr;
 
   okOrThrow(resp);
 
@@ -2365,6 +2446,41 @@ router.post("/send-template", async (req, res) => {
 
     const paramValues = asArray(parameters).map((x) => String(x ?? "").trim());
     const normalizedHeaderMedia = normalizeTemplateHeaderMediaInput(headerMedia);
+    const bodyVarIndexes = extractVarIndexesFromText(extractTemplateBodyText(tpl));
+    const requiredParamCount = bodyVarIndexes.length
+      ? Math.max(...bodyVarIndexes)
+      : 0;
+    const headerFormat = getTemplateHeaderFormat(tpl);
+
+    if (requiredParamCount && paramValues.length < requiredParamCount) {
+      return res.status(400).json({
+        message: `Template requires ${requiredParamCount} parameter(s), received ${paramValues.length}.`,
+        code: "TEMPLATE_PARAMETERS_MISSING",
+        requiredParamCount,
+        receivedParamCount: paramValues.length,
+        templateName: tpl.name || originalTemplateName || "",
+      });
+    }
+
+    if (paramValues.some((value) => !String(value || "").trim())) {
+      return res.status(400).json({
+        message: "Template parameters cannot be empty.",
+        code: "TEMPLATE_PARAMETERS_EMPTY",
+        templateName: tpl.name || originalTemplateName || "",
+      });
+    }
+
+    if (
+      ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) &&
+      !normalizedHeaderMedia?.id
+    ) {
+      return res.status(400).json({
+        message: `Template ${tpl.name || originalTemplateName || ""} requires a ${headerFormat.toLowerCase()} header attachment.`,
+        code: "TEMPLATE_HEADER_MEDIA_REQUIRED",
+        templateName: tpl.name || originalTemplateName || "",
+        headerFormat,
+      });
+    }
 
     const payload = buildTrustSignalTemplatePayload({
       sender,
@@ -2491,9 +2607,22 @@ router.post("/send-template", async (req, res) => {
       message: e?.message,
     });
 
+    const providerMessage =
+      deepPick(data, [
+        "message",
+        "error.message",
+        "error",
+        "details",
+        "result.message",
+        "results.0.message",
+      ]) ||
+      e?.message ||
+      "Send template failed";
+
     return res.status(status).json({
       success: false,
-      message: "Send template failed",
+      code: "TEMPLATE_SEND_REJECTED",
+      message: String(providerMessage),
       providerError: data || { error: e?.message || "UNKNOWN_ERROR" },
     });
   }

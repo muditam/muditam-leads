@@ -1,5 +1,6 @@
 const express = require("express");
 const RedcliffeWebhookEvent = require("../models/RedcliffeWebhookEvent");
+const RedcliffeBooking = require("../models/RedcliffeBooking");
 
 const router = express.Router();
 
@@ -851,6 +852,118 @@ function normalizeBookingRecord(item = {}) {
  };
 }
 
+function getWebhookBookingPayload(payload = {}) {
+ const nestedContainers = [
+   payload.data,
+   payload.details,
+   payload.payload,
+   payload.result,
+ ];
+
+ for (const container of nestedContainers) {
+   if (container && typeof container === "object" && !Array.isArray(container)) {
+     const bookingId = extractBookingIdFromPayload(container);
+     if (bookingId) return container;
+   }
+ }
+
+ return payload && typeof payload === "object" ? payload : {};
+}
+
+function buildBookingPatchFromPayload(payload = {}, source = "unknown") {
+ const snapshot = payload && typeof payload === "object" ? payload : {};
+ const bookingId = extractBookingIdFromPayload(snapshot);
+ if (!bookingId) return null;
+
+ const looksLikeFullBooking =
+   snapshot.booking_date ||
+   snapshot.collection_date ||
+   snapshot.customer_name ||
+   snapshot.customer_phonenumber ||
+   snapshot.customer_phone ||
+   snapshot.packages ||
+   snapshot.patient_detail ||
+   snapshot.additional_members ||
+   snapshot.collection_slot ||
+   snapshot.slot_time;
+
+ if (looksLikeFullBooking) {
+   const normalized = normalizeBookingRecord(snapshot);
+   return {
+     ...normalized,
+     bookingId: String(normalized.bookingId || bookingId).trim(),
+     lastSource: source,
+     lastSyncedAt: new Date(),
+   };
+ }
+
+ const patch = {
+   bookingId: String(bookingId).trim(),
+   lastSource: source,
+   lastSyncedAt: new Date(),
+ };
+
+ if (snapshot.booking_status !== undefined) {
+   patch.bookingStatus = normalizeStatusValue(snapshot.booking_status);
+ }
+ if (snapshot.pickup_status !== undefined) {
+   patch.pickupStatus = String(snapshot.pickup_status || "").trim() || "unknown";
+ }
+ if (snapshot.report_status !== undefined) {
+   patch.reportStatus = String(snapshot.report_status || "").trim() || "none";
+ }
+ if (snapshot.collection_date !== undefined) {
+   patch.collectionDate = String(snapshot.collection_date || "").trim();
+ }
+ if (snapshot.collection_slot !== undefined || snapshot.slot_time !== undefined || snapshot.collection_time !== undefined) {
+   const slotMeta = normalizeCollectionSlot(snapshot);
+   patch.collectionSlot = slotMeta.collectionSlotRaw;
+   patch.collectionSlotId = slotMeta.collectionSlotId;
+   patch.collectionTime = slotMeta.collectionTime;
+   patch.raw = {
+     booking_id: bookingId,
+     collection_slot:
+       snapshot.collection_slot && typeof snapshot.collection_slot === "object"
+         ? snapshot.collection_slot
+         : null,
+     slot_time:
+       snapshot.slot_time && typeof snapshot.slot_time === "object"
+         ? snapshot.slot_time
+         : null,
+     collection_time:
+       snapshot.collection_time && typeof snapshot.collection_time === "object"
+         ? snapshot.collection_time
+         : null,
+   };
+ }
+ if (snapshot.additional_members || snapshot.additional_member) {
+   const existing = normalizeAdditionalMembers(
+     snapshot.additional_members || snapshot.additional_member
+   );
+   patch.patients = existing;
+ }
+
+ return patch;
+}
+
+async function upsertBookingSnapshot(payload, source, extras = {}) {
+ const patch = buildBookingPatchFromPayload(payload, source);
+ if (!patch?.bookingId) return null;
+
+ if (extras.lastWebhookType) {
+   patch.lastWebhookType = extras.lastWebhookType;
+ }
+ if (extras.lastWebhookAt) {
+   patch.lastWebhookAt = extras.lastWebhookAt;
+ }
+
+ return RedcliffeBooking.findOneAndUpdate(
+   { bookingId: patch.bookingId },
+   { $set: patch },
+   { new: true, upsert: true, setDefaultsOnInsert: true }
+ );
+}
+
 
 function filterBookings(records, filters = {}) {
  const phoneTail = getPhoneTail(filters.phone || filters.customer_phone || "");
@@ -1285,6 +1398,10 @@ router.post("/bookings/create", async (req, res) => {
      data: upstreamPayload,
    });
 
+   if (result.status < 400) {
+     await upsertBookingSnapshot(result.data, "create");
+   }
+
 
    return res.status(result.status).json(result.data);
  } catch (error) {
@@ -1329,6 +1446,12 @@ router.post("/bookings/confirm", async (req, res) => {
    path: "/api/external/v2/center-confirm-booking/",
    data: payload,
  });
+ if (result.status < 400) {
+   await upsertBookingSnapshot(
+     { ...result.data, booking_id },
+     "confirm"
+   );
+ }
  return res.status(result.status).json(result.data);
 });
 
@@ -1402,6 +1525,19 @@ router.post("/bookings/update", async (req, res) => {
    path: "/api/external/v2/center-update-booking/",
    data: payload,
  });
+
+ if (result.status < 400) {
+   await upsertBookingSnapshot(
+     {
+       ...result.data,
+       booking_id,
+       booking_status: normalizedStatus,
+       collection_date: payload.collection_date,
+       collection_slot: payload.collection_slot,
+     },
+     "update"
+   );
+ }
 
 
  return res.status(result.status).json(result.data);
@@ -1535,6 +1671,13 @@ router.post("/bookings/:bookingId/add-member", async (req, res) => {
 
 
  if (finalResult && finalResult.status < 400) {
+   await upsertBookingSnapshot(
+     {
+       ...finalResult.data,
+       booking_id: bookingId,
+     },
+     "add-member"
+   );
    return res.status(finalResult.status).json(finalResult.data);
  }
 
@@ -1554,40 +1697,35 @@ router.post("/bookings/:bookingId/add-member", async (req, res) => {
 router.get("/bookings", async (req, res) => {
  try {
    const todayIso = new Date().toISOString().slice(0, 10);
-   const upstreamQuery = {
-     booking_id: req.query.booking_id,
-     client_ref_id: req.query.client_ref_id || req.query.reference_data,
-     booking_status: req.query.booking_status,
-     booking_date: req.query.booking_date,
-     collection_date: req.query.collection_date,
-   };
-
-   const hasExplicitLookup = Object.values(upstreamQuery).some(
-     (value) => value !== undefined && value !== null && String(value).trim() !== ""
+   const requestedCollectionDate = String(req.query.collection_date || "").trim();
+   const phone = String(req.query.phone || req.query.customer_phone || "").trim();
+   const clientRef = String(req.query.client_ref_id || req.query.reference_data || "").trim();
+   const packageCode = String(req.query.package_code || "").trim();
+   const bookingId = String(req.query.booking_id || "").trim();
+   const bookingStatus = String(req.query.booking_status || "").trim();
+   const bookingDate = String(req.query.booking_date || "").trim();
+   const hasExplicitLookup = Boolean(
+     bookingId || bookingStatus || bookingDate || requestedCollectionDate || phone || clientRef || packageCode
    );
-   if (!hasExplicitLookup) {
-     upstreamQuery.collection_date = todayIso;
-   }
+   const effectiveCollectionDate = hasExplicitLookup
+     ? requestedCollectionDate
+     : todayIso;
+   const query = {};
 
-   const result = await proxyWithMockFallback({
-     method: "GET",
-     path: withQuery("/api/external/v2/center-get-booking/", upstreamQuery),
-     query: upstreamQuery,
-   });
+   if (bookingId) query.bookingId = bookingId;
+   if (bookingStatus) query["bookingStatus.value"] = bookingStatus;
+   if (bookingDate) query.bookingDate = bookingDate;
+   if (effectiveCollectionDate) query.collectionDate = effectiveCollectionDate;
 
-   if (result.status >= 400) {
-     return res.status(result.status).json(result.data);
-   }
+   const records = await RedcliffeBooking.find(query)
+     .sort({ collectionDate: -1, updatedAt: -1 })
+     .lean();
 
-   const upstreamRecords = Array.isArray(result.data)
-     ? result.data
-     : toArray(result.data?.data);
-   const normalized = upstreamRecords.map(normalizeBookingRecord);
-   const filtered = filterBookings(normalized, req.query || {});
+   const filtered = filterBookings(records, req.query || {});
 
    return res.status(200).json({
-     status: result.data?.status || "success",
-     message: result.data?.message || "Booking details fetched successfully",
+     status: "success",
+     message: "Booking details fetched successfully",
      count: filtered.length,
      summary: {
        total: filtered.length,
@@ -1981,6 +2119,15 @@ router.post("/webhooks/redcliffe", async (req, res) => {
      message: authState.message,
    });
  }
+
+ await upsertBookingSnapshot(
+   getWebhookBookingPayload(payload),
+   "webhook",
+   {
+     lastWebhookType: hookType,
+     lastWebhookAt: new Date(),
+   }
+ );
 
 
  return res.status(200).json({

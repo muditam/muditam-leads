@@ -1,5 +1,6 @@
 const express = require("express");
 const axios = require("axios");
+const https = require("https");
 const WhatsAppTemplate = require("./whatsaapModels/WhatsAppTemplate");
 
 const router = express.Router();
@@ -23,6 +24,11 @@ const trustsignalClient = axios.create({
   baseURL: TRUSTSIGNAL_API_BASE,
   timeout: 30000,
   validateStatus: () => true,
+  httpsAgent: new https.Agent({
+    keepAlive: true,
+    maxSockets: 20,
+    family: 4,
+  }),
 });
 
 /* ----------------------------------------
@@ -124,6 +130,35 @@ function okOrThrow(resp, fallbackMessage = "Provider request failed") {
   throw err;
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isRetryableTrustSignalError(err) {
+  const code = String(err?.code || err?.cause?.code || "").toUpperCase();
+  const msg = String(err?.message || "").toLowerCase();
+
+  if (
+    [
+      "ECONNRESET",
+      "ECONNABORTED",
+      "ETIMEDOUT",
+      "EPIPE",
+      "EHOSTUNREACH",
+      "ENETUNREACH",
+      "EAI_AGAIN",
+      "UND_ERR_CONNECT_TIMEOUT",
+    ].includes(code)
+  ) {
+    return true;
+  }
+
+  return (
+    msg.includes("client network socket disconnected before secure tls connection was established") ||
+    msg.includes("socket hang up") ||
+    msg.includes("timeout") ||
+    msg.includes("network error")
+  );
+}
+
 function buildHeaders(extra = {}) {
   const headers = {
     accept: "*/*",
@@ -163,13 +198,43 @@ async function tsRequest({
 
   console.log("TS REQUEST =>", method, finalUrl, buildParams(params));
 
-  const resp = await trustsignalClient.request({
+  const requestConfig = {
     method,
     url: finalPath,
     params: buildParams(params),
     data,
     headers: buildHeaders(headers),
-  });
+  };
+
+  let resp;
+  let lastErr = null;
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      resp = await trustsignalClient.request(requestConfig);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      const retryable = isRetryableTrustSignalError(err);
+      console.error("TS TEMPLATE REQUEST NETWORK ERROR =>", {
+        attempt,
+        maxAttempts,
+        method,
+        url: finalUrl,
+        code: err?.code || err?.cause?.code || "",
+        message: err?.message || "",
+        retryable,
+      });
+      if (!retryable || attempt === maxAttempts) {
+        throw err;
+      }
+      await sleep(400 * attempt);
+    }
+  }
+
+  if (!resp && lastErr) throw lastErr;
 
   okOrThrow(resp);
 
