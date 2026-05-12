@@ -270,6 +270,24 @@ function normalizeWebhookBody(body) {
 
   if (!isObjectLike(body)) return {};
 
+  const objectWrappedCandidates = [body.payload, body.data, body.body].filter(
+    (candidate) => isObjectLike(candidate) || Array.isArray(candidate)
+  );
+
+  for (const candidate of objectWrappedCandidates) {
+    if (
+      isObjectLike(candidate) &&
+      (candidate.value ||
+        candidate.messages ||
+        candidate.statuses ||
+        candidate.entry ||
+        candidate.events ||
+        candidate.webhook_type)
+    ) {
+      return candidate;
+    }
+  }
+
   const wrapped =
     tryParseJson(body.payload) ||
     tryParseJson(body.data) ||
@@ -1291,7 +1309,13 @@ function textFromInboundMessage(msg = {}) {
         "content.text",
         "payload.text",
         "interactive.button_reply.title",
+        "interactive.button_reply.id",
         "interactive.list_reply.title",
+        "interactive.list_reply.id",
+        "interactive.nfm_reply.body",
+        "interactive.nfm_reply.response_json",
+        "nfm_reply.body",
+        "nfm_reply.response_json",
         "button.text",
         "button.payload",
       ]) || ""
@@ -2701,6 +2725,11 @@ function buildInboundMessageMatch({
 router.post("/webhook", async (req, res) => {
   try {
     const incomingBody = normalizeWebhookBody(req.body);
+    await recordWebhookDebug({
+      webhookType: String(incomingBody?.webhook_type || req.body?.webhook_type || "").trim(),
+      outcome: "received_raw",
+      raw: incomingBody || req.body || {},
+    });
 
     console.log("TS WEBHOOK RAW =>", JSON.stringify(incomingBody || {}, null, 2));
 
