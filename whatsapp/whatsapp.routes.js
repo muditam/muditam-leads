@@ -723,10 +723,15 @@ function normalizeTemplateHeaderMediaInput(headerMedia = null) {
   if (!isObjectLike(headerMedia)) return null;
 
   const format = normalizeTemplateHeaderFormat(headerMedia.format || "");
-  const id = String(headerMedia.id || "").trim();
+  let id = String(headerMedia.id || "").trim();
   const filename = sanitizeFilename(headerMedia.filename || "");
-  const url = String(headerMedia.url || "").trim();
+  let url = String(headerMedia.url || "").trim();
   const mime = String(headerMedia.mime || "").trim();
+
+  if (!url && isAbsoluteHttpUrl(id)) {
+    url = id;
+    id = "";
+  }
 
   if (!format && !id && !url && !filename && !mime) return null;
 
@@ -1192,8 +1197,7 @@ async function uploadBufferToWasabi({
   const ext = path.extname(safeName) || `.${extFromMime(mime)}`;
   const finalName =
     safeName || `file_${Date.now()}${ext.startsWith(".") ? ext : `.${ext}`}`;
-
-  const key = `${keyPrefix}/${Date.now()}_${finalName}`;
+  const key = `${keyPrefix}/${Date.now()}/${finalName}`;
 
   const up = await s3
     .upload({
@@ -1201,7 +1205,7 @@ async function uploadBufferToWasabi({
       Key: key,
       Body: buffer,
       ContentType: mime || "application/octet-stream",
-      ContentDisposition: `inline; filename="${finalName}"`,
+      ContentDisposition: `attachment; filename="${finalName}"; filename*=UTF-8''${encodeURIComponent(finalName)}`,
       CacheControl: "public, max-age=31536000",
       ACL: "public-read",
     })
@@ -1844,8 +1848,8 @@ async function handleUploadTemplateMedia(req, res) {
 
         return res.json({
           success: true,
-          mediaId: uploaded.url,
-          id: uploaded.url,
+          mediaId: "",
+          id: "",
           url: uploaded.url,
           filename: uploaded.filename,
           mime: uploaded.mime,
@@ -2530,7 +2534,8 @@ router.post("/send-template", async (req, res) => {
 
     if (
       ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) &&
-      !normalizedHeaderMedia?.id
+      !normalizedHeaderMedia?.id &&
+      !normalizedHeaderMedia?.url
     ) {
       return res.status(400).json({
         message: `Template ${tpl.name || originalTemplateName || ""} requires a ${headerFormat.toLowerCase()} header attachment.`,
@@ -2606,6 +2611,12 @@ router.post("/send-template", async (req, res) => {
     if (normalizedHeaderMedia?.url) {
       messageDoc.media = {
         url: normalizedHeaderMedia.url,
+        mime: normalizedHeaderMedia.mime || "",
+        filename: normalizedHeaderMedia.filename || "attachment",
+      };
+    } else if (normalizedHeaderMedia?.id && isAbsoluteHttpUrl(normalizedHeaderMedia.id)) {
+      messageDoc.media = {
+        url: normalizedHeaderMedia.id,
         mime: normalizedHeaderMedia.mime || "",
         filename: normalizedHeaderMedia.filename || "attachment",
       };
