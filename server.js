@@ -188,33 +188,6 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const rawSaver = (req, res, buf) => { req.rawBody = buf; };
 
-app.get("/api/whatsapp/webhook", (_req, res) => res.sendStatus(200));
-app.post(
-  "/api/whatsapp/webhook",
-  bodyParser.json({
-    verify: rawSaver,
-    limit: "2mb",
-    type: ["application/json", "application/cloudevents+json", "text/json"],
-  }),
-  bodyParser.urlencoded({
-    verify: rawSaver,
-    extended: false,
-    limit: "2mb",
-    type: ["application/x-www-form-urlencoded"],
-  }),
-  bodyParser.text({
-    verify: rawSaver,
-    type: ["text/plain"],
-    limit: "2mb",
-  }),
-  WhatsAppRoutes.handlePublicWebhook
-);
-app.post(
-  "/api/whatsapp/upload-template-media",
-  WhatsAppRoutes.uploadTemplateMediaMiddleware,
-  WhatsAppRoutes.handleUploadTemplateMedia
-);
-
 // Start Server
 const httpServer = http.createServer(app);
 
@@ -298,6 +271,33 @@ app.options("*", cors({
     "Range",
   ],
 }));
+
+app.get("/api/whatsapp/webhook", (_req, res) => res.sendStatus(200));
+app.post(
+  "/api/whatsapp/webhook",
+  bodyParser.json({
+    verify: rawSaver,
+    limit: "2mb",
+    type: ["application/json", "application/cloudevents+json", "text/json"],
+  }),
+  bodyParser.urlencoded({
+    verify: rawSaver,
+    extended: false,
+    limit: "2mb",
+    type: ["application/x-www-form-urlencoded"],
+  }),
+  bodyParser.text({
+    verify: rawSaver,
+    type: ["text/plain"],
+    limit: "2mb",
+  }),
+  WhatsAppRoutes.handlePublicWebhook
+);
+app.post(
+  "/api/whatsapp/upload-template-media",
+  WhatsAppRoutes.uploadTemplateMediaMiddleware,
+  WhatsAppRoutes.handleUploadTemplateMedia
+);
 
 app.set("trust proxy", 1);
  
