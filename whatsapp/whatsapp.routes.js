@@ -75,7 +75,7 @@ const TRUSTSIGNAL_API_KEY = String(
 
 const TS_PATH_SEND_REPLY = "/api/v1/whatsapp/agent-reply";
 const TS_PATH_SEND_TEMPLATE = "/api/v1/whatsapp/single";
-const TS_PATH_UPLOAD_MEDIA = "/v1/whatsapp/media";
+const TS_PATH_UPLOAD_MEDIA = "/api/v1/whatsapp/media";
 
 const trustsignalClient = axios.create({
   baseURL: TRUSTSIGNAL_API_BASE,
