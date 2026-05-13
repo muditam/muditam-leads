@@ -2360,7 +2360,7 @@ router.post("/send-text", async (req, res) => {
       },
     });
 
-    return res.json({ success: true, providerResponse: r.data || null });
+    return res.json({ success: true, providerResponse: providerResponse || null });
   } catch (e) {
     const status = e?.status || e?.response?.status || 400;
     const data = e?.data || e?.response?.data || null;
@@ -2710,6 +2710,7 @@ router.post("/send-template", async (req, res) => {
     });
 
     ensureTrustSignalAccepted(r.data, "TrustSignal did not accept template send");
+    const providerResponse = r.data;
 
     const now = new Date();
 
@@ -2722,8 +2723,8 @@ router.post("/send-template", async (req, res) => {
       clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
 
     const messageDoc = {
-      waId: extractProviderAcceptId(r.data),
-      providerTransactionId: extractProviderTransactionId(r.data),
+      waId: extractProviderAcceptId(providerResponse),
+      providerTransactionId: extractProviderTransactionId(providerResponse),
       from: senderForDb(sender),
       to: phone,
       direction: "OUTBOUND",
@@ -2752,7 +2753,7 @@ router.post("/send-template", async (req, res) => {
           : {}),
       },
       timestamp: now,
-      raw: r.data,
+      raw: providerResponse,
     };
 
     if (normalizedHeaderMedia?.url) {
@@ -2794,7 +2795,10 @@ router.post("/send-template", async (req, res) => {
       },
     });
 
-    return res.json({ success: true, providerResponse: r.data || null });
+    return res.json({
+      success: true,
+      providerResponse: providerResponse || null,
+    });
   } catch (e) {
     const status = e?.status || e?.response?.status || 400;
     const data = e?.data || e?.response?.data || null;
