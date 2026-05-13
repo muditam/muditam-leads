@@ -1048,15 +1048,29 @@ const emitMessage = (req, msgDoc) => {
   emitToPhone10(req, p10, "wa:message", { phone10: p10, message: msgDoc });
 };
 
-const emitStatus = (req, { phone10, waId, status, providerTransactionId }) => {
-  if (!waId) return;
+const emitStatus = (req, { phone10, waId, status, providerTransactionId, transactionId, messageId }) => {
+  const liveWaId = String(waId || messageId || "").trim();
+  const liveTxnId = String(providerTransactionId || transactionId || "").trim();
+  if (!liveWaId && !liveTxnId) return;
   const p10 = last10(phone10);
   if (!p10) return;
   emitToPhone10(req, p10, "wa:status", {
     phone10: p10,
-    waId,
+    ...(liveWaId
+      ? {
+          waId: liveWaId,
+          id: liveWaId,
+          messageId: liveWaId,
+        }
+      : {}),
     status,
-    ...(providerTransactionId ? { providerTransactionId } : {}),
+    ...(liveTxnId
+      ? {
+          providerTransactionId: liveTxnId,
+          transactionId: liveTxnId,
+          transaction_id: liveTxnId,
+        }
+      : {}),
   });
 };
 
@@ -2368,7 +2382,12 @@ router.post("/send-text", async (req, res) => {
       },
     });
 
-    return res.json({ success: true, providerResponse: r.data || null });
+    return res.json({
+      success: true,
+      providerResponse: r.data || null,
+      message: created,
+      phone10: p10,
+    });
   } catch (e) {
     const status = e?.status || e?.response?.status || 400;
     const data = e?.data || e?.response?.data || null;
@@ -2573,6 +2592,8 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       success: true,
       mediaUrl,
       providerResponse: r.data || null,
+      message: created,
+      phone10: p10,
     });
   } catch (e) {
     const status = e?.status || e?.response?.status || 400;
@@ -2806,6 +2827,8 @@ router.post("/send-template", async (req, res) => {
     return res.json({
       success: true,
       providerResponse: providerResponse || null,
+      message: created,
+      phone10: p10,
     });
   } catch (e) {
     const status = e?.status || e?.response?.status || 400;
@@ -3263,9 +3286,10 @@ async function handlePublicWebhook(req, res) {
         if (p10 && liveId) {
           emitStatus(req, {
             phone10: p10,
-            waId: liveId,
+            waId: updated.waId || waId || liveId,
             status: updated.status,
-            providerTransactionId: updated.providerTransactionId,
+            providerTransactionId:
+              updated.providerTransactionId || transactionId || "",
           });
         }
       }
