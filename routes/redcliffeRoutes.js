@@ -24,6 +24,12 @@ const inboundWebhookAuthValue = String(
 const useMockOnAuthFailure = String(
  process.env.REDCLIFFE_USE_MOCK_ON_AUTH_FAILURE || "false"
 ).trim().toLowerCase() === "true";
+const RECENT_BOOKING_SYNC_DAYS = 5;
+const RECENT_BOOKING_SYNC_TTL_MS = 5 * 60 * 1000;
+const recentBookingSyncState = {
+ inFlight: null,
+ lastSuccessAt: 0,
+};
 
 
 const recommendedWebhookTypes = [
@@ -394,6 +400,21 @@ function buildMockResponse(path, query = {}, data = {}) {
 
 
  return null;
+}
+
+function toIsoDate(value = new Date()) {
+ return new Date(value).toISOString().slice(0, 10);
+}
+
+function getRecentIsoDates(days = RECENT_BOOKING_SYNC_DAYS) {
+ const dates = [];
+ const today = new Date();
+ for (let offset = 0; offset < days; offset += 1) {
+   const current = new Date(today);
+   current.setDate(today.getDate() - offset);
+   dates.push(toIsoDate(current));
+ }
+ return dates.reverse();
 }
 
 
@@ -962,6 +983,90 @@ async function upsertBookingSnapshot(payload, source, extras = {}) {
    { $set: patch },
    { new: true, upsert: true, setDefaultsOnInsert: true }
  );
+}
+
+async function syncCollectionDateIntoMongo(collectionDate) {
+ const date = String(collectionDate || "").trim();
+ if (!date) return { collectionDate: "", fetched: 0, upserted: 0 };
+
+ const result = await proxyWithMockFallback({
+   method: "GET",
+   path: withQuery("/api/external/v2/center-get-booking/", {
+     collection_date: date,
+   }),
+   query: {
+     collection_date: date,
+   },
+ });
+
+ if (result.status >= 400) {
+   throw new Error(
+     result.data?.message ||
+       result.data?.detail ||
+       `Failed to sync Redcliffe bookings for ${date}`
+   );
+ }
+
+ const upstreamRecords = Array.isArray(result.data)
+   ? result.data
+   : toArray(result.data?.data);
+ const normalized = upstreamRecords
+   .map(normalizeBookingRecord)
+   .filter((item) => String(item?.bookingId || "").trim());
+
+ if (!normalized.length) {
+   return { collectionDate: date, fetched: 0, upserted: 0 };
+ }
+
+ await RedcliffeBooking.bulkWrite(
+   normalized.map((item) => ({
+     updateOne: {
+       filter: { bookingId: String(item.bookingId).trim() },
+       update: {
+         $set: {
+           ...item,
+           bookingId: String(item.bookingId).trim(),
+           lastSource: "sync-recent",
+           lastSyncedAt: new Date(),
+         },
+       },
+       upsert: true,
+     },
+   })),
+   { ordered: false }
+ );
+
+ return {
+   collectionDate: date,
+   fetched: upstreamRecords.length,
+   upserted: normalized.length,
+ };
+}
+
+async function ensureRecentBookingsSynced({ force = false, days = RECENT_BOOKING_SYNC_DAYS } = {}) {
+ const now = Date.now();
+ if (!force && recentBookingSyncState.lastSuccessAt && now - recentBookingSyncState.lastSuccessAt < RECENT_BOOKING_SYNC_TTL_MS) {
+   return [];
+ }
+ if (recentBookingSyncState.inFlight) {
+   return recentBookingSyncState.inFlight;
+ }
+
+ recentBookingSyncState.inFlight = (async () => {
+   const dates = getRecentIsoDates(days);
+   const results = [];
+   for (const date of dates) {
+     results.push(await syncCollectionDateIntoMongo(date));
+   }
+   recentBookingSyncState.lastSuccessAt = Date.now();
+   return results;
+ })();
+
+ try {
+   return await recentBookingSyncState.inFlight;
+ } finally {
+   recentBookingSyncState.inFlight = null;
+ }
 }
 
 
@@ -1696,7 +1801,9 @@ router.post("/bookings/:bookingId/add-member", async (req, res) => {
 
 router.get("/bookings", async (req, res) => {
  try {
-   const todayIso = new Date().toISOString().slice(0, 10);
+   const todayIso = toIsoDate();
+   const recentDates = getRecentIsoDates();
+   const oldestRecentIso = recentDates[0];
    const requestedCollectionDate = String(req.query.collection_date || "").trim();
    const phone = String(req.query.phone || req.query.customer_phone || "").trim();
    const clientRef = String(req.query.client_ref_id || req.query.reference_data || "").trim();
@@ -1707,15 +1814,21 @@ router.get("/bookings", async (req, res) => {
    const hasExplicitLookup = Boolean(
      bookingId || bookingStatus || bookingDate || requestedCollectionDate || phone || clientRef || packageCode
    );
-   const effectiveCollectionDate = hasExplicitLookup
-     ? requestedCollectionDate
-     : todayIso;
+
+   if (!hasExplicitLookup) {
+     await ensureRecentBookingsSynced();
+   }
+
    const query = {};
 
    if (bookingId) query.bookingId = bookingId;
    if (bookingStatus) query["bookingStatus.value"] = bookingStatus;
    if (bookingDate) query.bookingDate = bookingDate;
-   if (effectiveCollectionDate) query.collectionDate = effectiveCollectionDate;
+   if (requestedCollectionDate) {
+     query.collectionDate = requestedCollectionDate;
+   } else if (!hasExplicitLookup) {
+     query.collectionDate = { $gte: oldestRecentIso, $lte: todayIso };
+   }
 
    const records = await RedcliffeBooking.find(query)
      .sort({ collectionDate: -1, updatedAt: -1 })

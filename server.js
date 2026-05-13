@@ -766,7 +766,7 @@ app.use("/api/ads-videos", adsVideoRoutes);
 
 app.use("/api/shopify-catalog", shopifyCatalog);
 
-app.use("/api", unicommerceViewRoutes);
+app.use("/unicommerce-api", unicommerceViewRoutes);
 app.use("/api/sops", sopRoutes);
 app.use(walletRewardsRoutes);
 
