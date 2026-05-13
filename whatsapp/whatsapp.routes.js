@@ -760,8 +760,8 @@ function buildTrustSignalTemplatePayload({
     sample.bodyvar = paramValues;
   }
 
-  if (normalizedHeader?.id) {
-    sample.media = normalizedHeader.id;
+  if (normalizedHeader?.id || normalizedHeader?.url) {
+    sample.media = normalizedHeader.id || normalizedHeader.url;
   }
 
   const payload = {
@@ -1820,6 +1820,40 @@ async function handleUploadTemplateMedia(req, res) {
     return res.json({ success: true, mediaId });
   } catch (e) {
     console.error("upload-template-media error:", e?.data || e);
+
+    const providerStatus = e?.status || e?.response?.status || 0;
+    const providerMessage = String(
+      e?.message ||
+      e?.data?.message ||
+      e?.response?.data?.message ||
+      ""
+    ).toLowerCase();
+
+    const shouldFallbackToUrl =
+      providerStatus === 404 ||
+      providerMessage.includes("not found");
+
+    if (shouldFallbackToUrl && req.file) {
+      try {
+        const uploaded = await uploadBufferToWasabi({
+          buffer: req.file.buffer,
+          mime: req.file.mimetype || "application/octet-stream",
+          filename: req.file.originalname || "file",
+          keyPrefix: `whatsapp-template-media/${new Date().toISOString().slice(0, 10)}`,
+        });
+
+        return res.json({
+          success: true,
+          url: uploaded.url,
+          filename: uploaded.filename,
+          mime: uploaded.mime,
+          fallback: "wasabi-public-url",
+        });
+      } catch (fallbackErr) {
+        console.error("upload-template-media fallback error:", fallbackErr?.message || fallbackErr);
+      }
+    }
+
     return res.status(e?.status || e?.response?.status || 400).json({
       message: e?.message || "Upload template media failed",
       providerError: e?.data || e?.response?.data || null,
