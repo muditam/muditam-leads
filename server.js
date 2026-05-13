@@ -298,6 +298,10 @@ app.post(
   WhatsAppRoutes.uploadTemplateMediaMiddleware,
   WhatsAppRoutes.handleUploadTemplateMedia
 );
+app.get(
+  "/api/whatsapp/media-file/:filename",
+  WhatsAppRoutes.handlePublicMediaFile
+);
 
 app.set("trust proxy", 1);
  

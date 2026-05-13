@@ -822,6 +822,64 @@ function buildInboundMediaProxyUrl({
   return `/api/whatsapp/media-proxy?${qs.toString()}`;
 }
 
+function buildAbsoluteAppUrl(req, relativePath = "/") {
+  const configuredBase = String(
+    process.env.PUBLIC_BASE_URL ||
+    process.env.APP_BASE_URL ||
+    process.env.BACKEND_PUBLIC_URL ||
+    ""
+  ).trim();
+
+  const normalizedPath = String(relativePath || "/").startsWith("/")
+    ? String(relativePath || "/")
+    : `/${String(relativePath || "")}`;
+
+  if (configuredBase && isAbsoluteHttpUrl(configuredBase)) {
+    return new URL(
+      normalizedPath,
+      configuredBase.endsWith("/") ? configuredBase : `${configuredBase}/`
+    ).toString();
+  }
+
+  const proto = String(
+    req?.headers?.["x-forwarded-proto"] ||
+    req?.protocol ||
+    "https"
+  )
+    .split(",")[0]
+    .trim();
+  const host = String(
+    req?.headers?.["x-forwarded-host"] ||
+    req?.get?.("host") ||
+    req?.headers?.host ||
+    ""
+  )
+    .split(",")[0]
+    .trim();
+
+  if (!host) return "";
+  return `${proto}://${host}${normalizedPath}`;
+}
+
+function buildTemplateHeaderFetchUrl(req, {
+  url = "",
+  filename = "",
+  mime = "",
+} = {}) {
+  const rawUrl = String(url || "").trim();
+  if (!rawUrl) return "";
+
+  const safeFilename = sanitizeFilename(filename || "") || "attachment";
+  const qs = new URLSearchParams();
+  qs.set("url", rawUrl);
+  if (mime) qs.set("mime", String(mime || "").trim());
+
+  return buildAbsoluteAppUrl(
+    req,
+    `/api/whatsapp/media-file/${encodeURIComponent(safeFilename)}?${qs.toString()}`
+  );
+}
+
 function getHostSafe(raw = "") {
   try {
     return new URL(String(raw || "").trim()).host.toLowerCase();
@@ -1793,6 +1851,80 @@ router.get("/media-proxy", async (req, res) => {
   }
 });
 
+async function handlePublicMediaFile(req, res) {
+  let upstream;
+
+  try {
+    const rawUrl = String(req.query?.url || "").trim();
+    const filename = sanitizeFilename(
+      req.params?.filename || req.query?.filename || "attachment"
+    );
+    const fallbackMime = String(req.query?.mime || "").trim();
+
+    if (!rawUrl) {
+      return res.status(400).json({ message: "url required" });
+    }
+
+    if (!isAbsoluteHttpUrl(rawUrl) || isClearlyUnsafeProxyTarget(rawUrl)) {
+      return res.status(400).json({ message: "invalid media url" });
+    }
+
+    upstream = await fetchMediaStreamWithBestAuth(rawUrl);
+    console.log("media-file upstream status:", upstream.status, rawUrl);
+
+    if (upstream.status < 200 || upstream.status >= 300) {
+      try {
+        if (upstream.data && typeof upstream.data.destroy === "function") {
+          upstream.data.destroy();
+        }
+      } catch {}
+
+      return res.status(502).json({
+        message: "Failed to fetch public media file",
+        providerStatus: upstream.status,
+      });
+    }
+
+    const contentType =
+      String(upstream.headers?.["content-type"] || "").trim() ||
+      fallbackMime ||
+      "application/octet-stream";
+    const contentLength = String(
+      upstream.headers?.["content-length"] || ""
+    ).trim();
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename || "attachment"}"; filename*=UTF-8''${encodeURIComponent(filename || "attachment")}`
+    );
+    res.setHeader("Cache-Control", "public, max-age=300");
+
+    if (contentLength) {
+      res.setHeader("Content-Length", contentLength);
+    }
+
+    upstream.data.on("error", (err) => {
+      console.error("media-file stream error:", err?.message || err);
+      if (!res.headersSent) {
+        res.status(502).end("media file stream failed");
+      } else {
+        res.end();
+      }
+    });
+
+    return upstream.data.pipe(res);
+  } catch (e) {
+    console.error("media-file error:", e?.message || e);
+    return res.status(502).json({
+      message: "Media file proxy failed",
+      error: e?.message || "UNKNOWN_ERROR",
+    });
+  }
+}
+
+router.get("/media-file/:filename", handlePublicMediaFile);
+
 async function handleUploadTemplateMedia(req, res) {
   try {
     if (!req.file) {
@@ -2545,12 +2677,27 @@ router.post("/send-template", async (req, res) => {
       });
     }
 
+    const providerHeaderMedia =
+      headerFormat === "DOCUMENT" && normalizedHeaderMedia?.url
+        ? {
+            ...normalizedHeaderMedia,
+            url:
+              buildTemplateHeaderFetchUrl(req, {
+                url: normalizedHeaderMedia.url,
+                filename:
+                  normalizedHeaderMedia.filename ||
+                  path.basename(normalizedHeaderMedia.url.split("?")[0] || ""),
+                mime: normalizedHeaderMedia.mime || "",
+              }) || normalizedHeaderMedia.url,
+          }
+        : normalizedHeaderMedia;
+
     const payload = buildTrustSignalTemplatePayload({
       sender,
       to: phone,
       providerTemplateId,
       parameters: paramValues,
-      headerMedia: normalizedHeaderMedia,
+      headerMedia: providerHeaderMedia,
     });
 
     console.log("TS TEMPLATE PAYLOAD =>", JSON.stringify(payload, null, 2));
@@ -3335,5 +3482,6 @@ router.post("/webhook", handlePublicWebhook);
 router.handlePublicWebhook = handlePublicWebhook;
 router.uploadTemplateMediaMiddleware = upload.single("file");
 router.handleUploadTemplateMedia = handleUploadTemplateMedia;
+router.handlePublicMediaFile = handlePublicMediaFile;
 
 module.exports = router;
