@@ -1789,47 +1789,45 @@ router.get("/media-proxy", async (req, res) => {
   }
 });
 
-router.post(
-  "/upload-template-media",
-  upload.single("file"),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ message: "file required" });
-      }
+async function handleUploadTemplateMedia(req, res) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "file required" });
+    }
 
-      const fd = new FormData();
-      fd.append("file", req.file.buffer, {
-        filename: req.file.originalname || "file",
-        contentType: req.file.mimetype || "application/octet-stream",
-        knownLength: req.file.size,
-      });
+    const fd = new FormData();
+    fd.append("file", req.file.buffer, {
+      filename: req.file.originalname || "file",
+      contentType: req.file.mimetype || "application/octet-stream",
+      knownLength: req.file.size,
+    });
 
-      const r = await tsRequest({
-        method: "POST",
-        path: TS_PATH_UPLOAD_MEDIA,
-        data: fd,
-        headers: fd.getHeaders(),
-      });
+    const r = await tsRequest({
+      method: "POST",
+      path: TS_PATH_UPLOAD_MEDIA,
+      data: fd,
+      headers: fd.getHeaders(),
+    });
 
-      const mediaId = extractProviderMediaId(r.data);
-      if (!mediaId) {
-        return res.status(400).json({
-          message: "Upload succeeded but provider did not return media id",
-          providerError: r.data || null,
-        });
-      }
-
-      return res.json({ success: true, mediaId });
-    } catch (e) {
-      console.error("upload-template-media error:", e?.data || e);
-      return res.status(e?.status || e?.response?.status || 400).json({
-        message: e?.message || "Upload template media failed",
-        providerError: e?.data || e?.response?.data || null,
+    const mediaId = extractProviderMediaId(r.data);
+    if (!mediaId) {
+      return res.status(400).json({
+        message: "Upload succeeded but provider did not return media id",
+        providerError: r.data || null,
       });
     }
+
+    return res.json({ success: true, mediaId });
+  } catch (e) {
+    console.error("upload-template-media error:", e?.data || e);
+    return res.status(e?.status || e?.response?.status || 400).json({
+      message: e?.message || "Upload template media failed",
+      providerError: e?.data || e?.response?.data || null,
+    });
   }
-);
+}
+
+router.post("/upload-template-media", upload.single("file"), handleUploadTemplateMedia);
 
 router.post("/conversations/mark-read", async (req, res) => {
   try {
@@ -3288,5 +3286,7 @@ async function handlePublicWebhook(req, res) {
 
 router.post("/webhook", handlePublicWebhook);
 router.handlePublicWebhook = handlePublicWebhook;
+router.uploadTemplateMediaMiddleware = upload.single("file");
+router.handleUploadTemplateMedia = handleUploadTemplateMedia;
 
 module.exports = router;

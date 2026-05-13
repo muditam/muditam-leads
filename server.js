@@ -209,6 +209,11 @@ app.post(
   }),
   WhatsAppRoutes.handlePublicWebhook
 );
+app.post(
+  "/api/whatsapp/upload-template-media",
+  WhatsAppRoutes.uploadTemplateMediaMiddleware,
+  WhatsAppRoutes.handleUploadTemplateMedia
+);
 
 // Start Server
 const httpServer = http.createServer(app);
