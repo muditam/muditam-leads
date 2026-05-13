@@ -1844,6 +1844,8 @@ async function handleUploadTemplateMedia(req, res) {
 
         return res.json({
           success: true,
+          mediaId: uploaded.url,
+          id: uploaded.url,
           url: uploaded.url,
           filename: uploaded.filename,
           mime: uploaded.mime,
