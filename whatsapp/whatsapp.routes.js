@@ -2309,7 +2309,8 @@ router.get("/templates", async (req, res) => {
 
 router.post("/send-text", async (req, res) => {
   try {
-    const { to, text } = req.body;
+    const { to, text, clientTempId: rawClientTempId } = req.body;
+    const clientTempId = String(rawClientTempId || "").trim();
     const textValue = String(text || "").trim();
 
     if (!to || !textValue) {
@@ -2372,7 +2373,10 @@ router.post("/send-text", async (req, res) => {
       { upsert: true }
     );
 
-    emitMessage(req, created);
+    const createdPayload = created.toObject();
+    if (clientTempId) createdPayload.clientTempId = clientTempId;
+
+    emitMessage(req, createdPayload);
     emitConversationPatch(req, {
       phone10: p10,
       patch: {
@@ -2385,7 +2389,7 @@ router.post("/send-text", async (req, res) => {
     return res.json({
       success: true,
       providerResponse: r.data || null,
-      message: created,
+      message: createdPayload,
       phone10: p10,
     });
   } catch (e) {
@@ -2443,6 +2447,7 @@ router.post("/send-text", async (req, res) => {
 router.post("/send-media", upload.single("file"), async (req, res) => {
   try {
     const toRaw = req.body?.to || "";
+    const clientTempId = String(req.body?.clientTempId || "").trim();
     const caption = String(req.body?.caption || req.body?.message || "").trim();
     const directMediaUrl = String(req.body?.mediaUrl || "").trim();
     const directFilename = String(req.body?.filename || "").trim();
@@ -2578,7 +2583,10 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       { upsert: true }
     );
 
-    emitMessage(req, created);
+    const createdPayload = created.toObject();
+    if (clientTempId) createdPayload.clientTempId = clientTempId;
+
+    emitMessage(req, createdPayload);
     emitConversationPatch(req, {
       phone10: p10,
       patch: {
@@ -2592,7 +2600,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       success: true,
       mediaUrl,
       providerResponse: r.data || null,
-      message: created,
+      message: createdPayload,
       phone10: p10,
     });
   } catch (e) {
@@ -2613,12 +2621,14 @@ router.post("/send-template", async (req, res) => {
   try {
     const {
       to,
+      clientTempId: rawClientTempId = "",
       templateName,
       templateId: requestedTemplateId = "",
       parameters = [],
       renderedText = "",
       headerMedia = null,
     } = req.body;
+    const clientTempId = String(rawClientTempId || "").trim();
 
     if (!to || (!templateName && !requestedTemplateId)) {
       return res
@@ -2814,7 +2824,10 @@ router.post("/send-template", async (req, res) => {
       { upsert: true }
     );
 
-    emitMessage(req, created);
+    const createdPayload = created.toObject();
+    if (clientTempId) createdPayload.clientTempId = clientTempId;
+
+    emitMessage(req, createdPayload);
     emitConversationPatch(req, {
       phone10: p10,
       patch: {
@@ -2827,7 +2840,7 @@ router.post("/send-template", async (req, res) => {
     return res.json({
       success: true,
       providerResponse: providerResponse || null,
-      message: created,
+      message: createdPayload,
       phone10: p10,
     });
   } catch (e) {
