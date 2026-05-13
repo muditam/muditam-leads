@@ -2368,7 +2368,7 @@ router.post("/send-text", async (req, res) => {
       },
     });
 
-    return res.json({ success: true, providerResponse: providerResponse || null });
+    return res.json({ success: true, providerResponse: r.data || null });
   } catch (e) {
     const status = e?.status || e?.response?.status || 400;
     const data = e?.data || e?.response?.data || null;
