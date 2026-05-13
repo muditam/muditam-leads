@@ -462,6 +462,14 @@ function ensureTrustSignalAccepted(
   const providerErrors = Array.isArray(body?.errors) ? body.errors : [];
   const hasErrors = providerErrors.length > 0;
   const acceptId = extractProviderAcceptId(body);
+  const explicitTrue =
+    body?.success === true ||
+    body?.status === true ||
+    body?.ok === true ||
+    body?.message_delivered === true;
+  const textualSuccess = /success|accepted|queued|submitted|sent/i.test(
+    String(body?.message || "")
+  );
 
   if (explicitFalse || hasErrors) {
     const err = new Error(
@@ -472,7 +480,7 @@ function ensureTrustSignalAccepted(
     throw err;
   }
 
-  if (!acceptId) {
+  if (!acceptId && !explicitTrue && !textualSuccess) {
     const err = new Error(
       body?.message || "Provider did not return acceptance id"
     );
