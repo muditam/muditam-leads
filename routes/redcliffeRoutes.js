@@ -1046,7 +1046,7 @@ async function syncCollectionDateIntoMongo(collectionDate) {
 async function ensureRecentBookingsSynced({ force = false, days = RECENT_BOOKING_SYNC_DAYS } = {}) {
  const now = Date.now();
  if (!force && recentBookingSyncState.lastSuccessAt && now - recentBookingSyncState.lastSuccessAt < RECENT_BOOKING_SYNC_TTL_MS) {
-   return [];
+   return { results: [], failures: [] };
  }
  if (recentBookingSyncState.inFlight) {
    return recentBookingSyncState.inFlight;
@@ -1055,11 +1055,31 @@ async function ensureRecentBookingsSynced({ force = false, days = RECENT_BOOKING
  recentBookingSyncState.inFlight = (async () => {
    const dates = getRecentIsoDates(days);
    const results = [];
+   const failures = [];
    for (const date of dates) {
-     results.push(await syncCollectionDateIntoMongo(date));
+     try {
+       results.push(await syncCollectionDateIntoMongo(date));
+     } catch (error) {
+       console.error(
+         `Redcliffe recent booking sync failed for ${date}:`,
+         error?.message || error
+       );
+       failures.push({
+         collectionDate: date,
+         message: error?.message || `Failed to sync Redcliffe bookings for ${date}`,
+       });
+     }
    }
-   recentBookingSyncState.lastSuccessAt = Date.now();
-   return results;
+
+   if (!results.length && failures.length) {
+     throw new Error(failures[0].message);
+   }
+
+   if (results.length) {
+     recentBookingSyncState.lastSuccessAt = Date.now();
+   }
+
+   return { results, failures };
  })();
 
  try {
@@ -1814,9 +1834,10 @@ router.get("/bookings", async (req, res) => {
    const hasExplicitLookup = Boolean(
      bookingId || bookingStatus || bookingDate || requestedCollectionDate || phone || clientRef || packageCode
    );
+   let syncSummary = { results: [], failures: [] };
 
    if (!hasExplicitLookup) {
-     await ensureRecentBookingsSynced();
+     syncSummary = await ensureRecentBookingsSynced();
    }
 
    const query = {};
@@ -1840,6 +1861,14 @@ router.get("/bookings", async (req, res) => {
      status: "success",
      message: "Booking details fetched successfully",
      count: filtered.length,
+     sync: !hasExplicitLookup
+       ? {
+           attempted: recentDates.length,
+           succeeded: syncSummary.results.length,
+           failed: syncSummary.failures.length,
+           failures: syncSummary.failures,
+         }
+       : undefined,
      summary: {
        total: filtered.length,
        bookingStatus: buildStatusSummary(
