@@ -665,6 +665,10 @@ function summarizeReports(reportList) {
 }
 
 function extractReportUrl(payload, visited = new Set()) {
+ if (typeof payload === "string") {
+   const value = payload.trim();
+   return /^https?:\/\//i.test(value) ? value : "";
+ }
  if (!payload || typeof payload !== "object") return "";
  if (visited.has(payload)) return "";
  visited.add(payload);
@@ -689,6 +693,10 @@ function extractReportUrl(payload, visited = new Set()) {
    if (typeof value === "string" && value.trim()) {
      return value.trim();
    }
+ }
+
+ if (typeof payload.message === "string" && /^https?:\/\//i.test(payload.message.trim())) {
+   return payload.message.trim();
  }
 
  if (Array.isArray(payload)) {
