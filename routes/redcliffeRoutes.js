@@ -642,7 +642,15 @@ function summarizeReports(reportList) {
    .map((item) => String(item?.status || "").trim())
    .filter(Boolean);
  const links = reports
-   .map((item) => String(item?.report_link || "").trim())
+   .map((item) =>
+     String(
+       item?.report_link ||
+         item?.report_url ||
+         item?.url ||
+         item?.link ||
+         ""
+     ).trim()
+   )
    .filter(Boolean);
  const latestStatus = statuses[statuses.length - 1] || "none";
 
@@ -654,6 +662,64 @@ function summarizeReports(reportList) {
    available: links.length > 0,
    links,
  };
+}
+
+function extractReportUrl(payload, visited = new Set()) {
+ if (!payload || typeof payload !== "object") return "";
+ if (visited.has(payload)) return "";
+ visited.add(payload);
+
+ const directKeys = [
+   "report_url",
+   "reportUrl",
+   "report_link",
+   "reportLink",
+   "digital_report_url",
+   "consolidated_report_url",
+   "url",
+   "link",
+   "pdf_url",
+   "pdfUrl",
+   "file_url",
+   "fileUrl",
+ ];
+
+ for (const key of directKeys) {
+   const value = payload[key];
+   if (typeof value === "string" && value.trim()) {
+     return value.trim();
+   }
+ }
+
+ if (Array.isArray(payload)) {
+   for (const item of payload) {
+     const nested = extractReportUrl(item, visited);
+     if (nested) return nested;
+   }
+   return "";
+ }
+
+ const nestedKeys = [
+   "data",
+   "details",
+   "payload",
+   "result",
+   "report",
+   "reports",
+   "results",
+ ];
+
+ for (const key of nestedKeys) {
+   const nested = extractReportUrl(payload[key], visited);
+   if (nested) return nested;
+ }
+
+ for (const value of Object.values(payload)) {
+   const nested = extractReportUrl(value, visited);
+   if (nested) return nested;
+ }
+
+ return "";
 }
 
 
@@ -1087,6 +1153,111 @@ async function ensureRecentBookingsSynced({ force = false, days = RECENT_BOOKING
  } finally {
    recentBookingSyncState.inFlight = null;
  }
+}
+
+async function fetchBookingDetailsDirect({ bookingId, phone, bookingDate, collectionDate }) {
+ const trimmedBookingId = String(bookingId || "").trim();
+ const phoneTail = getPhoneTail(phone);
+ const attemptQueries = [];
+ const pushAttempt = (query) => {
+   const normalized = Object.entries(query)
+     .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "")
+     .sort(([a], [b]) => a.localeCompare(b));
+   const signature = JSON.stringify(normalized);
+   if (!signature || attemptQueries.some((item) => item.signature === signature)) return;
+   attemptQueries.push({ query, signature });
+ };
+
+ pushAttempt({
+   booking_id: trimmedBookingId,
+   customer_phone: phoneTail,
+   customer_phonenumber: phoneTail,
+   booking_date: bookingDate,
+   collection_date: collectionDate,
+ });
+ pushAttempt({
+   booking_id: trimmedBookingId,
+   customer_phone: phoneTail,
+   booking_date: bookingDate,
+   collection_date: collectionDate,
+ });
+ pushAttempt({
+   booking_id: trimmedBookingId,
+   customer_phonenumber: phoneTail,
+   booking_date: bookingDate,
+   collection_date: collectionDate,
+ });
+ pushAttempt({
+   booking_id: trimmedBookingId,
+   booking_date: bookingDate,
+   collection_date: collectionDate,
+ });
+ pushAttempt({
+   customer_phone: phoneTail,
+   customer_phonenumber: phoneTail,
+   booking_date: bookingDate,
+   collection_date: collectionDate,
+ });
+ pushAttempt({
+   customer_phonenumber: phoneTail,
+   booking_date: bookingDate,
+   collection_date: collectionDate,
+ });
+
+ for (const attempt of attemptQueries) {
+   const result = await proxyWithMockFallback({
+     method: "GET",
+     path: withQuery("/api/external/v2/center-get-booking/", attempt.query),
+     query: attempt.query,
+   });
+
+   if (result.status >= 400) {
+     if (![400, 404].includes(result.status)) {
+       throw new Error(
+         result.data?.message ||
+           result.data?.detail ||
+           "Failed to fetch booking details from Redcliffe."
+       );
+     }
+     continue;
+   }
+
+   const upstreamRecords = Array.isArray(result.data)
+     ? result.data
+     : toArray(result.data?.data);
+   const normalized = upstreamRecords
+     .map(normalizeBookingRecord)
+     .filter((item) => String(item?.bookingId || "").trim());
+
+   const filtered = filterBookings(normalized, {
+     booking_id: trimmedBookingId,
+     phone: phoneTail,
+   });
+
+   const matched = filtered.length ? filtered : normalized;
+   if (matched.length) {
+     await RedcliffeBooking.bulkWrite(
+       matched.map((item) => ({
+         updateOne: {
+           filter: { bookingId: String(item.bookingId).trim() },
+           update: {
+             $set: {
+               ...item,
+               bookingId: String(item.bookingId).trim(),
+               lastSource: "direct-lookup",
+               lastSyncedAt: new Date(),
+             },
+           },
+           upsert: true,
+         },
+       })),
+       { ordered: false }
+     );
+     return matched;
+   }
+ }
+
+ return [];
 }
 
 
@@ -1855,12 +2026,29 @@ router.get("/bookings", async (req, res) => {
      .sort({ collectionDate: -1, updatedAt: -1 })
      .lean();
 
-   const filtered = filterBookings(records, req.query || {});
+   let filtered = filterBookings(records, req.query || {});
+   let directLookupUsed = false;
+
+   if (!filtered.length && hasExplicitLookup && (bookingId || phone)) {
+     const directMatches = await fetchBookingDetailsDirect({
+       bookingId,
+       phone,
+       bookingDate,
+       collectionDate: requestedCollectionDate,
+     });
+     if (directMatches.length) {
+       filtered = directMatches;
+       directLookupUsed = true;
+     }
+   }
 
    return res.status(200).json({
      status: "success",
-     message: "Booking details fetched successfully",
+     message: directLookupUsed
+       ? "Booking details fetched directly from Redcliffe."
+       : "Booking details fetched successfully",
      count: filtered.length,
+     directLookupUsed,
      sync: !hasExplicitLookup
        ? {
            attempted: recentDates.length,
@@ -2004,8 +2192,10 @@ router.get("/bookings/:bookingId/reports/consolidated", async (req, res) => {
    return res.status(result.status).json(result.data);
  }
 
-
- return res.status(200).json(result.data);
+ return res.status(200).json({
+   ...result.data,
+   report_url: extractReportUrl(result.data),
+ });
 });
 
 
@@ -2031,8 +2221,10 @@ router.get("/bookings/:bookingId/reports/digital", async (req, res) => {
    return res.status(result.status).json(result.data);
  }
 
-
- return res.status(200).json(result.data);
+ return res.status(200).json({
+   ...result.data,
+   report_url: extractReportUrl(result.data),
+ });
 });
 
 
