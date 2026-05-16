@@ -171,6 +171,9 @@ const walletRewardsRoutes = require("./routes/Wallet/walletRewardsRoutes");
 const leadsCaptureRoutes = require("./KnowledgeBase/leadsCaptureRoutes");
 const knowledgeBaseRoutes = require("./KnowledgeBase/knowledgeBaseRoutes");
 
+const smartDietPlanRouter = require("./routes/smartDietPlan");
+const dietPublicRouter    = require("./routes/dietPublic");
+
 const app = express();
 const PORT = process.env.PORT || 5001;
 
@@ -781,6 +784,9 @@ app.use(walletRewardsRoutes);
 
 app.use("/api/knowledge-leads", leadsCaptureRoutes);
 app.use("/api/knowledge-base", knowledgeBaseRoutes);
+
+app.use("/api/smart-diet-plan", smartDietPlanRouter);
+app.use("/api/diet-public", dietPublicRouter);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

@@ -4,7 +4,6 @@ const ZoomCallLog = require("../models/ZoomCallLog");
 const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
-router.use(requireSession);
 
 function digitsOnly(v = "") {
   return String(v || "").replace(/\D/g, "");
@@ -27,7 +26,7 @@ function toE164India(v) {
   return "";
 }
 
-router.post("/click_to_call", async (req, res) => {
+router.post("/click_to_call", requireSession, async (req, res) => {
   try {
     const destination_number = toE164India(req.body.destination_number);
     if (!destination_number) {

@@ -10,8 +10,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const requireSession = require('../middleware/requireSession');
-const FoodByCat = require('../models/FoodByCat');
-const FoodItem = require('../models/FoodItem');
+const FoodByCat = require('../models/FoodByCat'); 
 const FoodRecipe = require('../models/FoodRecipe');
 const HomeBased = require('../models/HomeBased');
 const Packaged = require('../models/Packaged');
@@ -288,11 +287,6 @@ const COLLECTION_CONFIGS = {
    model: FoodByCat,
    idField: '_id',
    helperColumns: ['New_Image_ID', 'NewBrandLogo'],
- },
- food_items: {
-   model: FoodItem,
-   idField: 'code',
-   helperColumns: ['New_Image_ID'],
  },
  food_recipes: {
    model: FoodRecipe,
