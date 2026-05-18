@@ -9,6 +9,7 @@ const cron = require("node-cron");
 const ShopifyOrder = require("../models/ShopifyOrder");
 const Order = require("../models/Order");
 const Employee = require("../models/Employee");
+const shopifyOrdersRouter = require("./ShopifyOrderDB");
 
 const requireSession = require("../middleware/requireSession");
 
@@ -1422,10 +1423,8 @@ cron.schedule("*/59 * * * *", async () => {
       })`
     );
 
-    await axios.get(
-      "https://muditamleads-14f32a10d7f7.herokuapp.com/api/orders-shopify/sync-new",
-      { timeout: 120000 }
-    );
+    const syncStats = await shopifyOrdersRouter.syncNewCreatedOrders({});
+    console.log("[OC CRON] sync-new", syncStats);
 
     console.log(`[OC CRON] done in ${(Date.now() - started) / 1000}s`);
   } catch (e) {

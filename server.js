@@ -176,6 +176,16 @@ const dietPublicRouter    = require("./routes/dietPublic");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
+const DYNO = String(process.env.DYNO || "").trim();
+const SINGLETON_DYNO = String(process.env.SINGLETON_DYNO || "web.1").trim();
+
+function shouldRunSingletonJobs() {
+  if (String(process.env.RUN_SINGLETON_JOBS || "").toLowerCase() === "true") {
+    return true;
+  }
+  if (!DYNO) return true;
+  return DYNO === SINGLETON_DYNO;
+}
 
 app.use(
   compression({  
@@ -634,49 +644,57 @@ app.use("/api/zoom/calls", zoomCallRoutes);
 app.use("/api/zoom/call-intents", zoomCallIntentRoutes);
 app.use("/api/zoom/contacts", zoomContactsRoutes);
 
-// Nightly contact reconciliation (2:15 AM server time) for Zoom contact auto-sync healing.
-cron.schedule("15 2 * * *", async () => {
-  try {
-    await zoomContactSyncService.runFullSync();
-  } catch (_err) {
-    // noop
-  }
-});
+if (shouldRunSingletonJobs()) {
+  console.log(`[jobs] singleton background jobs enabled on dyno=${DYNO || "local"}`);
 
-setTimeout(async () => {
-  try {
-    await zoomContactSyncService.runFullSync();
-  } catch (_err) {
-    // noop
-  }
-}, 30000);
+  // Nightly contact reconciliation (2:15 AM server time) for Zoom contact auto-sync healing.
+  cron.schedule("15 2 * * *", async () => {
+    try {
+      await zoomContactSyncService.runFullSync();
+    } catch (_err) {
+      // noop
+    }
+  });
 
-// Zoom Phone manager analytics accuracy jobs (S2S call-history reconciliation).
-// - Incremental: every 1 hour over rolling 24h
-// - Nightly: deep 45-day reconcile
-cron.schedule("0 * * * *", async () => {
-  try {
-    await runIncrementalSync(24);
-  } catch (_err) {
-    // noop
-  }
-});
+  setTimeout(async () => {
+    try {
+      await zoomContactSyncService.runFullSync();
+    } catch (_err) {
+      // noop
+    }
+  }, 30000);
 
-cron.schedule("35 2 * * *", async () => {
-  try {
-    await runNightlyReconcile(45);
-  } catch (_err) {
-    // noop
-  }
-});
+  // Zoom Phone manager analytics accuracy jobs (S2S call-history reconciliation).
+  // - Incremental: every 1 hour over rolling 24h
+  // - Nightly: deep 45-day reconcile
+  cron.schedule("0 * * * *", async () => {
+    try {
+      await runIncrementalSync(24);
+    } catch (_err) {
+      // noop
+    }
+  });
 
-setTimeout(async () => {
-  try {
-    await runIncrementalSync(24);
-  } catch (_err) {
-    // noop
-  }
-}, 45000);
+  cron.schedule("35 2 * * *", async () => {
+    try {
+      await runNightlyReconcile(45);
+    } catch (_err) {
+      // noop
+    }
+  });
+
+  setTimeout(async () => {
+    try {
+      await runIncrementalSync(24);
+    } catch (_err) {
+      // noop
+    }
+  }, 45000);
+} else {
+  console.log(
+    `[jobs] skipping singleton Zoom jobs on dyno=${DYNO || "local"}; owner=${SINGLETON_DYNO}`
+  );
+}
 
 app.use("/api/finance", financeRoutes);
 

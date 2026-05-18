@@ -226,6 +226,36 @@ function authHeaders() {
  };
 }
 
+async function syncNewCreatedOrders({ sinceCreated, limit } = {}) {
+  const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
+  if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
+    const err = new Error("Missing Shopify env vars");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  let sinceISO = sinceCreated;
+  if (!sinceISO) {
+    const latest = await ShopifyOrder.findOne({}, { shopifyCreatedAt: 1 })
+      .sort({ shopifyCreatedAt: -1 })
+      .lean();
+    const baseDate = latest?.shopifyCreatedAt
+      ? new Date(latest.shopifyCreatedAt)
+      : new Date("2000-01-01T00:00:00Z");
+    baseDate.setMinutes(baseDate.getMinutes() - 2);
+    sinceISO = baseDate.toISOString();
+  }
+
+  const base = shopifyBase(SHOPIFY_STORE_NAME);
+  const safeLimit = Math.min(parseInt(limit || "250", 10) || 250, 250);
+  const url = `${base}/orders.json?status=any&limit=${safeLimit}&created_at_min=${encodeURIComponent(
+    sinceISO
+  )}`;
+
+  const stats = await pageAndUpsertAll(url, authHeaders());
+  return { ok: true, mode: "new-created", sinceCreated: sinceISO, ...stats };
+}
+
 
 // -------------------- ROUTES --------------------
 
@@ -259,40 +289,17 @@ router.get("/sync-all", async (req, res) => {
 */
 router.get("/sync-new", async (req, res) => {
  try {
-   const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
-   if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
-     return res.status(400).json({ error: "Missing Shopify env vars" });
-   }
-
-
-   // Determine starting watermark by CREATED time
-   let sinceISO = req.query.sinceCreated;
-   if (!sinceISO) {
-     const latest = await ShopifyOrder.findOne({}, { shopifyCreatedAt: 1 })
-       .sort({ shopifyCreatedAt: -1 })
-       .lean();
-     const baseDate = latest?.shopifyCreatedAt
-       ? new Date(latest.shopifyCreatedAt)
-       : new Date("2000-01-01T00:00:00Z");
-     baseDate.setMinutes(baseDate.getMinutes() - 2); // small safety buffer
-     sinceISO = baseDate.toISOString();
-   }
-
-
-   const base = shopifyBase(SHOPIFY_STORE_NAME);
-   const limit = Math.min(parseInt(req.query.limit || "250", 10) || 250, 250);
-
-
-   let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
-     sinceISO
-   )}`;
-
-
-   const stats = await pageAndUpsertAll(url, authHeaders());
-   res.json({ ok: true, mode: "new-created", sinceCreated: sinceISO, ...stats });
+   const stats = await syncNewCreatedOrders({
+     sinceCreated: req.query.sinceCreated,
+     limit: req.query.limit,
+   });
+   res.json(stats);
  } catch (err) {
    console.error("sync-new error:", err?.response?.data || err);
-   res.status(500).json({ error: "Failed to sync newly created orders", details: err?.message || err });
+   res.status(err.statusCode || 500).json({
+     error: "Failed to sync newly created orders",
+     details: err?.message || err,
+   });
  }
 });
 
@@ -680,8 +687,8 @@ if (!global.__SHOPIFY_SYNC_UNFULFILLED_CRON__) {
  );
 }
 
+router.syncNewCreatedOrders = syncNewCreatedOrders;
 
 module.exports = router;
-
 
 
