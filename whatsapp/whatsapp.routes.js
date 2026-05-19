@@ -133,12 +133,470 @@ const s3 =
 const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
 const last10 = (v = "") => digitsOnly(v).slice(-10);
 const normalizeText = (v = "") => String(v || "").trim().toLowerCase();
+const MAX_CONVERSATION_PAGE_SIZE = 100;
 
 function normalizeWaId(v = "") {
   const d = digitsOnly(v);
   if (!d) return "";
   if (d.length === 10) return `91${d}`;
   return d;
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function escapeRegex(value = "") {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function encodeConversationCursor(conversation) {
+  const stamp = conversation?.lastMessageAt || conversation?.updatedAt || conversation?.createdAt;
+  const id = String(conversation?._id || "").trim();
+  if (!stamp || !id) return "";
+  return Buffer.from(JSON.stringify({ ts: new Date(stamp).toISOString(), id })).toString("base64");
+}
+
+function decodeConversationCursor(cursor = "") {
+  try {
+    const raw = Buffer.from(String(cursor || ""), "base64").toString("utf8");
+    const parsed = JSON.parse(raw || "{}");
+    const ts = parsed?.ts ? new Date(parsed.ts) : null;
+    const id = String(parsed?.id || "").trim();
+    if (!ts || Number.isNaN(ts.getTime()) || !mongoose.Types.ObjectId.isValid(id)) {
+      return null;
+    }
+    return { ts, id };
+  } catch {
+    return null;
+  }
+}
+
+async function enrichConversations(conversations = []) {
+  if (!Array.isArray(conversations) || conversations.length === 0) return [];
+
+  const phones10 = conversations.map((c) => last10(c.phone)).filter(Boolean);
+  if (!phones10.length) {
+    return conversations.map((conv) => ({
+      ...conv,
+      displayName: last10(conv.phone),
+      assignedToLabel: "Unassigned",
+    }));
+  }
+
+  const [leads, customers] = await Promise.all([
+    Lead.find({ contactNumber: { $in: phones10 } })
+      .select("contactNumber name healthExpertAssigned agentAssigned")
+      .lean(),
+    Customer.find({ phone: { $in: phones10 } })
+      .select("phone name assignedTo")
+      .lean(),
+  ]);
+
+  const leadMap = {};
+  leads.forEach((lead) => {
+    leadMap[last10(lead.contactNumber)] = lead;
+  });
+
+  const customerMap = {};
+  customers.forEach((customer) => {
+    customerMap[last10(customer.phone)] = customer;
+  });
+
+  return conversations.map((conv) => {
+    const p10 = last10(conv.phone);
+    const lead = leadMap[p10];
+    const customer = customerMap[p10];
+
+    let displayName = p10;
+    let assignedToLabel = "Unassigned";
+
+    if (lead) {
+      displayName = lead.name || p10;
+      assignedToLabel =
+        lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
+    } else if (customer) {
+      displayName = customer.name || p10;
+      assignedToLabel = customer.assignedTo || "Unassigned";
+    }
+
+    return { ...conv, displayName, assignedToLabel };
+  });
+}
+
+async function resolveConversationAccessContext({ role, userName, userId, hasTeam, chatScope }) {
+  const roleRaw = String(role || "");
+  const normalizedRole = roleRaw.trim().toLowerCase();
+  const normalizedUserName = String(userName || "").trim().toLowerCase();
+  const scope = String(chatScope || "").trim().toLowerCase();
+
+  const isAdmin =
+    ["Manager", "Developer", "Super Admin", "Admin"].includes(roleRaw) ||
+    normalizedRole.includes("admin") ||
+    normalizedRole.includes("manager");
+
+  const isAssistantTeamLeadLike =
+    normalizedRole === "assistant team lead" ||
+    normalizedRole === "retention agent";
+  const isTeamLeaderLike =
+    normalizedRole === "team leader" || normalizedRole === "team-leader";
+  const userHasTeam =
+    String(hasTeam || "").trim().toLowerCase() === "true" ||
+    isAssistantTeamLeadLike ||
+    isTeamLeaderLike;
+
+  const context = {
+    isAdmin,
+    normalizedUserName,
+    mode: isAdmin ? "all" : "self",
+    allowedNames: new Set(),
+    selfName: normalizedUserName,
+  };
+
+  if (!userHasTeam || (!normalizedUserName && !String(userId || "").trim())) {
+    return context;
+  }
+
+  let employee = null;
+  const rawUserId = String(userId || "").trim();
+
+  if (mongoose.Types.ObjectId.isValid(rawUserId)) {
+    employee = await Employee.findById(rawUserId)
+      .select("_id fullName teamMembers")
+      .lean();
+  }
+
+  if (!employee && normalizedUserName) {
+    employee = await Employee.findOne({
+      fullName: {
+        $regex: new RegExp(`^${escapeRegex(String(userName).trim())}$`, "i"),
+      },
+    })
+      .select("_id fullName teamMembers")
+      .lean();
+  }
+
+  if (!employee?._id) {
+    return context;
+  }
+
+  const employeeNameNormalized = String(employee?.fullName || "")
+    .trim()
+    .toLowerCase();
+  context.selfName = employeeNameNormalized || normalizedUserName;
+
+  let directReports = await Employee.find({
+    teamLeader: employee._id,
+    status: "active",
+  })
+    .select("fullName")
+    .lean();
+
+  if (!directReports.length) {
+    directReports = await Employee.find({
+      teamLeader: employee._id,
+    })
+      .select("fullName")
+      .lean();
+  }
+
+  if (!directReports.length && Array.isArray(employee?.teamMembers) && employee.teamMembers.length) {
+    directReports = await Employee.find({
+      _id: { $in: employee.teamMembers },
+      status: "active",
+    })
+      .select("fullName")
+      .lean();
+
+    if (!directReports.length) {
+      directReports = await Employee.find({
+        _id: { $in: employee.teamMembers },
+      })
+        .select("fullName")
+        .lean();
+    }
+  }
+
+  context.allowedNames = new Set(
+    (directReports || [])
+      .map((emp) => String(emp?.fullName || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  if (scope === "team" || (isTeamLeaderLike && !scope)) {
+    context.mode = "team";
+    return context;
+  }
+
+  if (scope === "self") {
+    context.mode = "self";
+    return context;
+  }
+
+  if (scope === "combined" || (!scope && isAssistantTeamLeadLike)) {
+    context.mode = "combined";
+    return context;
+  }
+
+  return context;
+}
+
+function applyConversationAccessFilter(conversations = [], context) {
+  const list = Array.isArray(conversations) ? conversations : [];
+  if (!context) return list;
+  if (context.isAdmin && context.mode === "all") return list;
+
+  const selfName = String(context.selfName || context.normalizedUserName || "")
+    .trim()
+    .toLowerCase();
+  const allowedNames = context.allowedNames instanceof Set
+    ? context.allowedNames
+    : new Set(
+      Array.isArray(context.allowedNames)
+        ? context.allowedNames.map((name) => String(name || "").trim().toLowerCase()).filter(Boolean)
+        : []
+    );
+
+  if (context.mode === "team") {
+    if (allowedNames.size > 0) {
+      return list.filter((chat) =>
+        allowedNames.has(String(chat?.assignedToLabel || "").trim().toLowerCase())
+      );
+    }
+    if (!selfName) return [];
+    return list.filter(
+      (chat) =>
+        String(chat?.assignedToLabel || "").trim().toLowerCase() === selfName
+    );
+  }
+
+  if (context.mode === "combined") {
+    const combined = new Set(allowedNames);
+    if (selfName) combined.add(selfName);
+    if (!combined.size) return [];
+    return list.filter((chat) =>
+      combined.has(String(chat?.assignedToLabel || "").trim().toLowerCase())
+    );
+  }
+
+  if (!selfName) return [];
+  return list.filter(
+    (chat) =>
+      String(chat?.assignedToLabel || "").trim().toLowerCase() === selfName
+  );
+}
+
+function parseFavoritePhones(raw = "") {
+  const source = Array.isArray(raw)
+    ? raw
+    : String(raw || "")
+      .split(",");
+  return Array.from(
+    new Set(
+      source
+        .map((value) => last10(value))
+        .filter(Boolean)
+    )
+  );
+}
+
+function buildPhoneSuffixRegex(phone = "") {
+  const p10 = last10(phone);
+  if (!p10) return null;
+  return new RegExp(`${escapeRegex(p10)}$`);
+}
+
+function buildConversationBasePipeline({ phone } = {}) {
+  const pipeline = [];
+  const phoneSuffixRegex = buildPhoneSuffixRegex(phone);
+
+  if (phoneSuffixRegex) {
+    pipeline.push({
+      $match: {
+        phone: phoneSuffixRegex,
+      },
+    });
+  }
+
+  pipeline.push(
+    {
+      $addFields: {
+        phone10: {
+          $substrCP: [
+            "$phone",
+            {
+              $max: [
+                0,
+                { $subtract: [{ $strLenCP: { $ifNull: ["$phone", ""] } }, 10] },
+              ],
+            },
+            10,
+          ],
+        },
+      },
+    },
+    {
+      $lookup: {
+        from: Lead.collection.name,
+        localField: "phone10",
+        foreignField: "contactNumber",
+        as: "leadMatches",
+      },
+    },
+    {
+      $lookup: {
+        from: Customer.collection.name,
+        localField: "phone10",
+        foreignField: "phone",
+        as: "customerMatches",
+      },
+    },
+    {
+      $addFields: {
+        leadMatch: { $arrayElemAt: ["$leadMatches", 0] },
+        customerMatch: { $arrayElemAt: ["$customerMatches", 0] },
+      },
+    },
+    {
+      $addFields: {
+        displayName: {
+          $ifNull: [
+            "$leadMatch.name",
+            { $ifNull: ["$customerMatch.name", "$phone10"] },
+          ],
+        },
+        assignedToLabel: {
+          $ifNull: [
+            "$leadMatch.healthExpertAssigned",
+            {
+              $ifNull: [
+                "$leadMatch.agentAssigned",
+                {
+                  $ifNull: ["$customerMatch.assignedTo", "Unassigned"],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+    {
+      $project: {
+        leadMatches: 0,
+        customerMatches: 0,
+        leadMatch: 0,
+        customerMatch: 0,
+      },
+    }
+  );
+
+  return pipeline;
+}
+
+function buildConversationAccessMatchStages(context, assignedTo = "") {
+  const stages = [];
+  const assignedNormalized = String(assignedTo || "").trim().toLowerCase();
+  const accessMatch = {};
+
+  if (context && !(context.isAdmin && context.mode === "all")) {
+    const selfName = String(context.selfName || context.normalizedUserName || "")
+      .trim()
+      .toLowerCase();
+    const allowedNames = context.allowedNames instanceof Set
+      ? Array.from(context.allowedNames)
+      : Array.isArray(context.allowedNames)
+        ? context.allowedNames
+        : [];
+
+    if (context.mode === "team") {
+      if (allowedNames.length > 0) {
+        accessMatch.assignedToLabel = { $in: allowedNames.map((name) => new RegExp(`^${escapeRegex(name)}$`, "i")) };
+      } else if (selfName) {
+        accessMatch.assignedToLabel = new RegExp(`^${escapeRegex(selfName)}$`, "i");
+      } else {
+        accessMatch.assignedToLabel = /^$/;
+      }
+    } else if (context.mode === "combined") {
+      const combined = Array.from(new Set([selfName, ...allowedNames].filter(Boolean)));
+      accessMatch.assignedToLabel = combined.length
+        ? { $in: combined.map((name) => new RegExp(`^${escapeRegex(name)}$`, "i")) }
+        : /^$/;
+    } else if (selfName) {
+      accessMatch.assignedToLabel = new RegExp(`^${escapeRegex(selfName)}$`, "i");
+    } else {
+      accessMatch.assignedToLabel = /^$/;
+    }
+  }
+
+  if (assignedNormalized && assignedNormalized !== "all") {
+    accessMatch.assignedToLabel = new RegExp(`^${escapeRegex(assignedNormalized)}$`, "i");
+  }
+
+  if (Object.keys(accessMatch).length) {
+    stages.push({ $match: accessMatch });
+  }
+
+  return stages;
+}
+
+function buildConversationSearchStages(search = "") {
+  const raw = String(search || "").trim();
+  if (!raw) return [];
+
+  const q = raw.toLowerCase();
+  const typedDigits = digitsOnly(raw);
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const tokenMatchers = tokens.map((token) => ({
+    $or: [
+      { displayName: { $regex: escapeRegex(token), $options: "i" } },
+      { assignedToLabel: { $regex: escapeRegex(token), $options: "i" } },
+      { lastMessageText: { $regex: escapeRegex(token), $options: "i" } },
+      { phone: { $regex: escapeRegex(token), $options: "i" } },
+    ],
+  }));
+
+  if (typedDigits) {
+    tokenMatchers.push({
+      $or: [
+        { phone: { $regex: escapeRegex(typedDigits), $options: "i" } },
+        { phone10: { $regex: escapeRegex(last10(typedDigits)), $options: "i" } },
+      ],
+    });
+  }
+
+  return tokenMatchers.length ? [{ $match: { $and: tokenMatchers } }] : [];
+}
+
+function buildConversationTabStages(tab = "", favoritePhones = []) {
+  const normalizedTab = String(tab || "").trim().toLowerCase();
+  if (normalizedTab === "unread") {
+    return [{ $match: { unreadCount: { $gt: 0 } } }];
+  }
+  if (normalizedTab === "favourite") {
+    const list = Array.isArray(favoritePhones) ? favoritePhones.filter(Boolean) : [];
+    if (!list.length) {
+      return [{ $match: { _id: null } }];
+    }
+    return [{ $match: { phone10: { $in: list } } }];
+  }
+  return [];
+}
+
+function buildConversationCursorStages(cursorInfo) {
+  if (!cursorInfo?.ts || !cursorInfo?.id) return [];
+  return [{
+    $match: {
+      $or: [
+        { lastMessageAt: { $lt: cursorInfo.ts } },
+        {
+          lastMessageAt: cursorInfo.ts,
+          _id: { $lt: new mongoose.Types.ObjectId(cursorInfo.id) },
+        },
+      ],
+    },
+  }];
 }
 
 function safeStr(v = "") {
@@ -2051,191 +2509,127 @@ router.post("/conversations/mark-read", async (req, res) => {
 
 router.get("/conversations", async (req, res) => {
   try {
-    const { role, userName, userId, hasTeam, chatScope } = req.query;
+    const {
+      role,
+      userName,
+      userId,
+      hasTeam,
+      chatScope,
+      paginated,
+      cursor,
+      search,
+      tab,
+      assignedTo,
+      phone,
+      includeCounts,
+      includeAgentOptions,
+    } = req.query;
+    const accessContext = await resolveConversationAccessContext({
+      role,
+      userName,
+      userId,
+      hasTeam,
+      chatScope,
+    });
+    const wantsPaginated = String(paginated || "").trim().toLowerCase() === "true";
+    const wantsCounts = String(includeCounts || "").trim().toLowerCase() === "true";
+    const wantsAgentOptions = String(includeAgentOptions || "").trim().toLowerCase() === "true";
+    const favoritePhones = parseFavoritePhones(req.query.favoritePhones);
+    const basePipeline = buildConversationBasePipeline({ phone });
+    const accessStages = buildConversationAccessMatchStages(accessContext, assignedTo);
 
-    const conversations = await WhatsAppConversation.find({})
-      .sort({ lastMessageAt: -1 })
-      .lean();
+    if (wantsPaginated) {
+      const limit = Math.min(
+        parsePositiveInt(req.query.limit, 50),
+        MAX_CONVERSATION_PAGE_SIZE
+      );
+      const cursorInfo = decodeConversationCursor(cursor);
+      const itemPipeline = [
+        ...basePipeline,
+        ...accessStages,
+        ...buildConversationTabStages(tab, favoritePhones),
+        ...buildConversationSearchStages(search),
+        ...buildConversationCursorStages(cursorInfo),
+        { $sort: { lastMessageAt: -1, _id: -1 } },
+        { $limit: limit + 1 },
+      ];
 
-    if (!conversations.length) return res.json([]);
+      const [itemDocs, countsDocs, agentOptionDocs] = await Promise.all([
+        WhatsAppConversation.aggregate(itemPipeline),
+        wantsCounts
+          ? WhatsAppConversation.aggregate([
+            ...basePipeline,
+            ...accessStages,
+            {
+              $group: {
+                _id: null,
+                all: { $sum: 1 },
+                unread: {
+                  $sum: {
+                    $cond: [{ $gt: ["$unreadCount", 0] }, 1, 0],
+                  },
+                },
+                favourite: {
+                  $sum: {
+                    $cond: [{ $in: ["$phone10", favoritePhones] }, 1, 0],
+                  },
+                },
+              },
+            },
+          ])
+          : Promise.resolve([]),
+        wantsAgentOptions
+          ? WhatsAppConversation.aggregate([
+            ...basePipeline,
+            ...accessStages,
+            {
+              $match: {
+                assignedToLabel: {
+                  $nin: [null, "", "Unassigned"],
+                },
+              },
+            },
+            { $group: { _id: "$assignedToLabel" } },
+            { $sort: { _id: 1 } },
+          ])
+          : Promise.resolve([]),
+      ]);
 
-    const phones10 = conversations.map((c) => last10(c.phone));
+      const hasMore = itemDocs.length > limit;
+      const items = hasMore ? itemDocs.slice(0, limit) : itemDocs;
+      const nextCursor = hasMore ? encodeConversationCursor(items[items.length - 1]) : "";
+      const counts = countsDocs?.[0]
+        ? {
+          all: Number(countsDocs[0].all || 0),
+          unread: Number(countsDocs[0].unread || 0),
+          favourite: Number(countsDocs[0].favourite || 0),
+        }
+        : undefined;
+      const agentOptions = Array.isArray(agentOptionDocs)
+        ? agentOptionDocs
+          .map((row) => String(row?._id || "").trim())
+          .filter(Boolean)
+        : undefined;
 
-    const [leads, customers] = await Promise.all([
-      Lead.find({ contactNumber: { $in: phones10 } })
-        .select("contactNumber name healthExpertAssigned agentAssigned")
-        .lean(),
-      Customer.find({ phone: { $in: phones10 } })
-        .select("phone name assignedTo")
-        .lean(),
+      return res.json({
+        items,
+        hasMore,
+        nextCursor,
+        ...(counts ? { counts } : {}),
+        ...(agentOptions ? { agentOptions } : {}),
+      });
+    }
+
+    const conversations = await WhatsAppConversation.aggregate([
+      ...basePipeline,
+      ...accessStages,
+      ...buildConversationTabStages(tab, favoritePhones),
+      ...buildConversationSearchStages(search),
+      { $sort: { lastMessageAt: -1, _id: -1 } },
     ]);
 
-    const leadMap = {};
-    leads.forEach((l) => {
-      leadMap[last10(l.contactNumber)] = l;
-    });
-
-    const customerMap = {};
-    customers.forEach((c) => {
-      customerMap[last10(c.phone)] = c;
-    });
-
-    let enriched = conversations.map((conv) => {
-      const p10 = last10(conv.phone);
-      const lead = leadMap[p10];
-      const customer = customerMap[p10];
-
-      let displayName = p10;
-      let assignedToLabel = "Unassigned";
-
-      if (lead) {
-        displayName = lead.name || p10;
-        assignedToLabel =
-          lead.healthExpertAssigned || lead.agentAssigned || "Unassigned";
-      } else if (customer) {
-        displayName = customer.name || p10;
-        assignedToLabel = customer.assignedTo || "Unassigned";
-      }
-
-      return { ...conv, displayName, assignedToLabel };
-    });
-
-    const r = String(role || "");
-    const normalizedRole = String(role || "").trim().toLowerCase();
-    const normalizedUserName = String(userName || "").trim().toLowerCase();
-    const scope = String(chatScope || "").trim().toLowerCase();
-    const isAdmin =
-      ["Manager", "Developer", "Super Admin", "Admin"].includes(r) ||
-      r.toLowerCase().includes("admin") ||
-      r.toLowerCase().includes("manager");
-
-    const isAssistantTeamLeadLike =
-      (normalizedRole === "assistant team lead" ||
-        normalizedRole === "retention agent");
-    const isTeamLeaderLike =
-      (normalizedRole === "team leader" || normalizedRole === "team-leader");
-    const userHasTeam =
-      String(hasTeam || "").trim().toLowerCase() === "true" ||
-      isAssistantTeamLeadLike ||
-      isTeamLeaderLike;
-
-    if (userHasTeam && (normalizedUserName || String(userId || "").trim())) {
-      let employee = null;
-      const rawUserId = String(userId || "").trim();
-
-      if (mongoose.Types.ObjectId.isValid(rawUserId)) {
-        employee = await Employee.findById(rawUserId)
-          .select("_id fullName teamMembers")
-          .lean();
-      }
-
-      if (!employee && normalizedUserName) {
-        employee = await Employee.findOne({
-          fullName: {
-            $regex: new RegExp(
-              `^${String(userName).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
-              "i"
-            ),
-          },
-        })
-          .select("_id fullName teamMembers")
-          .lean();
-      }
-
-      if (employee?._id) {
-        const employeeNameNormalized = String(employee?.fullName || "")
-          .trim()
-          .toLowerCase();
-        let directReports = await Employee.find({
-          teamLeader: employee._id,
-          status: "active",
-        })
-          .select("fullName")
-          .lean();
-
-        if (!directReports.length) {
-          directReports = await Employee.find({
-            teamLeader: employee._id,
-          })
-            .select("fullName")
-            .lean();
-        }
-
-        if (!directReports.length && Array.isArray(employee?.teamMembers) && employee.teamMembers.length) {
-          directReports = await Employee.find({
-            _id: { $in: employee.teamMembers },
-            status: "active",
-          })
-            .select("fullName")
-            .lean();
-
-          if (!directReports.length) {
-            directReports = await Employee.find({
-              _id: { $in: employee.teamMembers },
-            })
-              .select("fullName")
-              .lean();
-          }
-        }
-
-        const teamNames = new Set(
-          (directReports || [])
-            .map((emp) => String(emp?.fullName || "").trim().toLowerCase())
-            .filter(Boolean)
-        );
-
-        const filterByNames = (allowedNames) =>
-          enriched.filter((chat) =>
-            allowedNames.has(String(chat.assignedToLabel || "").trim().toLowerCase())
-          );
-
-        if (scope === "team" || (isTeamLeaderLike && !scope)) {
-          if (teamNames.size > 0) {
-            enriched = filterByNames(teamNames);
-            return res.json(enriched);
-          }
-          // Team leader fallback: if no resolvable team members, at least return self chats.
-          const fallbackSelf = employeeNameNormalized || normalizedUserName;
-          if (fallbackSelf) {
-            enriched = enriched.filter(
-              (chat) =>
-                String(chat.assignedToLabel || "").trim().toLowerCase() ===
-                fallbackSelf
-            );
-          }
-          return res.json(enriched);
-        }
-
-        if (scope === "self") {
-          enriched = enriched.filter(
-            (chat) =>
-              String(chat.assignedToLabel || "").trim().toLowerCase() ===
-              (employeeNameNormalized || normalizedUserName)
-          );
-          return res.json(enriched);
-        }
-
-        if (
-          scope === "combined" ||
-          (!scope && isAssistantTeamLeadLike)
-        ) {
-          const combined = new Set(teamNames);
-          combined.add(employeeNameNormalized || normalizedUserName);
-          enriched = filterByNames(combined);
-          return res.json(enriched);
-        }
-      }
-    }
-
-    if (!isAdmin) {
-      enriched = enriched.filter(
-        (chat) =>
-          String(chat.assignedToLabel || "").trim().toLowerCase() ===
-          normalizedUserName
-      );
-    }
-
-    return res.json(enriched);
+    if (!conversations.length) return res.json([]);
+    return res.json(conversations);
   } catch (e) {
     console.error("Conversation load error:", e);
     return res.status(500).json({ message: "Failed to load conversations" });
