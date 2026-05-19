@@ -519,9 +519,6 @@ router.get("/refresh/:orderId", async (req, res) => {
  }
 });
 
-
-
-
 if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
  global.__SHOPIFY_SYNC_NEW_CRON__ = true;
  cron.schedule(
@@ -535,8 +532,6 @@ if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
        }
        console.log("[Cron] Running nightly Shopify new-orders sync (created_at) @ 23:00 IST");
 
-
-       // compute created watermark exactly like /sync-new
        const latest = await ShopifyOrder.findOne({}, { shopifyCreatedAt: 1 })
          .sort({ shopifyCreatedAt: -1 })
          .lean();
@@ -546,13 +541,11 @@ if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
        baseDate.setMinutes(baseDate.getMinutes() - 2);
        const sinceISO = baseDate.toISOString();
 
-
        const base = shopifyBase(process.env.SHOPIFY_STORE_NAME);
        const limit = 250;
        let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
          sinceISO
        )}`;
-
 
        const stats = await pageAndUpsertAll(url, authHeaders());
        console.log("[Cron] Shopify new-orders sync done:", { sinceCreated: sinceISO, ...stats });
@@ -564,28 +557,22 @@ if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
  );
 }
 
-
-
-
 async function pageAndUpsertUnfulfilledFromCutoff(url, headers, cutoffDateUtc) {
  let fetched = 0,
    considered = 0,
    created = 0,
    updated = 0;
 
-
  while (url) {
    const resp = await fetchPageWithRetry(url, headers);
    const orders = resp.data?.orders || [];
    fetched += orders.length;
-
 
    for (const raw of orders) {
      const createdAt = raw.created_at ? new Date(raw.created_at) : null;
      const isAfterCutoff = createdAt && createdAt >= cutoffDateUtc;
      const isUnfulfilled =
        (raw.fulfillment_status || "").toString().toLowerCase() === "unfulfilled";
-
 
      if (isAfterCutoff && isUnfulfilled) {
        considered++;
@@ -600,17 +587,12 @@ async function pageAndUpsertUnfulfilledFromCutoff(url, headers, cutoffDateUtc) {
      }
    }
 
-
    const links = parseLinkHeader(resp.headers.link);
    url = links.next || null;
  }
 
-
  return { fetched, considered, created, updated };
 }
-
-
-
 
 router.get("/sync-unfulfilled-from-cutoff", async (req, res) => {
  try {
@@ -619,19 +601,15 @@ router.get("/sync-unfulfilled-from-cutoff", async (req, res) => {
      return res.status(400).json({ error: "Missing Shopify env vars" });
    }
 
-
    const cutoffIsoUtc = "2025-09-29T18:30:00.000Z";
    const cutoffDateUtc = new Date(cutoffIsoUtc);
-
 
    const base = shopifyBase(SHOPIFY_STORE_NAME);
    const limit = 250;
 
-
    let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
      cutoffIsoUtc
    )}`;
-
 
    const stats = await pageAndUpsertUnfulfilledFromCutoff(url, authHeaders(), cutoffDateUtc);
    res.json({ ok: true, mode: "unfulfilled-from-cutoff", cutoffIsoUtc, ...stats });
@@ -648,7 +626,6 @@ router.get("/sync-unfulfilled-from-cutoff", async (req, res) => {
 if (!global.__SHOPIFY_SYNC_UNFULFILLED_CRON__) {
  global.__SHOPIFY_SYNC_UNFULFILLED_CRON__ = true;
 
-
  cron.schedule(
    "0 11,14,16 * * *",
    async () => {
@@ -661,21 +638,17 @@ if (!global.__SHOPIFY_SYNC_UNFULFILLED_CRON__) {
        const cutoffIsoUtc = "2025-09-29T18:30:00.000Z";
        const cutoffDateUtc = new Date(cutoffIsoUtc);
 
-
        console.log(
          "[Cron-Unfulfilled] Syncing unfulfilled orders from cutoff at 11/14/16 IST",
          { cutoffIsoUtc }
        );
 
-
        const base = shopifyBase(SHOPIFY_STORE_NAME);
        const limit = 250;
-
 
        let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
          cutoffIsoUtc
        )}`;
-
 
        const stats = await pageAndUpsertUnfulfilledFromCutoff(url, authHeaders(), cutoffDateUtc);
        console.log("[Cron-Unfulfilled] Done:", { cutoffIsoUtc, ...stats });
@@ -690,5 +663,3 @@ if (!global.__SHOPIFY_SYNC_UNFULFILLED_CRON__) {
 router.syncNewCreatedOrders = syncNewCreatedOrders;
 
 module.exports = router;
-
-
