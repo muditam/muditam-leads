@@ -12,6 +12,19 @@ const Employee = require("../models/Employee");
 const shopifyOrdersRouter = require("./ShopifyOrderDB");
 
 const requireSession = require("../middleware/requireSession");
+const DYNO = String(process.env.DYNO || "").trim();
+const SINGLETON_DYNO = String(process.env.SINGLETON_DYNO || "web.1").trim();
+
+function shouldRunOcCron() {
+  if (String(process.env.RUN_SINGLETON_JOBS || "").toLowerCase() === "true") {
+    return true;
+  }
+  if (String(process.env.RUN_OC_CRON || "").toLowerCase() === "true") {
+    return true;
+  }
+  if (!DYNO) return true;
+  return DYNO === SINGLETON_DYNO;
+}
 
 // Keep these in sync with the schema enum
 const CallStatusEnum = {
@@ -1411,27 +1424,37 @@ router.post("/cancel", requireSession, async (req, res) => {
 
 let __ocBusy = false;
 
-cron.schedule("*/59 * * * *", async () => {
-  if (__ocBusy) return;
-  __ocBusy = true;
-  const started = Date.now();
-
-  try {
-    const rr = await assignRoundRobin({});
-    console.log(
-      `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${rr.agents || 0
-      })`
-    );
-
-    const syncStats = await shopifyOrdersRouter.syncNewCreatedOrders({});
-    console.log("[OC CRON] sync-new", syncStats);
-
-    console.log(`[OC CRON] done in ${(Date.now() - started) / 1000}s`);
-  } catch (e) {
-    console.error("[OC CRON] error:", e?.response?.data || e.message || e);
-  } finally {
-    __ocBusy = false;
+if (shouldRunOcCron()) {
+  if (DYNO) {
+    console.log(`[OC CRON] enabled on dyno=${DYNO}`);
   }
-});
+
+  cron.schedule("*/59 * * * *", async () => {
+    if (__ocBusy) return;
+    __ocBusy = true;
+    const started = Date.now();
+
+    try {
+      const rr = await assignRoundRobin({});
+      console.log(
+        `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${rr.agents || 0
+        })`
+      );
+
+      const syncStats = await shopifyOrdersRouter.syncNewCreatedOrders({});
+      console.log("[OC CRON] sync-new", syncStats);
+
+      console.log(`[OC CRON] done in ${(Date.now() - started) / 1000}s`);
+    } catch (e) {
+      console.error("[OC CRON] error:", e?.response?.data || e.message || e);
+    } finally {
+      __ocBusy = false;
+    }
+  });
+} else {
+  if (DYNO) {
+    console.log(`[OC CRON] skipped on dyno=${DYNO}; owner=${SINGLETON_DYNO}`);
+  }
+}
 
 module.exports = router;

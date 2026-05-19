@@ -2,27 +2,62 @@ const axios = require("axios");
 const ZoomCallLog = require("../models/ZoomCallLog");
 const { getValidAccessTokenForUser } = require("../services/zoomAuthService");
 
-const jobs = [];
 let started = false;
+let polling = false;
+const LEASE_MS = 60 * 1000;
+const MAX_ATTEMPTS = 3;
 
 function enqueue(job) {
-  jobs.push({ ...job, attempts: 0, runAt: Date.now() + (job.delayMs || 30000) });
+  const delayMs = Number(job?.delayMs || 30000);
+  const runAt = new Date(Date.now() + delayMs);
+  return ZoomCallLog.findOneAndUpdate(
+    { callId: job.callId },
+    {
+      $set: {
+        recordingStatus: "pending",
+        transcriptStatus: "pending",
+        recordingNextAttemptAt: runAt,
+        recordingLeaseUntil: null,
+        ...(job.callElementId ? { callElementId: String(job.callElementId) } : {}),
+      },
+      $setOnInsert: {
+        callId: job.callId,
+        recordingAttempts: 0,
+      },
+    },
+    { upsert: true }
+  );
 }
 
-async function processOne(job) {
-  const call = await ZoomCallLog.findOne({ callId: job.callId });
-  if (!call || !call.agentId) return;
-
-  call.recordingStatus = "downloading";
-  await call.save();
+async function processOne(call) {
+  if (!call || !call.agentId) {
+    await ZoomCallLog.updateOne(
+      { callId: call?.callId },
+      {
+        $set: {
+          recordingStatus: "failed",
+          transcriptStatus: "failed",
+          recordingLeaseUntil: null,
+        },
+      }
+    );
+    return;
+  }
 
   // v3 hard-cutover: fetch call element details and read recording metadata from element payload.
   const accessToken = await getValidAccessTokenForUser(call.agentId);
-  const callElementId = String(job.callElementId || call.callElementId || "");
+  const callElementId = String(call.callElementId || "");
   if (!callElementId) {
-    call.recordingStatus = "failed";
-    call.transcriptStatus = "failed";
-    await call.save();
+    await ZoomCallLog.updateOne(
+      { callId: call.callId },
+      {
+        $set: {
+          recordingStatus: "failed",
+          transcriptStatus: "failed",
+          recordingLeaseUntil: null,
+        },
+      }
+    );
     return;
   }
 
@@ -34,38 +69,113 @@ async function processOne(job) {
   });
 
   const recording = resp.data?.recording || {};
-  call.recordingId = call.recordingId || recording.recording_id || recording.id || "";
-  call.recordingUrl = recording.download_url || recording.recording_download_url || call.recordingUrl || "";
-  call.recordingStatus = call.recordingUrl ? "completed" : "failed";
-  call.transcriptStatus = call.recordingUrl ? "pending" : call.transcriptStatus;
-  call.callHistoryUuid = call.callHistoryUuid || String(resp.data?.call_history_uuid || "");
-  call.callElementId = call.callElementId || callElementId;
-  await call.save();
+  const recordingUrl =
+    recording.download_url || recording.recording_download_url || call.recordingUrl || "";
+
+  await ZoomCallLog.updateOne(
+    { callId: call.callId },
+    {
+      $set: {
+        recordingId: call.recordingId || recording.recording_id || recording.id || "",
+        recordingUrl,
+        recordingStatus: recordingUrl ? "completed" : "failed",
+        transcriptStatus: recordingUrl ? "pending" : call.transcriptStatus,
+        callHistoryUuid: call.callHistoryUuid || String(resp.data?.call_history_uuid || ""),
+        callElementId: call.callElementId || callElementId,
+        recordingLeaseUntil: null,
+        recordingNextAttemptAt: null,
+      },
+    }
+  );
+}
+
+async function claimOne() {
+  const now = new Date();
+  const leaseUntil = new Date(now.getTime() + LEASE_MS);
+
+  return ZoomCallLog.findOneAndUpdate(
+    {
+      recordingStatus: "pending",
+      $and: [
+        {
+          $or: [
+            { recordingNextAttemptAt: null },
+            { recordingNextAttemptAt: { $exists: false } },
+            { recordingNextAttemptAt: { $lte: now } },
+          ],
+        },
+        {
+          $or: [
+            { recordingLeaseUntil: null },
+            { recordingLeaseUntil: { $exists: false } },
+            { recordingLeaseUntil: { $lt: now } },
+          ],
+        },
+      ],
+    },
+    {
+      $set: {
+        recordingStatus: "downloading",
+        recordingLeaseUntil: leaseUntil,
+      },
+      $inc: {
+        recordingAttempts: 1,
+      },
+    },
+    {
+      sort: { recordingNextAttemptAt: 1, updatedAt: 1 },
+      new: true,
+    }
+  ).lean();
+}
+
+async function processTick() {
+  if (polling) return;
+  polling = true;
+
+  try {
+    const call = await claimOne();
+    if (!call) return;
+
+    try {
+      await processOne(call);
+    } catch (err) {
+      const attempts = Number(call.recordingAttempts || 0);
+      if (attempts < MAX_ATTEMPTS) {
+        await ZoomCallLog.updateOne(
+          { callId: call.callId },
+          {
+            $set: {
+              recordingStatus: "pending",
+              recordingLeaseUntil: null,
+              recordingNextAttemptAt: new Date(Date.now() + 30000 * attempts),
+            },
+          }
+        );
+      } else {
+        await ZoomCallLog.updateOne(
+          { callId: call.callId },
+          {
+            $set: {
+              recordingStatus: "failed",
+              transcriptStatus: "failed",
+              recordingLeaseUntil: null,
+              recordingNextAttemptAt: null,
+            },
+          }
+        );
+      }
+    }
+  } finally {
+    polling = false;
+  }
 }
 
 function start() {
   if (started) return;
   started = true;
-  setInterval(async () => {
-    if (!jobs.length) return;
-    const now = Date.now();
-    const idx = jobs.findIndex((j) => j.runAt <= now);
-    if (idx === -1) return;
-
-    const job = jobs.splice(idx, 1)[0];
-    try {
-      await processOne(job);
-    } catch (err) {
-      const attempts = (job.attempts || 0) + 1;
-      if (attempts < 3) {
-        jobs.push({ ...job, attempts, runAt: Date.now() + 30000 * attempts });
-      } else {
-        await ZoomCallLog.findOneAndUpdate(
-          { callId: job.callId },
-          { recordingStatus: "failed", transcriptStatus: "failed" }
-        );
-      }
-    }
+  setInterval(() => {
+    processTick().catch(() => {});
   }, 3000);
 }
 

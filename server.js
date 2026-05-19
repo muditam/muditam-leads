@@ -928,7 +928,6 @@ app.get('/api/orders', async (req, res) => {
   }
 });
 
-
 const statusMapping = {
   "DEL": "Delivered",
   "INT": "In Transit",
@@ -1056,7 +1055,6 @@ const syncOrdersForDateRange = async (startDate, endDate) => {
   return totalFetched;
 };
 
-
 const phoneLast10 = (v = "") => String(v).replace(/\D/g, "").slice(-10);
 
 
@@ -1128,7 +1126,6 @@ app.post('/api/shipway/neworder', async (req, res) => {
     }
     const status = statusMapping[shipment_status] || shipment_status;
     const date = order_date ? new Date(order_date) : null;
-    // Normalize order_id before updating
     const normalizedOrderId = order_id.replace(/^#/, '');
     await Order.updateOne(
       { order_id: normalizedOrderId },
@@ -1140,7 +1137,6 @@ app.post('/api/shipway/neworder', async (req, res) => {
     res.status(500).json({ message: "Error saving new order", error: error.message });
   }
 });
-
 
 app.get('/api/orders/by-shipment-status', async (req, res) => {
   try {
@@ -1168,36 +1164,6 @@ app.get('/api/orders/by-shipment-status', async (req, res) => {
   } catch (error) {
     console.error("Error fetching orders by shipment status:", error);
     res.status(500).json({ message: 'Failed to fetch orders', error: error.message });
-  }
-});
-
-
-cron.schedule('0 8 * * *', async () => {
-  try {
-    const orders = await Order.find({});
-    for (const order of orders) {
-      try {
-        if (!order.order_date) continue;
-
-        if (order.shipment_status === "Delivered" || order.shipment_status === "RTO Delivered") {
-          console.log(`Skipping cron update for order ${order.order_id} with final status: ${order.shipment_status}`);
-          continue;
-        }
-        const page = 1;
-        const dateStr = order.order_date.toISOString().split("T")[0];
-        const ordersFromShipway = await fetchOrdersFromShipway(page, dateStr, dateStr);
-        // Find matching order using normalized order_id
-        const updatedOrder = ordersFromShipway.find(o => o.order_id.replace(/^#/, '') === order.order_id);
-        if (updatedOrder) {
-          const shipmentStatus = statusMapping[updatedOrder.shipment_status] || updatedOrder.shipment_status;
-          await Order.updateOne({ order_id: order.order_id }, { shipment_status: shipmentStatus });
-        }
-      } catch (err) {
-        console.error(`Error updating order ${order.order_id}:`, err);
-      }
-    }
-  } catch (error) {
-    console.error("Cron job error:", error);
   }
 });
 

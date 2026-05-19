@@ -21,6 +21,9 @@ const zoomCallLogSchema = new mongoose.Schema(
     recordingId: { type: String, default: "" },
     recordingStatus: { type: String, enum: ["none", "pending", "downloading", "completed", "failed"], default: "none" },
     recordingUrl: { type: String, default: "" },
+    recordingAttempts: { type: Number, default: 0 },
+    recordingNextAttemptAt: { type: Date, default: null, index: true },
+    recordingLeaseUntil: { type: Date, default: null, index: true },
 
     transcriptId: { type: String, default: "" },
     transcriptStatus: { type: String, enum: ["none", "pending", "completed", "failed"], default: "none" },

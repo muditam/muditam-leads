@@ -386,14 +386,14 @@ router.get("/sync-range", async (req, res) => {
 
 
 /**
-* POST /api/orders-shopify/sync-fulfillment-last-90-days
-* Refreshes fulfillment_status for ShopifyOrder docs updated in the last 90 days.
+* POST /api/orders-shopify/sync-fulfillment-last-5-days
+* Refreshes fulfillment_status for ShopifyOrder docs updated in the last 5 days.
 * This endpoint updates only fulfillment_status (+ shopifyUpdatedAt), nothing else.
 * Optional body/query:
-*   - days (number, default 90)
+*   - days (number, default 5)
 *   - limit (number, default 250, max 250)
 */
-router.post("/sync-fulfillment-last-90-days", async (req, res) => {
+router.post("/sync-fulfillment-last-5-days", async (req, res) => {
  try {
    const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
    if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
@@ -403,7 +403,7 @@ router.post("/sync-fulfillment-last-90-days", async (req, res) => {
 
    const daysInput = req.body?.days ?? req.query.days;
    const daysNum = Number.parseInt(daysInput, 10);
-   const days = Number.isFinite(daysNum) && daysNum > 0 ? daysNum : 90;
+   const days = Number.isFinite(daysNum) && daysNum > 0 ? daysNum : 5;
 
 
    const limitInput = req.body?.limit ?? req.query.limit;
@@ -425,15 +425,15 @@ router.post("/sync-fulfillment-last-90-days", async (req, res) => {
    const stats = await pageAndUpdateFulfillmentOnly(url, authHeaders());
    return res.json({
      ok: true,
-     mode: "sync-fulfillment-status-only-last-90-days",
+     mode: "sync-fulfillment-status-only-last-5-days",
      days,
      updatedAtMin: fromISO,
      ...stats,
    });
  } catch (err) {
-   console.error("sync-fulfillment-last-90-days error:", err?.response?.data || err);
+   console.error("sync-fulfillment-last-5-days error:", err?.response?.data || err);
    return res.status(500).json({
-     error: "Failed to sync fulfillment status for last 90 days",
+     error: "Failed to sync fulfillment status for last 5 days",
      details: err?.message || err,
    });
  }
