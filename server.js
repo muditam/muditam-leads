@@ -21,13 +21,11 @@ const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const compression = require('compression');
 const requireSession = require("./middleware/requireSession");
-const TransferRequest = require('./models/TransferRequests');
 const shopifyProductsRoute = require("./services/shopifyProducts");
 const shopifyOrdersRoute = require("./services/shopifyOrders");
 const ShopifyPush = require("./services/ShopifyPush");
 const razorpayRoutes = require("./services/razorpay");
 const shopifyRoutes = require("./routes/shopifyRoutes");
-const templateRoutes = require("./routes/templates");
 const exportLeadsRouter = require('./routes/exportLeads');
 const retentionSalesRoutes = require('./routes/retentionSalesRoutes');
 const activeCountsRoute = require("./routes/activeCountsRoute");
@@ -60,7 +58,6 @@ const mergedSalesRoutes = require("./routes/mergedSales");
 const employeeRoutes = require("./routes/employees");
 const shipwayRoutes = require('./routes/shipwayRoutes');
 const reachoutRoutes = require('./routes/reachoutLogs');
-const leadTransfer = require('./routes/leadTransferRoutes');
 const searchRoutes = require('./routes/searchRoutes');
 const Addemployee = require('./routes/Addemployee');
 const authRoutes = require('./routes/loginRoutes');
@@ -113,7 +110,6 @@ const shopifyOrdersTable = require("./routes/shopifyOrdersTable");
 
 const leadsMigration = require('./routes/leadMigration');
 const orderConfirmationsRouter = require("./routes/orderConfirmations");
-const scheduleCallsRouter = require("./routes/scheduleCalls");
 const opsDashboardRoutes = require("./routes/opsDashboard");
 const orderConfirmAnalytics = require("./routes/orderConfirmAnalytics");
 const assetsRoutes = require("./routes/add-assets");
@@ -567,7 +563,6 @@ app.post(
 app.use("/api/zoom/webhooks", zoomWebhookRoutes);
 app.use(express.json());
 
-app.use("/api/templates", templateRoutes);
 app.use("/api/shopify", shopifyProductsRoute);
 app.use("/api/shopify", shopifyOrdersRoute);
 app.use("/api/shopify", ShopifyPush);
@@ -630,7 +625,6 @@ app.use('/api/shipway', shipwayRoutes);
 
 app.use('/api/reachout-logs', reachoutRoutes);
 
-app.use('/api/leads', leadTransfer);
 
 app.use('/api/search', searchRoutes);
 
@@ -739,7 +733,6 @@ app.use("/api", shopifyOrdersTable);
 
 app.use('/api/lead-migration', leadsMigration);
 app.use("/api/order-confirmations", orderConfirmationsRouter);
-app.use("/api/schedule-calls", scheduleCallsRouter);
 
 app.use("/api/ops-dashboard", opsDashboardRoutes);
 app.use("/api/order-analytics", orderConfirmAnalytics);
@@ -1445,8 +1438,8 @@ app.get('/api/leads', requireSession, async (req, res) => {
   try {
     const filterCriteria = typeof filters === "string" ? JSON.parse(filters) : filters;
     const pageNumber = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
-    const defaultLimit = req.query.view === "master-leads" ? 10 : 30;
-    const maxLimit = req.query.view === "master-leads" ? 20 : 50;
+    const defaultLimit = req.query.view === "master-leads" ? 30 : 30;
+    const maxLimit = req.query.view === "master-leads" ? 100 : 50;
     const limitNumber = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || defaultLimit, 1), maxLimit);
     const asArray = (value) => {
       if (Array.isArray(value)) return value.filter(Boolean);
@@ -2378,7 +2371,11 @@ app.get('/api/retention-orders', async (req, res) => {
   }
 });
 
-app.get('/api/leads/:id', async (req, res) => {
+app.get('/api/leads/:id', async (req, res, next) => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return next();
+  }
+
   try {
     const lead = await Lead.findById(req.params.id);
     if (!lead) {
@@ -2408,6 +2405,10 @@ app.get('/api/consultation-history', async (req, res) => {
 });
 
 app.post('/api/leads/:id/first-call-connected', async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(400).json({ message: "Invalid lead id" });
+  }
+
   try {
     const { id } = req.params;
  

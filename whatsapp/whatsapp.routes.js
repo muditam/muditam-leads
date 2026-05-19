@@ -255,6 +255,10 @@ async function resolveConversationAccessContext({ role, userName, userId, hasTea
     selfName: normalizedUserName,
   };
 
+  if (isAdmin) {
+    return context;
+  }
+
   if (!userHasTeam || (!normalizedUserName && !String(userId || "").trim())) {
     return context;
   }
