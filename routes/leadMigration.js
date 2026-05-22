@@ -31,7 +31,7 @@ router.get('/experts', async (req, res) => {
 router.get('/experts/:expert/leads', async (req, res) => {
   try {
     const { expert } = req.params;
-    const { q = '', limit, onlyActive } = req.query;
+    const { q = '', limit, onlyActive, status } = req.query;
     const label = cleanLabel(expert);
     const rx = new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, 'i');
 
@@ -42,8 +42,15 @@ router.get('/experts/:expert/leads', async (req, res) => {
       find.$or = [{ name: qrx }, { contactNumber: qrx }];
     }
 
-    // ⬇️ Active OR unset (null/empty/missing)
-    if (String(onlyActive) === '1' || String(onlyActive).toLowerCase() === 'true') {
+    const normalizedStatus = String(status || '').trim().toLowerCase();
+    const shouldFilterActive =
+      normalizedStatus === 'active' ||
+      String(onlyActive) === '1' ||
+      String(onlyActive).toLowerCase() === 'true';
+    const shouldFilterLost = normalizedStatus === 'lost';
+
+    // Active OR unset (null/empty/missing)
+    if (shouldFilterActive) {
       // If a search "q" was set above, it created find.$or; so we must AND this status filter.
       // Move the prior OR into an $and with the status conditions.
       const prevOr = find.$or;
@@ -58,6 +65,24 @@ router.get('/experts/:expert/leads', async (req, res) => {
 
       if (prevOr) {
         // both search OR and status OR should be true → use $and
+        Object.assign(find, {
+          $and: [
+            { $or: prevOr },
+            { $or: statusOr }
+          ]
+        });
+      } else {
+        Object.assign(find, { $or: statusOr });
+      }
+    }
+
+    if (shouldFilterLost) {
+      const prevOr = find.$or;
+      delete find.$or;
+
+      const statusOr = [{ retentionStatus: { $regex: /^\s*lost\s*$/i } }];
+
+      if (prevOr) {
         Object.assign(find, {
           $and: [
             { $or: prevOr },
