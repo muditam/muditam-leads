@@ -607,6 +607,38 @@ router.put("/api/employees/:id", async (req, res) => {
    const oldStatus = employee.status;
    const previousLeaderId = employee.teamLeader ? String(employee.teamLeader) : null;
    const updateData = {};
+   const bodyKeys = Object.keys(req.body || {}).filter(
+     (key) => key !== "changedByName"
+   );
+   const isPermissionsOnlyUpdate =
+     bodyKeys.length === 1 && permissions && typeof permissions === "object";
+
+
+   if (isPermissionsOnlyUpdate) {
+     employee.permissions = {
+       menubar: permissions.menubar || {},
+       navbar: permissions.navbar || {},
+     };
+
+
+     if (typeof employee.addAuditLog === "function") {
+       employee.addAuditLog("UPDATE", actorName);
+     }
+
+
+     await employee.save();
+
+
+     const savedEmployee = await Employee.findById(employee._id).select(
+       "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate monthlyDeliveredSales totalDeliveredSales languages permissions auditLogs"
+     );
+
+
+     return res.status(200).json({
+       message: "Employee permissions updated successfully",
+       employee: safeEmployeeResponse(savedEmployee || employee),
+     });
+   }
 
 
    if (fullName !== undefined) {
