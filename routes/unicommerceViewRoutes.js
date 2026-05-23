@@ -44,6 +44,8 @@ const TRANSIT_KEYWORDS = [
 
 const HOLD_KEYWORDS = ["hold"];
 const CANCELED_KEYWORDS = ["cancelled", "canceled", "cancel"];
+const AMBIGUOUS_COMPLETE_STATUSES = new Set(["complete", "completed"]);
+const STATUS_PENDING = "Status Pending";
 
 async function getUniwareToken() {
   const now = Date.now();
@@ -129,6 +131,59 @@ function isHoldText(text) {
 
 function isCanceledText(text) {
   return hasAny(text, CANCELED_KEYWORDS);
+}
+
+function isAmbiguousCompleteStatus(value) {
+  return AMBIGUOUS_COMPLETE_STATUSES.has(normalizeText(value));
+}
+
+function normalizeFallbackStatus(value) {
+  if (!value) return STATUS_PENDING;
+  if (isAmbiguousCompleteStatus(value)) return STATUS_PENDING;
+  return value;
+}
+
+function getOrderItems(saleOrder = {}, saleOrderDetails = null) {
+  const candidates = [
+    saleOrderDetails?.orderItems,
+    saleOrderDetails?.saleOrderItems,
+    saleOrderDetails?.items,
+    saleOrderDetails?.saleOrderItemDTOs,
+    saleOrder?.orderItems,
+    saleOrder?.saleOrderItems,
+    saleOrder?.items,
+    saleOrder?.saleOrderItemDTOs,
+  ];
+
+  return candidates.find((items) => Array.isArray(items)) || [];
+}
+
+function getItemStatusText(item = {}) {
+  return joinText([
+    item?.status,
+    item?.itemStatus,
+    item?.orderItemStatus,
+    item?.statusCode,
+    item?.shippingStatus,
+    item?.fulfillmentStatus,
+    item?.returnStatus,
+    item?.reversePickupStatus,
+    item?.rtoStatus,
+  ]);
+}
+
+function mapSingleItemStatus(item = {}) {
+  const txt = getItemStatusText(item);
+
+  if (!txt) return "";
+  if (txt.includes("courier_return")) {
+    return "RTO";
+  }
+  if (txt.includes("delivered")) return "Delivered";
+  if (txt.includes("dispatched") || txt.includes("dispatch")) return "In Transit";
+  if (isCanceledText(txt)) return "Canceled";
+
+  return "";
 }
 
 function getChannelText(saleOrder = {}) {
@@ -270,7 +325,9 @@ function mapSinglePackageStatus(pkg = {}) {
   if (hasHold) return "On Hold";
   if (hasCanceled) return "Canceled";
 
-  return pkg?.status || pkg?.trackingStatus || pkg?.courierStatus || "";
+  return normalizeFallbackStatus(
+    pkg?.trackingStatus || pkg?.courierStatus || pkg?.status || ""
+  );
 }
 
 /**
@@ -287,6 +344,8 @@ function deriveShipmentStatus({
   const orderText = getOrderLevelStatusText(saleOrder, saleOrderDetails);
   const latestPkg = chooseLatestPackage(packages);
   const latestPkgStatus = latestPkg ? mapSinglePackageStatus(latestPkg) : "";
+  const orderItems = getOrderItems(saleOrder, saleOrderDetails);
+  const itemStatuses = orderItems.map((item) => mapSingleItemStatus(item)).filter(Boolean);
 
   const packageStatuses = Array.isArray(packages)
     ? packages.map((pkg) => mapSinglePackageStatus(pkg)).filter(Boolean)
@@ -294,6 +353,7 @@ function deriveShipmentStatus({
 
   const hasRtoFlow =
     isRtoText(orderText) ||
+    itemStatuses.includes("RTO") ||
     packageStatuses.includes("RTO") ||
     packageStatuses.includes("RTO Delivered");
 
@@ -319,12 +379,16 @@ function deriveShipmentStatus({
   if (packageStatuses.includes("On Hold")) return "On Hold";
   if (packageStatuses.includes("Canceled")) return "Canceled";
 
+  if (itemStatuses.includes("Delivered")) return "Delivered";
+  if (itemStatuses.includes("In Transit")) return "In Transit";
+  if (itemStatuses.includes("Canceled")) return "Canceled";
+
   if (isDeliveredText(orderText)) return "Delivered";
   if (isTransitText(orderText)) return "In Transit";
   if (isHoldText(orderText)) return "On Hold";
   if (isCanceledText(orderText)) return "Canceled";
 
-  return saleOrderDetails?.status || saleOrder?.status || "";
+  return normalizeFallbackStatus(saleOrderDetails?.status || saleOrder?.status || "");
 }
 
 async function searchSaleOrders({
