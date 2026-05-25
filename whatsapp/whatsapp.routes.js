@@ -1486,33 +1486,6 @@ async function fetchMediaBufferWithBestAuth(rawUrl) {
    SOCKET EMITS
 ----------------------------------------- */
 const roomForPhone10 = (p10) => `wa:${String(p10 || "").slice(-10)}`;
-const CONVERSATION_LIST_CACHE_TTL_MS = 5000;
-const conversationListCache = new Map();
-
-function conversationListCacheKey(query = {}) {
-  const keys = Object.keys(query || {}).sort();
-  return keys.map((key) => `${key}:${String(query[key] ?? "")}`).join("|");
-}
-
-function readConversationListCache(query = {}) {
-  const key = conversationListCacheKey(query);
-  const cached = conversationListCache.get(key);
-  if (!cached) return null;
-  if (Date.now() - cached.at > CONVERSATION_LIST_CACHE_TTL_MS) {
-    conversationListCache.delete(key);
-    return null;
-  }
-  return cached.value;
-}
-
-function writeConversationListCache(query = {}, value) {
-  const key = conversationListCacheKey(query);
-  conversationListCache.set(key, { at: Date.now(), value });
-}
-
-function invalidateConversationListCache() {
-  conversationListCache.clear();
-}
 
 const emitToPhone10 = (req, phone10, event, payload) => {
   const io = req?.app?.get("io");
@@ -1566,7 +1539,6 @@ const emitStatus = (req, { phone10, waId, status, providerTransactionId, transac
 const emitConversationPatch = (req, { phone10, patch }) => {
   const p10 = last10(phone10);
   if (!p10) return;
-  invalidateConversationListCache();
   emitToPhone10(req, p10, "wa:conversation", {
     phone10: p10,
     phone: p10,
@@ -2541,13 +2513,6 @@ router.post("/conversations/mark-read", async (req, res) => {
 
 router.get("/conversations", async (req, res) => {
   try {
-    const cacheable = String(req.query.paginated || "").trim().toLowerCase() === "true";
-    if (cacheable) {
-      const cached = readConversationListCache(req.query);
-      if (cached) {
-        return res.json(cached);
-      }
-    }
     const {
       role,
       userName,
@@ -2650,15 +2615,13 @@ router.get("/conversations", async (req, res) => {
           .filter(Boolean)
         : undefined;
 
-      const payload = {
+      return res.json({
         items,
         hasMore,
         nextCursor,
         ...(counts ? { counts } : {}),
         ...(agentOptions ? { agentOptions } : {}),
-      };
-      writeConversationListCache(req.query, payload);
-      return res.json(payload);
+      });
     }
 
     const conversations = await WhatsAppConversation.aggregate([
@@ -2744,8 +2707,7 @@ router.get("/templates", async (req, res) => {
 
 router.post("/send-text", async (req, res) => {
   try {
-    const { to, text, clientTempId: rawClientTempId } = req.body;
-    const clientTempId = String(rawClientTempId || "").trim();
+    const { to, text } = req.body;
     const textValue = String(text || "").trim();
 
     if (!to || !textValue) {
@@ -2809,7 +2771,6 @@ router.post("/send-text", async (req, res) => {
     );
 
     const createdPayload = created.toObject();
-    if (clientTempId) createdPayload.clientTempId = clientTempId;
 
     emitMessage(req, createdPayload);
     emitConversationPatch(req, {
@@ -2882,7 +2843,6 @@ router.post("/send-text", async (req, res) => {
 router.post("/send-media", upload.single("file"), async (req, res) => {
   try {
     const toRaw = req.body?.to || "";
-    const clientTempId = String(req.body?.clientTempId || "").trim();
     const caption = String(req.body?.caption || req.body?.message || "").trim();
     const directMediaUrl = String(req.body?.mediaUrl || "").trim();
     const directFilename = String(req.body?.filename || "").trim();
@@ -3019,7 +2979,6 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     );
 
     const createdPayload = created.toObject();
-    if (clientTempId) createdPayload.clientTempId = clientTempId;
 
     emitMessage(req, createdPayload);
     emitConversationPatch(req, {
@@ -3056,15 +3015,12 @@ router.post("/send-template", async (req, res) => {
   try {
     const {
       to,
-      clientTempId: rawClientTempId = "",
       templateName,
       templateId: requestedTemplateId = "",
       parameters = [],
       renderedText = "",
       headerMedia = null,
     } = req.body;
-    const clientTempId = String(rawClientTempId || "").trim();
-
     if (!to || (!templateName && !requestedTemplateId)) {
       return res
         .status(400)
@@ -3260,7 +3216,6 @@ router.post("/send-template", async (req, res) => {
     );
 
     const createdPayload = created.toObject();
-    if (clientTempId) createdPayload.clientTempId = clientTempId;
 
     emitMessage(req, createdPayload);
     emitConversationPatch(req, {
