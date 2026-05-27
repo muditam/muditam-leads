@@ -626,6 +626,32 @@ function normalizeStatusValue(value) {
  };
 }
 
+function getNormalizedStatusText(value) {
+ const raw =
+   value && typeof value === "object"
+     ? value.value || value.name || value.status || ""
+     : value;
+ return String(raw || "").trim().toLowerCase();
+}
+
+function shouldPreserveConfirmedStatus(existingStatus, incomingStatus) {
+ const existing = getNormalizedStatusText(existingStatus);
+ const incoming = getNormalizedStatusText(incomingStatus);
+ if (!existing.includes("confirm")) return false;
+ return incoming === "order booked" || incoming === "booked";
+}
+
+function mergeBookingStatusWithExisting(nextItem, existingItem) {
+ if (!existingItem) return nextItem;
+ if (!shouldPreserveConfirmedStatus(existingItem.bookingStatus, nextItem.bookingStatus)) {
+   return nextItem;
+ }
+ return {
+   ...nextItem,
+   bookingStatus: existingItem.bookingStatus,
+ };
+}
+
 
 function buildStatusSummary(items, accessor) {
  return items.reduce((acc, item) => {
@@ -1052,9 +1078,15 @@ async function upsertBookingSnapshot(payload, source, extras = {}) {
    patch.lastWebhookAt = extras.lastWebhookAt;
  }
 
+ const existing = await RedcliffeBooking.findOne(
+   { bookingId: patch.bookingId },
+   { bookingStatus: 1 }
+ ).lean();
+ const mergedPatch = mergeBookingStatusWithExisting(patch, existing);
+
  return RedcliffeBooking.findOneAndUpdate(
    { bookingId: patch.bookingId },
-   { $set: patch },
+   { $set: mergedPatch },
    { new: true, upsert: true, setDefaultsOnInsert: true }
  );
 }
@@ -1092,8 +1124,23 @@ async function syncCollectionDateIntoMongo(collectionDate) {
    return { collectionDate: date, fetched: 0, upserted: 0 };
  }
 
+ const bookingIds = normalized.map((item) => String(item.bookingId).trim());
+ const existingRecords = await RedcliffeBooking.find(
+   { bookingId: { $in: bookingIds } },
+   { bookingId: 1, bookingStatus: 1 }
+ ).lean();
+ const existingByBookingId = new Map(
+   existingRecords.map((item) => [String(item.bookingId).trim(), item])
+ );
+ const mergedNormalized = normalized.map((item) =>
+   mergeBookingStatusWithExisting(
+     item,
+     existingByBookingId.get(String(item.bookingId).trim())
+   )
+ );
+
  await RedcliffeBooking.bulkWrite(
-   normalized.map((item) => ({
+   mergedNormalized.map((item) => ({
      updateOne: {
        filter: { bookingId: String(item.bookingId).trim() },
        update: {
@@ -1113,7 +1160,7 @@ async function syncCollectionDateIntoMongo(collectionDate) {
  return {
    collectionDate: date,
    fetched: upstreamRecords.length,
-   upserted: normalized.length,
+   upserted: mergedNormalized.length,
  };
 }
 
@@ -1244,8 +1291,22 @@ async function fetchBookingDetailsDirect({ bookingId, phone, bookingDate, collec
 
    const matched = filtered.length ? filtered : normalized;
    if (matched.length) {
+     const bookingIds = matched.map((item) => String(item.bookingId).trim());
+     const existingRecords = await RedcliffeBooking.find(
+       { bookingId: { $in: bookingIds } },
+       { bookingId: 1, bookingStatus: 1 }
+     ).lean();
+     const existingByBookingId = new Map(
+       existingRecords.map((item) => [String(item.bookingId).trim(), item])
+     );
+     const mergedMatched = matched.map((item) =>
+       mergeBookingStatusWithExisting(
+         item,
+         existingByBookingId.get(String(item.bookingId).trim())
+       )
+     );
      await RedcliffeBooking.bulkWrite(
-       matched.map((item) => ({
+       mergedMatched.map((item) => ({
          updateOne: {
            filter: { bookingId: String(item.bookingId).trim() },
            update: {
@@ -1261,7 +1322,7 @@ async function fetchBookingDetailsDirect({ bookingId, phone, bookingDate, collec
        })),
        { ordered: false }
      );
-     return matched;
+     return mergedMatched;
    }
  }
 

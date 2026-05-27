@@ -61,6 +61,105 @@ const buildDateMatch = (startDate, endDate) => {
   return match;
 };
 
+const normalizeShipmentOrderId = (value = "") => String(value || "").replace(/^#/, "").trim();
+
+const matchesShipmentGroup = (status = "", group = "", category = "") => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  if (category === "Total Orders") return true;
+
+  switch (String(group || "").trim().toLowerCase()) {
+    case "delivered":
+      return normalizedStatus.includes("delivered") && !normalizedStatus.includes("rto");
+    case "rto":
+      return normalizedStatus.includes("rto");
+    case "in_transit":
+      return normalizedStatus.includes("transit");
+    case "out_for_delivery":
+      return normalizedStatus.includes("out for delivery");
+    default:
+      return String(status || "").trim() === String(category || "").trim();
+  }
+};
+
+async function fetchUnifiedRetentionShipmentRows({ orderCreatedBy, startDate, endDate }) {
+  const retentionQuery = {};
+  if (orderCreatedBy) retentionQuery.orderCreatedBy = orderCreatedBy;
+  if (startDate || endDate) {
+    retentionQuery.date = {};
+    if (startDate) retentionQuery.date.$gte = startDate;
+    if (endDate) retentionQuery.date.$lte = endDate;
+  }
+
+  const myOrderQuery = {};
+  if (orderCreatedBy) myOrderQuery.agentName = orderCreatedBy;
+  if (startDate || endDate) {
+    myOrderQuery.orderDate = {};
+    if (startDate) myOrderQuery.orderDate.$gte = new Date(startDate);
+    if (endDate) {
+      const d = new Date(endDate);
+      d.setHours(23, 59, 59, 999);
+      myOrderQuery.orderDate.$lte = d;
+    }
+  }
+
+  const [retentionSales, myOrders] = await Promise.all([
+    RetentionSales.find(retentionQuery).lean(),
+    MyOrder.find(myOrderQuery).lean(),
+  ]);
+
+  const normalizedOrderIds = [
+    ...retentionSales.map((sale) => normalizeShipmentOrderId(sale.orderId)),
+    ...myOrders.map((order) => normalizeShipmentOrderId(order.orderId)),
+  ].filter(Boolean);
+
+  const orderDocs = normalizedOrderIds.length
+    ? await Order.find({ order_id: { $in: normalizedOrderIds } }).lean()
+    : [];
+
+  const ordersMap = new Map(orderDocs.map((order) => [String(order.order_id || "").trim(), order]));
+
+  const retentionRows = retentionSales.map((sale) => {
+    const orderDoc = ordersMap.get(normalizeShipmentOrderId(sale.orderId)) || {};
+    return {
+      _id: sale._id,
+      source: "RetentionSales",
+      date: sale.date || "",
+      orderId: sale.orderId || "",
+      contactNumber: sale.contactNumber || "",
+      shipway_status: orderDoc.shipment_status || sale.shipway_status || "Not Available",
+      tracking_number: orderDoc.tracking_number || "",
+      carrier_title: orderDoc.carrier_title || "",
+      amountPaid: Number(sale.amountPaid || 0),
+      orderCreatedBy: sale.orderCreatedBy || "",
+    };
+  });
+
+  const myOrderRows = myOrders.map((order) => {
+    const orderDoc = ordersMap.get(normalizeShipmentOrderId(order.orderId)) || {};
+    return {
+      _id: order._id,
+      source: "MyOrder",
+      date: order.orderDate ? order.orderDate.toISOString().slice(0, 10) : "",
+      orderId: order.orderId || "",
+      contactNumber: order.phone || "",
+      shipway_status: orderDoc.shipment_status || "Not Available",
+      tracking_number: orderDoc.tracking_number || "",
+      carrier_title: orderDoc.carrier_title || "",
+      amountPaid:
+        Number(order.upsellAmount || 0) > 0
+          ? Number(order.upsellAmount)
+          : Number(order.totalPrice || 0) + Number(order.partialPayment || 0),
+      orderCreatedBy: order.agentName || "",
+    };
+  });
+
+  return [...retentionRows, ...myOrderRows].sort((a, b) => {
+    const aDate = a.date ? new Date(a.date) : new Date(0);
+    const bDate = b.date ? new Date(b.date) : new Date(0);
+    return bDate - aDate;
+  });
+}
+
 router.get('/api/retention-sales', async (req, res) => {
   const { orderCreatedBy } = req.query;
   try {
@@ -1443,71 +1542,37 @@ router.get('/api/retention-sales/allapi', async (req, res) => {
 router.get('/api/retention-sales/allnew', async (req, res) => {
   const { orderCreatedBy, startDate, endDate } = req.query;
 
-  // Build retention-sales query (date is a YYYY-MM-DD string)
-  const retentionQuery = {};
-  if (orderCreatedBy) retentionQuery.orderCreatedBy = orderCreatedBy;
-  if (startDate || endDate) {
-    retentionQuery.date = {};
-    if (startDate) retentionQuery.date.$gte = startDate;
-    if (endDate) retentionQuery.date.$lte = endDate;
-  }
-
-  // Build myorders query (orderDate is a JS Date)
-  const myOrderQuery = {};
-  if (orderCreatedBy) myOrderQuery.agentName = orderCreatedBy;
-  if (startDate || endDate) {
-    myOrderQuery.orderDate = {};
-    if (startDate) myOrderQuery.orderDate.$gte = new Date(startDate);
-    if (endDate) {
-      const d = new Date(endDate);
-      d.setHours(23, 59, 59, 999);
-      myOrderQuery.orderDate.$lte = d;
-    }
-  }
-
   try {
-    const [retentionSales, myOrders] = await Promise.all([
-      RetentionSales.find(retentionQuery).lean(),
-      MyOrder.find(myOrderQuery).lean(),
-    ]);
-
-    // Fetch matching Order entries by normalized orderId
-    const orderIds = myOrders.map(o => o.orderId?.replace(/^#/, '')).filter(Boolean);
-    const ordersMap = {};
-    const orderDocs = await Order.find({ order_id: { $in: orderIds } }).lean();
-    orderDocs.forEach(order => {
-      ordersMap[order.order_id] = order;
+    const combined = await fetchUnifiedRetentionShipmentRows({
+      orderCreatedBy,
+      startDate,
+      endDate,
     });
-
-    const transformed = myOrders.map(order => {
-      const normalizedOrderId = order.orderId?.replace(/^#/, '') || '';
-      const shipwayOrder = ordersMap[normalizedOrderId] || {};
-
-      return {
-        _id: order._id,
-        date: order.orderDate ? order.orderDate.toISOString().slice(0, 10) : '',
-        orderId: order.orderId || '',
-        contactNumber: order.phone || '',
-        shipway_status: shipwayOrder.shipment_status || 'Not Available',
-        tracking_number: shipwayOrder.tracking_number || '',
-        carrier_title: shipwayOrder.carrier_title || '',
-        amountPaid:
-          Number(order.upsellAmount || 0) > 0
-            ? Number(order.upsellAmount)
-            : Number(order.totalPrice || 0) + Number(order.partialPayment || 0)
-      };
-    });
-
-    const combined = [...retentionSales, ...transformed].sort((a, b) => {
-      const aDate = a.date ? new Date(a.date) : new Date(0);
-      const bDate = b.date ? new Date(b.date) : new Date(0);
-      return bDate - aDate;
-    });
-
     res.json(combined);
   } catch (err) {
     console.error('Error fetching combined sales:', err);
     res.status(500).json({ message: 'Error fetching combined sales', error: err.message });
+  }
+});
+
+router.get('/api/retention-sales/shipment-details', async (req, res) => {
+  const { orderCreatedBy, startDate, endDate, category = 'All', group = '' } = req.query;
+
+  try {
+    const combined = await fetchUnifiedRetentionShipmentRows({
+      orderCreatedBy,
+      startDate,
+      endDate,
+    });
+
+    const filtered = combined.filter((row) =>
+      matchesShipmentGroup(row.shipway_status, group, category)
+    );
+
+    res.json(filtered);
+  } catch (err) {
+    console.error('Error fetching shipment details:', err);
+    res.status(500).json({ message: 'Error fetching shipment details', error: err.message });
   }
 });
 
