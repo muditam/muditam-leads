@@ -199,30 +199,6 @@ function decodeConversationCursor(cursor = "") {
   }
 }
 
-function encodeMessageCursor(message) {
-  const stamp = message?.timestamp || message?.createdAt;
-  const id = String(message?._id || "").trim();
-  if (!stamp || !id) return "";
-  return Buffer.from(
-    JSON.stringify({ ts: new Date(stamp).toISOString(), id })
-  ).toString("base64");
-}
-
-function decodeMessageCursor(cursor = "") {
-  try {
-    const raw = Buffer.from(String(cursor || ""), "base64").toString("utf8");
-    const parsed = JSON.parse(raw || "{}");
-    const ts = parsed?.ts ? new Date(parsed.ts) : null;
-    const id = String(parsed?.id || "").trim();
-    if (!ts || Number.isNaN(ts.getTime()) || !mongoose.Types.ObjectId.isValid(id)) {
-      return null;
-    }
-    return { ts, id };
-  } catch {
-    return null;
-  }
-}
-
 async function enrichConversations(conversations = []) {
   if (!Array.isArray(conversations) || conversations.length === 0) return [];
 
@@ -2707,8 +2683,7 @@ router.get("/messages", async (req, res) => {
       ? Math.min(100, Math.floor(limitRaw))
       : null;
     const beforeRaw = String(req.query.before || "").trim();
-    const beforeCursor = decodeMessageCursor(beforeRaw);
-    const beforeDate = beforeCursor ? null : beforeRaw ? new Date(beforeRaw) : null;
+    const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
 
     const waId = normalizeWaId(q);
     const l10 = waId.slice(-10);
@@ -2721,29 +2696,15 @@ router.get("/messages", async (req, res) => {
         { to: new RegExp(`${l10}$`) },
       ],
     };
-    if (beforeCursor) {
-      baseQuery.$and = [
-        {
-          $or: [
-            { timestamp: { $lt: beforeCursor.ts } },
-            {
-              timestamp: beforeCursor.ts,
-              _id: { $lt: new mongoose.Types.ObjectId(beforeCursor.id) },
-            },
-          ],
-        },
-      ];
-    } else if (beforeDate && !Number.isNaN(beforeDate.getTime())) {
+    if (beforeDate && !Number.isNaN(beforeDate.getTime())) {
       baseQuery.timestamp = { $lt: beforeDate };
     }
 
     const query = WhatsAppMessage.find(baseQuery)
-      .sort(limit ? { timestamp: -1, _id: -1 } : { timestamp: 1, _id: 1 });
-    if (limit) query.limit(limit + 1);
+      .sort(limit ? { timestamp: -1, createdAt: -1 } : { timestamp: 1, createdAt: 1 });
+    if (limit) query.limit(limit);
     const msgs = await query.lean();
-    const hasMore = Boolean(limit) && msgs.length > limit;
-    const pageDocs = hasMore ? msgs.slice(0, limit) : msgs;
-    const rows = limit ? pageDocs.slice().reverse() : pageDocs;
+    const rows = limit ? msgs.slice().reverse() : msgs;
 
     const byIdentity = new Map();
     for (const msg of rows || []) {
@@ -2759,21 +2720,7 @@ router.get("/messages", async (req, res) => {
         byIdentity.set(k, { ...prev, ...msg });
       }
     }
-    const items = Array.from(byIdentity.values());
-    if (!limit) {
-      return res.json(items);
-    }
-
-    const nextCursor =
-      hasMore && pageDocs.length
-        ? encodeMessageCursor(pageDocs[pageDocs.length - 1])
-        : "";
-
-    return res.json({
-      items,
-      hasMore,
-      nextCursor,
-    });
+    return res.json(Array.from(byIdentity.values()));
   } catch (e) {
     console.error("load messages error:", e);
     return res.status(500).json({ message: "Failed to load messages" });
