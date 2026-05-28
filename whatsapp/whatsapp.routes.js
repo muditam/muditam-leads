@@ -148,31 +148,6 @@ function parsePositiveInt(value, fallback) {
   return parsed;
 }
 
-function extractTemplateButtons(tpl = {}) {
-  const components = Array.isArray(tpl?.components) ? tpl.components : [];
-  const buttonComponent = components.find(
-    (component) => String(component?.type || "").trim().toUpperCase() === "BUTTONS"
-  );
-  const rawButtons = Array.isArray(buttonComponent?.buttons)
-    ? buttonComponent.buttons
-    : Array.isArray(buttonComponent?.componentData?.buttons)
-      ? buttonComponent.componentData.buttons
-      : Array.isArray(buttonComponent?.data?.buttons)
-        ? buttonComponent.data.buttons
-        : [];
-
-  return rawButtons
-    .map((button) => ({
-      type: String(button?.type || "").trim().toUpperCase(),
-      text: String(button?.text || button?.title || "").trim(),
-      url: String(button?.url || "").trim(),
-      phoneNumber: String(
-        button?.phone_number || button?.phoneNumber || button?.phone || ""
-      ).trim(),
-    }))
-    .filter((button) => button.type || button.text || button.url || button.phoneNumber);
-}
-
 function escapeRegex(value = "") {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -3185,7 +3160,6 @@ router.post("/send-template", async (req, res) => {
       : "";
     const finalText =
       clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
-    const templateButtons = extractTemplateButtons(tpl);
 
     const messageDoc = {
       waId: extractProviderAcceptId(providerResponse),
@@ -3201,7 +3175,6 @@ router.post("/send-template", async (req, res) => {
         templateId: providerTemplateId,
         language: String(tpl.language || "").trim(),
         parameters: paramValues,
-        buttons: templateButtons,
         ...(normalizedHeaderMedia
           ? {
             headerMedia: {
