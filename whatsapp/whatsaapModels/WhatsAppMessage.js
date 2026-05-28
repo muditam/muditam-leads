@@ -1,5 +1,15 @@
 const mongoose = require("mongoose");
 
+const TemplateButtonSchema = new mongoose.Schema(
+  {
+    type: { type: String, default: "" },
+    text: { type: String, default: "" },
+    url: { type: String, default: "" },
+    phoneNumber: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const WhatsAppMessageSchema = new mongoose.Schema(
   {
     waId: { type: String, index: true },
@@ -24,8 +34,10 @@ const WhatsAppMessageSchema = new mongoose.Schema(
     // optional: store template info (helpful)
     templateMeta: {
       name: { type: String, default: "" },
+      templateId: { type: String, default: "" },
       language: { type: String, default: "" },
       parameters: { type: [String], default: [] },
+      buttons: { type: [TemplateButtonSchema], default: [] },
       headerMedia: { type: Object, default: null }
     },
 

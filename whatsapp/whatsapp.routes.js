@@ -148,6 +148,31 @@ function parsePositiveInt(value, fallback) {
   return parsed;
 }
 
+function extractTemplateButtons(tpl = {}) {
+  const components = Array.isArray(tpl?.components) ? tpl.components : [];
+  const buttonComponent = components.find(
+    (component) => String(component?.type || "").trim().toUpperCase() === "BUTTONS"
+  );
+  const rawButtons = Array.isArray(buttonComponent?.buttons)
+    ? buttonComponent.buttons
+    : Array.isArray(buttonComponent?.componentData?.buttons)
+      ? buttonComponent.componentData.buttons
+      : Array.isArray(buttonComponent?.data?.buttons)
+        ? buttonComponent.data.buttons
+        : [];
+
+  return rawButtons
+    .map((button) => ({
+      type: String(button?.type || "").trim().toUpperCase(),
+      text: String(button?.text || button?.title || "").trim(),
+      url: String(button?.url || "").trim(),
+      phoneNumber: String(
+        button?.phone_number || button?.phoneNumber || button?.phone || ""
+      ).trim(),
+    }))
+    .filter((button) => button.type || button.text || button.url || button.phoneNumber);
+}
+
 function escapeRegex(value = "") {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -160,6 +185,30 @@ function encodeConversationCursor(conversation) {
 }
 
 function decodeConversationCursor(cursor = "") {
+  try {
+    const raw = Buffer.from(String(cursor || ""), "base64").toString("utf8");
+    const parsed = JSON.parse(raw || "{}");
+    const ts = parsed?.ts ? new Date(parsed.ts) : null;
+    const id = String(parsed?.id || "").trim();
+    if (!ts || Number.isNaN(ts.getTime()) || !mongoose.Types.ObjectId.isValid(id)) {
+      return null;
+    }
+    return { ts, id };
+  } catch {
+    return null;
+  }
+}
+
+function encodeMessageCursor(message) {
+  const stamp = message?.timestamp || message?.createdAt;
+  const id = String(message?._id || "").trim();
+  if (!stamp || !id) return "";
+  return Buffer.from(
+    JSON.stringify({ ts: new Date(stamp).toISOString(), id })
+  ).toString("base64");
+}
+
+function decodeMessageCursor(cursor = "") {
   try {
     const raw = Buffer.from(String(cursor || ""), "base64").toString("utf8");
     const parsed = JSON.parse(raw || "{}");
@@ -1486,6 +1535,7 @@ async function fetchMediaBufferWithBestAuth(rawUrl) {
    SOCKET EMITS
 ----------------------------------------- */
 const roomForPhone10 = (p10) => `wa:${String(p10 || "").slice(-10)}`;
+const WA_INBOX_ROOM = "wa:inbox";
 
 const emitToPhone10 = (req, phone10, event, payload) => {
   const io = req?.app?.get("io");
@@ -1493,6 +1543,12 @@ const emitToPhone10 = (req, phone10, event, payload) => {
   const p10 = last10(phone10);
   if (!p10) return;
   io.to(roomForPhone10(p10)).emit(event, payload);
+};
+
+const emitToInbox = (req, event, payload) => {
+  const io = req?.app?.get("io");
+  if (!io) return;
+  io.to(WA_INBOX_ROOM).emit(event, payload);
 };
 
 const customerPhoneFromMsg = (msgDoc) => {
@@ -1539,11 +1595,13 @@ const emitStatus = (req, { phone10, waId, status, providerTransactionId, transac
 const emitConversationPatch = (req, { phone10, patch }) => {
   const p10 = last10(phone10);
   if (!p10) return;
-  emitToPhone10(req, p10, "wa:conversation", {
+  const payload = {
     phone10: p10,
     phone: p10,
     patch,
-  });
+  };
+  emitToPhone10(req, p10, "wa:conversation", payload);
+  emitToInbox(req, "wa:conversation", payload);
 };
 
 function freeformExpiryFromConvo(convo) {
@@ -2649,7 +2707,8 @@ router.get("/messages", async (req, res) => {
       ? Math.min(100, Math.floor(limitRaw))
       : null;
     const beforeRaw = String(req.query.before || "").trim();
-    const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
+    const beforeCursor = decodeMessageCursor(beforeRaw);
+    const beforeDate = beforeCursor ? null : beforeRaw ? new Date(beforeRaw) : null;
 
     const waId = normalizeWaId(q);
     const l10 = waId.slice(-10);
@@ -2662,15 +2721,29 @@ router.get("/messages", async (req, res) => {
         { to: new RegExp(`${l10}$`) },
       ],
     };
-    if (beforeDate && !Number.isNaN(beforeDate.getTime())) {
+    if (beforeCursor) {
+      baseQuery.$and = [
+        {
+          $or: [
+            { timestamp: { $lt: beforeCursor.ts } },
+            {
+              timestamp: beforeCursor.ts,
+              _id: { $lt: new mongoose.Types.ObjectId(beforeCursor.id) },
+            },
+          ],
+        },
+      ];
+    } else if (beforeDate && !Number.isNaN(beforeDate.getTime())) {
       baseQuery.timestamp = { $lt: beforeDate };
     }
 
     const query = WhatsAppMessage.find(baseQuery)
-      .sort(limit ? { timestamp: -1, createdAt: -1 } : { timestamp: 1, createdAt: 1 });
-    if (limit) query.limit(limit);
+      .sort(limit ? { timestamp: -1, _id: -1 } : { timestamp: 1, _id: 1 });
+    if (limit) query.limit(limit + 1);
     const msgs = await query.lean();
-    const rows = limit ? msgs.slice().reverse() : msgs;
+    const hasMore = Boolean(limit) && msgs.length > limit;
+    const pageDocs = hasMore ? msgs.slice(0, limit) : msgs;
+    const rows = limit ? pageDocs.slice().reverse() : pageDocs;
 
     const byIdentity = new Map();
     for (const msg of rows || []) {
@@ -2686,7 +2759,21 @@ router.get("/messages", async (req, res) => {
         byIdentity.set(k, { ...prev, ...msg });
       }
     }
-    return res.json(Array.from(byIdentity.values()));
+    const items = Array.from(byIdentity.values());
+    if (!limit) {
+      return res.json(items);
+    }
+
+    const nextCursor =
+      hasMore && pageDocs.length
+        ? encodeMessageCursor(pageDocs[pageDocs.length - 1])
+        : "";
+
+    return res.json({
+      items,
+      hasMore,
+      nextCursor,
+    });
   } catch (e) {
     console.error("load messages error:", e);
     return res.status(500).json({ message: "Failed to load messages" });
@@ -3151,6 +3238,7 @@ router.post("/send-template", async (req, res) => {
       : "";
     const finalText =
       clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
+    const templateButtons = extractTemplateButtons(tpl);
 
     const messageDoc = {
       waId: extractProviderAcceptId(providerResponse),
@@ -3166,6 +3254,7 @@ router.post("/send-template", async (req, res) => {
         templateId: providerTemplateId,
         language: String(tpl.language || "").trim(),
         parameters: paramValues,
+        buttons: templateButtons,
         ...(normalizedHeaderMedia
           ? {
             headerMedia: {
