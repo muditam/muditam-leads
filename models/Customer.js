@@ -30,12 +30,27 @@ async function enqueueCustomerForZoomSync(docLike) {
   }
 }
 
+async function syncCustomerConversationProfile(docLike) {
+  try {
+    const phone = String(docLike?.phone || "").trim();
+    if (!phone) return;
+    const { syncConversationByPhone } = require("../whatsapp/conversationProfile.service");
+    await syncConversationByPhone(phone, {
+      lastMessageText: String(docLike?.lastMessageText || "").trim(),
+    });
+  } catch (_) {
+    // best-effort conversation sync hook
+  }
+}
+
 CustomerSchema.post("save", function (doc) {
   enqueueCustomerForZoomSync(doc);
+  syncCustomerConversationProfile(doc);
 });
 
 CustomerSchema.post("findOneAndUpdate", function (doc) {
   enqueueCustomerForZoomSync(doc);
+  syncCustomerConversationProfile(doc);
 });
 
 CustomerSchema.post("updateOne", async function () {
@@ -43,6 +58,7 @@ CustomerSchema.post("updateOne", async function () {
     const filter = this.getQuery() || {};
     const doc = await mongoose.model("Customer").findOne(filter, { name: 1, phone: 1 }).lean();
     enqueueCustomerForZoomSync(doc);
+    syncCustomerConversationProfile(doc);
   } catch (_) {}
 });
 

@@ -10,6 +10,11 @@ const mongoose = require("mongoose");
 const WhatsAppMessage = require("./whatsaapModels/WhatsAppMessage");
 const WhatsAppConversation = require("./whatsaapModels/WhatsAppConversation");
 const WhatsAppTemplate = require("./whatsaapModels/WhatsAppTemplate");
+const {
+  buildConversationSearchText,
+  getConversationDerivedFields,
+  backfillConversationDerivedFields,
+} = require("./conversationProfile.service");
 
 const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
@@ -134,6 +139,7 @@ const digitsOnly = (v = "") => String(v || "").replace(/\D/g, "");
 const last10 = (v = "") => digitsOnly(v).slice(-10);
 const normalizeText = (v = "") => String(v || "").trim().toLowerCase();
 const MAX_CONVERSATION_PAGE_SIZE = 100;
+let conversationBackfillStarted = false;
 
 function normalizeWaId(v = "") {
   const d = digitsOnly(v);
@@ -225,6 +231,141 @@ async function enrichConversations(conversations = []) {
     return { ...conv, displayName, assignedToLabel };
   });
 }
+
+function normalizeNameKey(v = "") {
+  return String(v || "").trim().toLowerCase();
+}
+
+function buildConversationAccessQuery(context, assignedTo = "") {
+  const query = {};
+  const assignedNormalized = normalizeNameKey(assignedTo);
+
+  if (context && !(context.isAdmin && context.mode === "all")) {
+    const selfName = normalizeNameKey(context.selfName || context.normalizedUserName || "");
+    const allowedNames = context.allowedNames instanceof Set
+      ? Array.from(context.allowedNames).map((name) => normalizeNameKey(name)).filter(Boolean)
+      : [];
+
+    if (context.mode === "team") {
+      query.assignedToLabelNorm = allowedNames.length
+        ? { $in: allowedNames }
+        : selfName || "__no_match__";
+    } else if (context.mode === "combined") {
+      const combined = Array.from(new Set([selfName, ...allowedNames].filter(Boolean)));
+      query.assignedToLabelNorm = combined.length ? { $in: combined } : "__no_match__";
+    } else {
+      query.assignedToLabelNorm = selfName || "__no_match__";
+    }
+  }
+
+  if (assignedNormalized && assignedNormalized !== "all") {
+    query.assignedToLabelNorm = assignedNormalized;
+  }
+
+  return query;
+}
+
+function buildConversationSearchQuery(search = "") {
+  const tokens = normalizeNameKey(search).split(/\s+/).filter(Boolean);
+  if (!tokens.length) return {};
+  return {
+    $and: tokens.map((token) => ({
+      searchText: { $regex: escapeRegex(token), $options: "i" },
+    })),
+  };
+}
+
+function buildConversationTabQuery(tab = "", favoritePhones = []) {
+  const normalizedTab = String(tab || "").trim().toLowerCase();
+  if (normalizedTab === "unread") {
+    return { unreadCount: { $gt: 0 } };
+  }
+  if (normalizedTab === "favourite") {
+    const list = Array.isArray(favoritePhones) ? favoritePhones.filter(Boolean) : [];
+    return list.length ? { phone10: { $in: list } } : { _id: null };
+  }
+  return {};
+}
+
+function buildConversationPhoneQuery(phone = "") {
+  const phone10 = last10(phone);
+  return phone10
+    ? {
+      $or: [
+        { phone10 },
+        { phone: new RegExp(`${escapeRegex(phone10)}$`) },
+      ],
+    }
+    : {};
+}
+
+function buildConversationCursorQuery(cursorInfo) {
+  if (!cursorInfo?.ts || !cursorInfo?.id) return {};
+  return {
+    $or: [
+      { lastMessageAt: { $lt: cursorInfo.ts } },
+      {
+        lastMessageAt: cursorInfo.ts,
+        _id: { $lt: new mongoose.Types.ObjectId(cursorInfo.id) },
+      },
+    ],
+  };
+}
+
+function mergeMongoQueries(...queries) {
+  const valid = queries.filter((query) => query && Object.keys(query).length);
+  if (!valid.length) return {};
+  if (valid.length === 1) return valid[0];
+  return { $and: valid };
+}
+
+async function upsertConversationRecord(phone = "", setFields = {}, options = {}) {
+  const normalizedPhone = normalizeWaId(phone);
+  const phone10 = last10(normalizedPhone);
+  if (!phone10) return null;
+
+  const lastMessageText = String(setFields?.lastMessageText || "").slice(0, 200);
+  const derivedFields = await getConversationDerivedFields({
+    phone: normalizedPhone,
+    lastMessageText,
+  });
+
+  const update = {
+    $set: {
+      ...derivedFields,
+      ...setFields,
+      searchText: buildConversationSearchText({
+        phone: normalizedPhone,
+        phone10: derivedFields.phone10,
+        displayName: derivedFields.displayName,
+        assignedToLabel: derivedFields.assignedToLabel,
+        lastMessageText,
+      }),
+    },
+  };
+
+  if (options.inc && Object.keys(options.inc).length) {
+    update.$inc = options.inc;
+  }
+
+  return WhatsAppConversation.findOneAndUpdate(
+    { phone: new RegExp(`${phone10}$`) },
+    update,
+    { upsert: true, new: options.new !== false }
+  ).lean();
+}
+
+function scheduleConversationBackfill() {
+  if (conversationBackfillStarted) return;
+  conversationBackfillStarted = true;
+  setImmediate(() => {
+    backfillConversationDerivedFields().catch((error) => {
+      console.error("WhatsApp conversation backfill failed:", error);
+    });
+  });
+}
+
+scheduleConversationBackfill();
 
 async function resolveConversationAccessContext({ role, userName, userId, hasTeam, chatScope }) {
   const roleRaw = String(role || "");
@@ -2522,6 +2663,7 @@ router.post("/conversations/mark-read", async (req, res) => {
 
 router.get("/conversations", async (req, res) => {
   try {
+    scheduleConversationBackfill();
     const {
       role,
       userName,
@@ -2548,8 +2690,10 @@ router.get("/conversations", async (req, res) => {
     const wantsCounts = String(includeCounts || "").trim().toLowerCase() === "true";
     const wantsAgentOptions = String(includeAgentOptions || "").trim().toLowerCase() === "true";
     const favoritePhones = parseFavoritePhones(req.query.favoritePhones);
-    const basePipeline = buildConversationBasePipeline({ phone });
-    const accessStages = buildConversationAccessMatchStages(accessContext, assignedTo);
+    const baseFilter = mergeMongoQueries(
+      buildConversationPhoneQuery(phone),
+      buildConversationAccessQuery(accessContext, assignedTo)
+    );
 
     if (wantsPaginated) {
       const limit = Math.min(
@@ -2557,71 +2701,53 @@ router.get("/conversations", async (req, res) => {
         MAX_CONVERSATION_PAGE_SIZE
       );
       const cursorInfo = decodeConversationCursor(cursor);
-      const itemPipeline = [
-        ...basePipeline,
-        ...accessStages,
-        ...buildConversationTabStages(tab, favoritePhones),
-        ...buildConversationSearchStages(search),
-        ...buildConversationCursorStages(cursorInfo),
-        { $sort: { lastMessageAt: -1, _id: -1 } },
-        { $limit: limit + 1 },
-      ];
+      const itemFilter = mergeMongoQueries(
+        baseFilter,
+        buildConversationTabQuery(tab, favoritePhones),
+        buildConversationSearchQuery(search),
+        buildConversationCursorQuery(cursorInfo)
+      );
 
       const [itemDocs, countsDocs, agentOptionDocs] = await Promise.all([
-        WhatsAppConversation.aggregate(itemPipeline),
+        WhatsAppConversation.find(itemFilter)
+          .sort({ lastMessageAt: -1, _id: -1 })
+          .limit(limit + 1)
+          .lean(),
         wantsCounts
-          ? WhatsAppConversation.aggregate([
-            ...basePipeline,
-            ...accessStages,
-            {
-              $group: {
-                _id: null,
-                all: { $sum: 1 },
-                unread: {
-                  $sum: {
-                    $cond: [{ $gt: ["$unreadCount", 0] }, 1, 0],
-                  },
-                },
-                favourite: {
-                  $sum: {
-                    $cond: [{ $in: ["$phone10", favoritePhones] }, 1, 0],
-                  },
-                },
-              },
-            },
+          ? Promise.all([
+            WhatsAppConversation.countDocuments(baseFilter),
+            WhatsAppConversation.countDocuments(
+              mergeMongoQueries(baseFilter, { unreadCount: { $gt: 0 } })
+            ),
+            favoritePhones.length
+              ? WhatsAppConversation.countDocuments(
+                mergeMongoQueries(baseFilter, { phone10: { $in: favoritePhones } })
+              )
+              : Promise.resolve(0),
           ])
-          : Promise.resolve([]),
+          : Promise.resolve(null),
         wantsAgentOptions
-          ? WhatsAppConversation.aggregate([
-            ...basePipeline,
-            ...accessStages,
-            {
-              $match: {
-                assignedToLabel: {
-                  $nin: [null, "", "Unassigned"],
-                },
-              },
-            },
-            { $group: { _id: "$assignedToLabel" } },
-            { $sort: { _id: 1 } },
-          ])
+          ? WhatsAppConversation.distinct("assignedToLabel", mergeMongoQueries(baseFilter, {
+            assignedToLabelNorm: { $nin: ["", "unassigned"] },
+          }))
           : Promise.resolve([]),
       ]);
 
       const hasMore = itemDocs.length > limit;
       const items = hasMore ? itemDocs.slice(0, limit) : itemDocs;
       const nextCursor = hasMore ? encodeConversationCursor(items[items.length - 1]) : "";
-      const counts = countsDocs?.[0]
+      const counts = Array.isArray(countsDocs)
         ? {
-          all: Number(countsDocs[0].all || 0),
-          unread: Number(countsDocs[0].unread || 0),
-          favourite: Number(countsDocs[0].favourite || 0),
+          all: Number(countsDocs[0] || 0),
+          unread: Number(countsDocs[1] || 0),
+          favourite: Number(countsDocs[2] || 0),
         }
         : undefined;
       const agentOptions = Array.isArray(agentOptionDocs)
         ? agentOptionDocs
-          .map((row) => String(row?._id || "").trim())
+          .map((row) => String(row || "").trim())
           .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b))
         : undefined;
 
       return res.json({
@@ -2633,13 +2759,15 @@ router.get("/conversations", async (req, res) => {
       });
     }
 
-    const conversations = await WhatsAppConversation.aggregate([
-      ...basePipeline,
-      ...accessStages,
-      ...buildConversationTabStages(tab, favoritePhones),
-      ...buildConversationSearchStages(search),
-      { $sort: { lastMessageAt: -1, _id: -1 } },
-    ]);
+    const conversations = await WhatsAppConversation.find(
+      mergeMongoQueries(
+        baseFilter,
+        buildConversationTabQuery(tab, favoritePhones),
+        buildConversationSearchQuery(search)
+      )
+    )
+      .sort({ lastMessageAt: -1, _id: -1 })
+      .lean();
 
     if (!conversations.length) return res.json([]);
     return res.json(conversations);
@@ -2766,18 +2894,12 @@ router.post("/send-text", async (req, res) => {
       raw: r.data,
     });
 
-    await WhatsAppConversation.findOneAndUpdate(
-      { phone: new RegExp(`${p10}$`) },
-      {
-        $set: {
-          phone,
-          lastMessageAt: now,
-          lastMessageText: textValue.slice(0, 200),
-          lastOutboundAt: now,
-        },
-      },
-      { upsert: true }
-    );
+    await upsertConversationRecord(phone, {
+      phone,
+      lastMessageAt: now,
+      lastMessageText: textValue.slice(0, 200),
+      lastOutboundAt: now,
+    }, { new: false });
 
     const createdPayload = created.toObject();
 
@@ -2974,18 +3096,12 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       raw: r.data,
     });
 
-    await WhatsAppConversation.findOneAndUpdate(
-      { phone: new RegExp(`${p10}$`) },
-      {
-        $set: {
-          phone,
-          lastMessageAt: now,
-          lastMessageText: previewText.slice(0, 200),
-          lastOutboundAt: now,
-        },
-      },
-      { upsert: true }
-    );
+    await upsertConversationRecord(phone, {
+      phone,
+      lastMessageAt: now,
+      lastMessageText: previewText.slice(0, 200),
+      lastOutboundAt: now,
+    }, { new: false });
 
     const createdPayload = created.toObject();
 
@@ -3211,18 +3327,12 @@ router.post("/send-template", async (req, res) => {
 
     const created = await WhatsAppMessage.create(messageDoc);
 
-    await WhatsAppConversation.findOneAndUpdate(
-      { phone: new RegExp(`${p10}$`) },
-      {
-        $set: {
-          phone,
-          lastMessageAt: now,
-          lastMessageText: finalText.slice(0, 200),
-          lastOutboundAt: now,
-        },
-      },
-      { upsert: true }
-    );
+    await upsertConversationRecord(phone, {
+      phone,
+      lastMessageAt: now,
+      lastMessageText: finalText.slice(0, 200),
+      lastOutboundAt: now,
+    }, { new: false });
 
     const createdPayload = created.toObject();
 
@@ -3878,20 +3988,13 @@ async function handlePublicWebhook(req, res) {
         continue;
       }
 
-      const updatedConv = await WhatsAppConversation.findOneAndUpdate(
-        { phone: new RegExp(`${p10}$`) },
-        {
-          $set: {
-            phone: from,
-            lastMessageAt: now,
-            lastMessageText: String(textValue || "").slice(0, 200),
-            lastInboundAt: now,
-            windowExpiresAt: windowExpiry,
-          },
-          $inc: { unreadCount: 1 },
-        },
-        { upsert: true, new: true }
-      ).lean();
+      const updatedConv = await upsertConversationRecord(from, {
+        phone: from,
+        lastMessageAt: now,
+        lastMessageText: String(textValue || "").slice(0, 200),
+        lastInboundAt: now,
+        windowExpiresAt: windowExpiry,
+      }, { inc: { unreadCount: 1 }, new: true });
 
       emitMessage(req, created);
 

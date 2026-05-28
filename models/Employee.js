@@ -53,6 +53,9 @@ const EmployeeSchema = new mongoose.Schema({
  }],
 });
 
+EmployeeSchema.index({ fullName: 1 });
+EmployeeSchema.index({ teamLeader: 1, status: 1 });
+
 
 EmployeeSchema.methods.addAuditLog = function (actionType, changedBy) {
  const changedByName =
@@ -71,4 +74,3 @@ EmployeeSchema.methods.addAuditLog = function (actionType, changedBy) {
 
 
 module.exports = mongoose.model("Employee", EmployeeSchema);
-

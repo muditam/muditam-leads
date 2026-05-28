@@ -144,12 +144,27 @@ async function enqueueLeadForZoomSync(docLike) {
   }
 }
 
+async function syncLeadConversationProfile(docLike) {
+  try {
+    const phone = String(docLike?.contactNumber || "").trim();
+    if (!phone) return;
+    const { syncConversationByPhone } = require("../whatsapp/conversationProfile.service");
+    await syncConversationByPhone(phone, {
+      lastMessageText: String(docLike?.lastMessageText || "").trim(),
+    });
+  } catch (_) {
+    // best-effort conversation sync hook
+  }
+}
+
 LeadSchema.post("save", function (doc) {
   enqueueLeadForZoomSync(doc);
+  syncLeadConversationProfile(doc);
 });
 
 LeadSchema.post("findOneAndUpdate", function (doc) {
   enqueueLeadForZoomSync(doc);
+  syncLeadConversationProfile(doc);
 });
 
 LeadSchema.post("updateOne", async function () {
@@ -157,6 +172,7 @@ LeadSchema.post("updateOne", async function () {
     const filter = this.getQuery() || {};
     const doc = await mongoose.model("Lead").findOne(filter, { name: 1, contactNumber: 1 }).lean();
     enqueueLeadForZoomSync(doc);
+    syncLeadConversationProfile(doc);
   } catch (_) {}
 });
 
