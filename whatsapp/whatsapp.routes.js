@@ -831,8 +831,9 @@ async function getScopedActiveAgentOptions(context, baseFilter = {}) {
   const activeEmployees = await Employee.find({
     status: "active",
     role: { $in: relevantRoles.map((role) => new RegExp(`^${escapeRegex(role)}$`, "i")) },
+    department: { $not: /^tech helper$/i },
   })
-    .select("fullName")
+    .select("fullName department")
     .lean();
 
   const activeNameMap = new Map();
@@ -3354,7 +3355,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     console.error("Send media error:", { status, data, message: e?.message });
 
     return res.status(status).json({
-      success: false,
+      uccess: false,
       message: "Send media failed",
       providerError: data || { error: e?.message },
     });
