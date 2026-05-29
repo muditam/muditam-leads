@@ -312,6 +312,90 @@ function buildConversationCursorQuery(cursorInfo) {
   };
 }
 
+function extractTemplateButtonsFromTemplate(tpl = {}) {
+  const components = Array.isArray(tpl?.components) ? tpl.components : [];
+  const buttonItems = [];
+
+  for (const component of components) {
+    const componentType = String(component?.type || "").trim().toUpperCase();
+    if (componentType !== "BUTTONS" && componentType !== "BUTTON") continue;
+
+    if (Array.isArray(component?.buttons) && component.buttons.length) {
+      buttonItems.push(...component.buttons);
+      continue;
+    }
+
+    buttonItems.push(component);
+  }
+
+  const jsonStructRaw =
+    tpl?.jsonstruct ||
+    tpl?.template?.jsonstruct ||
+    tpl?.data?.jsonstruct ||
+    tpl?.raw360?.jsonstruct ||
+    tpl?.raw360?.template?.jsonstruct ||
+    null;
+
+  let jsonStruct = null;
+  if (typeof jsonStructRaw === "string") {
+    try {
+      jsonStruct = JSON.parse(jsonStructRaw);
+    } catch {
+      jsonStruct = null;
+    }
+  } else if (jsonStructRaw && typeof jsonStructRaw === "object") {
+    jsonStruct = jsonStructRaw;
+  }
+
+  if (Array.isArray(jsonStruct?.buttons) && jsonStruct.buttons.length) {
+    buttonItems.push(...jsonStruct.buttons);
+  }
+
+  return buttonItems
+    .map((button) => {
+      const type = String(
+        button?.type ||
+          button?.sub_type ||
+          button?.buttonType ||
+          button?.button_type ||
+          ""
+      )
+        .trim()
+        .toUpperCase();
+
+      const text = String(
+        button?.text || button?.title || button?.label || button?.caption || ""
+      ).trim();
+
+      const url = String(
+        button?.url || button?.href || button?.websiteUrl || ""
+      ).trim();
+
+      const phoneNumber = String(
+        button?.phoneNumber ||
+          button?.phone_number ||
+          button?.phone ||
+          button?.value ||
+          ""
+      ).trim();
+
+      const payload = String(
+        button?.payload || button?.id || button?.value || ""
+      ).trim();
+
+      if (!type && !text && !url && !phoneNumber && !payload) return null;
+
+      return {
+        type,
+        text,
+        url,
+        phoneNumber,
+        payload,
+      };
+    })
+    .filter(Boolean);
+}
+
 function mergeMongoQueries(...queries) {
   const valid = queries.filter((query) => query && Object.keys(query).length);
   if (!valid.length) return {};
@@ -3274,6 +3358,7 @@ router.post("/send-template", async (req, res) => {
     const serverText = serverBody
       ? applyTemplateVars(serverBody, paramValues)
       : "";
+    const templateButtons = extractTemplateButtonsFromTemplate(tpl);
     const finalText =
       clientText || serverText || `[TEMPLATE] ${tpl.name || providerTemplateId}`;
 
@@ -3291,6 +3376,7 @@ router.post("/send-template", async (req, res) => {
         templateId: providerTemplateId,
         language: String(tpl.language || "").trim(),
         parameters: paramValues,
+        buttons: templateButtons,
         ...(normalizedHeaderMedia
           ? {
             headerMedia: {
