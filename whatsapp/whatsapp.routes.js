@@ -462,21 +462,20 @@ async function resolveConversationAccessContext({ role, userName, userId, hasTea
   const normalizedRole = roleRaw.trim().toLowerCase();
   const normalizedUserName = String(userName || "").trim().toLowerCase();
   const scope = String(chatScope || "").trim().toLowerCase();
+  const hasTeamFlag = String(hasTeam || "").trim().toLowerCase() === "true";
 
   const isAdmin =
     ["Manager", "Developer", "Super Admin", "Admin"].includes(roleRaw) ||
     normalizedRole.includes("admin") ||
     normalizedRole.includes("manager");
 
-  const isAssistantTeamLeadLike =
-    normalizedRole === "assistant team lead" ||
-    normalizedRole === "retention agent";
+  const isAssistantTeamLeadLike = normalizedRole === "assistant team lead";
   const isTeamLeaderLike =
     normalizedRole === "team leader" || normalizedRole === "team-leader";
+  const isRetentionAgentWithTeam =
+    normalizedRole === "retention agent" && hasTeamFlag;
   const userHasTeam =
-    String(hasTeam || "").trim().toLowerCase() === "true" ||
-    isAssistantTeamLeadLike ||
-    isTeamLeaderLike;
+    hasTeamFlag || isAssistantTeamLeadLike || isTeamLeaderLike;
 
   const context = {
     isAdmin,
@@ -570,7 +569,7 @@ async function resolveConversationAccessContext({ role, userName, userId, hasTea
     return context;
   }
 
-  if (scope === "combined" || (!scope && isAssistantTeamLeadLike)) {
+  if (scope === "combined" || (!scope && (isAssistantTeamLeadLike || isRetentionAgentWithTeam))) {
     context.mode = "combined";
     return context;
   }
@@ -817,6 +816,70 @@ function buildConversationTabStages(tab = "", favoritePhones = []) {
     return [{ $match: { phone10: { $in: list } } }];
   }
   return [];
+}
+
+async function getScopedActiveAgentOptions(context, baseFilter = {}) {
+  const relevantRoles = [
+    "sales agent",
+    "retention agent",
+    "assistant team lead",
+    "assistant team leader",
+    "team leader",
+    "team-leader",
+  ];
+
+  const activeEmployees = await Employee.find({
+    status: "active",
+    role: { $in: relevantRoles.map((role) => new RegExp(`^${escapeRegex(role)}$`, "i")) },
+  })
+    .select("fullName")
+    .lean();
+
+  const activeNameMap = new Map();
+  for (const emp of activeEmployees || []) {
+    const fullName = String(emp?.fullName || "").trim();
+    const normalized = normalizeNameKey(fullName);
+    if (!normalized) continue;
+    activeNameMap.set(normalized, fullName);
+  }
+
+  if (!activeNameMap.size) return [];
+
+  let allowedNormalizedNames = null;
+  if (!(context?.isAdmin && context?.mode === "all")) {
+    const selfName = normalizeNameKey(context?.selfName || context?.normalizedUserName || "");
+    const teamNames = context?.allowedNames instanceof Set
+      ? Array.from(context.allowedNames).map((name) => normalizeNameKey(name)).filter(Boolean)
+      : Array.isArray(context?.allowedNames)
+      ? context.allowedNames.map((name) => normalizeNameKey(name)).filter(Boolean)
+      : [];
+
+    if (context?.mode === "team") {
+      allowedNormalizedNames = new Set(teamNames);
+    } else if (context?.mode === "combined") {
+      allowedNormalizedNames = new Set([selfName, ...teamNames].filter(Boolean));
+    } else {
+      allowedNormalizedNames = new Set(selfName ? [selfName] : []);
+    }
+  }
+
+  const conversationNames = await WhatsAppConversation.distinct(
+    "assignedToLabel",
+    mergeMongoQueries(baseFilter, {
+      assignedToLabelNorm: { $nin: ["", "unassigned"] },
+    })
+  );
+
+  return (conversationNames || [])
+    .map((name) => String(name || "").trim())
+    .filter(Boolean)
+    .filter((name) => {
+      const normalized = normalizeNameKey(name);
+      if (!activeNameMap.has(normalized)) return false;
+      if (allowedNormalizedNames && !allowedNormalizedNames.has(normalized)) return false;
+      return true;
+    })
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function buildConversationCursorStages(cursorInfo) {
@@ -2817,9 +2880,7 @@ router.get("/conversations", async (req, res) => {
           ])
           : Promise.resolve(null),
         wantsAgentOptions
-          ? WhatsAppConversation.distinct("assignedToLabel", mergeMongoQueries(baseFilter, {
-            assignedToLabelNorm: { $nin: ["", "unassigned"] },
-          }))
+          ? getScopedActiveAgentOptions(accessContext, baseFilter)
           : Promise.resolve([]),
       ]);
 
@@ -2835,9 +2896,6 @@ router.get("/conversations", async (req, res) => {
         : undefined;
       const agentOptions = Array.isArray(agentOptionDocs)
         ? agentOptionDocs
-          .map((row) => String(row || "").trim())
-          .filter(Boolean)
-          .sort((a, b) => a.localeCompare(b))
         : undefined;
 
       return res.json({
