@@ -370,6 +370,31 @@ function getSyntheticComponentsFromJsonStruct(t = {}) {
     });
   }
 
+  if (Array.isArray(js.buttons) && js.buttons.length) {
+    components.push({
+      type: "BUTTONS",
+      buttons: js.buttons.map((button) => ({
+        type: String(
+          button?.type ||
+            button?.sub_type ||
+            button?.buttonType ||
+            button?.button_type ||
+            ""
+        ).toUpperCase(),
+        text: String(button?.text || button?.title || button?.label || ""),
+        url: String(button?.url || button?.href || ""),
+        phoneNumber: String(
+          button?.phoneNumber ||
+            button?.phone_number ||
+            button?.phone ||
+            button?.value ||
+            ""
+        ),
+        payload: String(button?.payload || button?.id || button?.value || ""),
+      })),
+    });
+  }
+
   return components;
 }
 
