@@ -347,8 +347,14 @@ function extractTemplateButtonsFromTemplate(tpl = {}) {
     jsonStruct = jsonStructRaw;
   }
 
-  if (Array.isArray(jsonStruct?.buttons) && jsonStruct.buttons.length) {
-    buttonItems.push(...jsonStruct.buttons);
+  const jsonButtons = Array.isArray(jsonStruct?.buttons)
+    ? jsonStruct.buttons
+    : Array.isArray(jsonStruct?.buttons?.buttons)
+    ? jsonStruct.buttons.buttons
+    : [];
+
+  if (jsonButtons.length) {
+    buttonItems.push(...jsonButtons);
   }
 
   return buttonItems
@@ -2892,6 +2898,83 @@ router.get("/messages", async (req, res) => {
     if (limit) query.limit(limit);
     const msgs = await query.lean();
     const rows = limit ? msgs.slice().reverse() : msgs;
+
+    const templateMessages = (rows || []).filter((msg) => {
+      if (String(msg?.type || "").toLowerCase() !== "template") return false;
+      return !Array.isArray(msg?.templateMeta?.buttons) || msg.templateMeta.buttons.length === 0;
+    });
+
+    if (templateMessages.length) {
+      const templateNames = Array.from(
+        new Set(
+          templateMessages
+            .map((msg) => normalizeTemplateName(String(msg?.templateMeta?.name || "").trim()))
+            .filter(Boolean)
+        )
+      );
+
+      const templateIds = Array.from(
+        new Set(
+          templateMessages
+            .flatMap((msg) => [
+              String(msg?.templateMeta?.templateId || "").trim(),
+              String(msg?.templateMeta?.providerTemplateId || "").trim(),
+            ])
+            .filter(Boolean)
+        )
+      );
+
+      if (templateNames.length || templateIds.length) {
+        const templates = await WhatsAppTemplate.find({
+          $or: [
+            ...(templateNames.length ? [{ name: { $in: templateNames } }] : []),
+            ...(templateIds.length
+              ? [
+                  { template_id: { $in: templateIds } },
+                  { templateId: { $in: templateIds } },
+                  { providerTemplateId: { $in: templateIds } },
+                ]
+              : []),
+          ],
+        }).lean();
+
+        const templateByName = new Map();
+        const templateById = new Map();
+
+        for (const tpl of templates || []) {
+          const normalizedName = normalizeTemplateName(String(tpl?.name || "").trim());
+          if (normalizedName) templateByName.set(normalizedName, tpl);
+
+          const ids = [
+            String(tpl?.template_id || "").trim(),
+            String(tpl?.templateId || "").trim(),
+            String(tpl?.providerTemplateId || "").trim(),
+          ].filter(Boolean);
+          ids.forEach((id) => templateById.set(id, tpl));
+        }
+
+        for (const msg of rows) {
+          if (String(msg?.type || "").toLowerCase() !== "template") continue;
+          if (Array.isArray(msg?.templateMeta?.buttons) && msg.templateMeta.buttons.length) continue;
+
+          const templateId = String(msg?.templateMeta?.templateId || "").trim();
+          const templateName = normalizeTemplateName(String(msg?.templateMeta?.name || "").trim());
+          const tpl =
+            (templateId && templateById.get(templateId)) ||
+            (templateName && templateByName.get(templateName)) ||
+            null;
+          if (!tpl) continue;
+
+          const buttons = extractTemplateButtonsFromTemplate(tpl);
+          if (!buttons.length) continue;
+
+          msg.templateMeta = {
+            ...(msg.templateMeta || {}),
+            buttons,
+          };
+        }
+      }
+    }
 
     const byIdentity = new Map();
     for (const msg of rows || []) {

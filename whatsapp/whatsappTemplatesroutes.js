@@ -370,10 +370,16 @@ function getSyntheticComponentsFromJsonStruct(t = {}) {
     });
   }
 
-  if (Array.isArray(js.buttons) && js.buttons.length) {
+  const jsonButtons = Array.isArray(js?.buttons)
+    ? js.buttons
+    : Array.isArray(js?.buttons?.buttons)
+    ? js.buttons.buttons
+    : [];
+
+  if (jsonButtons.length) {
     components.push({
       type: "BUTTONS",
-      buttons: js.buttons.map((button) => ({
+      buttons: jsonButtons.map((button) => ({
         type: String(
           button?.type ||
             button?.sub_type ||
