@@ -299,6 +299,18 @@ function buildConversationPhoneQuery(phone = "") {
     : {};
 }
 
+async function canAccessConversationPhone(phone, accessContext) {
+  const phoneQuery = buildConversationPhoneQuery(phone);
+  if (!Object.keys(phoneQuery).length) return false;
+  const accessQuery = buildConversationAccessQuery(accessContext);
+  const conversation = await WhatsAppConversation.findOne(
+    mergeMongoQueries(phoneQuery, accessQuery)
+  )
+    .select("_id")
+    .lean();
+  return Boolean(conversation?._id);
+}
+
 function buildConversationCursorQuery(cursorInfo) {
   if (!cursorInfo?.ts || !cursorInfo?.id) return {};
   return {
@@ -575,6 +587,25 @@ async function resolveConversationAccessContext({ role, userName, userId, hasTea
   }
 
   return context;
+}
+
+async function resolveConversationAccessContextFromRequest(req, source = {}) {
+  const sessionUser = req?.sessionUser || req?.session?.user || {};
+  const role = source.role || sessionUser.role || "";
+  const userName = source.userName || sessionUser.fullName || sessionUser.name || "";
+  const userId = source.userId || sessionUser._id || sessionUser.id || "";
+  const hasTeam =
+    source.hasTeam !== undefined && source.hasTeam !== null
+      ? source.hasTeam
+      : sessionUser.hasTeam;
+
+  return resolveConversationAccessContext({
+    role,
+    userName,
+    userId,
+    hasTeam,
+    chatScope: source.chatScope,
+  });
 }
 
 function applyConversationAccessFilter(conversations = [], context) {
@@ -2794,6 +2825,16 @@ router.post("/conversations/mark-read", async (req, res) => {
     const phoneRaw = req.body?.phone || "";
     const p10 = last10(phoneRaw);
     if (!p10) return res.status(400).json({ message: "phone required" });
+    const accessContext = await resolveConversationAccessContextFromRequest(req, {
+      role: req.body?.role || req.query?.role,
+      userName: req.body?.userName || req.query?.userName,
+      userId: req.body?.userId || req.query?.userId,
+      hasTeam: req.body?.hasTeam || req.query?.hasTeam,
+      chatScope: req.body?.chatScope || req.query?.chatScope,
+    });
+
+    const allowed = await canAccessConversationPhone(p10, accessContext);
+    if (!allowed) return res.status(403).json({ message: "Forbidden" });
 
     const now = new Date();
 
@@ -2833,7 +2874,7 @@ router.get("/conversations", async (req, res) => {
       includeCounts,
       includeAgentOptions,
     } = req.query;
-    const accessContext = await resolveConversationAccessContext({
+    const accessContext = await resolveConversationAccessContextFromRequest(req, {
       role,
       userName,
       userId,
@@ -2930,6 +2971,17 @@ router.get("/messages", async (req, res) => {
   try {
     const q = digitsOnly(req.query.phone);
     if (!q) return res.status(400).json({ message: "phone required" });
+    const accessContext = await resolveConversationAccessContextFromRequest(req, {
+      role: req.query?.role,
+      userName: req.query?.userName,
+      userId: req.query?.userId,
+      hasTeam: req.query?.hasTeam,
+      chatScope: req.query?.chatScope,
+    });
+
+    const allowed = await canAccessConversationPhone(q, accessContext);
+    if (!allowed) return res.status(403).json({ message: "Forbidden" });
+
     const limitRaw = Number(req.query.limit || 0);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0
       ? Math.min(100, Math.floor(limitRaw))
