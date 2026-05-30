@@ -34,12 +34,10 @@ function computeCalorieTarget(tdee, goal) {
 }
 
 
-// SmartCalorie target: proprietary satiety-weighted budget
-// Plans are assembled to hit this value, biasing toward high-Score (high-fiber) foods.
-// Reference ratios: Score-9 = 3.2%, Score-6 = 4.5%, Score-3 = 5%, Score-1 = 6%
-// Mixed-diet average ≈ 4% of actual kcal
+// SmartCalorie target: proprietary satiety-weighted budget.
+// Plans use the spec's Score-9 baseline ratio for the daily target.
 function computeSmartCalorieTarget(calorieTarget) {
- return parseFloat((calorieTarget * 0.04).toFixed(2));
+ return parseFloat((calorieTarget * 0.032).toFixed(2));
 }
 
 

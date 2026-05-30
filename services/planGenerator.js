@@ -56,7 +56,7 @@ function getActiveSlotIndices(mealsPerDay) {
 // ─── Field normalization ───────────────────────────────────────────────────────
 // Each food collection has slight naming inconsistencies; normalize to a single shape.
 function normalizeFood(raw, source) {
- const name = String(raw.Food || raw.Name || '').trim();
+ const name = String(raw.Food || raw.Name || raw.foodItem || '').trim();
  if (!name) return null;
 
 
@@ -342,14 +342,12 @@ function sortByPriorityAndScore(foods, healthConditions, scBudget, communityCode
    const aCommunity = communityPriority(a, communityCodes);
    const bCommunity = communityPriority(b, communityCodes);
    if (bCommunity !== aCommunity) return bCommunity - aCommunity;
-   if (sourceRank(b) !== sourceRank(a)) return sourceRank(b) - sourceRank(a);
    if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
-   if (completenessScore(b) !== completenessScore(a)) return completenessScore(b) - completenessScore(a);
-   if (scBudget) {
-     const aFit = Math.abs(scBudget - a.smartCalories);
-     const bFit = Math.abs(scBudget - b.smartCalories);
-     if (aFit !== bFit) return aFit - bFit;
+   if ((a.smartCalories || 0) !== (b.smartCalories || 0)) {
+     return (a.smartCalories || 0) - (b.smartCalories || 0);
    }
+   if (sourceRank(b) !== sourceRank(a)) return sourceRank(b) - sourceRank(a);
+   if (completenessScore(b) !== completenessScore(a)) return completenessScore(b) - completenessScore(a);
    return a.name.localeCompare(b.name);
  });
 }
@@ -627,6 +625,7 @@ async function generatePlan(profile) {
  for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
    const usedFoodIds = new Set();
    const slots = [];
+   let carriedSmartCalories = 0;
 
 
    for (const slot of SLOT_CONFIG) {
@@ -635,7 +634,10 @@ async function generatePlan(profile) {
 
 
      if (isActive) {
-       foods = selectFoodsForSlot(slot, sortedPool, slotBudget[slot.index] || 0, usedFoodIds, dayIdx, healthConditions, communityCodes);
+       const budgetForSlot = (slotBudget[slot.index] || 0) + carriedSmartCalories;
+       foods = selectFoodsForSlot(slot, sortedPool, budgetForSlot, usedFoodIds, dayIdx, healthConditions, communityCodes);
+       const usedSmartCalories = foods.reduce((s, f) => s + f.smartCalories, 0);
+       carriedSmartCalories = Math.max(0, budgetForSlot - usedSmartCalories);
      }
 
 
@@ -684,6 +686,9 @@ async function getSwapOptions(slotIndex, profile, dayIndex = 0) {
  const rawPool = filteredNormalizedFoods(rawGroups, profile, [
    'food_recipes',
    'homeBased',
+   'food_by_cat',
+   'Packaged',
+   'restaurants',
  ]);
 
 
@@ -711,7 +716,6 @@ async function getSwapOptions(slotIndex, profile, dayIndex = 0) {
   }
 
   let options = sortByPriorityAndScore(filtered, profile.healthConditions, null, profile.communityCodes)
-    .filter(f => PRIMARY_SOURCES.has(f.source) || SECONDARY_SOURCES.has(f.source))
     .filter(f => !CONDIMENT_RE.test(f.name))
     .filter(f => !(CORE_SLOT_INDICES.has(slot.index) && String(f.brandName || '').trim() && f.source === 'food_by_cat'));
 
@@ -738,10 +742,15 @@ async function getFoodDetails(source, foodId, profile = null, slotIndex = null) 
  if (!Model || !foodId) return null;
 
 
- const numericFoodId = Number(foodId);
- const idFilters = [{ _id: foodId }, { code: foodId }];
+ const foodIdText = String(foodId).trim();
+ const numericFoodId = Number(foodIdText);
+ const idFilters = [{ code: foodIdText }];
+ if (source !== 'food_recipes' || /^[a-f\d]{24}$/i.test(foodIdText)) {
+   idFilters.push({ _id: foodIdText });
+ }
  if (!Number.isNaN(numericFoodId)) {
-   idFilters.push({ _id: numericFoodId }, { code: numericFoodId });
+   idFilters.push({ code: numericFoodId });
+   if (source !== 'food_recipes') idFilters.push({ _id: numericFoodId });
  }
 
 
@@ -777,7 +786,9 @@ async function searchFoods(profile, q, slotIndex = null) {
    const slot = SLOT_CONFIG[Number(slotIndex)];
    if (slot) {
      const typeSet = new Set(slot.typeCodes);
-      pool = pool.filter(f => f.typeArr.some(t => typeSet.has(t)));
+      pool = pool
+        .filter(f => f.typeArr.some(t => typeSet.has(t)))
+        .filter(f => isSlotAppropriateFood(slot, f));
     }
   }
 
