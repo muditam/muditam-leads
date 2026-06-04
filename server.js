@@ -147,7 +147,6 @@ const vendorsRoute = require("./routes/vendorsname");
 const purchaseRoute = require("./routes/PurchaseRcrds");
 const paymentRoute = require("./routes/paymentRcrds");
 const shopifyExport = require("./routes/shopifyExport"); 
-const notificationsRoutes = require("./routes/notifications");
 
 const WhatsAppRoutes = require("./whatsapp/whatsapp.routes");
 const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes"); 
@@ -322,7 +321,11 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   proxy: isProd,
-  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGO_URI,
+    // Reduce write amplification from frequent authenticated requests.
+    touchAfter: 24 * 3600,
+  }),
   cookie: {
     httpOnly: true,
     sameSite: isProd ? "none" : "lax",
@@ -773,7 +776,6 @@ app.use("/api/purchase-records", purchaseRoute);
 app.use("/api/payment-records", paymentRoute);
 
 app.use("/api/shopify", shopifyExport); 
-app.use("/api/notifications", notificationsRoutes);
 
 app.use("/api/whatsapp", WhatsAppRoutes);
 app.use("/api/whatsapp/templates", whatsappTemplatesRoutes); 
