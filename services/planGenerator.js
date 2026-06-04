@@ -242,22 +242,66 @@ function passesCommunityFilter(food, communityCodes) {
  return food.communityArr.some(c => allowed.has(c));
 }
 
+function normalizeProfileToken(value) {
+ return String(value || '')
+   .toLowerCase()
+   .replace(/[^a-z0-9]+/g, '');
+}
+
+const HEALTH_CONDITION_ALIASES = {
+ hypertension: ['hypertension', 'highbloodpressure', 'bloodpressure', 'bp'],
+ anemia: ['anemia'],
+ thyroid: ['thyroid', 'hypothyroidism', 'hypothyroid'],
+ liverDisease: ['liverdisease', 'fattyliver', 'liver'],
+ inflammation: ['inflammation', 'inflammatory'],
+ calciumDeficiency: ['calciumdeficiency'],
+ proteinDeficiency: ['proteindeficiency'],
+ vitaminDDeficiency: ['vitaminddeficiency'],
+ vitaminB12Deficiency: ['vitaminb12deficiency', 'b12deficiency'],
+ uricAcid: ['uricacid', 'uricacidproblem'],
+ pcos: ['pcos'],
+ cholesterolHeart: ['cholesterolheart', 'cholesterol', 'highcholesterol', 'heartdisease', 'heart'],
+ diabetes: ['diabetes'],
+ digestionAcidityConstipation: ['digestionacidityconstipation', 'ibs', 'digestion', 'acidity', 'constipation'],
+ sleepDisorder: ['sleepdisorder', 'insomnia', 'sleep'],
+ ironDeficiency: ['irondeficiency', 'anemia'],
+ prediabetes: ['prediabetes', 'prediabetic', 'diabetes'],
+};
+
+function expandHealthConditionAliases(healthConditions = []) {
+ const expanded = new Set();
+ for (const condition of healthConditions) {
+   const normalized = normalizeProfileToken(condition);
+   expanded.add(normalized);
+   for (const alias of HEALTH_CONDITION_ALIASES[condition] || HEALTH_CONDITION_ALIASES[normalized] || []) {
+     expanded.add(normalizeProfileToken(alias));
+   }
+ }
+ return expanded;
+}
+
 
 // ─── Step 5 – health conditions filter (in-memory) ────────────────────────────
 function passesConditionsFilter(food, healthConditions) {
  if (!healthConditions || healthConditions.length === 0) return true;
  if (food.avoidIn.length === 0) return true;
- const avoid = new Set(food.avoidIn.map(s => s.toLowerCase()));
- return !healthConditions.some(c => avoid.has(c.toLowerCase()));
+ const selectedConditions = expandHealthConditionAliases(healthConditions);
+ const avoid = new Set(food.avoidIn.map(normalizeProfileToken));
+ for (const condition of selectedConditions) {
+   if (avoid.has(condition)) return false;
+ }
+ return true;
 }
 
 
 // ─── Step 6 – allergy filter (in-memory) ──────────────────────────────────────
 // Allergy codes → keywords to match against food name / avoidIn
 const ALLERGY_KW = {
- SF:  ['seafood', 'fish', 'prawn', 'shrimp', 'crab', 'lobster', 'tuna', 'salmon'],
+ FI:  ['fish', 'tuna', 'salmon', 'sardine', 'mackerel', 'anchovy'],
+ SF:  ['seafood', 'prawn', 'shrimp', 'crab', 'lobster', 'mussel', 'oyster', 'clam', 'squid', 'octopus'],
  SO:  ['seafood', 'fish', 'prawn', 'shrimp'],
  ML:  ['milk', 'dairy', 'curd', 'yogurt', 'cheese', 'paneer', 'butter', 'ghee', 'cream', 'lactose', 'lassi', 'whey'],
+ SY:  ['soya', 'soy', 'soybean', 'soybeans', 'tofu', 'tempeh', 'soymilk'],
  G:   ['gluten', 'wheat', 'maida', 'barley', 'rye', 'semolina', 'rava', 'suji', 'pasta', 'noodle', 'bread', 'roti', 'paratha', 'biscuit'],
 };
 
@@ -334,10 +378,10 @@ function dedupeFoods(foods) {
 
 // ─── Sorting: recommended foods first, then Score/source/completeness ─────────
 function sortByPriorityAndScore(foods, healthConditions, scBudget, communityCodes = []) {
- const condSet = new Set((healthConditions || []).map(c => c.toLowerCase()));
+ const condSet = expandHealthConditionAliases(healthConditions);
  return foods.slice().sort((a, b) => {
-   const aRec = a.recommendedIn.some(r => condSet.has(r.toLowerCase())) ? 1 : 0;
-   const bRec = b.recommendedIn.some(r => condSet.has(r.toLowerCase())) ? 1 : 0;
+   const aRec = a.recommendedIn.some(r => condSet.has(normalizeProfileToken(r))) ? 1 : 0;
+   const bRec = b.recommendedIn.some(r => condSet.has(normalizeProfileToken(r))) ? 1 : 0;
    if (bRec !== aRec) return bRec - aRec;
    const aCommunity = communityPriority(a, communityCodes);
    const bCommunity = communityPriority(b, communityCodes);
@@ -849,6 +893,4 @@ module.exports = {
  sortByPriorityAndScore,
  searchFoods,
 };
-
-
 

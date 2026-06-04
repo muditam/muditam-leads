@@ -27,7 +27,7 @@ const ZoomCallLog = require("../models/ZoomCallLog");
     if (!entry) return null;
     if (Date.now() > entry.expires) {
       cache.delete(key);
-      return null;q
+      return null;
     }
     return entry.data;
   }
@@ -1677,6 +1677,127 @@ router.get("/cohort-analysis", async (req, res) => {
     return res.status(500).json({ 
       error: "Failed to compute cohort",
       details: err.message 
+    });
+  }
+});
+
+router.get("/cohort-analysis/customers", async (req, res) => {
+  try {
+    const cohort = String(req.query.cohort || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(cohort)) {
+      return res.status(400).json({ error: "Valid cohort is required in YYYY-MM format" });
+    }
+
+    const firstOrders = await ShopifyOrder.aggregate(
+      [
+        {
+          $match: {
+            normalizedPhone: { $exists: true, $ne: "" },
+            orderDate: { $type: "date" },
+          },
+        },
+        { $sort: { normalizedPhone: 1, orderDate: 1, _id: 1 } },
+        {
+          $group: {
+            _id: "$normalizedPhone",
+            firstOrderDate: { $first: "$orderDate" },
+            customerName: { $first: "$customerName" },
+          },
+        },
+        {
+          $addFields: {
+            cohortKey: {
+              $dateToString: { format: "%Y-%m", date: "$firstOrderDate" },
+            },
+          },
+        },
+        { $match: { cohortKey: cohort } },
+      ],
+      { allowDiskUse: true }
+    );
+
+    if (!firstOrders.length) {
+      return res.json({
+        cohort,
+        summary: {
+          totalCustomers: 0,
+          assignedCustomers: 0,
+          unassignedCustomers: 0,
+          uniqueHealthExperts: 0,
+        },
+        rows: [],
+      });
+    }
+
+    const normalizePhone = (phone) => {
+      if (!phone) return "";
+      const digits = String(phone).replace(/\D/g, "");
+      return digits.length >= 10 ? digits.slice(-10) : digits;
+    };
+
+    const phones = firstOrders.map((row) => normalizePhone(row._id)).filter(Boolean);
+    const leadRows = await Lead.find(
+      { contactNumber: { $in: phones } },
+      "name contactNumber healthExpertAssigned retentionStatus salesStatus leadStatus"
+    ).lean();
+
+    const leadByPhone = new Map();
+    for (const lead of leadRows) {
+      const phone = normalizePhone(lead?.contactNumber);
+      if (!phone) continue;
+
+      const nextAssigned = String(lead?.healthExpertAssigned || "").trim();
+      const prev = leadByPhone.get(phone);
+      const prevAssigned = String(prev?.healthExpertAssigned || "").trim();
+
+      if (!prev || (!prevAssigned && nextAssigned)) {
+        leadByPhone.set(phone, lead);
+      }
+    }
+
+    const rows = firstOrders
+      .map((row) => {
+        const phone = normalizePhone(row._id);
+        const lead = leadByPhone.get(phone) || {};
+        return {
+          customerName:
+            String(row?.customerName || "").trim() ||
+            String(lead?.name || "").trim() ||
+            "Unknown",
+          contactNumber: phone,
+          firstOrderDate: row.firstOrderDate,
+          healthExpertAssigned: String(lead?.healthExpertAssigned || "").trim(),
+          retentionStatus: String(lead?.retentionStatus || "").trim(),
+          salesStatus: String(lead?.salesStatus || "").trim(),
+          leadStatus: String(lead?.leadStatus || "").trim(),
+        };
+      })
+      .sort((a, b) => {
+        const da = a.firstOrderDate ? new Date(a.firstOrderDate).getTime() : 0;
+        const db = b.firstOrderDate ? new Date(b.firstOrderDate).getTime() : 0;
+        return db - da;
+      });
+
+    const assignedCustomers = rows.filter((row) => row.healthExpertAssigned).length;
+    const uniqueHealthExperts = new Set(
+      rows.map((row) => row.healthExpertAssigned).filter(Boolean)
+    ).size;
+
+    return res.json({
+      cohort,
+      summary: {
+        totalCustomers: rows.length,
+        assignedCustomers,
+        unassignedCustomers: Math.max(0, rows.length - assignedCustomers),
+        uniqueHealthExperts,
+      },
+      rows,
+    });
+  } catch (err) {
+    console.error("GET /cohort-analysis/customers error:", err);
+    return res.status(500).json({
+      error: "Failed to load cohort customers",
+      details: err.message,
     });
   }
 });

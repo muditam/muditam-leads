@@ -46,6 +46,113 @@ const HOLD_KEYWORDS = ["hold"];
 const CANCELED_KEYWORDS = ["cancelled", "canceled", "cancel"];
 const AMBIGUOUS_COMPLETE_STATUSES = new Set(["complete", "completed"]);
 const STATUS_PENDING = "Status Pending";
+const STATUS_PROCESSING = "Processing";
+const STATUS_IN_TRANSIT = "In Transit";
+const STATUS_DELIVERED = "Delivered";
+const STATUS_RTO = "RTO";
+const STATUS_RTO_DELIVERED = "RTO Delivered";
+const STATUS_UNDELIVERED = "Undelivered";
+const STATUS_CANCELED = "Canceled";
+const STATUS_UNKNOWN = "UNKNOWN";
+const ALLOWED_FINAL_STATUSES = new Set([
+  STATUS_DELIVERED,
+  STATUS_RTO,
+  STATUS_IN_TRANSIT,
+  STATUS_PROCESSING,
+  STATUS_RTO_DELIVERED,
+  STATUS_UNDELIVERED,
+]);
+
+const EXACT_DELIVERED_CODES = new Set([
+  "DELIVERED",
+  "DELIVERED_TO_CUSTOMER",
+  "DELIVERED_SHIPMENT_DELIVERED",
+]);
+
+const EXACT_RTO_DELIVERED_CODES = new Set([
+  "RTO_DELIVERED_TO_SELLER",
+]);
+
+const EXACT_RTO_CODES = new Set([
+  "RTO_INITIATED",
+  "RTO_IN_TRANSIT",
+  "RTO_DELAYED",
+  "RTO_REACHED_AT_DESTINATION",
+  "RTO_OUT_FOR_DELIVERY",
+  "RTO_UNDELIVERED",
+  "RTO_LOST",
+  "RETURN_PENDING",
+  "RETURNED_TO_ORIGIN",
+  "RETURNED_CONSIGNEE_ADDRESS_INCOMPLETE",
+  "RETURNED_CONSIGNEE_ADDRESS_INCORRECT",
+  "RETURNED_CONSIGNEE_NOT_AVAILABLE",
+  "RETURNED_CONSIGNEE_REFUSED_TO_ACCEPT",
+  "RETURNED_CONSIGNEE_REFUSED_TO_PAY",
+  "RETURNED_OUT_OF_DELIVERY_AREA",
+]);
+
+const EXACT_UNDELIVERED_CODES = new Set([
+  "UNDELIVERED",
+  "NOT_SERVICEABLE",
+  "INCORRECT_WAYBILL_NUMBER",
+  "PENDING_CONSIGNEE_ADDRESS_INCOMPLETE",
+  "PENDING_CONSIGNEE_ADDRESS_INCORRECT",
+  "PENDING_CONSIGNEE_NOT_AVAILABLE",
+  "PENDING_CONSIGNEE_REFUSED_TO_ACCEPT",
+  "PENDING_CONSIGNEE_REFUSED_TO_PAY",
+  "PENDING_OUT_OF_DELIVERY_AREA",
+  "PENDING_PROHIBITED_AREA",
+  "PENDING_SCHEDULED_FOR_NEXT_DAY_DELIVERY",
+  "DAMAGED",
+  "DESTROYED",
+  "LOST",
+]);
+
+const EXACT_IN_TRANSIT_CODES = new Set([
+  "COMPLETE",
+  "DISPATCHED",
+  "PICKED_UP",
+  "IN_TRANSIT",
+  "DELAYED",
+  "HELD",
+  "REACHED_AT_DESTINATION",
+  "OUT_FOR_DELIVERY",
+  "PARTIALLY_DELIVERED",
+  "CUSTOM_CLEARED",
+  "STATUS_NOT_DEFINED",
+  "CONTACT_CUSTOMER_CARE",
+  "NO_INFORMATION",
+  "PENDING_AWAITING_DELIVERY_INFORMATION",
+  "PENDING_DELAYED",
+  "PENDING_IN_TRANSIT",
+  "PENDING_MISROUTED",
+  "PENDING_NO_INFORMATION",
+  "PENDING_REDIRECTED_SHIPMENT",
+  "PENDING_SHIPMENT_CONFISCATED",
+  "PENDING_SHIPMENT_HELD_AT_DESTINATION",
+  "PENDING_SHIPMENT_MANIFESTED_NOT_RECEIVED",
+]);
+
+const EXACT_PROCESSING_CODES = new Set([
+  "CREATED",
+  "PROCESSING",
+  "PENDING_VERIFICATION",
+  "PICKING",
+  "PICKED",
+  "PACKED",
+  "READY_TO_SHIP",
+  "COURIER_ASSIGNED",
+  "PICKUP_PENDING",
+  "PICKUP_RESCHEDULED",
+  "OUT_FOR_PICKUP",
+  "MANIFESTED",
+]);
+
+const EXACT_CANCELED_CODES = new Set([
+  "CANCELLED",
+  "CANCELED",
+  "ORDER_CANCELLED",
+]);
 
 async function getUniwareToken() {
   const now = Date.now();
@@ -98,6 +205,13 @@ function normalizeText(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+}
+
 function joinText(values = []) {
   return values
     .filter(Boolean)
@@ -118,7 +232,15 @@ function isRtoText(text) {
 }
 
 function isDeliveredText(text) {
-  return hasAny(text, DELIVERED_KEYWORDS);
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  return /\bdelivered\b/.test(normalized) && !/\bundelivered\b/.test(normalized);
+}
+
+function isUndeliveredText(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  return /\bundelivered\b/.test(normalized) || normalized.includes("not delivered");
 }
 
 function isTransitText(text) {
@@ -139,8 +261,19 @@ function isAmbiguousCompleteStatus(value) {
 
 function normalizeFallbackStatus(value) {
   if (!value) return STATUS_PENDING;
-  if (isAmbiguousCompleteStatus(value)) return STATUS_PENDING;
+  if (isAmbiguousCompleteStatus(value)) return STATUS_IN_TRANSIT;
   return value;
+}
+
+function firstMatchingStatus(codes = []) {
+  if (codes.some((code) => EXACT_RTO_DELIVERED_CODES.has(code))) return STATUS_RTO_DELIVERED;
+  if (codes.some((code) => EXACT_DELIVERED_CODES.has(code))) return STATUS_DELIVERED;
+  if (codes.some((code) => EXACT_RTO_CODES.has(code))) return STATUS_RTO;
+  if (codes.some((code) => EXACT_UNDELIVERED_CODES.has(code))) return STATUS_UNDELIVERED;
+  if (codes.some((code) => EXACT_IN_TRANSIT_CODES.has(code))) return STATUS_IN_TRANSIT;
+  if (codes.some((code) => EXACT_PROCESSING_CODES.has(code))) return STATUS_PROCESSING;
+  if (codes.some((code) => EXACT_CANCELED_CODES.has(code))) return STATUS_CANCELED;
+  return "";
 }
 
 function getOrderItems(saleOrder = {}, saleOrderDetails = null) {
@@ -172,16 +305,34 @@ function getItemStatusText(item = {}) {
   ]);
 }
 
+function getItemStatusCodes(item = {}) {
+  return [
+    item?.statusCode,
+    item?.status,
+    item?.itemStatus,
+    item?.orderItemStatus,
+    item?.shippingStatus,
+    item?.fulfillmentStatus,
+    item?.returnStatus,
+    item?.reversePickupStatus,
+    item?.rtoStatus,
+  ]
+    .filter(Boolean)
+    .map(normalizeCode);
+}
+
 function mapSingleItemStatus(item = {}) {
+  const exact = firstMatchingStatus(getItemStatusCodes(item));
+  if (exact) return exact;
+
   const txt = getItemStatusText(item);
 
   if (!txt) return "";
-  if (txt.includes("courier_return")) {
-    return "RTO";
-  }
-  if (txt.includes("delivered")) return "Delivered";
-  if (txt.includes("dispatched") || txt.includes("dispatch")) return "In Transit";
-  if (isCanceledText(txt)) return "Canceled";
+  if (txt.includes("courier_return") || isRtoText(txt)) return STATUS_RTO;
+  if (isUndeliveredText(txt)) return STATUS_UNDELIVERED;
+  if (isDeliveredText(txt)) return STATUS_DELIVERED;
+  if (isTransitText(txt)) return STATUS_IN_TRANSIT;
+  if (isCanceledText(txt)) return STATUS_CANCELED;
 
   return "";
 }
@@ -246,7 +397,9 @@ function getOrderDate(saleOrder = {}, saleOrderDetails = null) {
   return (
     safeDate(saleOrder?.displayOrderDateTime) ||
     safeDate(saleOrder?.created) ||
+    safeDate(saleOrder?.createdOn) ||
     safeDate(saleOrderDetails?.created) ||
+    safeDate(saleOrderDetails?.createdOn) ||
     null
   );
 }
@@ -257,16 +410,24 @@ function chooseLatestPackage(packages = []) {
   return [...packages].sort((a, b) => {
     const ad =
       safeDate(a.updated) ||
+      safeDate(a.updatedOn) ||
       safeDate(a.delivered) ||
+      safeDate(a.deliveredOn) ||
       safeDate(a.dispatched) ||
+      safeDate(a.dispatchedOn) ||
       safeDate(a.created) ||
+      safeDate(a.createdOn) ||
       new Date(0);
 
     const bd =
       safeDate(b.updated) ||
+      safeDate(b.updatedOn) ||
       safeDate(b.delivered) ||
+      safeDate(b.deliveredOn) ||
       safeDate(b.dispatched) ||
+      safeDate(b.dispatchedOn) ||
       safeDate(b.created) ||
+      safeDate(b.createdOn) ||
       new Date(0);
 
     return bd - ad;
@@ -309,7 +470,48 @@ function getOrderLevelStatusText(saleOrder = {}, saleOrderDetails = null) {
   ]);
 }
 
+function getPackageStatusCodes(pkg = {}) {
+  return [
+    pkg?.statusCode,
+    pkg?.trackingStatus,
+    pkg?.courierStatus,
+    pkg?.status,
+    pkg?.currentStatus,
+    pkg?.shippingStatus,
+    pkg?.latestTrackingEvent,
+    pkg?.eventName,
+  ]
+    .filter(Boolean)
+    .map(normalizeCode);
+}
+
+function getOrderLevelStatusCodes(saleOrder = {}, saleOrderDetails = null) {
+  return [
+    saleOrder?.status,
+    saleOrder?.orderStatus,
+    saleOrder?.displayStatus,
+    saleOrder?.statusCode,
+    saleOrder?.state,
+    saleOrder?.shippingStatus,
+    saleOrder?.fulfillmentStatus,
+    saleOrder?.currentStatus,
+    saleOrderDetails?.status,
+    saleOrderDetails?.orderStatus,
+    saleOrderDetails?.displayStatus,
+    saleOrderDetails?.statusCode,
+    saleOrderDetails?.state,
+    saleOrderDetails?.shippingStatus,
+    saleOrderDetails?.fulfillmentStatus,
+    saleOrderDetails?.currentStatus,
+  ]
+    .filter(Boolean)
+    .map(normalizeCode);
+}
+
 function mapSinglePackageStatus(pkg = {}) {
+  const exact = firstMatchingStatus(getPackageStatusCodes(pkg));
+  if (exact) return exact;
+
   const txt = getPackageStatusText(pkg);
 
   const hasRto = isRtoText(txt);
@@ -317,16 +519,18 @@ function mapSinglePackageStatus(pkg = {}) {
   const hasTransit = Boolean(pkg?.dispatched) || isTransitText(txt);
   const hasHold = isHoldText(txt);
   const hasCanceled = isCanceledText(txt);
+  const hasUndelivered = isUndeliveredText(txt);
 
-  if (hasRto && hasDelivered) return "RTO Delivered";
-  if (hasRto) return "RTO";
-  if (hasDelivered) return "Delivered";
-  if (hasTransit) return "In Transit";
-  if (hasHold) return "On Hold";
-  if (hasCanceled) return "Canceled";
+  if (hasRto && hasDelivered) return STATUS_RTO_DELIVERED;
+  if (hasRto) return STATUS_RTO;
+  if (hasUndelivered) return STATUS_UNDELIVERED;
+  if (hasDelivered) return STATUS_DELIVERED;
+  if (hasTransit) return STATUS_IN_TRANSIT;
+  if (hasHold) return STATUS_IN_TRANSIT;
+  if (hasCanceled) return STATUS_CANCELED;
 
   return normalizeFallbackStatus(
-    pkg?.trackingStatus || pkg?.courierStatus || pkg?.status || ""
+    pkg?.statusCode || pkg?.trackingStatus || pkg?.courierStatus || pkg?.status || ""
   );
 }
 
@@ -342,6 +546,8 @@ function deriveShipmentStatus({
   packages = [],
 }) {
   const orderText = getOrderLevelStatusText(saleOrder, saleOrderDetails);
+  const orderCodes = getOrderLevelStatusCodes(saleOrder, saleOrderDetails);
+  const orderExactStatus = firstMatchingStatus(orderCodes);
   const latestPkg = chooseLatestPackage(packages);
   const latestPkgStatus = latestPkg ? mapSinglePackageStatus(latestPkg) : "";
   const orderItems = getOrderItems(saleOrder, saleOrderDetails);
@@ -351,44 +557,41 @@ function deriveShipmentStatus({
     ? packages.map((pkg) => mapSinglePackageStatus(pkg)).filter(Boolean)
     : [];
 
-  const hasRtoFlow =
-    isRtoText(orderText) ||
-    itemStatuses.includes("RTO") ||
-    packageStatuses.includes("RTO") ||
-    packageStatuses.includes("RTO Delivered");
+  if (latestPkgStatus && latestPkgStatus !== STATUS_PENDING) return latestPkgStatus;
 
-  if (hasRtoFlow) {
-    if (
-      latestPkgStatus === "Delivered" ||
-      latestPkgStatus === "RTO Delivered" ||
-      packageStatuses.includes("RTO Delivered")
-    ) {
-      return "RTO Delivered";
-    }
+  if (packageStatuses.includes(STATUS_RTO_DELIVERED)) return STATUS_RTO_DELIVERED;
+  if (packageStatuses.includes(STATUS_RTO)) return STATUS_RTO;
+  if (packageStatuses.includes(STATUS_DELIVERED)) return STATUS_DELIVERED;
+  if (packageStatuses.includes(STATUS_UNDELIVERED)) return STATUS_UNDELIVERED;
+  if (packageStatuses.includes(STATUS_IN_TRANSIT)) return STATUS_IN_TRANSIT;
+  if (packageStatuses.includes(STATUS_PROCESSING)) return STATUS_PROCESSING;
+  if (packageStatuses.includes(STATUS_CANCELED)) return STATUS_CANCELED;
 
-    return "RTO";
-  }
+  if (itemStatuses.includes(STATUS_RTO_DELIVERED)) return STATUS_RTO_DELIVERED;
+  if (itemStatuses.includes(STATUS_RTO)) return STATUS_RTO;
+  if (itemStatuses.includes(STATUS_DELIVERED)) return STATUS_DELIVERED;
+  if (itemStatuses.includes(STATUS_UNDELIVERED)) return STATUS_UNDELIVERED;
+  if (itemStatuses.includes(STATUS_IN_TRANSIT)) return STATUS_IN_TRANSIT;
+  if (itemStatuses.includes(STATUS_PROCESSING)) return STATUS_PROCESSING;
+  if (itemStatuses.includes(STATUS_CANCELED)) return STATUS_CANCELED;
 
-  if (latestPkgStatus === "Delivered") return "Delivered";
-  if (latestPkgStatus === "In Transit") return "In Transit";
-  if (latestPkgStatus === "On Hold") return "On Hold";
-  if (latestPkgStatus === "Canceled") return "Canceled";
+  if (orderExactStatus) return orderExactStatus;
 
-  if (packageStatuses.includes("Delivered")) return "Delivered";
-  if (packageStatuses.includes("In Transit")) return "In Transit";
-  if (packageStatuses.includes("On Hold")) return "On Hold";
-  if (packageStatuses.includes("Canceled")) return "Canceled";
+  if (isRtoText(orderText) && isDeliveredText(orderText)) return STATUS_RTO_DELIVERED;
+  if (isRtoText(orderText)) return STATUS_RTO;
+  if (isUndeliveredText(orderText)) return STATUS_UNDELIVERED;
+  if (isDeliveredText(orderText)) return STATUS_DELIVERED;
+  if (isTransitText(orderText) || isAmbiguousCompleteStatus(orderText)) return STATUS_IN_TRANSIT;
+  if (normalizeCode(orderText) === "PROCESSING") return STATUS_PROCESSING;
+  if (isCanceledText(orderText)) return STATUS_CANCELED;
 
-  if (itemStatuses.includes("Delivered")) return "Delivered";
-  if (itemStatuses.includes("In Transit")) return "In Transit";
-  if (itemStatuses.includes("Canceled")) return "Canceled";
-
-  if (isDeliveredText(orderText)) return "Delivered";
-  if (isTransitText(orderText)) return "In Transit";
-  if (isHoldText(orderText)) return "On Hold";
-  if (isCanceledText(orderText)) return "Canceled";
-
-  return normalizeFallbackStatus(saleOrderDetails?.status || saleOrder?.status || "");
+  return normalizeFallbackStatus(
+    saleOrderDetails?.statusCode ||
+      saleOrderDetails?.status ||
+      saleOrder?.statusCode ||
+      saleOrder?.status ||
+      ""
+  );
 }
 
 async function searchSaleOrders({
@@ -596,11 +799,14 @@ router.get("/shopify-orders-live", async (req, res) => {
         let saleOrderDetails = null;
         let packages = [];
         let latestPkg = null;
+        let saleOrderFetchOk = true;
+        let packageFetchOk = true;
 
         try {
           saleOrderDetails = await getSaleOrder(accessToken, saleOrder.code);
         } catch (_) {
           saleOrderDetails = null;
+          saleOrderFetchOk = false;
         }
 
         try {
@@ -609,21 +815,30 @@ router.get("/shopify-orders-live", async (req, res) => {
         } catch (_) {
           packages = [];
           latestPkg = null;
+          packageFetchOk = false;
         }
 
         const orderId = getUnicommerceOrderId(saleOrder, saleOrderDetails);
+        const shipmentStatus = deriveShipmentStatus({
+          saleOrder,
+          saleOrderDetails,
+          packages,
+        });
 
         return {
           order_id: orderId || "-",
-          shipment_status: deriveShipmentStatus({
-            saleOrder,
-            saleOrderDetails,
-            packages,
-          }),
+          shipment_status: shipmentStatus,
           order_date: getOrderDate(saleOrder, saleOrderDetails),
           tracking_number: latestPkg?.trackingNumber || "",
           carrier_title: latestPkg?.shippingProvider || "",
           channel_text: getChannelText(saleOrder),
+          is_uncertain:
+            !saleOrderFetchOk || !packageFetchOk,
+          can_backfill:
+            saleOrderFetchOk &&
+            packageFetchOk &&
+            Boolean(orderId) &&
+            ALLOWED_FINAL_STATUSES.has(shipmentStatus),
         };
       }
     );
@@ -675,11 +890,14 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
         let saleOrderDetails = null;
         let packages = [];
         let latestPkg = null;
+        let saleOrderFetchOk = true;
+        let packageFetchOk = true;
 
         try {
           saleOrderDetails = await getSaleOrder(accessToken, saleOrder.code);
         } catch (_) {
           saleOrderDetails = null;
+          saleOrderFetchOk = false;
         }
 
         try {
@@ -688,10 +906,20 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
         } catch (_) {
           packages = [];
           latestPkg = null;
+          packageFetchOk = false;
         }
 
         const orderId = getUnicommerceOrderId(saleOrder, saleOrderDetails);
         if (!orderId) return null;
+
+        const shipmentStatus = deriveShipmentStatus({
+          saleOrder,
+          saleOrderDetails,
+          packages,
+        });
+
+        const isUncertain =
+          !saleOrderFetchOk || !packageFetchOk;
 
         let shopifyOrder = null;
         try {
@@ -702,11 +930,7 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
 
         return {
           order_id: orderId,
-          shipment_status: deriveShipmentStatus({
-            saleOrder,
-            saleOrderDetails,
-            packages,
-          }),
+          shipment_status: isUncertain ? STATUS_UNKNOWN : shipmentStatus,
           order_date: getOrderDate(saleOrder, saleOrderDetails),
           tracking_number: latestPkg?.trackingNumber || "",
           carrier_title: latestPkg?.shippingProvider || "",
@@ -720,11 +944,20 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
             shopifyOrder?.customerAddress?.name ||
             "",
           has_shopify_match: Boolean(shopifyOrder),
+          is_uncertain: isUncertain,
+          skip_reason: !isUncertain
+            ? ""
+            : !saleOrderFetchOk
+            ? "sale_order_fetch_failed"
+            : !packageFetchOk
+            ? "shipping_package_fetch_failed"
+            : "status_not_allowed",
         };
       }
     );
 
     const validRows = enrichedRows.filter((row) => row && row.order_id);
+    const uncertainRows = validRows.filter((row) => row.is_uncertain);
     const matchedShopifyCount = validRows.filter(
       (row) => row.has_shopify_match
     ).length;
@@ -738,10 +971,12 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
         rawOrdersSeen,
         totalFetchedShopifyChannelOrders: shopifyChannelOrders.length,
         totalProcessed: 0,
+        unknownCount: uncertainRows.length,
         matchedShopifyOrderCount: 0,
         inserted: 0,
         updated: 0,
         sample: [],
+        unknownSample: uncertainRows.slice(0, 10),
       });
     }
 
@@ -799,10 +1034,12 @@ router.post("/orders/backfill-shopify-to-order", async (req, res) => {
       rawOrdersSeen,
       totalFetchedShopifyChannelOrders: shopifyChannelOrders.length,
       totalProcessed: validRows.length,
+      unknownCount: uncertainRows.length,
       matchedShopifyOrderCount: matchedShopifyCount,
       inserted,
       updated,
       sample: validRows.slice(0, 10),
+      unknownSample: uncertainRows.slice(0, 10),
     });
   } catch (error) {
     console.error("Backfill error:", error?.response?.data || error.message);

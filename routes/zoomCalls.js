@@ -4,7 +4,11 @@ const requireSession = require("../middleware/requireSession");
 const ZoomCallLog = require("../models/ZoomCallLog");
 const ZoomToken = require("../models/ZoomToken");
 const { getUserIdFromReq, getValidAccessTokenForUser } = require("../services/zoomAuthService");
-const { isManagerRole, normalizeRole } = require("../utils/managerRoles");
+const {
+  isManagerRole,
+  normalizeRole,
+  canAccessCallingCenterManagerDashboard,
+} = require("../utils/managerRoles");
 const {
   syncCallHistoryWindow,
   syncCallHistoryWindowViaConnectedUsers,
@@ -188,11 +192,12 @@ router.get("/element/:callElementId", requireSession, async (req, res) => {
 router.get("/manager/overview", requireSession, async (req, res) => {
   try {
     const role = req.sessionUser?.role || "";
-    if (!isManagerRole(role)) {
+    if (!canAccessCallingCenterManagerDashboard(req.sessionUser)) {
       if (process.env.NODE_ENV !== "production") {
         console.warn("[calling-center] manager overview forbidden", {
           userId: String(getUserIdFromReq(req) || ""),
           normalizedRole: normalizeRole(role),
+          hasTeam: Boolean(req.sessionUser?.hasTeam),
         });
       }
       return res.status(403).json({ message: "Forbidden" });
@@ -270,11 +275,12 @@ router.get(
   requireSession,
   async (req, res) => {
   const role = req.sessionUser?.role || "";
-  if (!isManagerRole(role)) {
+  if (!canAccessCallingCenterManagerDashboard(req.sessionUser)) {
     if (process.env.NODE_ENV !== "production") {
       console.warn("[calling-center] manager stream forbidden", {
         userId: String(getUserIdFromReq(req) || ""),
         normalizedRole: normalizeRole(role),
+        hasTeam: Boolean(req.sessionUser?.hasTeam),
       });
     }
     return res.status(403).json({ message: "Forbidden" });
