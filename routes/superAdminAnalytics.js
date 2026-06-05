@@ -8,6 +8,7 @@ const Escalation = require("../models/escalation.model");
 const DietPlan = require("../models/DietPlan");
 const Employee = require("../models/Employee");
 const ZoomCallLog = require("../models/ZoomCallLog");
+const INDIA_TIMEZONE = "Asia/Kolkata";
   function getDateFilter(start, end) {
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
@@ -1498,7 +1499,11 @@ router.get("/cohort-analysis", async (req, res) => {
             _id: 1,
             firstOrder: 1,
             cohortKey: {
-              $dateToString: { format: "%Y-%m", date: "$firstOrder" },
+              $dateToString: {
+                format: "%Y-%m",
+                date: "$firstOrder",
+                timezone: INDIA_TIMEZONE,
+              },
             },
           },
         },
@@ -1701,13 +1706,18 @@ router.get("/cohort-analysis/customers", async (req, res) => {
           $group: {
             _id: "$normalizedPhone",
             firstOrderDate: { $first: "$orderDate" },
+            lastOrderDate: { $max: "$orderDate" },
             customerName: { $first: "$customerName" },
           },
         },
         {
           $addFields: {
             cohortKey: {
-              $dateToString: { format: "%Y-%m", date: "$firstOrderDate" },
+              $dateToString: {
+                format: "%Y-%m",
+                date: "$firstOrderDate",
+                timezone: INDIA_TIMEZONE,
+              },
             },
           },
         },
@@ -1766,6 +1776,7 @@ router.get("/cohort-analysis/customers", async (req, res) => {
             "Unknown",
           contactNumber: phone,
           firstOrderDate: row.firstOrderDate,
+          lastOrderDate: row.lastOrderDate,
           healthExpertAssigned: String(lead?.healthExpertAssigned || "").trim(),
           retentionStatus: String(lead?.retentionStatus || "").trim(),
           salesStatus: String(lead?.salesStatus || "").trim(),

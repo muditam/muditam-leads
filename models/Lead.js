@@ -33,6 +33,7 @@ const LeadSchema = new mongoose.Schema({
   retentionStatus: { type: String, default: "Active" },
   communicationMethod: String,
   preferredLanguage: String,
+  conditions: { type: [String], default: [] },
   rtRemark: String,
   rowColor: String,
   images: [ 
