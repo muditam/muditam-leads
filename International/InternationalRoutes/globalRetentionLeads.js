@@ -3,6 +3,23 @@ const express = require("express");
 const router = express.Router();
 const GlobalRetentionLead = require("../InternationalModel/GlobalRetentionLead");
 
+function normalizeConditionValues(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
 // helper: compute "days ago" from a Date
 function daysFromNow(date) {
   if (!date) return null;
@@ -175,7 +192,8 @@ router.post("/", async (req, res) => {
 
     const trimmedName = String(name).trim();
     const trimmedPhone = String(phoneNumber).trim();
-    const trimmedLookingFor = (lookingFor || "").trim();
+    const normalizedLookingFor = normalizeConditionValues(lookingFor);
+    const joinedLookingFor = normalizedLookingFor.join(", ");
 
     const update = {
       name: trimmedName,
@@ -183,8 +201,8 @@ router.post("/", async (req, res) => {
       phoneNumber: trimmedPhone,
       contactNumber: trimmedPhone,
       age: age ? Number(age) : undefined,
-      lookingFor: trimmedLookingFor,
-      condition: trimmedLookingFor,
+      lookingFor: joinedLookingFor,
+      condition: joinedLookingFor,
     };
 
     // if frontend sends full retention details while creating
@@ -245,6 +263,12 @@ router.patch("/:id", async (req, res) => {
     updatableFields.forEach((f) => {
       if (Object.prototype.hasOwnProperty.call(req.body, f)) {
         update[f] = req.body[f];
+      }
+    });
+
+    ["condition", "lookingFor"].forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(update, field)) {
+        update[field] = normalizeConditionValues(update[field]).join(", ");
       }
     });
 

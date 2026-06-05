@@ -2967,6 +2967,31 @@ router.get("/conversations", async (req, res) => {
   }
 });
 
+router.get("/conversations/summary", async (req, res) => {
+  try {
+    const { role, userName, userId, hasTeam, chatScope } = req.query;
+    const accessContext = await resolveConversationAccessContextFromRequest(req, {
+      role,
+      userName,
+      userId,
+      hasTeam,
+      chatScope,
+    });
+
+    const unread = await WhatsAppConversation.countDocuments(
+      mergeMongoQueries(
+        buildConversationAccessQuery(accessContext),
+        { unreadCount: { $gt: 0 } }
+      )
+    );
+
+    return res.json({ unread: Number(unread || 0) });
+  } catch (e) {
+    console.error("Conversation summary load error:", e);
+    return res.status(500).json({ message: "Failed to load conversation summary" });
+  }
+});
+
 router.get("/messages", async (req, res) => {
   try {
     const q = digitsOnly(req.query.phone);
@@ -3328,6 +3353,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       );
 
       if (!filename) {
+        
         filename = sanitizeFilename(
           path.basename(mediaUrl.split("?")[0] || "attachment")
         );
