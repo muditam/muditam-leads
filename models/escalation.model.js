@@ -11,6 +11,8 @@ const EscalationSchema = new mongoose.Schema({
   status: { type: String, default: 'Open' },
   assignedTo: String,
   remark: String, 
+  followUp: String,
+  finalClosure: String,
   resolvedDate: String,
   reason: String,
   amount: String,              

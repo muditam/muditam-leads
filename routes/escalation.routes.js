@@ -106,7 +106,7 @@ router.get('/', async (req, res) => {
         .limit(perPage)
         .select(
           'date orderId name contactNumber agentName query attachedFileUrls ' +
-          'status assignedTo remark resolvedDate reason createdAt trackingId ' +
+          'status assignedTo remark followUp finalClosure resolvedDate reason createdAt trackingId ' +
           'amount products'
         )
         .lean(),
@@ -206,6 +206,8 @@ router.post('/', upload.array('attachedFiles'), async (req, res) => {
       status: req.body.status || 'Open',
       assignedTo: req.body.assignedTo || '',
       remark: req.body.remark || '',
+      followUp: req.body.followUp || '',
+      finalClosure: req.body.finalClosure || '',
       resolvedDate: req.body.resolvedDate || '',
       reason: req.body.reason || '',
       amount,
@@ -231,6 +233,8 @@ router.put('/:id', async (req, res) => {
     if (req.body.status !== undefined)      updateFields.status = req.body.status;
     if (req.body.assignedTo !== undefined)  updateFields.assignedTo = req.body.assignedTo;
     if (req.body.remark !== undefined)      updateFields.remark = req.body.remark;
+    if (req.body.followUp !== undefined)    updateFields.followUp = req.body.followUp;
+    if (req.body.finalClosure !== undefined)updateFields.finalClosure = req.body.finalClosure;
     if (req.body.resolvedDate !== undefined)updateFields.resolvedDate = req.body.resolvedDate;
 
 

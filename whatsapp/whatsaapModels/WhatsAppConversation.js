@@ -14,6 +14,13 @@ const WhatsAppConversationSchema = new mongoose.Schema(
     assignedToLabel: { type: String, default: "Unassigned" },
     assignedToLabelNorm: { type: String, default: "unassigned", index: true },
     searchText: { type: String, default: "" },
+
+    unknownOwnerUserId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null, index: true },
+    unknownOwnerName: { type: String, default: "" },
+    unknownOwnerNameNorm: { type: String, default: "", index: true },
+    unknownVisibleToUserIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employee", index: true }],
+    unknownVisibleToNameNorms: [{ type: String, index: true }],
+    unknownSource: { type: String, default: "" },
  
     // session window
     windowExpiresAt: Date,
@@ -34,6 +41,8 @@ const WhatsAppConversationSchema = new mongoose.Schema(
 WhatsAppConversationSchema.index({ phone: 1, lastMessageAt: -1 });
 WhatsAppConversationSchema.index({ phone10: 1, lastMessageAt: -1 });
 WhatsAppConversationSchema.index({ assignedToLabelNorm: 1, lastMessageAt: -1 });
+WhatsAppConversationSchema.index({ unknownVisibleToUserIds: 1, lastMessageAt: -1 });
+WhatsAppConversationSchema.index({ unknownVisibleToNameNorms: 1, lastMessageAt: -1 });
 WhatsAppConversationSchema.index({ unreadCount: 1, lastMessageAt: -1 });
  
 module.exports = mongoose.model("WhatsAppConversation", WhatsAppConversationSchema);

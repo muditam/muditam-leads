@@ -236,6 +236,28 @@ function normalizeNameKey(v = "") {
   return String(v || "").trim().toLowerCase();
 }
 
+function toObjectId(value = "") {
+  const id = String(value || "").trim();
+  return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+}
+
+function buildUnknownConversationAccessClauses(context) {
+  if (!context) return [];
+
+  const clauses = [];
+  const userObjectId = toObjectId(context.userId);
+  const nameNorm = normalizeNameKey(context.selfName || context.normalizedUserName || "");
+
+  if (userObjectId) {
+    clauses.push({ unknownVisibleToUserIds: userObjectId });
+  }
+  if (nameNorm) {
+    clauses.push({ unknownVisibleToNameNorms: nameNorm });
+  }
+
+  return clauses;
+}
+
 function buildConversationAccessQuery(context, assignedTo = "") {
   const query = {};
   const assignedNormalized = normalizeNameKey(assignedTo);
@@ -246,15 +268,23 @@ function buildConversationAccessQuery(context, assignedTo = "") {
       ? Array.from(context.allowedNames).map((name) => normalizeNameKey(name)).filter(Boolean)
       : [];
 
+    let assignedAccess = {};
     if (context.mode === "team") {
-      query.assignedToLabelNorm = allowedNames.length
+      assignedAccess.assignedToLabelNorm = allowedNames.length
         ? { $in: allowedNames }
         : selfName || "__no_match__";
     } else if (context.mode === "combined") {
       const combined = Array.from(new Set([selfName, ...allowedNames].filter(Boolean)));
-      query.assignedToLabelNorm = combined.length ? { $in: combined } : "__no_match__";
+      assignedAccess.assignedToLabelNorm = combined.length ? { $in: combined } : "__no_match__";
     } else {
-      query.assignedToLabelNorm = selfName || "__no_match__";
+      assignedAccess.assignedToLabelNorm = selfName || "__no_match__";
+    }
+
+    const unknownAccess = buildUnknownConversationAccessClauses(context);
+    if (unknownAccess.length) {
+      query.$or = [assignedAccess, ...unknownAccess];
+    } else {
+      Object.assign(query, assignedAccess);
     }
   }
 
@@ -287,6 +317,17 @@ function buildConversationTabQuery(tab = "", favoritePhones = []) {
   return {};
 }
 
+function buildConversationDateQuery(dateStart = "", dateEnd = "") {
+  const start = dateStart ? new Date(dateStart) : null;
+  const end = dateEnd ? new Date(dateEnd) : null;
+  const range = {};
+
+  if (start && !Number.isNaN(start.getTime())) range.$gte = start;
+  if (end && !Number.isNaN(end.getTime())) range.$lte = end;
+
+  return Object.keys(range).length ? { lastMessageAt: range } : {};
+}
+
 function buildConversationPhoneQuery(phone = "") {
   const phone10 = last10(phone);
   return phone10
@@ -311,14 +352,17 @@ async function canAccessConversationPhone(phone, accessContext) {
   return Boolean(conversation?._id);
 }
 
-function buildConversationCursorQuery(cursorInfo) {
+function buildConversationCursorQuery(cursorInfo, sortOrder = "desc") {
   if (!cursorInfo?.ts || !cursorInfo?.id) return {};
+  const ascending = String(sortOrder || "").trim().toLowerCase() === "asc";
   return {
     $or: [
-      { lastMessageAt: { $lt: cursorInfo.ts } },
+      { lastMessageAt: ascending ? { $gt: cursorInfo.ts } : { $lt: cursorInfo.ts } },
       {
         lastMessageAt: cursorInfo.ts,
-        _id: { $lt: new mongoose.Types.ObjectId(cursorInfo.id) },
+        _id: ascending
+          ? { $gt: new mongoose.Types.ObjectId(cursorInfo.id) }
+          : { $lt: new mongoose.Types.ObjectId(cursorInfo.id) },
       },
     ],
   };
@@ -473,24 +517,27 @@ async function resolveConversationAccessContext({ role, userName, userId, hasTea
   const roleRaw = String(role || "");
   const normalizedRole = roleRaw.trim().toLowerCase();
   const normalizedUserName = String(userName || "").trim().toLowerCase();
+  const normalizedUserId = String(userId || "").trim();
   const scope = String(chatScope || "").trim().toLowerCase();
   const hasTeamFlag = String(hasTeam || "").trim().toLowerCase() === "true";
 
   const isAdmin =
-    ["Manager", "Developer", "Super Admin", "Admin"].includes(roleRaw) ||
+    ["Developer", "Super Admin", "Admin"].includes(roleRaw) ||
     normalizedRole.includes("admin") ||
-    normalizedRole.includes("manager");
+    normalizedRole === "developer";
 
   const isAssistantTeamLeadLike = normalizedRole === "assistant team lead";
   const isTeamLeaderLike =
     normalizedRole === "team leader" || normalizedRole === "team-leader";
   const isRetentionAgentWithTeam =
     normalizedRole === "retention agent" && hasTeamFlag;
+  const isManagerLike = normalizedRole === "manager";
   const userHasTeam =
-    hasTeamFlag || isAssistantTeamLeadLike || isTeamLeaderLike;
+    hasTeamFlag || isAssistantTeamLeadLike || isTeamLeaderLike || isManagerLike;
 
   const context = {
     isAdmin,
+    userId: normalizedUserId,
     normalizedUserName,
     mode: isAdmin ? "all" : "self",
     allowedNames: new Set(),
@@ -576,12 +623,16 @@ async function resolveConversationAccessContext({ role, userName, userId, hasTea
     return context;
   }
 
-  if (scope === "self") {
+  if (scope === "self" && !isManagerLike) {
     context.mode = "self";
     return context;
   }
 
-  if (scope === "combined" || (!scope && (isAssistantTeamLeadLike || isRetentionAgentWithTeam))) {
+  if (
+    scope === "combined" ||
+    isManagerLike ||
+    (!scope && (isAssistantTeamLeadLike || isRetentionAgentWithTeam))
+  ) {
     context.mode = "combined";
     return context;
   }
@@ -608,6 +659,76 @@ async function resolveConversationAccessContextFromRequest(req, source = {}) {
   });
 }
 
+async function buildUnknownTemplateVisibility(req, phone10 = "") {
+  const sessionUser = req?.sessionUser || req?.session?.user || {};
+  const source = req?.body || {};
+  const role = String(source.role || sessionUser.role || "").trim().toLowerCase();
+
+  if (!["sales agent", "retention agent"].includes(role)) return null;
+
+  const [lead, customer] = await Promise.all([
+    Lead.findOne({ contactNumber: phone10 }).select("_id").lean(),
+    Customer.findOne({ phone: phone10 }).select("_id").lean(),
+  ]);
+  if (lead || customer) return null;
+
+  const userId = String(source.userId || sessionUser._id || sessionUser.id || "").trim();
+  const userName = String(source.userName || sessionUser.fullName || sessionUser.name || "").trim();
+  let employee = null;
+
+  if (mongoose.Types.ObjectId.isValid(userId)) {
+    employee = await Employee.findById(userId)
+      .select("_id fullName role hasTeam teamLeader")
+      .lean();
+  }
+
+  if (!employee && userName) {
+    employee = await Employee.findOne({
+      fullName: { $regex: new RegExp(`^${escapeRegex(userName)}$`, "i") },
+    })
+      .select("_id fullName role hasTeam teamLeader")
+      .lean();
+  }
+
+  if (!employee?._id) return null;
+
+  const visibleMap = new Map();
+  const addVisible = (emp) => {
+    if (!emp?._id) return;
+    visibleMap.set(String(emp._id), {
+      id: emp._id,
+      nameNorm: normalizeNameKey(emp.fullName),
+    });
+  };
+
+  addVisible(employee);
+
+  let leader = null;
+  if (employee.teamLeader && mongoose.Types.ObjectId.isValid(String(employee.teamLeader))) {
+    leader = await Employee.findById(employee.teamLeader)
+      .select("_id fullName role hasTeam teamLeader")
+      .lean();
+    addVisible(leader);
+  }
+
+  if (leader?.teamLeader && mongoose.Types.ObjectId.isValid(String(leader.teamLeader))) {
+    const manager = await Employee.findById(leader.teamLeader)
+      .select("_id fullName")
+      .lean();
+    addVisible(manager);
+  }
+
+  const visible = Array.from(visibleMap.values());
+  return {
+    unknownOwnerUserId: employee._id,
+    unknownOwnerName: String(employee.fullName || "").trim(),
+    unknownOwnerNameNorm: normalizeNameKey(employee.fullName),
+    unknownVisibleToUserIds: visible.map((item) => item.id),
+    unknownVisibleToNameNorms: visible.map((item) => item.nameNorm).filter(Boolean),
+    unknownSource: "agent_template_send",
+  };
+}
+
 function applyConversationAccessFilter(conversations = [], context) {
   const list = Array.isArray(conversations) ? conversations : [];
   if (!context) return list;
@@ -625,15 +746,29 @@ function applyConversationAccessFilter(conversations = [], context) {
     );
 
   if (context.mode === "team") {
+    const unknownAllowed = (chat) => {
+      const userId = String(context.userId || "");
+      const nameNorm = String(selfName || "");
+      const visibleIds = Array.isArray(chat?.unknownVisibleToUserIds)
+        ? chat.unknownVisibleToUserIds.map((id) => String(id))
+        : [];
+      const visibleNames = Array.isArray(chat?.unknownVisibleToNameNorms)
+        ? chat.unknownVisibleToNameNorms.map((name) => normalizeNameKey(name))
+        : [];
+      return (userId && visibleIds.includes(userId)) || (nameNorm && visibleNames.includes(nameNorm));
+    };
+
     if (allowedNames.size > 0) {
       return list.filter((chat) =>
-        allowedNames.has(String(chat?.assignedToLabel || "").trim().toLowerCase())
+        allowedNames.has(String(chat?.assignedToLabel || "").trim().toLowerCase()) ||
+        unknownAllowed(chat)
       );
     }
     if (!selfName) return [];
     return list.filter(
       (chat) =>
-        String(chat?.assignedToLabel || "").trim().toLowerCase() === selfName
+        String(chat?.assignedToLabel || "").trim().toLowerCase() === selfName ||
+        unknownAllowed(chat)
     );
   }
 
@@ -642,14 +777,36 @@ function applyConversationAccessFilter(conversations = [], context) {
     if (selfName) combined.add(selfName);
     if (!combined.size) return [];
     return list.filter((chat) =>
-      combined.has(String(chat?.assignedToLabel || "").trim().toLowerCase())
+      combined.has(String(chat?.assignedToLabel || "").trim().toLowerCase()) ||
+      buildUnknownConversationAccessClauses(context).some((clause) => {
+        const id = clause.unknownVisibleToUserIds ? String(clause.unknownVisibleToUserIds) : "";
+        const name = clause.unknownVisibleToNameNorms ? normalizeNameKey(clause.unknownVisibleToNameNorms) : "";
+        const visibleIds = Array.isArray(chat?.unknownVisibleToUserIds)
+          ? chat.unknownVisibleToUserIds.map((value) => String(value))
+          : [];
+        const visibleNames = Array.isArray(chat?.unknownVisibleToNameNorms)
+          ? chat.unknownVisibleToNameNorms.map((value) => normalizeNameKey(value))
+          : [];
+        return (id && visibleIds.includes(id)) || (name && visibleNames.includes(name));
+      })
     );
   }
 
   if (!selfName) return [];
   return list.filter(
     (chat) =>
-      String(chat?.assignedToLabel || "").trim().toLowerCase() === selfName
+      String(chat?.assignedToLabel || "").trim().toLowerCase() === selfName ||
+      buildUnknownConversationAccessClauses(context).some((clause) => {
+        const id = clause.unknownVisibleToUserIds ? String(clause.unknownVisibleToUserIds) : "";
+        const name = clause.unknownVisibleToNameNorms ? normalizeNameKey(clause.unknownVisibleToNameNorms) : "";
+        const visibleIds = Array.isArray(chat?.unknownVisibleToUserIds)
+          ? chat.unknownVisibleToUserIds.map((value) => String(value))
+          : [];
+        const visibleNames = Array.isArray(chat?.unknownVisibleToNameNorms)
+          ? chat.unknownVisibleToNameNorms.map((value) => normalizeNameKey(value))
+          : [];
+        return (id && visibleIds.includes(id)) || (name && visibleNames.includes(name));
+      })
   );
 }
 
@@ -764,6 +921,7 @@ function buildConversationAccessMatchStages(context, assignedTo = "") {
   const stages = [];
   const assignedNormalized = String(assignedTo || "").trim().toLowerCase();
   const accessMatch = {};
+  let assignedAccessMatch = {};
 
   if (context && !(context.isAdmin && context.mode === "all")) {
     const selfName = String(context.selfName || context.normalizedUserName || "")
@@ -777,21 +935,28 @@ function buildConversationAccessMatchStages(context, assignedTo = "") {
 
     if (context.mode === "team") {
       if (allowedNames.length > 0) {
-        accessMatch.assignedToLabel = { $in: allowedNames.map((name) => new RegExp(`^${escapeRegex(name)}$`, "i")) };
+        assignedAccessMatch.assignedToLabel = { $in: allowedNames.map((name) => new RegExp(`^${escapeRegex(name)}$`, "i")) };
       } else if (selfName) {
-        accessMatch.assignedToLabel = new RegExp(`^${escapeRegex(selfName)}$`, "i");
+        assignedAccessMatch.assignedToLabel = new RegExp(`^${escapeRegex(selfName)}$`, "i");
       } else {
-        accessMatch.assignedToLabel = /^$/;
+        assignedAccessMatch.assignedToLabel = /^$/;
       }
     } else if (context.mode === "combined") {
       const combined = Array.from(new Set([selfName, ...allowedNames].filter(Boolean)));
-      accessMatch.assignedToLabel = combined.length
+      assignedAccessMatch.assignedToLabel = combined.length
         ? { $in: combined.map((name) => new RegExp(`^${escapeRegex(name)}$`, "i")) }
         : /^$/;
     } else if (selfName) {
-      accessMatch.assignedToLabel = new RegExp(`^${escapeRegex(selfName)}$`, "i");
+      assignedAccessMatch.assignedToLabel = new RegExp(`^${escapeRegex(selfName)}$`, "i");
     } else {
-      accessMatch.assignedToLabel = /^$/;
+      assignedAccessMatch.assignedToLabel = /^$/;
+    }
+
+    const unknownAccess = buildUnknownConversationAccessClauses(context);
+    if (unknownAccess.length) {
+      accessMatch.$or = [assignedAccessMatch, ...unknownAccess];
+    } else {
+      Object.assign(accessMatch, assignedAccessMatch);
     }
   }
 
@@ -2873,6 +3038,9 @@ router.get("/conversations", async (req, res) => {
       phone,
       includeCounts,
       includeAgentOptions,
+      sortOrder,
+      dateStart,
+      dateEnd,
     } = req.query;
     const accessContext = await resolveConversationAccessContextFromRequest(req, {
       role,
@@ -2884,11 +3052,17 @@ router.get("/conversations", async (req, res) => {
     const wantsPaginated = String(paginated || "").trim().toLowerCase() === "true";
     const wantsCounts = String(includeCounts || "").trim().toLowerCase() === "true";
     const wantsAgentOptions = String(includeAgentOptions || "").trim().toLowerCase() === "true";
+    const ascendingSort = String(sortOrder || "").trim().toLowerCase() === "asc";
+    const conversationSort = ascendingSort
+      ? { lastMessageAt: 1, _id: 1 }
+      : { lastMessageAt: -1, _id: -1 };
     const favoritePhones = parseFavoritePhones(req.query.favoritePhones);
+    const dateFilter = buildConversationDateQuery(dateStart, dateEnd);
     const baseFilter = mergeMongoQueries(
       buildConversationPhoneQuery(phone),
       buildConversationAccessQuery(accessContext, assignedTo)
     );
+    const datedBaseFilter = mergeMongoQueries(baseFilter, dateFilter);
 
     if (wantsPaginated) {
       const limit = Math.min(
@@ -2897,26 +3071,26 @@ router.get("/conversations", async (req, res) => {
       );
       const cursorInfo = decodeConversationCursor(cursor);
       const itemFilter = mergeMongoQueries(
-        baseFilter,
+        datedBaseFilter,
         buildConversationTabQuery(tab, favoritePhones),
         buildConversationSearchQuery(search),
-        buildConversationCursorQuery(cursorInfo)
+        buildConversationCursorQuery(cursorInfo, ascendingSort ? "asc" : "desc")
       );
 
       const [itemDocs, countsDocs, agentOptionDocs] = await Promise.all([
         WhatsAppConversation.find(itemFilter)
-          .sort({ lastMessageAt: -1, _id: -1 })
+          .sort(conversationSort)
           .limit(limit + 1)
           .lean(),
         wantsCounts
           ? Promise.all([
-            WhatsAppConversation.countDocuments(baseFilter),
+            WhatsAppConversation.countDocuments(datedBaseFilter),
             WhatsAppConversation.countDocuments(
-              mergeMongoQueries(baseFilter, { unreadCount: { $gt: 0 } })
+              mergeMongoQueries(datedBaseFilter, { unreadCount: { $gt: 0 } })
             ),
             favoritePhones.length
               ? WhatsAppConversation.countDocuments(
-                mergeMongoQueries(baseFilter, { phone10: { $in: favoritePhones } })
+                mergeMongoQueries(datedBaseFilter, { phone10: { $in: favoritePhones } })
               )
               : Promise.resolve(0),
           ])
@@ -2951,12 +3125,12 @@ router.get("/conversations", async (req, res) => {
 
     const conversations = await WhatsAppConversation.find(
       mergeMongoQueries(
-        baseFilter,
+        datedBaseFilter,
         buildConversationTabQuery(tab, favoritePhones),
         buildConversationSearchQuery(search)
       )
-    )
-      .sort({ lastMessageAt: -1, _id: -1 })
+      )
+      .sort(conversationSort)
       .lean();
 
     if (!conversations.length) return res.json([]);
@@ -3632,12 +3806,14 @@ router.post("/send-template", async (req, res) => {
     }
 
     const created = await WhatsAppMessage.create(messageDoc);
+    const unknownVisibility = await buildUnknownTemplateVisibility(req, p10);
 
     await upsertConversationRecord(phone, {
       phone,
       lastMessageAt: now,
       lastMessageText: finalText.slice(0, 200),
       lastOutboundAt: now,
+      ...(unknownVisibility || {}),
     }, { new: false });
 
     const createdPayload = created.toObject();
