@@ -39,27 +39,6 @@ router.use(
   })
 );
 
-const WhatsAppWebhookDebug =
-  mongoose.models.WhatsAppWebhookDebug ||
-  mongoose.model(
-    "WhatsAppWebhookDebug",
-    new mongoose.Schema(
-      {
-        webhookType: String,
-        outcome: String,
-        status: String,
-        waId: String,
-        transactionId: String,
-        phone: String,
-        matchedMessageId: String,
-        matchedStatus: String,
-        raw: Object,
-        receivedAt: { type: Date, default: Date.now, index: true },
-      },
-      { minimize: false }
-    )
-  );
-
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 const upload = multer({
@@ -1113,6 +1092,25 @@ function messageIdentityKeyForList(msg = {}) {
   const ts = msg?.timestamp ? new Date(msg.timestamp).getTime() : 0;
   const tsBucket = ts ? Math.floor(ts / 1000) : "";
   return `sig:${dir}|${from}|${to}|${type}|${text}|${mediaId}|${mediaUrl}|${tsBucket}`;
+}
+
+function encodeMessageCursor(msg = {}) {
+  const ts = msg?.timestamp || msg?.createdAt;
+  const id = String(msg?._id || "").trim();
+  const iso = ts ? new Date(ts).toISOString() : "";
+  return iso && id ? `${iso}__${id}` : "";
+}
+
+function decodeMessageCursor(cursor = "") {
+  const raw = String(cursor || "").trim();
+  if (!raw) return null;
+  const [iso, id] = raw.split("__");
+  const ts = iso ? new Date(iso) : null;
+  if (!ts || Number.isNaN(ts.getTime())) return null;
+  const objectId = mongoose.Types.ObjectId.isValid(String(id || ""))
+    ? new mongoose.Types.ObjectId(id)
+    : null;
+  return { ts, id: objectId };
 }
 
 function toE164Plus(v = "") {
@@ -3181,12 +3179,14 @@ router.get("/messages", async (req, res) => {
     const allowed = await canAccessConversationPhone(q, accessContext);
     if (!allowed) return res.status(403).json({ message: "Forbidden" });
 
+    const wantsPageInfo = String(req.query.pageInfo || "").trim().toLowerCase() === "true";
     const limitRaw = Number(req.query.limit || 0);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0
       ? Math.min(100, Math.floor(limitRaw))
       : null;
     const beforeRaw = String(req.query.before || "").trim();
-    const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
+    const cursorInfo = decodeMessageCursor(String(req.query.cursor || "").trim());
+    const beforeDate = cursorInfo?.ts || (beforeRaw ? new Date(beforeRaw) : null);
 
     const waId = normalizeWaId(q);
     const l10 = waId.slice(-10);
@@ -3200,14 +3200,26 @@ router.get("/messages", async (req, res) => {
       ],
     };
     if (beforeDate && !Number.isNaN(beforeDate.getTime())) {
-      baseQuery.timestamp = { $lt: beforeDate };
+      if (cursorInfo?.id) {
+        baseQuery.$and = [
+          {
+            $or: [
+              { timestamp: { $lt: beforeDate } },
+              { timestamp: beforeDate, _id: { $lt: cursorInfo.id } },
+            ],
+          },
+        ];
+      } else {
+        baseQuery.timestamp = { $lt: beforeDate };
+      }
     }
 
     const query = WhatsAppMessage.find(baseQuery)
-      .sort(limit ? { timestamp: -1, createdAt: -1 } : { timestamp: 1, createdAt: 1 });
-    if (limit) query.limit(limit);
+      .sort(limit ? { timestamp: -1, _id: -1 } : { timestamp: 1, _id: 1 });
+    if (limit) query.limit(wantsPageInfo ? limit + 1 : limit);
     const msgs = await query.lean();
-    const rows = limit ? msgs.slice().reverse() : msgs;
+    const pageDocs = wantsPageInfo && limit ? msgs.slice(0, limit) : msgs;
+    const rows = limit ? pageDocs.slice().reverse() : pageDocs;
 
     const templateMessages = (rows || []).filter((msg) => {
       if (String(msg?.type || "").toLowerCase() !== "template") return false;
@@ -3300,7 +3312,16 @@ router.get("/messages", async (req, res) => {
         byIdentity.set(k, { ...prev, ...msg });
       }
     }
-    return res.json(Array.from(byIdentity.values()));
+    const items = Array.from(byIdentity.values());
+    if (wantsPageInfo) {
+      const oldestDoc = rows[0] || null;
+      return res.json({
+        items,
+        hasMore: Boolean(limit && msgs.length > limit),
+        nextCursor: oldestDoc ? encodeMessageCursor(oldestDoc) : "",
+      });
+    }
+    return res.json(items);
   } catch (e) {
     console.error("load messages error:", e);
     return res.status(500).json({ message: "Failed to load messages" });
@@ -3885,37 +3906,8 @@ router.post("/send-template", async (req, res) => {
 
 router.get("/webhook", (req, res) => res.sendStatus(200));
 
-router.get("/webhook-debug", async (req, res) => {
-  try {
-    const phone = last10(req.query.phone || "");
-    const filter = phone ? { phone: new RegExp(`${phone}$`) } : {};
-    const rows = await WhatsAppWebhookDebug.find(filter)
-      .sort({ receivedAt: -1 })
-      .limit(50)
-      .lean();
-    return res.json(rows || []);
-  } catch (e) {
-    console.error("webhook debug load error:", e);
-    return res.status(500).json({ message: "Failed to load webhook debug" });
-  }
-});
-
-async function recordWebhookDebug(doc = {}) {
-  try {
-    await WhatsAppWebhookDebug.create({
-      webhookType: String(doc.webhookType || ""),
-      outcome: String(doc.outcome || ""),
-      status: String(doc.status || ""),
-      waId: String(doc.waId || ""),
-      transactionId: String(doc.transactionId || ""),
-      phone: doc.phone ? normalizeWaId(doc.phone) : "",
-      matchedMessageId: doc.matchedMessageId ? String(doc.matchedMessageId) : "",
-      matchedStatus: String(doc.matchedStatus || ""),
-      raw: doc.raw || {},
-    });
-  } catch (e) {
-    console.error("webhook debug write error:", e?.message || e);
-  }
+async function recordWebhookDebug() {
+  return null;
 }
 
 function buildInboundMessageMatch({

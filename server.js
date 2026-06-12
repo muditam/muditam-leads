@@ -108,6 +108,7 @@ const cohartDataApiRouter = require("./routes/cohart-dataApi");
 const allProductsFromOrdersRoute = require("./routes/allProductsFromOrders");
 
 const shopifyOrdersTable = require("./routes/shopifyOrdersTable");
+const lmsOrdersRoutes = require("./routes/lmsOrders");
 
 const leadsMigration = require('./routes/leadMigration');
 const orderConfirmationsRouter = require("./routes/orderConfirmations");
@@ -735,6 +736,7 @@ app.use("/cohart-dataApi", cohartDataApiRouter);
 app.use("/api", allProductsFromOrdersRoute);
 
 app.use("/api", shopifyOrdersTable);
+app.use("/api", lmsOrdersRoutes);
 
 app.use('/api/lead-migration', leadsMigration);
 app.use("/api/order-confirmations", orderConfirmationsRouter);

@@ -3,10 +3,39 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
+const { syncConversationByPhone } = require('../whatsapp/conversationProfile.service');
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const cleanLabel = (s) => (s || '').trim().replace(/\s+/g, ' ');
 const normKey = (s) => cleanLabel(s).toLocaleLowerCase();
+const WHATSAPP_SYNC_BATCH_SIZE = 50;
+const WHATSAPP_SYNC_DELAY_MS = 100;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function syncMigratedLeadConversations(ids) {
+  const leads = await Lead.find(
+    { _id: { $in: ids } },
+    { contactNumber: 1 }
+  ).lean();
+
+  const phones = Array.from(
+    new Set(
+      leads
+        .map((lead) => String(lead?.contactNumber || '').trim())
+        .filter(Boolean)
+    )
+  );
+
+  for (let i = 0; i < phones.length; i += WHATSAPP_SYNC_BATCH_SIZE) {
+    const batch = phones.slice(i, i + WHATSAPP_SYNC_BATCH_SIZE);
+    await Promise.allSettled(batch.map((phone) => syncConversationByPhone(phone)));
+
+    if (i + WHATSAPP_SYNC_BATCH_SIZE < phones.length) {
+      await delay(WHATSAPP_SYNC_DELAY_MS);
+    }
+  }
+}
 
 router.get('/experts', async (req, res) => {
   try {
@@ -140,6 +169,12 @@ router.post('/migrate', async (req, res) => {
       matched: result.matchedCount ?? result.nMatched,
       modified: result.modifiedCount ?? result.nModified,
       toExpert: toLabel,
+    });
+
+    setImmediate(() => {
+      syncMigratedLeadConversations(ids).catch((error) => {
+        console.error('WhatsApp conversation sync after lead migration failed:', error);
+      });
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
