@@ -359,6 +359,31 @@ async function updateOrderStatus(orderId, statusLabel) {
   });
 }
 
+async function updateOrderRemark(orderId, opsRemark) {
+  const normalized = normalizeOrderName(orderId);
+  if (!normalized) return null;
+
+  const now = new Date();
+  const update = {
+    opsRemark: String(opsRemark || "").trim(),
+    last_updated_at: now,
+  };
+  const existing = await Order.findOneAndUpdate(
+    { order_id: { $in: [normalized, `#${normalized}`] } },
+    { $set: update },
+    { new: true, sort: { last_updated_at: -1, updatedAt: -1, _id: -1 } }
+  ).lean();
+
+  if (existing) return existing;
+
+  return Order.create({
+    order_id: normalized,
+    shipment_status: "Not Shipped",
+    opsRemark: update.opsRemark,
+    last_updated_at: now,
+  });
+}
+
 function buildStatusCounts(rows = []) {
   const counts = new Map();
   rows.forEach((row) => {
@@ -553,6 +578,27 @@ router.patch("/lms-orders/status", requireSession, async (req, res) => {
   } catch (err) {
     console.error("PATCH /api/lms-orders/status error:", err);
     res.status(500).json({ error: "Failed to update order status" });
+  }
+});
+
+router.patch("/lms-orders/remark", requireSession, async (req, res) => {
+  try {
+    const orderId = req.body?.orderId;
+    const opsRemark = req.body?.opsRemark;
+    const normalized = normalizeOrderName(orderId);
+
+    if (!normalized) {
+      return res.status(400).json({ error: "Order ID is required." });
+    }
+
+    const updated = await updateOrderRemark(normalized, opsRemark);
+    res.json({
+      orderId: normalized,
+      opsRemark: updated?.opsRemark || "",
+    });
+  } catch (err) {
+    console.error("PATCH /api/lms-orders/remark error:", err);
+    res.status(500).json({ error: "Failed to update order remark" });
   }
 });
 

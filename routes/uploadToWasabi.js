@@ -46,6 +46,25 @@ function normalizeExt(ext) {
  return valid.has(e) ? e : '.jpg';
 }
 
+function normalizeReportExt(ext, contentType = '') {
+ const e = String(ext || '').toLowerCase();
+ const valid = new Set([
+   '.pdf',
+   '.jpg',
+   '.jpeg',
+   '.png',
+   '.webp',
+ ]);
+ if (valid.has(e)) return e;
+
+ const ct = String(contentType || '').toLowerCase();
+ if (ct.includes('pdf')) return '.pdf';
+ if (ct.includes('image/jpeg') || ct.includes('image/jpg')) return '.jpg';
+ if (ct.includes('image/png')) return '.png';
+ if (ct.includes('image/webp')) return '.webp';
+ return '.pdf';
+}
+
 
 function extFromContentType(contentType = '') {
  const ct = String(contentType || '').toLowerCase();
@@ -80,6 +99,21 @@ function buildKey({ originalName, prefix = DEFAULT_PREFIX, deterministic = false
  const unique = deterministic ? '' : `-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
  const key = `${safePrefix}/${baseName}${unique}${ext}`;
 
+
+ return { key, ext };
+}
+
+function buildReportKey({ fileName, prefix = 'lead-reports' }) {
+ const safePrefix = String(prefix || 'lead-reports')
+   .trim()
+   .replace(/^\/+|\/+$/g, '')
+   .replace(/[^a-zA-Z0-9/_-]/g, '_');
+
+ const parsedName = path.basename(String(fileName || '').trim() || 'report.pdf');
+ const ext = normalizeReportExt(path.extname(parsedName));
+ const baseName = sanitizeBaseName(parsedName) || 'report';
+ const unique = `-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+ const key = `${safePrefix}/${baseName}${unique}${ext}`;
 
  return { key, ext };
 }
@@ -200,6 +234,46 @@ router.post('/api/upload-image', requireUploadApiKey, upload.single('file'), asy
    });
  } catch (error) {
    console.error('Error in /api/upload-image:', error);
+   return res.status(500).json({ message: 'Upload failed', error: error.message });
+ }
+});
+
+// Route: POST /api/upload-report-to-wasabi
+// Multipart form-data:
+// - report: PDF/image/document report file (single)
+// - prefix (optional): folder path in bucket
+router.post('/api/upload-report-to-wasabi', requireSession, upload.single('report'), async (req, res) => {
+ try {
+   if (!req.file) {
+     return res.status(400).json({ message: 'No report uploaded. Use "report" field.' });
+   }
+
+   const ext = path.extname(req.file.originalname || '').toLowerCase();
+   const allowedExts = new Set(['.pdf', '.jpg', '.jpeg', '.png', '.webp']);
+   const mime = String(req.file.mimetype || '').toLowerCase();
+   const isAllowedMime = mime === 'application/pdf' || mime.startsWith('image/');
+   if (!allowedExts.has(ext) || !isAllowedMime) {
+     return res.status(400).json({ message: 'Only PDF and image reports are allowed.' });
+   }
+
+   const { key } = buildReportKey({
+     fileName: req.file.originalname,
+     prefix: req.body.prefix || 'lead-reports',
+   });
+
+   const uploaded = await uploadToWasabi({
+     buffer: req.file.buffer,
+     key,
+     contentType: req.file.mimetype,
+   });
+
+   return res.status(200).json({
+     message: 'Upload successful',
+     url: uploaded.url,
+     key: uploaded.key,
+   });
+ } catch (error) {
+   console.error('Error in /api/upload-report-to-wasabi:', error);
    return res.status(500).json({ message: 'Upload failed', error: error.message });
  }
 });
