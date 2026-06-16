@@ -1,6 +1,8 @@
 const express = require("express");
 const ShopifyOrder = require("../models/ShopifyOrder");
 const Order = require("../models/Order");
+const Lead = require("../models/Lead");
+const Customer = require("../models/Customer");
 const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
@@ -30,6 +32,7 @@ const PAGE_SELECT =
   "orderId orderName customerName contactNumber customerAddress orderDate createdAt amount modeOfPayment paymentGatewayNames productsOrdered financial_status fulfillment_status cancelled_at";
 const NDR_ACTIVE_STATUS_REGEX = /(shipped|transit|out[\s_-]*for[\s_-]*delivery|ofd|ready[\s_-]*for[\s_-]*pickup|pickup)/i;
 const NDR_PROBLEM_REGEX = /(refus|not[\s_-]*available|address|incomplete|incorrect|consignee|failed|undelivered|delay|hold|exception|otp)/i;
+const NDR_EXCLUDED_PRODUCT_REGEX = /(blood\s*test|full\s*body\s*checkup)/i;
 const NDR_STATUS_OPTIONS = [
   { value: "shipped", label: "Shipped" },
   { value: "in_transit", label: "In Transit" },
@@ -706,6 +709,131 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
     },
     {
       $match: {
+        "shop.productsOrdered": {
+          $not: {
+            $elemMatch: {
+              title: NDR_EXCLUDED_PRODUCT_REGEX,
+            },
+          },
+        },
+      },
+    },
+    {
+      $addFields: {
+        phoneNorm: {
+          $let: {
+            vars: {
+              digits: {
+                $regexFind: {
+                  input: { $ifNull: ["$phoneEff", ""] },
+                  regex: /(\d{10})$/,
+                },
+              },
+            },
+            in: { $ifNull: ["$$digits.match", ""] },
+          },
+        },
+      },
+    },
+    {
+      $lookup: {
+        from: Lead.collection.name,
+        let: { phoneNorm: "$phoneNorm" },
+        pipeline: [
+          {
+            $addFields: {
+              contactNorm: {
+                $let: {
+                  vars: {
+                    digits: {
+                      $regexFind: {
+                        input: { $ifNull: ["$contactNumber", ""] },
+                        regex: /(\d{10})$/,
+                      },
+                    },
+                  },
+                  in: { $ifNull: ["$$digits.match", ""] },
+                },
+              },
+              healthExpertName: { $trim: { input: { $ifNull: ["$healthExpertAssigned", ""] } } },
+            },
+          },
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $gt: [{ $strLenCP: "$$phoneNorm" }, 0] },
+                  { $eq: ["$contactNorm", "$$phoneNorm"] },
+                ],
+              },
+            },
+          },
+          { $sort: { healthExpertName: -1, _id: -1 } },
+          { $project: { _id: 0, healthExpertName: 1 } },
+          { $limit: 1 },
+        ],
+        as: "leadAgent",
+      },
+    },
+    {
+      $lookup: {
+        from: Customer.collection.name,
+        let: { phoneNorm: "$phoneNorm" },
+        pipeline: [
+          {
+            $addFields: {
+              customerPhoneNorm: {
+                $let: {
+                  vars: {
+                    digits: {
+                      $regexFind: {
+                        input: { $ifNull: ["$phone", ""] },
+                        regex: /(\d{10})$/,
+                      },
+                    },
+                  },
+                  in: { $ifNull: ["$$digits.match", ""] },
+                },
+              },
+              assignedName: { $trim: { input: { $ifNull: ["$assignedTo", ""] } } },
+            },
+          },
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $gt: [{ $strLenCP: "$$phoneNorm" }, 0] },
+                  { $eq: ["$customerPhoneNorm", "$$phoneNorm"] },
+                ],
+              },
+            },
+          },
+          { $sort: { assignedName: -1, _id: -1 } },
+          { $project: { _id: 0, assignedName: 1 } },
+          { $limit: 1 },
+        ],
+        as: "customerAgent",
+      },
+    },
+    {
+      $addFields: {
+        leadAgentName: { $ifNull: [{ $arrayElemAt: ["$leadAgent.healthExpertName", 0] }, ""] },
+        customerAgentName: { $ifNull: [{ $arrayElemAt: ["$customerAgent.assignedName", 0] }, ""] },
+      },
+    },
+    {
+      $addFields: {
+        agentName: {
+          $cond: [
+            { $gt: [{ $strLenCP: "$leadAgentName" }, 0] },
+            "$leadAgentName",
+            "$customerAgentName",
+          ],
+        },
+      },
+    },
+    {
+      $match: {
         $or: [{ "shop.cancelled_at": null }, { "shop.cancelled_at": { $exists: false } }],
         shipment_status: { $not: CLOSED_STATUS_REGEX },
       },
@@ -757,6 +885,7 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
     orderName: { $ifNull: ["$shop.orderName", "$order_id"] },
     orderDate: "$orderDateEff",
     customerName: "$customerNameEff",
+    agentName: { $ifNull: ["$agentName", ""] },
     contactNumber: "$phoneEff",
     customerAddress: { $ifNull: ["$shop.customerAddress", null] },
     amount: { $ifNull: ["$shop.amount", 0] },
