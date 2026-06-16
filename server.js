@@ -94,6 +94,7 @@ const {
   runIncrementalSync,
   runNightlyReconcile,
 } = require("./services/zoomPhoneHistorySyncService");
+const { runDueFutureOrders } = require("./services/futureOrderScheduler");
 
 const ReturnDeliveredRoutes = require("./routes/ReturnDelivered");
 
@@ -167,6 +168,7 @@ const sopRoutes = require("./routes/Wallet/sopRoutes");
 const walletRewardsRoutes = require("./routes/Wallet/walletRewardsRoutes");
 const leadsCaptureRoutes = require("./KnowledgeBase/leadsCaptureRoutes");
 const knowledgeBaseRoutes = require("./KnowledgeBase/knowledgeBaseRoutes");
+const futureOrdersRoutes = require("./routes/futureOrders");
 
 const smartDietPlanRouter = require("./routes/smartDietPlan");
 const dietPublicRouter    = require("./routes/dietPublic");
@@ -192,7 +194,7 @@ app.use(
   })
 );
 
-const allowedOrigins = ['https://www.60brands.com', 'https://60brands.com', 'http://localhost:3000'];
+const allowedOrigins = ['https://www.60brands.com', 'https://60brands.com', 'http://localhost:3000', 'https://www.muditam.com', 'https://muditam.com'];
 
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
@@ -690,6 +692,15 @@ if (shouldRunSingletonJobs()) {
       // noop
     }
   }, 45000);
+
+  // Future-dated LMS orders: place pending Shopify orders once daily at 11:00 AM IST.
+  cron.schedule("0 11 * * *", async () => {
+    try {
+      await runDueFutureOrders();
+    } catch (err) {
+      console.error("[future-orders] scheduled run failed:", err.message);
+    }
+  }, { timezone: "Asia/Kolkata" });
 } else {
   console.log(
     `[jobs] skipping singleton Zoom jobs on dyno=${DYNO || "local"}; owner=${SINGLETON_DYNO}`
@@ -798,6 +809,7 @@ app.use("/api/shopify-catalog", shopifyCatalog);
 app.use("/unicommerce-api", unicommerceViewRoutes);
 app.use("/api/sops", sopRoutes);
 app.use(walletRewardsRoutes);
+app.use("/api/future-orders", futureOrdersRoutes);
 
 app.use("/api/knowledge-leads", leadsCaptureRoutes);
 app.use("/api/knowledge-base", knowledgeBaseRoutes);

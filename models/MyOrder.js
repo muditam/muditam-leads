@@ -26,4 +26,3 @@ MyOrderSchema.index({ orderDate: -1 });
 
 
 module.exports = mongoose.model('MyOrder', MyOrderSchema);  
-

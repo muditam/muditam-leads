@@ -7,8 +7,13 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// POST /create-order endpoint
-router.post("/create-order", async (req, res) => {
+function validationError(message) {
+  const err = new Error(message);
+  err.statusCode = 400;
+  return err;
+}
+
+async function createShopifyOrder(input = {}) {
   const {
     cartItems,
     shippingAddress,
@@ -23,7 +28,8 @@ router.post("/create-order", async (req, res) => {
     customerId,
     shippingCost,
     appliedDiscount,
-  } = req.body;
+    note,
+  } = input;
 
   const shopifyStore = process.env.SHOPIFY_STORE_NAME;
   const accessToken = process.env.SHOPIFY_API_SECRET;
@@ -38,24 +44,16 @@ router.post("/create-order", async (req, res) => {
     const total = toNumber(orderTotal);
 
     if (!paid || paid <= 0) {
-      return res
-        .status(400)
-        .json({ message: "partialPaidAmount is required and must be > 0" });
+      throw validationError("partialPaidAmount is required and must be > 0");
     }
     if (!total || total <= 0) {
-      return res
-        .status(400)
-        .json({ message: "orderTotal is required and must be > 0 for Partial Paid" });
+      throw validationError("orderTotal is required and must be > 0 for Partial Paid");
     }
     if (paid >= total) {
-      return res
-        .status(400)
-        .json({ message: "partialPaidAmount must be less than orderTotal" });
+      throw validationError("partialPaidAmount must be less than orderTotal");
     }
     if (!transactionId || String(transactionId).trim() === "") {
-      return res
-        .status(400)
-        .json({ message: "transactionId is required for Partial Paid" });
+      throw validationError("transactionId is required for Partial Paid");
     }
   }
 
@@ -92,6 +90,7 @@ router.post("/create-order", async (req, res) => {
       financial_status: isPrepaid ? "paid" : "pending",
 
       note_attributes: [],
+      note: String(note || "").trim(),
       tags: isPartial ? "PARTIAL_COD" : isCOD ? "COD" : "PREPAID",
     },
   };
@@ -137,66 +136,68 @@ router.post("/create-order", async (req, res) => {
 
   const createOrderUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders.json`;
 
-  try {
-    // 1) Create order
-    const response = await axios.post(createOrderUrl, orderPayload, {
+  // 1) Create order
+  const response = await axios.post(createOrderUrl, orderPayload, {
+    headers: {
+      "X-Shopify-Access-Token": accessToken,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const createdOrder = response.data.order;
+
+  // 2) If Partial Paid -> create external sale transaction
+  if (isPartial) {
+    const paid = toNumber(partialPaidAmount);
+
+    // source=external otherwise Shopify rejects "sale"
+    const txUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${createdOrder.id}/transactions.json?source=external`;
+
+    const txPayload = {
+      transaction: {
+        kind: "sale",
+        status: "success",
+        amount: paid.toFixed(2),
+        currency: createdOrder?.currency || "INR",
+        gateway: "manual",
+        source: "external",
+        authorization: String(transactionId || ""),
+      },
+    };
+
+    await axios.post(txUrl, txPayload, {
       headers: {
         "X-Shopify-Access-Token": accessToken,
         "Content-Type": "application/json",
       },
     });
 
-    const createdOrder = response.data.order;
+    // 3) Fetch updated order so UI gets "partially_paid"
+    const getUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${createdOrder.id}.json`;
+    const updated = await axios.get(getUrl, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+    });
 
-    // 2) If Partial Paid -> create external sale transaction
-    if (isPartial) {
-      const paid = toNumber(partialPaidAmount);
+    return updated.data.order;
+  }
 
-      // ✅ CRITICAL FIX: source=external (otherwise Shopify rejects "sale")
-      const txUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${createdOrder.id}/transactions.json?source=external`;
+  return createdOrder;
+}
 
-      const txPayload = {
-        transaction: {
-          kind: "sale",
-          status: "success",
-          amount: paid.toFixed(2),
-          currency: createdOrder?.currency || "INR",
-          gateway: "manual",
-          source: "external", // extra-safe
-          authorization: String(transactionId || ""),
-        },
-      };
-
-      await axios.post(txUrl, txPayload, {
-        headers: {
-          "X-Shopify-Access-Token": accessToken,
-          "Content-Type": "application/json",
-        },
-      });
-
-      // 3) Fetch updated order so UI gets "partially_paid"
-      const getUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${createdOrder.id}.json`;
-      const updated = await axios.get(getUrl, {
-        headers: {
-          "X-Shopify-Access-Token": accessToken,
-          "Content-Type": "application/json",
-        },
-      });
-
-      return res.status(201).json({
-        message: "Order created successfully (Partial Paid)",
-        order: updated.data.order,
-      });
-    }
-
-    // Prepaid/COD
+// POST /create-order endpoint
+router.post("/create-order", async (req, res) => {
+  try {
+    const createdOrder = await createShopifyOrder(req.body);
     return res.status(201).json({
       message: "Order created successfully",
       order: createdOrder,
     });
   } catch (error) {
     console.error("Error creating order:", error.response?.data || error.message);
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       message: "Error creating order",
       error: error.response?.data || error.message,
     });
@@ -391,3 +392,4 @@ router.put("/customer-address", async (req, res) => {
 });
 
 module.exports = router;
+module.exports.createShopifyOrder = createShopifyOrder;
