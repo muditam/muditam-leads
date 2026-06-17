@@ -568,6 +568,7 @@ app.post(
 
 // Keep Zoom webhook raw-body verification before global JSON parser
 app.use("/api/zoom/webhooks", zoomWebhookRoutes);
+app.use("/api/redcliffe", redcliffeRoutes.webhookRouter);
 app.use(express.json());
 
 app.use("/api/shopify", shopifyProductsRoute);

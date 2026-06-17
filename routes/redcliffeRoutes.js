@@ -1,8 +1,12 @@
 const express = require("express");
+const crypto = require("crypto");
+const Razorpay = require("razorpay");
 const RedcliffeWebhookEvent = require("../models/RedcliffeWebhookEvent");
 const RedcliffeBooking = require("../models/RedcliffeBooking");
+const RedcliffePaymentIntent = require("../models/RedcliffePaymentIntent");
 
 const router = express.Router();
+const webhookRouter = express.Router();
 
 const DEFAULT_BASE_URL = "https://apiv3.redcliffelabs.com";
 const baseUrl = String(
@@ -1613,6 +1617,231 @@ function normalizeCreateBookingPayload(body = {}) {
  return payload;
 }
 
+function getRazorpayClient() {
+ const keyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
+ const keySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
+ if (!keyId || !keySecret) {
+   throw new Error("RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required");
+ }
+ return new Razorpay({
+   key_id: keyId,
+   key_secret: keySecret,
+ });
+}
+
+function getShopifyAdminConfig() {
+ const shop = String(process.env.SHOPIFY_STORE_NAME || "").trim();
+ const token = String(
+   process.env.SHOPIFY_API_SECRET || process.env.SHOPIFY_ACCESS_TOKEN || ""
+ ).trim();
+ if (!shop || !token) {
+   throw new Error("SHOPIFY_STORE_NAME and Shopify access token are required");
+ }
+ return {
+   shop,
+   token,
+   baseUrl: `https://${shop}.myshopify.com/admin/api/2024-04`,
+ };
+}
+
+function toAmount(value) {
+ const amount = Number(value);
+ return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function splitCustomerName(fullName) {
+ const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
+ return {
+   firstName: parts[0] || "Customer",
+   lastName: parts.slice(1).join(" ") || "-",
+ };
+}
+
+function normalizeShopifyOrderPayload(input = {}) {
+ const cartItems = Array.isArray(input.cartItems) ? input.cartItems : [];
+ return {
+   cartItems: cartItems
+     .map((item) => ({
+       variantId: String(item.variantId || item.variant_id || "").trim(),
+       quantity: Math.max(1, Number(item.quantity || 1)),
+     }))
+     .filter((item) => item.variantId),
+   shippingAddress: input.shippingAddress || {},
+   billingAddress: input.billingAddress || input.shippingAddress || {},
+   note: String(input.note || "").trim(),
+ };
+}
+
+function buildAddressPayload(address = {}) {
+ return {
+   first_name: address.firstName || address.first_name || "",
+   last_name: address.lastName || address.last_name || "",
+   address1: address.address1 || "",
+   address2: address.address2 || "",
+   city: address.city || "",
+   province: address.province || "",
+   country: address.country || "India",
+   zip: address.zip || "",
+   phone: address.phone || "",
+ };
+}
+
+function getPaymentLinkEntity(payload = {}) {
+ return (
+   payload?.payload?.payment_link?.entity ||
+   payload?.payment_link?.entity ||
+   payload?.payment_link ||
+   payload
+ );
+}
+
+function getPaymentEntity(payload = {}) {
+ return (
+   payload?.payload?.payment?.entity ||
+   payload?.payment?.entity ||
+   payload?.payment ||
+   {}
+ );
+}
+
+async function createPaidShopifyDraftOrder({ intent, paymentId }) {
+ const { shop, token, baseUrl } = getShopifyAdminConfig();
+ const shopifyPayload = normalizeShopifyOrderPayload(intent.shopifyOrderPayload);
+ if (!shopifyPayload.cartItems.length) {
+   throw new Error("Shopify cartItems are required to create draft order");
+ }
+
+ const bookingPayload = intent.bookingPayload || {};
+ const customerName = splitCustomerName(bookingPayload.customer_name);
+ const email = String(bookingPayload.customer_email || "").trim();
+ const phone = String(bookingPayload.customer_phonenumber || "").trim();
+
+ const draftPayload = {
+   draft_order: {
+     line_items: shopifyPayload.cartItems.map((item) => ({
+       variant_id: item.variantId,
+       quantity: item.quantity,
+       properties: [
+         { name: "redcliffe_booking_id", value: String(intent.bookingId || "") },
+         { name: "redcliffe_payment_intent_id", value: String(intent.intentId || "") },
+       ],
+     })),
+     email,
+     shipping_address: buildAddressPayload({
+       firstName: shopifyPayload.shippingAddress.firstName || customerName.firstName,
+       lastName: shopifyPayload.shippingAddress.lastName || customerName.lastName,
+       phone,
+       ...shopifyPayload.shippingAddress,
+     }),
+     billing_address: buildAddressPayload({
+       firstName: shopifyPayload.billingAddress.firstName || customerName.firstName,
+       lastName: shopifyPayload.billingAddress.lastName || customerName.lastName,
+       phone,
+       ...shopifyPayload.billingAddress,
+     }),
+     note: [
+       shopifyPayload.note,
+       `Redcliffe booking: ${intent.bookingId}`,
+       `Razorpay payment: ${paymentId || ""}`,
+     ].filter(Boolean).join(" | "),
+     note_attributes: [
+       { name: "redcliffe_booking_id", value: String(intent.bookingId || "") },
+       { name: "redcliffe_payment_intent_id", value: String(intent.intentId || "") },
+       { name: "razorpay_payment_id", value: String(paymentId || "") },
+     ],
+     tags: "REDCLIFFE,PREPAID,RAZORPAY",
+   },
+ };
+
+ const createRes = await fetch(`${baseUrl}/draft_orders.json`, {
+   method: "POST",
+   headers: {
+     "X-Shopify-Access-Token": token,
+     "Content-Type": "application/json",
+     Accept: "application/json",
+   },
+   body: JSON.stringify(draftPayload),
+ });
+ const createData = await createRes.json();
+ if (!createRes.ok) {
+   throw new Error(
+     createData?.errors
+       ? JSON.stringify(createData.errors)
+       : "Failed to create Shopify draft order"
+   );
+ }
+
+ const draftOrder = createData.draft_order;
+ const completeRes = await fetch(`${baseUrl}/draft_orders/${draftOrder.id}/complete.json`, {
+   method: "PUT",
+   headers: {
+     "X-Shopify-Access-Token": token,
+     "Content-Type": "application/json",
+     Accept: "application/json",
+   },
+   body: JSON.stringify({ payment_pending: false }),
+ });
+ const completeData = await completeRes.json();
+ if (!completeRes.ok) {
+   throw new Error(
+     completeData?.errors
+       ? JSON.stringify(completeData.errors)
+       : "Failed to complete Shopify draft order"
+   );
+ }
+
+ return {
+   shop,
+   draftOrder,
+   order: completeData.draft_order?.order || completeData.order || completeData.draft_order || null,
+   raw: completeData,
+ };
+}
+
+async function finalizePaidRedcliffePaymentIntent(intent, webhookPayload) {
+ if (!intent || intent.shopifyOrderId) {
+   return intent;
+ }
+
+ const payment = getPaymentEntity(webhookPayload);
+ const paymentId = String(payment?.id || intent.razorpayPaymentId || "").trim();
+
+ const shopifyResult = await createPaidShopifyDraftOrder({
+   intent,
+   paymentId,
+ });
+ const orderId = String(
+   shopifyResult.order?.id ||
+     shopifyResult.raw?.draft_order?.order_id ||
+     shopifyResult.draftOrder?.order_id ||
+     ""
+ ).trim();
+ const orderName = String(
+   shopifyResult.order?.name ||
+     shopifyResult.raw?.draft_order?.name ||
+     ""
+ ).trim();
+
+ return RedcliffePaymentIntent.findOneAndUpdate(
+   { intentId: intent.intentId },
+   {
+     $set: {
+       status: "shopify_order_created",
+       razorpayPaymentId: paymentId,
+       razorpayPayload: webhookPayload,
+       shopifyDraftOrderId: String(shopifyResult.draftOrder?.id || ""),
+       shopifyOrderId: orderId,
+       shopifyOrderName: orderName,
+       shopifyFinalPayload: shopifyResult.raw,
+       paidAt: intent.paidAt || new Date(),
+       finalizedAt: new Date(),
+       errorMessage: "",
+     },
+   },
+   { new: true }
+ );
+}
+
 
 router.get("/location-search", async (req, res) => {
  const placeQuery = String(req.query.place_query || "").trim();
@@ -1775,6 +2004,151 @@ router.post("/bookings/create", async (req, res) => {
      status: "failure",
      message: "Internal server error while creating booking",
      detail: error?.message || "Unknown server error",
+   });
+ }
+});
+
+router.post("/payments/razorpay/create-link", async (req, res) => {
+ try {
+   const amount = toAmount(req.body?.amount);
+   if (!amount) {
+     return res.status(400).json({
+       status: "failure",
+       message: "amount is required and must be greater than 0",
+     });
+   }
+
+   const shopifyOrderPayload = normalizeShopifyOrderPayload(
+     req.body?.shopifyOrderPayload || {}
+   );
+   if (!shopifyOrderPayload.cartItems.length) {
+     return res.status(400).json({
+       status: "failure",
+       message: "shopifyOrderPayload.cartItems is required",
+     });
+   }
+
+   const bookingPayload = normalizeCreateBookingPayload(req.body?.bookingPayload || {});
+   const requiredFields = [
+     "booking_date",
+     "collection_date",
+     "collection_slot",
+     "customer_name",
+     "customer_age",
+     "customer_gender",
+     "customer_email",
+     "customer_phonenumber",
+     "customer_address",
+     "customer_landmark",
+     "pincode",
+     "customer_latitude",
+     "customer_longitude",
+   ];
+   const missingField = requiredFields.find((field) => {
+     const value = bookingPayload[field];
+     return value === undefined || value === null || value === "";
+   });
+   if (missingField) {
+     return res.status(400).json({
+       status: "failure",
+       message: `${missingField} is required`,
+     });
+   }
+   if (!bookingPayload.package_code.length) {
+     return res.status(400).json({
+       status: "failure",
+       message: "At least one package code is required",
+     });
+   }
+
+   const bookingResult = await proxyWithMockFallback({
+     method: "POST",
+     path: "/api/external/v2/center-create-booking/",
+     data: bookingPayload,
+   });
+
+   if (bookingResult.status >= 400) {
+     return res.status(bookingResult.status).json(bookingResult.data);
+   }
+
+   await upsertBookingSnapshot(bookingResult.data, "razorpay-payment-link");
+
+   const bookingId = String(
+     bookingResult.data?.booking_id || bookingResult.data?.pk || ""
+   ).trim();
+   if (!bookingId) {
+     return res.status(500).json({
+       status: "failure",
+       message: "Redcliffe booking created but booking id is missing",
+     });
+   }
+
+   const intentId = crypto.randomUUID();
+   const currency = String(req.body?.currency || "INR").trim() || "INR";
+   const returnUrl = String(
+     req.body?.return_url ||
+       req.body?.returnUrl ||
+       process.env.REDCLIFFE_RAZORPAY_RETURN_URL ||
+       ""
+   ).trim();
+
+   const razorpay = getRazorpayClient();
+   const paymentLinkPayload = {
+     amount: Math.round(amount * 100),
+     currency,
+     accept_partial: false,
+     description: `Redcliffe blood test booking ${bookingId}`,
+     reference_id: intentId,
+     customer: {
+       name: bookingPayload.customer_name,
+       email: bookingPayload.customer_email,
+       contact: bookingPayload.customer_phonenumber,
+     },
+     notify: {
+       sms: true,
+       email: true,
+     },
+     notes: {
+       redcliffe_booking_id: bookingId,
+       redcliffe_payment_intent_id: intentId,
+       source: "shopify-redcliffe-booking",
+     },
+   };
+
+   if (returnUrl) {
+     paymentLinkPayload.callback_url = returnUrl;
+     paymentLinkPayload.callback_method = "get";
+   }
+
+   const paymentLink = await razorpay.paymentLink.create(paymentLinkPayload);
+
+   await RedcliffePaymentIntent.create({
+     intentId,
+     status: "payment_link_created",
+     bookingId,
+     bookingPayload,
+     bookingResponse: bookingResult.data,
+     shopifyOrderPayload,
+     amount,
+     currency,
+     razorpayPaymentLinkId: String(paymentLink.id || ""),
+     razorpayPaymentLinkUrl: String(paymentLink.short_url || ""),
+   });
+
+   return res.status(201).json({
+     status: "success",
+     intent_id: intentId,
+     booking_id: bookingId,
+     payment_link_id: paymentLink.id,
+     payment_link: paymentLink.short_url,
+     booking: bookingResult.data,
+   });
+ } catch (error) {
+   console.error("Redcliffe Razorpay payment link error:", error?.response?.data || error);
+   return res.status(500).json({
+     status: "failure",
+     message: "Failed to create Redcliffe Razorpay payment link",
+     detail: error?.response?.data || error?.message || "Unknown server error",
    });
  }
 });
@@ -2540,5 +2914,113 @@ router.post("/webhooks/redcliffe", async (req, res) => {
  });
 });
 
+webhookRouter.post(
+ "/payments/razorpay/webhook",
+ express.raw({ type: "application/json", limit: "2mb" }),
+ async (req, res) => {
+   try {
+     const rawBody = Buffer.isBuffer(req.body)
+       ? req.body
+       : Buffer.from(req.body || "");
+     const signature = String(req.get("X-Razorpay-Signature") || "").trim();
+     const secret = String(process.env.RAZORPAY_WEBHOOK_SECRET || "").trim();
+
+     if (secret) {
+       const digest = crypto
+         .createHmac("sha256", secret)
+         .update(rawBody)
+         .digest("hex");
+       if (!signature || digest !== signature) {
+         return res.status(401).send("Invalid Razorpay webhook signature");
+       }
+     }
+
+     let payload = {};
+     try {
+       payload = JSON.parse(rawBody.toString("utf8") || "{}");
+     } catch (_error) {
+       return res.status(400).send("Invalid Razorpay webhook payload");
+     }
+
+     const event = String(payload.event || "").trim();
+     const paymentLink = getPaymentLinkEntity(payload);
+     const linkStatus = String(paymentLink?.status || "").trim().toLowerCase();
+     if (event && !["payment_link.paid", "payment.captured"].includes(event)) {
+       return res.status(200).json({ status: "ignored", event });
+     }
+     if (paymentLink?.status && linkStatus !== "paid") {
+       return res.status(200).json({ status: "ignored", payment_link_status: linkStatus });
+     }
+
+     const intentId = String(paymentLink?.reference_id || "").trim();
+     const paymentLinkId = String(paymentLink?.id || "").trim();
+     if (!intentId && !paymentLinkId) {
+       return res.status(200).json({
+         status: "ignored",
+         reason: "No Redcliffe payment intent reference found",
+       });
+     }
+     const query = intentId
+       ? { intentId }
+       : { razorpayPaymentLinkId: paymentLinkId };
+     const intent = await RedcliffePaymentIntent.findOne(query).lean();
+     if (!intent) {
+       return res.status(404).json({
+         status: "failure",
+         message: "Redcliffe payment intent not found",
+       });
+     }
+
+     const paidIntent = await RedcliffePaymentIntent.findOneAndUpdate(
+       { intentId: intent.intentId },
+       {
+         $set: {
+           status: "paid",
+           razorpayPayload: payload,
+           paidAt: new Date(),
+           errorMessage: "",
+         },
+       },
+       { new: true }
+     ).lean();
+
+     const finalized = await finalizePaidRedcliffePaymentIntent(paidIntent, payload);
+     return res.status(200).json({
+       status: "success",
+       intent_id: finalized.intentId,
+       shopify_order_id: finalized.shopifyOrderId,
+       shopify_order_name: finalized.shopifyOrderName,
+     });
+   } catch (error) {
+     console.error("Redcliffe Razorpay webhook error:", error);
+     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+     let parsed = {};
+     try {
+       parsed = JSON.parse(body.toString("utf8") || "{}");
+     } catch (_error) {}
+     const paymentLink = getPaymentLinkEntity(parsed);
+     const intentId = String(paymentLink?.reference_id || "").trim();
+     if (intentId) {
+       await RedcliffePaymentIntent.updateOne(
+         { intentId },
+         {
+           $set: {
+             status: "failed",
+             errorMessage: error?.message || "Failed to finalize paid Redcliffe order",
+             razorpayPayload: parsed,
+           },
+         }
+       );
+     }
+     return res.status(500).json({
+       status: "failure",
+       message: "Failed to process Redcliffe Razorpay webhook",
+       detail: error?.message || "Unknown server error",
+     });
+   }
+ }
+);
+
+router.webhookRouter = webhookRouter;
 
 module.exports = router;
