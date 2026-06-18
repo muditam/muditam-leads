@@ -1,8 +1,10 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const ShopifyOrder = require("../models/ShopifyOrder");
 const Order = require("../models/Order");
 const Lead = require("../models/Lead");
 const Customer = require("../models/Customer");
+const Employee = require("../models/Employee");
 const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
@@ -30,15 +32,8 @@ const CLOSED_STATUS_REGEX = /(delivered|rto[\s_-]*(received|delivered)|return[\s
 const ACTIVE_ORDERS_START = new Date("2026-04-01T00:00:00.000Z");
 const PAGE_SELECT =
   "orderId orderName customerName contactNumber customerAddress orderDate createdAt amount modeOfPayment paymentGatewayNames productsOrdered financial_status fulfillment_status cancelled_at";
-const NDR_ACTIVE_STATUS_REGEX = /(shipped|transit|out[\s_-]*for[\s_-]*delivery|ofd|ready[\s_-]*for[\s_-]*pickup|pickup)/i;
-const NDR_PROBLEM_REGEX = /(refus|not[\s_-]*available|address|incomplete|incorrect|consignee|failed|undelivered|delay|hold|exception|otp)/i;
+const NDR_DELIVERED_STATUS_REGEX = /^(delivered|delivered[\s_-]*paid[\s_-]*cod|delivered\s*&\s*paid.*)$/i;
 const NDR_EXCLUDED_PRODUCT_REGEX = /(blood\s*test|full\s*body\s*checkup)/i;
-const NDR_STATUS_OPTIONS = [
-  { value: "shipped", label: "Shipped" },
-  { value: "in_transit", label: "In Transit" },
-  { value: "out_for_delivery", label: "Out for Delivery" },
-  { value: "ready_for_pickup", label: "Ready for Pickup" },
-];
 const META_CACHE_TTL_MS = 30000;
 const metaCache = new Map();
 
@@ -142,6 +137,10 @@ function statusRegexForKey(status = "") {
 function normalizeOrderName(orderName = "") {
   const value = String(orderName || "");
   return value.startsWith("#") ? value.slice(1) : value;
+}
+
+function normalizePhoneTail(value = "") {
+  return String(value || "").replace(/\D/g, "").slice(-10);
 }
 
 function isClosedStatus(status = "") {
@@ -387,6 +386,82 @@ async function updateOrderRemark(orderId, opsRemark) {
   });
 }
 
+async function updateOrderAgent(orderId, assignedAgentId) {
+  const normalized = normalizeOrderName(orderId);
+  if (!normalized) return null;
+
+  const nextAgentId = assignedAgentId ? new mongoose.Types.ObjectId(String(assignedAgentId)) : null;
+  const now = new Date();
+  const update = {
+    assignedAgentId: nextAgentId,
+    last_updated_at: now,
+  };
+  const existing = await Order.findOneAndUpdate(
+    { order_id: { $in: [normalized, `#${normalized}`] } },
+    { $set: update },
+    { new: true, sort: { last_updated_at: -1, updatedAt: -1, _id: -1 } }
+  ).lean();
+
+  if (existing) return existing;
+
+  return Order.create({
+    order_id: normalized,
+    shipment_status: "Not Shipped",
+    assignedAgentId: nextAgentId,
+    last_updated_at: now,
+  });
+}
+
+async function syncLeadAssignmentForOrder(orderId, assignedAgentName = "") {
+  const normalized = normalizeOrderName(orderId);
+  if (!normalized) return { leadsUpdated: 0, customersUpdated: 0 };
+
+  const orderNameVariants = [...new Set([normalized, `#${normalized}`].filter(Boolean))];
+  const [orderDoc, shopOrder] = await Promise.all([
+    Order.findOne({ order_id: { $in: orderNameVariants } })
+      .sort({ last_updated_at: -1, updatedAt: -1, _id: -1 })
+      .select("contact_number")
+      .lean(),
+    ShopifyOrder.findOne({ orderName: { $in: orderNameVariants } })
+      .sort({ orderDate: -1, createdAt: -1, _id: -1 })
+      .select("contactNumber customerAddress.phone")
+      .lean(),
+  ]);
+
+  const phoneCandidates = [...new Set([
+    orderDoc?.contact_number,
+    shopOrder?.contactNumber,
+    shopOrder?.customerAddress?.phone,
+  ].map((value) => String(value || "").trim()).filter(Boolean))];
+
+  const phoneTail = phoneCandidates.map(normalizePhoneTail).find((value) => value.length === 10) || "";
+  const leadOr = [{ orderId: { $in: orderNameVariants } }];
+  const customerOr = [];
+
+  if (phoneCandidates.length) {
+    leadOr.push({ contactNumber: { $in: phoneCandidates } });
+    customerOr.push({ phone: { $in: phoneCandidates } });
+  }
+
+  if (phoneTail) {
+    const tailRegex = new RegExp(`${escapeRegex(phoneTail)}$`);
+    leadOr.push({ contactNumber: tailRegex });
+    customerOr.push({ phone: tailRegex });
+  }
+
+  const [leadResult, customerResult] = await Promise.all([
+    Lead.updateMany({ $or: leadOr }, { $set: { healthExpertAssigned: assignedAgentName } }),
+    customerOr.length
+      ? Customer.updateMany({ $or: customerOr }, { $set: { assignedTo: assignedAgentName } })
+      : Promise.resolve({ modifiedCount: 0 }),
+  ]);
+
+  return {
+    leadsUpdated: Number(leadResult?.modifiedCount || 0),
+    customersUpdated: Number(customerResult?.modifiedCount || 0),
+  };
+}
+
 function buildStatusCounts(rows = []) {
   const counts = new Map();
   rows.forEach((row) => {
@@ -605,6 +680,50 @@ router.patch("/lms-orders/remark", requireSession, async (req, res) => {
   }
 });
 
+router.patch("/lms-orders/agent", requireSession, async (req, res) => {
+  try {
+    const orderId = req.body?.orderId;
+    const assignedAgentId = req.body?.assignedAgentId || null;
+    const normalized = normalizeOrderName(orderId);
+
+    if (!normalized) {
+      return res.status(400).json({ error: "Order ID is required." });
+    }
+
+    let agent = null;
+    if (assignedAgentId) {
+      if (!mongoose.Types.ObjectId.isValid(String(assignedAgentId))) {
+        return res.status(400).json({ error: "Invalid agent." });
+      }
+
+      agent = await Employee.findOne({
+        _id: assignedAgentId,
+        role: /^operations$/i,
+        department: /^customer support$/i,
+        status: /^active$/i,
+      })
+        .select("_id fullName")
+        .lean();
+
+      if (!agent) {
+        return res.status(400).json({ error: "Select an active customer support operations agent." });
+      }
+    }
+
+    const updated = await updateOrderAgent(normalized, assignedAgentId);
+    const leadAssignment = await syncLeadAssignmentForOrder(normalized, agent?.fullName || "");
+    res.json({
+      orderId: normalized,
+      assignedAgentId: updated?.assignedAgentId ? String(updated.assignedAgentId) : "",
+      assignedAgentName: agent?.fullName || "",
+      leadAssignment,
+    });
+  } catch (err) {
+    console.error("PATCH /api/lms-orders/agent error:", err);
+    res.status(500).json({ error: "Failed to update order agent" });
+  }
+});
+
 function parseDelayRange(value = "") {
   const key = String(value || "").trim();
   const ranges = {
@@ -617,7 +736,7 @@ function parseDelayRange(value = "") {
   return ranges[key] || null;
 }
 
-function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
+function buildNdrPipeline(query = {}, section = "all", forFacet = true) {
   const page = Math.max(parseInt(query.page || "1", 10), 1);
   const limit = Math.min(Math.max(parseInt(query.limit || "10", 10), 1), 100);
   const skip = (page - 1) * limit;
@@ -631,11 +750,6 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
   const now = new Date();
 
   const pipeline = [
-    {
-      $match: {
-        shipment_status: { $regex: NDR_ACTIVE_STATUS_REGEX },
-      },
-    },
     {
       $addFields: {
         orderIdNoHash: {
@@ -721,16 +835,10 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
     {
       $match: {
         $or: [{ "shop.cancelled_at": null }, { "shop.cancelled_at": { $exists: false } }],
-        shipment_status: { $not: CLOSED_STATUS_REGEX },
+        shipment_status: { $not: NDR_DELIVERED_STATUS_REGEX },
       },
     },
   ];
-
-  if (section === "attention") {
-    pipeline.push({ $match: { issue: NDR_PROBLEM_REGEX, delayDays: { $lt: 7 } } });
-  } else {
-    pipeline.push({ $match: { delayDays: { $gte: 7 } } });
-  }
 
   if (dateFrom || dateTo) {
     const dateMatch = {};
@@ -756,7 +864,6 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
           { phoneEff: searchRegex },
           { tracking_number: searchRegex },
           { carrier_title: searchRegex },
-          { issue: searchRegex },
           { "shop.productsOrdered.title": searchRegex },
           { "shop.productsOrdered.sku": searchRegex },
         ],
@@ -771,7 +878,6 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
     orderName: { $ifNull: ["$shop.orderName", "$order_id"] },
     orderDate: "$orderDateEff",
     customerName: "$customerNameEff",
-    agentName: { $ifNull: ["$agentName", ""] },
     contactNumber: "$phoneEff",
     customerAddress: { $ifNull: ["$shop.customerAddress", null] },
     amount: { $ifNull: ["$shop.amount", 0] },
@@ -782,128 +888,11 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
     trackingNumber: { $ifNull: ["$tracking_number", ""] },
     courier: { $ifNull: ["$carrier_title", ""] },
     statusUpdatedAt: "$last_updated_at",
-    shipmentIssue: { $ifNull: ["$issue", ""] },
     opsRemark: { $ifNull: ["$opsRemark", ""] },
+    assignedAgentId: { $ifNull: [{ $toString: "$assignedAgentId" }, ""] },
     delayDays: 1,
     section: { $literal: section },
   };
-
-  const pageAgentLookupStages = [
-    {
-      $addFields: {
-        phoneNorm: {
-          $let: {
-            vars: {
-              digits: {
-                $regexFind: {
-                  input: { $ifNull: ["$phoneEff", ""] },
-                  regex: /(\d{10})$/,
-                },
-              },
-            },
-            in: { $ifNull: ["$$digits.match", ""] },
-          },
-        },
-      },
-    },
-    {
-      $lookup: {
-        from: Lead.collection.name,
-        let: { phoneNorm: "$phoneNorm" },
-        pipeline: [
-          {
-            $addFields: {
-              contactNorm: {
-                $let: {
-                  vars: {
-                    digits: {
-                      $regexFind: {
-                        input: { $ifNull: ["$contactNumber", ""] },
-                        regex: /(\d{10})$/,
-                      },
-                    },
-                  },
-                  in: { $ifNull: ["$$digits.match", ""] },
-                },
-              },
-              healthExpertName: { $trim: { input: { $ifNull: ["$healthExpertAssigned", ""] } } },
-            },
-          },
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $gt: [{ $strLenCP: "$$phoneNorm" }, 0] },
-                  { $eq: ["$contactNorm", "$$phoneNorm"] },
-                ],
-              },
-            },
-          },
-          { $sort: { healthExpertName: -1, _id: -1 } },
-          { $project: { _id: 0, healthExpertName: 1 } },
-          { $limit: 1 },
-        ],
-        as: "leadAgent",
-      },
-    },
-    {
-      $lookup: {
-        from: Customer.collection.name,
-        let: { phoneNorm: "$phoneNorm" },
-        pipeline: [
-          {
-            $addFields: {
-              customerPhoneNorm: {
-                $let: {
-                  vars: {
-                    digits: {
-                      $regexFind: {
-                        input: { $ifNull: ["$phone", ""] },
-                        regex: /(\d{10})$/,
-                      },
-                    },
-                  },
-                  in: { $ifNull: ["$$digits.match", ""] },
-                },
-              },
-              assignedName: { $trim: { input: { $ifNull: ["$assignedTo", ""] } } },
-            },
-          },
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $gt: [{ $strLenCP: "$$phoneNorm" }, 0] },
-                  { $eq: ["$customerPhoneNorm", "$$phoneNorm"] },
-                ],
-              },
-            },
-          },
-          { $sort: { assignedName: -1, _id: -1 } },
-          { $project: { _id: 0, assignedName: 1 } },
-          { $limit: 1 },
-        ],
-        as: "customerAgent",
-      },
-    },
-    {
-      $addFields: {
-        leadAgentName: { $ifNull: [{ $arrayElemAt: ["$leadAgent.healthExpertName", 0] }, ""] },
-        customerAgentName: { $ifNull: [{ $arrayElemAt: ["$customerAgent.assignedName", 0] }, ""] },
-      },
-    },
-    {
-      $addFields: {
-        agentName: {
-          $cond: [
-            { $gt: [{ $strLenCP: "$leadAgentName" }, 0] },
-            "$leadAgentName",
-            "$customerAgentName",
-          ],
-        },
-      },
-    },
-  ];
 
   if (!forFacet) return pipeline;
 
@@ -913,7 +902,6 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
         { $sort: { orderDateEff: -1, last_updated_at: -1, _id: -1 } },
         { $skip: skip },
         { $limit: limit },
-        ...pageAgentLookupStages,
         { $project: projectRow },
       ],
       total: [{ $count: "count" }],
@@ -932,15 +920,16 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
 
 router.get("/lms-orders/ndr", requireSession, async (req, res) => {
   try {
-    const section = String(req.query.section || "delayed").toLowerCase() === "attention" ? "attention" : "delayed";
+    const section = "all";
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit || "10", 10), 1), 100);
     const [result] = await Order.aggregate(buildNdrPipeline(req.query, section)).allowDiskUse(true);
     const total = result?.total?.[0]?.count || 0;
-    const statusMap = new Map(NDR_STATUS_OPTIONS.map((item) => [item.value, { ...item, count: 0 }]));
+    const statusMap = new Map();
     (result?.statuses || []).forEach((item) => {
-      const value = statusOptionValue(item._id || "");
-      const existing = statusMap.get(value) || { value, label: statusLabelFromValue(value), count: 0 };
+      const label = String(item._id || "Not Available").trim() || "Not Available";
+      const value = `raw:${label}`;
+      const existing = statusMap.get(value) || { value, label, count: 0 };
       existing.count += Number(item.count || 0);
       statusMap.set(value, existing);
     });
@@ -951,7 +940,7 @@ router.get("/lms-orders/ndr", requireSession, async (req, res) => {
       limit,
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),
-      statusOptions: Array.from(statusMap.values()).filter((item) => item.count > 0 || NDR_STATUS_OPTIONS.some((base) => base.value === item.value)),
+      statusOptions: Array.from(statusMap.values()).filter((item) => item.count > 0),
       carriers: (result?.carriers || []).map((item) => item._id).filter(Boolean),
       data: result?.rows || [],
     });
