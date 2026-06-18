@@ -719,6 +719,77 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
       },
     },
     {
+      $match: {
+        $or: [{ "shop.cancelled_at": null }, { "shop.cancelled_at": { $exists: false } }],
+        shipment_status: { $not: CLOSED_STATUS_REGEX },
+      },
+    },
+  ];
+
+  if (section === "attention") {
+    pipeline.push({ $match: { issue: NDR_PROBLEM_REGEX, delayDays: { $lt: 7 } } });
+  } else {
+    pipeline.push({ $match: { delayDays: { $gte: 7 } } });
+  }
+
+  if (dateFrom || dateTo) {
+    const dateMatch = {};
+    if (dateFrom) dateMatch.$gte = dateFrom;
+    if (dateTo) dateMatch.$lte = dateTo;
+    pipeline.push({ $match: { orderDateEff: dateMatch } });
+  }
+
+  if (courier) pipeline.push({ $match: { carrier_title: new RegExp(escapeRegex(courier), "i") } });
+  if (status) pipeline.push({ $match: { shipment_status: statusRegexForKey(status) } });
+  if (paymentMode) pipeline.push({ $match: { paymentModeEff: new RegExp(`^${escapeRegex(paymentMode)}$`, "i") } });
+  if (delayRange) {
+    const [min, max] = delayRange;
+    pipeline.push({ $match: { delayDays: max ? { $gte: min, $lte: max } : { $gte: min } } });
+  }
+  if (search) {
+    const searchRegex = new RegExp(escapeRegex(search), "i");
+    pipeline.push({
+      $match: {
+        $or: [
+          { order_id: searchRegex },
+          { customerNameEff: searchRegex },
+          { phoneEff: searchRegex },
+          { tracking_number: searchRegex },
+          { carrier_title: searchRegex },
+          { issue: searchRegex },
+          { "shop.productsOrdered.title": searchRegex },
+          { "shop.productsOrdered.sku": searchRegex },
+        ],
+      },
+    });
+  }
+
+  const projectRow = {
+    _id: 0,
+    id: { $toString: "$_id" },
+    orderId: "$orderIdNoHash",
+    orderName: { $ifNull: ["$shop.orderName", "$order_id"] },
+    orderDate: "$orderDateEff",
+    customerName: "$customerNameEff",
+    agentName: { $ifNull: ["$agentName", ""] },
+    contactNumber: "$phoneEff",
+    customerAddress: { $ifNull: ["$shop.customerAddress", null] },
+    amount: { $ifNull: ["$shop.amount", 0] },
+    paymentMode: { $ifNull: ["$paymentModeEff", ""] },
+    products: { $ifNull: ["$shop.productsOrdered", []] },
+    status: "$shipment_status",
+    statusRaw: "$shipment_status",
+    trackingNumber: { $ifNull: ["$tracking_number", ""] },
+    courier: { $ifNull: ["$carrier_title", ""] },
+    statusUpdatedAt: "$last_updated_at",
+    shipmentIssue: { $ifNull: ["$issue", ""] },
+    opsRemark: { $ifNull: ["$opsRemark", ""] },
+    delayDays: 1,
+    section: { $literal: section },
+  };
+
+  const pageAgentLookupStages = [
+    {
       $addFields: {
         phoneNorm: {
           $let: {
@@ -832,75 +903,7 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
         },
       },
     },
-    {
-      $match: {
-        $or: [{ "shop.cancelled_at": null }, { "shop.cancelled_at": { $exists: false } }],
-        shipment_status: { $not: CLOSED_STATUS_REGEX },
-      },
-    },
   ];
-
-  if (section === "attention") {
-    pipeline.push({ $match: { issue: NDR_PROBLEM_REGEX, delayDays: { $lt: 7 } } });
-  } else {
-    pipeline.push({ $match: { delayDays: { $gte: 7 } } });
-  }
-
-  if (dateFrom || dateTo) {
-    const dateMatch = {};
-    if (dateFrom) dateMatch.$gte = dateFrom;
-    if (dateTo) dateMatch.$lte = dateTo;
-    pipeline.push({ $match: { orderDateEff: dateMatch } });
-  }
-
-  if (courier) pipeline.push({ $match: { carrier_title: new RegExp(escapeRegex(courier), "i") } });
-  if (status) pipeline.push({ $match: { shipment_status: statusRegexForKey(status) } });
-  if (paymentMode) pipeline.push({ $match: { paymentModeEff: new RegExp(`^${escapeRegex(paymentMode)}$`, "i") } });
-  if (delayRange) {
-    const [min, max] = delayRange;
-    pipeline.push({ $match: { delayDays: max ? { $gte: min, $lte: max } : { $gte: min } } });
-  }
-  if (search) {
-    const searchRegex = new RegExp(escapeRegex(search), "i");
-    pipeline.push({
-      $match: {
-        $or: [
-          { order_id: searchRegex },
-          { customerNameEff: searchRegex },
-          { phoneEff: searchRegex },
-          { tracking_number: searchRegex },
-          { carrier_title: searchRegex },
-          { issue: searchRegex },
-          { "shop.productsOrdered.title": searchRegex },
-          { "shop.productsOrdered.sku": searchRegex },
-        ],
-      },
-    });
-  }
-
-  const projectRow = {
-    _id: 0,
-    id: { $toString: "$_id" },
-    orderId: "$orderIdNoHash",
-    orderName: { $ifNull: ["$shop.orderName", "$order_id"] },
-    orderDate: "$orderDateEff",
-    customerName: "$customerNameEff",
-    agentName: { $ifNull: ["$agentName", ""] },
-    contactNumber: "$phoneEff",
-    customerAddress: { $ifNull: ["$shop.customerAddress", null] },
-    amount: { $ifNull: ["$shop.amount", 0] },
-    paymentMode: { $ifNull: ["$paymentModeEff", ""] },
-    products: { $ifNull: ["$shop.productsOrdered", []] },
-    status: "$shipment_status",
-    statusRaw: "$shipment_status",
-    trackingNumber: { $ifNull: ["$tracking_number", ""] },
-    courier: { $ifNull: ["$carrier_title", ""] },
-    statusUpdatedAt: "$last_updated_at",
-    shipmentIssue: { $ifNull: ["$issue", ""] },
-    opsRemark: { $ifNull: ["$opsRemark", ""] },
-    delayDays: 1,
-    section: { $literal: section },
-  };
 
   if (!forFacet) return pipeline;
 
@@ -910,6 +913,7 @@ function buildNdrPipeline(query = {}, section = "delayed", forFacet = true) {
         { $sort: { orderDateEff: -1, last_updated_at: -1, _id: -1 } },
         { $skip: skip },
         { $limit: limit },
+        ...pageAgentLookupStages,
         { $project: projectRow },
       ],
       total: [{ $count: "count" }],
