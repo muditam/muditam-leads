@@ -143,6 +143,32 @@ function normalizePhoneTail(value = "") {
   return String(value || "").replace(/\D/g, "").slice(-10);
 }
 
+function isCustomerSupportOperationsUser(user = {}) {
+  return /^operations$/i.test(String(user.role || "").trim())
+    && /^customer support$/i.test(String(user.department || "").trim());
+}
+
+async function resolveCustomerSupportOperationsEmployee(user = {}) {
+  const roleDepartmentMatch = {
+    role: /^operations$/i,
+    department: /^customer support$/i,
+  };
+  const id = String(user._id || user.id || user.userId || "").trim();
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    const employee = await Employee.findOne({ _id: id, ...roleDepartmentMatch }).select("_id hasTeam").lean();
+    if (employee?._id) return employee;
+  }
+
+  const or = [];
+  const email = String(user.email || "").trim();
+  const fullName = String(user.fullName || user.name || "").trim();
+  if (email) or.push({ email: new RegExp(`^${escapeRegex(email)}$`, "i") });
+  if (fullName) or.push({ fullName: new RegExp(`^${escapeRegex(fullName)}$`, "i") });
+  if (!or.length) return null;
+
+  return Employee.findOne({ ...roleDepartmentMatch, $or: or }).select("_id hasTeam").lean();
+}
+
 function isClosedStatus(status = "") {
   return CLOSED_STATUS_KEYS.has(normalizeStatusKey(status));
 }
@@ -736,7 +762,7 @@ function parseDelayRange(value = "") {
   return ranges[key] || null;
 }
 
-function buildNdrPipeline(query = {}, section = "all", forFacet = true) {
+function buildNdrPipeline(query = {}, section = "all", forFacet = true, assignedAgentScopeId = null) {
   const page = Math.max(parseInt(query.page || "1", 10), 1);
   const limit = Math.min(Math.max(parseInt(query.limit || "10", 10), 1), 100);
   const skip = (page - 1) * limit;
@@ -749,7 +775,16 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true) {
   const dateTo = parseDateEnd(query.date_to);
   const now = new Date();
 
-  const pipeline = [
+  const pipeline = [];
+  if (assignedAgentScopeId) {
+    pipeline.push({
+      $match: {
+        assignedAgentId: new mongoose.Types.ObjectId(String(assignedAgentScopeId)),
+      },
+    });
+  }
+
+  pipeline.push(
     {
       $addFields: {
         orderIdNoHash: {
@@ -838,7 +873,7 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true) {
         shipment_status: { $not: NDR_DELIVERED_STATUS_REGEX },
       },
     },
-  ];
+  );
 
   if (dateFrom || dateTo) {
     const dateMatch = {};
@@ -913,6 +948,10 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true) {
         { $group: { _id: "$carrier_title" } },
         { $sort: { _id: 1 } },
       ],
+      payments: [
+        { $group: { _id: "$paymentModeEff", count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+      ],
     },
   });
   return pipeline;
@@ -923,7 +962,26 @@ router.get("/lms-orders/ndr", requireSession, async (req, res) => {
     const section = "all";
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit || "10", 10), 1), 100);
-    const [result] = await Order.aggregate(buildNdrPipeline(req.query, section)).allowDiskUse(true);
+    let assignedAgentScopeId = null;
+    if (isCustomerSupportOperationsUser(req.sessionUser || {})) {
+      const employee = await resolveCustomerSupportOperationsEmployee(req.sessionUser || {});
+      if (!employee?._id) {
+        return res.json({
+          section,
+          page,
+          limit,
+          total: 0,
+          totalPages: 1,
+          statusOptions: [],
+          paymentOptions: [],
+          carriers: [],
+          data: [],
+        });
+      }
+      if (!employee.hasTeam) assignedAgentScopeId = employee._id;
+    }
+
+    const [result] = await Order.aggregate(buildNdrPipeline(req.query, section, true, assignedAgentScopeId)).allowDiskUse(true);
     const total = result?.total?.[0]?.count || 0;
     const statusMap = new Map();
     (result?.statuses || []).forEach((item) => {
@@ -941,6 +999,13 @@ router.get("/lms-orders/ndr", requireSession, async (req, res) => {
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),
       statusOptions: Array.from(statusMap.values()).filter((item) => item.count > 0),
+      paymentOptions: (result?.payments || [])
+        .map((item) => ({
+          value: String(item._id || "").trim(),
+          label: String(item._id || "Not Available").trim() || "Not Available",
+          count: Number(item.count || 0),
+        }))
+        .filter((item) => item.value && item.count > 0),
       carriers: (result?.carriers || []).map((item) => item._id).filter(Boolean),
       data: result?.rows || [],
     });
