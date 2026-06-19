@@ -32,6 +32,16 @@ const WhatsAppMessageSchema = new mongoose.Schema(
     // optional: keep caption separately (if you want)
     caption: { type: String, default: "" },
 
+    replyTo: {
+      messageId: { type: mongoose.Schema.Types.ObjectId, default: null },
+      waId: { type: String, default: "" },
+      text: { type: String, default: "" },
+      type: { type: String, default: "" },
+      direction: { type: String, default: "" },
+      from: { type: String, default: "" },
+      to: { type: String, default: "" },
+    },
+
     // optional: store template info (helpful)
     templateMeta: {
       name: { type: String, default: "" },

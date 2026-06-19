@@ -241,7 +241,7 @@ function buildConversationAccessQuery(context, assignedTo = "") {
   const query = {};
   const assignedNormalized = normalizeNameKey(assignedTo);
 
-  if (context && !(context.isAdmin && context.mode === "all")) {
+  if (context && context.mode !== "all") {
     const selfName = normalizeNameKey(context.selfName || context.normalizedUserName || "");
     const allowedNames = context.allowedNames instanceof Set
       ? Array.from(context.allowedNames).map((name) => normalizeNameKey(name)).filter(Boolean)
@@ -444,6 +444,126 @@ function mergeMongoQueries(...queries) {
   return { $and: valid };
 }
 
+function parseMaybeJsonObject(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeReplyTo(input) {
+  const raw = parseMaybeJsonObject(input);
+  if (!raw) return null;
+  const messageIdRaw = String(raw.messageId || raw._id || raw.id || "").trim();
+  const messageId = mongoose.Types.ObjectId.isValid(messageIdRaw)
+    ? new mongoose.Types.ObjectId(messageIdRaw)
+    : null;
+  const text = String(raw.text || raw.caption || "").trim().slice(0, 500);
+  const type = String(raw.type || "").trim().slice(0, 40);
+  const waId = String(raw.waId || "").trim().slice(0, 200);
+  const direction = String(raw.direction || "").trim().toUpperCase();
+  const from = String(raw.from || "").trim().slice(0, 40);
+  const to = String(raw.to || "").trim().slice(0, 40);
+
+  if (!messageId && !waId && !text && !type) return null;
+
+  return {
+    messageId,
+    waId,
+    text,
+    type,
+    direction: ["INBOUND", "OUTBOUND"].includes(direction) ? direction : "",
+    from,
+    to,
+  };
+}
+
+function nativeReplyContextFields(replyTo = null) {
+  const contextId = String(replyTo?.waId || "").trim();
+  if (!contextId) return {};
+  return {
+    reply_to_message_id: contextId,
+    context: {
+      id: contextId,
+      message_id: contextId,
+    },
+  };
+}
+
+function replyPreviewTextFromMessage(message = {}) {
+  const text = String(message?.text || message?.caption || "").trim();
+  if (text) return text.slice(0, 500);
+  const type = String(message?.type || "").toLowerCase();
+  if (type === "image") return "Photo";
+  if (type === "video") return "Video";
+  if (type === "audio" || type === "voice") return "Audio";
+  if (type === "template") return "Template message";
+  if (type === "document") return message?.media?.filename || "Document";
+  if (message?.media?.filename) return message.media.filename;
+  return "Message";
+}
+
+function buildReplyToFromMessage(message = null) {
+  if (!message) return null;
+  return {
+    messageId: message._id || null,
+    waId: String(message.waId || "").trim(),
+    text: replyPreviewTextFromMessage(message),
+    type: String(message.type || "").trim(),
+    direction: String(message.direction || "").trim().toUpperCase(),
+    from: String(message.from || "").trim(),
+    to: String(message.to || "").trim(),
+  };
+}
+
+function inboundReplyContextId(msg = {}) {
+  return String(
+    deepPick(msg, [
+      "context.id",
+      "context.message_id",
+      "context.messageId",
+      "context.message.id",
+      "reply.context.id",
+      "reply.context.message_id",
+      "reply_to_message_id",
+      "replyTo.message_id",
+      "replyTo.messageId",
+      "replyTo.id",
+      "quoted_message_id",
+      "quotedMessageId",
+      "quoted.id",
+      "quoted.message_id",
+      "in_reply_to",
+      "inReplyTo",
+      "replied_message_id",
+    ]) || ""
+  ).trim();
+}
+
+async function resolveReplyToByProviderId(providerId = "") {
+  const id = String(providerId || "").trim();
+  if (!id) return null;
+  const original = await WhatsAppMessage.findOne({
+    $or: [
+      { waId: id },
+      { providerTransactionId: id },
+      { "raw.id": id },
+      { "raw.message_id": id },
+      { "raw.data.message_id": id },
+      { "raw.results.message_id": id },
+      { "raw.results.0.message_id": id },
+    ],
+  })
+    .sort({ timestamp: -1 })
+    .lean();
+  return buildReplyToFromMessage(original);
+}
+
 async function upsertConversationRecord(phone = "", setFields = {}, options = {}) {
   const normalizedPhone = normalizeWaId(phone);
   const phone10 = last10(normalizedPhone);
@@ -518,12 +638,12 @@ async function resolveConversationAccessContext({ role, userName, userId, hasTea
     isAdmin,
     userId: normalizedUserId,
     normalizedUserName,
-    mode: isAdmin ? "all" : "self",
+    mode: isAdmin || isManagerLike ? "all" : "self",
     allowedNames: new Set(),
     selfName: normalizedUserName,
   };
 
-  if (isAdmin) {
+  if (isAdmin || isManagerLike) {
     return context;
   }
 
@@ -711,7 +831,7 @@ async function buildUnknownTemplateVisibility(req, phone10 = "") {
 function applyConversationAccessFilter(conversations = [], context) {
   const list = Array.isArray(conversations) ? conversations : [];
   if (!context) return list;
-  if (context.isAdmin && context.mode === "all") return list;
+  if (context.mode === "all") return list;
 
   const selfName = String(context.selfName || context.normalizedUserName || "")
     .trim()
@@ -902,7 +1022,7 @@ function buildConversationAccessMatchStages(context, assignedTo = "") {
   const accessMatch = {};
   let assignedAccessMatch = {};
 
-  if (context && !(context.isAdmin && context.mode === "all")) {
+  if (context && context.mode !== "all") {
     const selfName = String(context.selfName || context.normalizedUserName || "")
       .trim()
       .toLowerCase();
@@ -1022,7 +1142,7 @@ async function getScopedActiveAgentOptions(context, baseFilter = {}) {
   if (!activeNameMap.size) return [];
 
   let allowedNormalizedNames = null;
-  if (!(context?.isAdmin && context?.mode === "all")) {
+  if (context?.mode !== "all") {
     const selfName = normalizeNameKey(context?.selfName || context?.normalizedUserName || "");
     const teamNames = context?.allowedNames instanceof Set
       ? Array.from(context.allowedNames).map((name) => normalizeNameKey(name)).filter(Boolean)
@@ -1709,6 +1829,7 @@ function buildTrustSignalTemplatePayload({
   providerTemplateId,
   parameters = [],
   headerMedia = null,
+  replyTo = null,
 }) {
   const normalizedHeader = normalizeTemplateHeaderMediaInput(headerMedia);
   const paramValues = asArray(parameters).map((x) => String(x ?? "").trim());
@@ -1733,6 +1854,7 @@ function buildTrustSignalTemplatePayload({
     sender: toE164Plus(sender),
     to: toE164Plus(to),
     template_id: providerTemplateId,
+    ...nativeReplyContextFields(replyTo),
     ...(typeof sval === "number" ? { sval } : {}),
     ...(Object.keys(sample).length ? { sample } : {}),
   };
@@ -2166,8 +2288,9 @@ async function tsRequest({
   return resp;
 }
 
-async function sendFreeformTextViaTrustSignal({ sender, toNumber, text }) {
+async function sendFreeformTextViaTrustSignal({ sender, toNumber, text, replyTo = null }) {
   const textValue = String(text || "").trim();
+  const nativeReply = nativeReplyContextFields(replyTo);
 
   const payload = {
     message_type: "text",
@@ -2175,6 +2298,7 @@ async function sendFreeformTextViaTrustSignal({ sender, toNumber, text }) {
     to: toE164Plus(toNumber),
     reply: {
       message: textValue,
+      ...nativeReply,
     },
   };
 
@@ -2193,8 +2317,10 @@ async function sendFreeformMediaViaTrustSignal({
   mediaType,
   mediaUrl,
   filename,
+  replyTo = null,
 }) {
   const resolvedType = normalizeOutgoingMediaType(mediaType);
+  const nativeReply = nativeReplyContextFields(replyTo);
 
   const payload = {
     message_type: "file",
@@ -2205,6 +2331,7 @@ async function sendFreeformMediaViaTrustSignal({
       media_type: resolvedType,
       media_file_url: String(mediaUrl || "").trim(),
       ...(filename ? { filename } : {}),
+      ...nativeReply,
     },
   };
 
@@ -2735,11 +2862,12 @@ function parseWebhookPayload(body = {}) {
         waId,
         from,
         to: businessPhone || out.businessPhone || "",
-        text,
-        type: safeType,
-        ...(isRealMedia ? { media: normalizedMedia } : {}),
-        raw: msg,
-        timestamp,
+      text,
+      type: safeType,
+      replyContextId: inboundReplyContextId(msg),
+      ...(isRealMedia ? { media: normalizedMedia } : {}),
+      raw: msg,
+      timestamp,
       });
     }
   }
@@ -3016,6 +3144,45 @@ router.post("/conversations/mark-read", async (req, res) => {
   } catch (e) {
     console.error("mark-read error:", e);
     return res.status(500).json({ message: e.message || "mark-read failed" });
+  }
+});
+
+router.post("/conversations/mark-unread", async (req, res) => {
+  try {
+    const phoneRaw = req.body?.phone || "";
+    const p10 = last10(phoneRaw);
+    if (!p10) return res.status(400).json({ message: "phone required" });
+    const accessContext = await resolveConversationAccessContextFromRequest(req, {
+      role: req.body?.role || req.query?.role,
+      userName: req.body?.userName || req.query?.userName,
+      userId: req.body?.userId || req.query?.userId,
+      hasTeam: req.body?.hasTeam || req.query?.hasTeam,
+      chatScope: req.body?.chatScope || req.query?.chatScope,
+    });
+
+    const allowed = await canAccessConversationPhone(p10, accessContext);
+    if (!allowed) return res.status(403).json({ message: "Forbidden" });
+
+    const existing = await WhatsAppConversation.findOne({
+      phone: new RegExp(`${p10}$`),
+    }).lean();
+
+    const unreadCount = Math.max(1, Number(existing?.unreadCount || 0));
+    const updated = await WhatsAppConversation.findOneAndUpdate(
+      { phone: new RegExp(`${p10}$`) },
+      { $set: { unreadCount } },
+      { new: true }
+    ).lean();
+
+    emitConversationPatch(req, {
+      phone10: p10,
+      patch: { unreadCount },
+    });
+
+    return res.json({ success: true, conversation: updated || null });
+  } catch (e) {
+    console.error("mark-unread error:", e);
+    return res.status(500).json({ message: e.message || "mark-unread failed" });
   }
 });
 
@@ -3344,6 +3511,7 @@ router.post("/send-text", async (req, res) => {
   try {
     const { to, text } = req.body;
     const textValue = String(text || "").trim();
+    const replyTo = normalizeReplyTo(req.body?.replyTo);
 
     if (!to || !textValue) {
       return res.status(400).json({ message: "to & text required" });
@@ -3373,6 +3541,7 @@ router.post("/send-text", async (req, res) => {
       sender,
       toNumber,
       text: textValue,
+      replyTo,
     });
 
     ensureTrustSignalAccepted(r.data, "TrustSignal did not accept text send");
@@ -3387,6 +3556,7 @@ router.post("/send-text", async (req, res) => {
       text: textValue,
       direction: "OUTBOUND",
       type: "text",
+      ...(replyTo ? { replyTo } : {}),
       status: "sent",
       timestamp: now,
       raw: r.data,
@@ -3479,6 +3649,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
     const directType = String(req.body?.mediaType || "")
       .trim()
       .toLowerCase();
+    const replyTo = normalizeReplyTo(req.body?.replyTo);
 
     if (!toRaw) {
       return res.status(400).json({ message: "to required" });
@@ -3568,6 +3739,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       mediaType,
       mediaUrl,
       filename,
+      replyTo,
     });
 
     console.log("TS MEDIA RESPONSE =>", safeStringify(r.data));
@@ -3585,6 +3757,7 @@ router.post("/send-media", upload.single("file"), async (req, res) => {
       direction: "OUTBOUND",
       type: mediaType,
       text: caption,
+      ...(replyTo ? { replyTo } : {}),
       status: "sent",
       timestamp: now,
       media: {
@@ -3644,7 +3817,9 @@ router.post("/send-template", async (req, res) => {
       parameters = [],
       renderedText = "",
       headerMedia = null,
+      replyTo: replyToRaw = null,
     } = req.body;
+    const replyTo = normalizeReplyTo(replyToRaw);
     if (!to || (!templateName && !requestedTemplateId)) {
       return res
         .status(400)
@@ -3752,6 +3927,7 @@ router.post("/send-template", async (req, res) => {
       providerTemplateId,
       parameters: paramValues,
       headerMedia: providerHeaderMedia,
+      replyTo,
     });
 
     console.log("TS TEMPLATE PAYLOAD =>", JSON.stringify(payload, null, 2));
@@ -3785,6 +3961,7 @@ router.post("/send-template", async (req, res) => {
       direction: "OUTBOUND",
       type: "template",
       text: finalText,
+      ...(replyTo ? { replyTo } : {}),
       status: "sent",
       templateMeta: {
         name: tpl.name || originalTemplateName,
@@ -4375,6 +4552,7 @@ async function handlePublicWebhook(req, res) {
       }
 
       const textValue = String(text || "").slice(0, 4000);
+      const replyTo = await resolveReplyToByProviderId(msg?.replyContextId);
 
       const inboundPayload = {
         waId: waId || undefined,
@@ -4386,6 +4564,7 @@ async function handlePublicWebhook(req, res) {
         status: "received",
         timestamp: now,
         ...(media ? { media } : {}),
+        ...(replyTo ? { replyTo } : {}),
         raw: msg.raw || msg,
       };
 
