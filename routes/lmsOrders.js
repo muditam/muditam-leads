@@ -32,7 +32,7 @@ const CLOSED_STATUS_REGEX = /(delivered|rto[\s_-]*(received|delivered)|return[\s
 const ACTIVE_ORDERS_START = new Date("2026-04-01T00:00:00.000Z");
 const PAGE_SELECT =
   "orderId orderName customerName contactNumber customerAddress orderDate createdAt amount modeOfPayment paymentGatewayNames productsOrdered financial_status fulfillment_status cancelled_at";
-const NDR_DELIVERED_STATUS_REGEX = /^(delivered|delivered[\s_-]*paid[\s_-]*cod|delivered\s*&\s*paid.*)$/i;
+const NDR_CLOSING_STATUS_REGEX = /^(delivered|delivered[\s_-]*paid[\s_-]*cod|delivered\s*&\s*paid.*|rto[\s_-]*(received|delivered)|return[\s_-]*delivered|rto_received)$/i;
 const NDR_EXCLUDED_PRODUCT_REGEX = /(blood\s*test|full\s*body\s*checkup)/i;
 const META_CACHE_TTL_MS = 30000;
 const metaCache = new Map();
@@ -762,6 +762,13 @@ function parseDelayRange(value = "") {
   return ranges[key] || null;
 }
 
+function normalizeNdrLevel(value = "") {
+  const level = String(value || "").trim().toLowerCase();
+  if (level === "level2" || level === "level_2") return "level2";
+  if (level === "closing") return "closing";
+  return "level1";
+}
+
 function buildNdrPipeline(query = {}, section = "all", forFacet = true, assignedAgentScopeId = null) {
   const page = Math.max(parseInt(query.page || "1", 10), 1);
   const limit = Math.min(Math.max(parseInt(query.limit || "10", 10), 1), 100);
@@ -770,6 +777,8 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
   const courier = String(query.courier || "").trim();
   const status = String(query.status || "").trim();
   const paymentMode = String(query.payment_mode || "").trim();
+  const agent = String(query.agent || "").trim();
+  const ndrLevel = normalizeNdrLevel(query.ndr_level);
   const delayRange = parseDelayRange(query.delay);
   const dateFrom = parseDateStart(query.date_from);
   const dateTo = parseDateEnd(query.date_to);
@@ -870,10 +879,18 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
     {
       $match: {
         $or: [{ "shop.cancelled_at": null }, { "shop.cancelled_at": { $exists: false } }],
-        shipment_status: { $not: NDR_DELIVERED_STATUS_REGEX },
       },
     },
   );
+
+  if (ndrLevel === "closing") {
+    pipeline.push({ $match: { shipment_status: NDR_CLOSING_STATUS_REGEX } });
+  } else {
+    pipeline.push({ $match: { shipment_status: { $not: NDR_CLOSING_STATUS_REGEX } } });
+    if (ndrLevel === "level2") {
+      pipeline.push({ $match: { opsRemark: { $exists: true, $nin: ["", null] } } });
+    }
+  }
 
   if (dateFrom || dateTo) {
     const dateMatch = {};
@@ -885,6 +902,9 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
   if (courier) pipeline.push({ $match: { carrier_title: new RegExp(escapeRegex(courier), "i") } });
   if (status) pipeline.push({ $match: { shipment_status: statusRegexForKey(status) } });
   if (paymentMode) pipeline.push({ $match: { paymentModeEff: new RegExp(`^${escapeRegex(paymentMode)}$`, "i") } });
+  if (agent && mongoose.Types.ObjectId.isValid(agent)) {
+    pipeline.push({ $match: { assignedAgentId: new mongoose.Types.ObjectId(agent) } });
+  }
   if (delayRange) {
     const [min, max] = delayRange;
     pipeline.push({ $match: { delayDays: max ? { $gte: min, $lte: max } : { $gte: min } } });
