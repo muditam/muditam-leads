@@ -2,8 +2,6 @@ const express = require("express");
 const mongoose = require("mongoose");
 const ShopifyOrder = require("../models/ShopifyOrder");
 const Order = require("../models/Order");
-const Lead = require("../models/Lead");
-const Customer = require("../models/Customer");
 const Employee = require("../models/Employee");
 const requireSession = require("../middleware/requireSession");
 
@@ -438,56 +436,6 @@ async function updateOrderAgent(orderId, assignedAgentId) {
   });
 }
 
-async function syncLeadAssignmentForOrder(orderId, assignedAgentName = "") {
-  const normalized = normalizeOrderName(orderId);
-  if (!normalized) return { leadsUpdated: 0, customersUpdated: 0 };
-
-  const orderNameVariants = [...new Set([normalized, `#${normalized}`].filter(Boolean))];
-  const [orderDoc, shopOrder] = await Promise.all([
-    Order.findOne({ order_id: { $in: orderNameVariants } })
-      .sort({ last_updated_at: -1, updatedAt: -1, _id: -1 })
-      .select("contact_number")
-      .lean(),
-    ShopifyOrder.findOne({ orderName: { $in: orderNameVariants } })
-      .sort({ orderDate: -1, createdAt: -1, _id: -1 })
-      .select("contactNumber customerAddress.phone")
-      .lean(),
-  ]);
-
-  const phoneCandidates = [...new Set([
-    orderDoc?.contact_number,
-    shopOrder?.contactNumber,
-    shopOrder?.customerAddress?.phone,
-  ].map((value) => String(value || "").trim()).filter(Boolean))];
-
-  const phoneTail = phoneCandidates.map(normalizePhoneTail).find((value) => value.length === 10) || "";
-  const leadOr = [{ orderId: { $in: orderNameVariants } }];
-  const customerOr = [];
-
-  if (phoneCandidates.length) {
-    leadOr.push({ contactNumber: { $in: phoneCandidates } });
-    customerOr.push({ phone: { $in: phoneCandidates } });
-  }
-
-  if (phoneTail) {
-    const tailRegex = new RegExp(`${escapeRegex(phoneTail)}$`);
-    leadOr.push({ contactNumber: tailRegex });
-    customerOr.push({ phone: tailRegex });
-  }
-
-  const [leadResult, customerResult] = await Promise.all([
-    Lead.updateMany({ $or: leadOr }, { $set: { healthExpertAssigned: assignedAgentName } }),
-    customerOr.length
-      ? Customer.updateMany({ $or: customerOr }, { $set: { assignedTo: assignedAgentName } })
-      : Promise.resolve({ modifiedCount: 0 }),
-  ]);
-
-  return {
-    leadsUpdated: Number(leadResult?.modifiedCount || 0),
-    customersUpdated: Number(customerResult?.modifiedCount || 0),
-  };
-}
-
 function buildStatusCounts(rows = []) {
   const counts = new Map();
   rows.forEach((row) => {
@@ -737,12 +685,10 @@ router.patch("/lms-orders/agent", requireSession, async (req, res) => {
     }
 
     const updated = await updateOrderAgent(normalized, assignedAgentId);
-    const leadAssignment = await syncLeadAssignmentForOrder(normalized, agent?.fullName || "");
     res.json({
       orderId: normalized,
       assignedAgentId: updated?.assignedAgentId ? String(updated.assignedAgentId) : "",
       assignedAgentName: agent?.fullName || "",
-      leadAssignment,
     });
   } catch (err) {
     console.error("PATCH /api/lms-orders/agent error:", err);
@@ -902,7 +848,16 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
   if (courier) pipeline.push({ $match: { carrier_title: new RegExp(escapeRegex(courier), "i") } });
   if (status) pipeline.push({ $match: { shipment_status: statusRegexForKey(status) } });
   if (paymentMode) pipeline.push({ $match: { paymentModeEff: new RegExp(`^${escapeRegex(paymentMode)}$`, "i") } });
-  if (agent && mongoose.Types.ObjectId.isValid(agent)) {
+  if (agent === "no_agent") {
+    pipeline.push({
+      $match: {
+        $or: [
+          { assignedAgentId: null },
+          { assignedAgentId: { $exists: false } },
+        ],
+      },
+    });
+  } else if (agent && mongoose.Types.ObjectId.isValid(agent)) {
     pipeline.push({ $match: { assignedAgentId: new mongoose.Types.ObjectId(agent) } });
   }
   if (delayRange) {
