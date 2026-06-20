@@ -9,6 +9,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 const WhatsAppMessage = require("./whatsaapModels/WhatsAppMessage");
 const WhatsAppConversation = require("./whatsaapModels/WhatsAppConversation");
+const WhatsAppInternalNote = require("./whatsaapModels/WhatsAppInternalNote");
 const WhatsAppTemplate = require("./whatsaapModels/WhatsAppTemplate");
 const {
   buildConversationSearchText,
@@ -317,6 +318,19 @@ function buildConversationPhoneQuery(phone = "") {
       ],
     }
     : {};
+}
+
+function noteAuthorFromRequest(req, source = {}) {
+  const sessionUser = req?.sessionUser || req?.session?.user || {};
+  const userId = String(source.userId || sessionUser._id || sessionUser.id || "").trim();
+  const userName = String(
+    source.userName || sessionUser.fullName || sessionUser.name || sessionUser.email || ""
+  ).trim();
+
+  return {
+    userId: mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null,
+    name: userName,
+  };
 }
 
 async function canAccessConversationPhone(phone, accessContext) {
@@ -3183,6 +3197,60 @@ router.post("/conversations/mark-unread", async (req, res) => {
   } catch (e) {
     console.error("mark-unread error:", e);
     return res.status(500).json({ message: e.message || "mark-unread failed" });
+  }
+});
+
+router.get("/internal-notes", async (req, res) => {
+  try {
+    const p10 = last10(req.query.phone || "");
+    if (!p10) return res.status(400).json({ message: "phone is required" });
+
+    const accessContext = await resolveConversationAccessContextFromRequest(req, req.query || {});
+    const allowed = await canAccessConversationPhone(p10, accessContext);
+    if (!allowed) {
+      return res.status(403).json({ message: "Not allowed to view notes for this conversation" });
+    }
+
+    const notes = await WhatsAppInternalNote.find({ phone10: p10 })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    return res.json({ notes });
+  } catch (e) {
+    console.error("Internal notes load error:", e);
+    return res.status(500).json({ message: "Failed to load internal notes" });
+  }
+});
+
+router.post("/internal-notes", async (req, res) => {
+  try {
+    const p10 = last10(req.body?.phone || "");
+    const text = String(req.body?.text || "").trim();
+    if (!p10) return res.status(400).json({ message: "phone is required" });
+    if (!text) return res.status(400).json({ message: "note text is required" });
+
+    const accessContext = await resolveConversationAccessContextFromRequest(req, req.body || {});
+    const allowed = await canAccessConversationPhone(p10, accessContext);
+    if (!allowed) {
+      return res.status(403).json({ message: "Not allowed to add notes for this conversation" });
+    }
+
+    const leadIdRaw = String(req.body?.leadId || "").trim();
+    const author = noteAuthorFromRequest(req, req.body || {});
+    const note = await WhatsAppInternalNote.create({
+      phone: normalizeWaId(p10),
+      phone10: p10,
+      leadId: mongoose.Types.ObjectId.isValid(leadIdRaw) ? new mongoose.Types.ObjectId(leadIdRaw) : null,
+      text: text.slice(0, 4000),
+      createdByUserId: author.userId,
+      createdByName: author.name,
+    });
+
+    return res.status(201).json({ note });
+  } catch (e) {
+    console.error("Internal note create error:", e);
+    return res.status(500).json({ message: "Failed to save internal note" });
   }
 });
 
