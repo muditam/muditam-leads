@@ -13,6 +13,11 @@ const WhatsAppConversationSchema = new mongoose.Schema(
     displayNameNorm: { type: String, default: "", index: true },
     assignedToLabel: { type: String, default: "Unassigned" },
     assignedToLabelNorm: { type: String, default: "unassigned", index: true },
+    manualAssignedToLabel: { type: String, default: "" },
+    manualAssignedToLabelNorm: { type: String, default: "", index: true },
+    manualAssignedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
+    manualAssignedByName: { type: String, default: "" },
+    manualAssignedAt: { type: Date, default: null },
     searchText: { type: String, default: "" },
 
     unknownOwnerUserId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null, index: true },

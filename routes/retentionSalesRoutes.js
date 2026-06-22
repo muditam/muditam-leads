@@ -2492,24 +2492,6 @@ function isEligibleReferralPatientRow(row = {}) {
   return true;
 }
 
-function getCurrentMonthRange() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-  const formatYMD = (date) => {
-    const yyyy = date.getFullYear();
-    const mm = String(date.getMonth() + 1).padStart(2, "0");
-    const dd = String(date.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
-  return {
-    monthStart: formatYMD(start),
-    monthEnd: formatYMD(end),
-  };
-}
-
 function buildExtraCoinSummary(rows = []) {
   const prepaidEligibleRows = rows.filter((row) =>
     isPrepaidPaymentMode(row.modeOfPayment)
@@ -2951,7 +2933,7 @@ async function buildVKRWalletData({
       coinCannotConvertToCash: true,
     },
     rows: [],
-    note: `Wallet coins are counted only from ${WALLET_COIN_START_DATE}`,
+    note: `Wallet coins counted from ${coinStartDate || startDate} to ${endDate}`,
   };
 
   if (!coinStartDate || coinStartDate > endDate) {
@@ -3182,12 +3164,9 @@ async function buildVKRWalletData({
     .filter(Boolean)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    const { monthStart, monthEnd } = getCurrentMonthRange();
-
-
   const workingDays = countWorkingDaysExcludingSundays(
-    monthStart,
-    monthEnd
+    coinStartDate,
+    endDate
   );
 
   const monthlyTargetCount = workingDays * VKR_DAILY_TARGET;
@@ -3273,7 +3252,7 @@ async function buildVKRWalletData({
       coinCannotConvertToCash: true,
     },
     rows: qualifyingRows,
-    note: `Wallet coins counted from ${WALLET_COIN_START_DATE}`,
+    note: `Wallet coins counted from ${coinStartDate} to ${endDate}`,
   };
 }
 

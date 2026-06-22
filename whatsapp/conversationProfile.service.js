@@ -149,7 +149,7 @@ async function syncConversationByPhone(phone = "", options = {}) {
   const existing = await WhatsAppConversation.find({
     $or: [{ phone10 }, { phone: new RegExp(`${phone10}$`) }],
   })
-    .select("_id phone lastMessageText")
+    .select("_id phone lastMessageText manualAssignedToLabel manualAssignedToLabelNorm")
     .lean();
 
   if (!existing.length) {
@@ -162,10 +162,32 @@ async function syncConversationByPhone(phone = "", options = {}) {
   const ops = [];
   let lastDerivedFields = null;
   for (const convo of existing) {
-    const derivedFields = await getConversationDerivedFields({
+    let derivedFields = await getConversationDerivedFields({
       phone: convo?.phone || normalizedPhone,
       lastMessageText: convo?.lastMessageText || options?.lastMessageText || "",
     });
+    const manualAssignedToLabel = String(convo?.manualAssignedToLabel || "").trim();
+    const manualAssignedToLabelNorm = normalizeText(
+      convo?.manualAssignedToLabelNorm || manualAssignedToLabel
+    );
+    if (
+      manualAssignedToLabel &&
+      manualAssignedToLabelNorm &&
+      normalizeText(derivedFields.assignedToLabel) === "unassigned"
+    ) {
+      derivedFields = {
+        ...derivedFields,
+        assignedToLabel: manualAssignedToLabel,
+        assignedToLabelNorm: manualAssignedToLabelNorm,
+        searchText: buildConversationSearchText({
+          phone: convo?.phone || normalizedPhone,
+          phone10: derivedFields.phone10,
+          displayName: derivedFields.displayName,
+          assignedToLabel: manualAssignedToLabel,
+          lastMessageText: convo?.lastMessageText || options?.lastMessageText || "",
+        }),
+      };
+    }
     lastDerivedFields = derivedFields;
     ops.push({
       updateOne: {

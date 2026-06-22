@@ -269,7 +269,7 @@ function buildConversationAccessQuery(context, assignedTo = "") {
   }
 
   if (assignedNormalized && assignedNormalized !== "all") {
-    query.assignedToLabelNorm = assignedNormalized;
+    return mergeMongoQueries(query, { assignedToLabelNorm: assignedNormalized });
   }
 
   return query;
@@ -584,10 +584,32 @@ async function upsertConversationRecord(phone = "", setFields = {}, options = {}
   if (!phone10) return null;
 
   const lastMessageText = String(setFields?.lastMessageText || "").slice(0, 200);
-  const derivedFields = await getConversationDerivedFields({
+  let derivedFields = await getConversationDerivedFields({
     phone: normalizedPhone,
     lastMessageText,
   });
+  const existingConversation = await WhatsAppConversation.findOne({
+    $or: [{ phone10 }, { phone: new RegExp(`${phone10}$`) }],
+  })
+    .select("manualAssignedToLabel manualAssignedToLabelNorm")
+    .lean();
+  const manualAssignedToLabel = String(existingConversation?.manualAssignedToLabel || "").trim();
+  const manualAssignedToLabelNorm = normalizeNameKey(
+    existingConversation?.manualAssignedToLabelNorm || manualAssignedToLabel
+  );
+  if (
+    manualAssignedToLabel &&
+    manualAssignedToLabelNorm &&
+    normalizeNameKey(derivedFields.assignedToLabel) === "unassigned" &&
+    !setFields.assignedToLabel &&
+    !setFields.assignedToLabelNorm
+  ) {
+    derivedFields = {
+      ...derivedFields,
+      assignedToLabel: manualAssignedToLabel,
+      assignedToLabelNorm: manualAssignedToLabelNorm,
+    };
+  }
 
   const update = {
     $set: {
@@ -1190,6 +1212,30 @@ async function getScopedActiveAgentOptions(context, baseFilter = {}) {
       return true;
     })
     .sort((a, b) => a.localeCompare(b));
+}
+
+function isManagerRole(role = "") {
+  return String(role || "").trim().toLowerCase() === "manager";
+}
+
+async function getActiveSalesRetentionAgents() {
+  const roles = ["sales agent", "retention agent"];
+  const employees = await Employee.find({
+    status: "active",
+    role: { $in: roles.map((role) => new RegExp(`^${escapeRegex(role)}$`, "i")) },
+    department: { $not: /^tech helper$/i },
+  })
+    .select("_id fullName role department")
+    .lean();
+
+  return (employees || [])
+    .map((emp) => ({
+      id: String(emp?._id || ""),
+      name: String(emp?.fullName || "").trim(),
+      role: String(emp?.role || "").trim(),
+    }))
+    .filter((emp) => emp.id && emp.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function buildConversationCursorStages(cursorInfo) {
@@ -3251,6 +3297,118 @@ router.post("/internal-notes", async (req, res) => {
   } catch (e) {
     console.error("Internal note create error:", e);
     return res.status(500).json({ message: "Failed to save internal note" });
+  }
+});
+
+router.get("/conversations/assignable-agents", async (req, res) => {
+  try {
+    const sessionUser = req?.sessionUser || req?.session?.user || {};
+    const role = req.query?.role || sessionUser.role || "";
+    if (!isManagerRole(role)) {
+      return res.status(403).json({ message: "Only manager can assign WhatsApp chats" });
+    }
+    const agents = await getActiveSalesRetentionAgents();
+    return res.json({ agents });
+  } catch (e) {
+    console.error("Assignable agents load error:", e);
+    return res.status(500).json({ message: "Failed to load assignable agents" });
+  }
+});
+
+router.post("/conversations/assign", async (req, res) => {
+  try {
+    const sessionUser = req?.sessionUser || req?.session?.user || {};
+    const role = req.body?.role || sessionUser.role || "";
+    if (!isManagerRole(role)) {
+      return res.status(403).json({ message: "Only manager can assign WhatsApp chats" });
+    }
+
+    const p10 = last10(req.body?.phone || req.body?.phone10 || "");
+    const assignedToId = String(req.body?.assignedToId || "").trim();
+    const assignedToNameRaw = String(req.body?.assignedToName || "").trim();
+    if (!p10) return res.status(400).json({ message: "Phone is required" });
+    if (!assignedToId && !assignedToNameRaw) {
+      return res.status(400).json({ message: "Agent is required" });
+    }
+
+    const roleRegex = [/^sales agent$/i, /^retention agent$/i];
+    const employeeQuery = {
+      status: "active",
+      role: { $in: roleRegex },
+      department: { $not: /^tech helper$/i },
+      ...(mongoose.Types.ObjectId.isValid(assignedToId)
+        ? { _id: assignedToId }
+        : { fullName: { $regex: new RegExp(`^${escapeRegex(assignedToNameRaw)}$`, "i") } }),
+    };
+    const agent = await Employee.findOne(employeeQuery).select("_id fullName role").lean();
+    if (!agent?._id) {
+      return res.status(404).json({ message: "Active sales/retention agent not found" });
+    }
+
+    const assignedToLabel = String(agent.fullName || "").trim();
+    const assignedToLabelNorm = normalizeNameKey(assignedToLabel);
+    const existing = await WhatsAppConversation.findOne({
+      $or: [{ phone10: p10 }, { phone: new RegExp(`${p10}$`) }],
+      assignedToLabelNorm: "unassigned",
+    }).lean();
+    if (!existing?._id) {
+      return res.status(404).json({ message: "Only unassigned WhatsApp chats can be assigned here" });
+    }
+
+    const managerName = String(
+      req.body?.userName || sessionUser.fullName || sessionUser.name || ""
+    ).trim();
+    const managerId = String(req.body?.userId || sessionUser._id || sessionUser.id || "").trim();
+    const updatedSearchText = buildConversationSearchText({
+      phone: existing.phone,
+      phone10: existing.phone10 || p10,
+      displayName: existing.displayName || p10,
+      assignedToLabel,
+      lastMessageText: existing.lastMessageText || "",
+    });
+
+    const updated = await WhatsAppConversation.findByIdAndUpdate(
+      existing._id,
+      {
+        $set: {
+          assignedToLabel,
+          assignedToLabelNorm,
+          manualAssignedToLabel: assignedToLabel,
+          manualAssignedToLabelNorm: assignedToLabelNorm,
+          manualAssignedAt: new Date(),
+          manualAssignedByName: managerName,
+          ...(mongoose.Types.ObjectId.isValid(managerId)
+            ? { manualAssignedBy: managerId }
+            : { manualAssignedBy: null }),
+          searchText: updatedSearchText,
+        },
+        $unset: {
+          unknownOwnerUserId: "",
+          unknownOwnerName: "",
+          unknownOwnerNameNorm: "",
+          unknownSource: "",
+        },
+      },
+      { new: true }
+    ).lean();
+
+    if (updated?._id) {
+      await WhatsAppConversation.updateOne(
+        { _id: updated._id },
+        {
+          $set: {
+            unknownVisibleToUserIds: [],
+            unknownVisibleToNameNorms: [],
+          },
+        }
+      );
+    }
+
+    const finalDoc = await WhatsAppConversation.findById(existing._id).lean();
+    return res.json({ conversation: finalDoc });
+  } catch (e) {
+    console.error("Conversation assign error:", e);
+    return res.status(500).json({ message: "Failed to assign WhatsApp chat" });
   }
 });
 

@@ -49,13 +49,13 @@ function clearMetaCache() {
 
 function parseDateStart(value) {
   if (!value) return null;
-  const date = new Date(`${value}T00:00:00.000Z`);
+  const date = new Date(`${value}T00:00:00.000+05:30`);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function parseDateEnd(value) {
   if (!value) return null;
-  const date = new Date(`${value}T23:59:59.999Z`);
+  const date = new Date(`${value}T23:59:59.999+05:30`);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -904,7 +904,13 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
     section: { $literal: section },
   };
 
-  if (!forFacet) return pipeline;
+  if (!forFacet) {
+    pipeline.push(
+      { $sort: { orderDateEff: -1, last_updated_at: -1, _id: -1 } },
+      { $project: projectRow }
+    );
+    return pipeline;
+  }
 
   pipeline.push({
     $facet: {
@@ -937,6 +943,7 @@ router.get("/lms-orders/ndr", requireSession, async (req, res) => {
     const section = "all";
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit || "10", 10), 1), 100);
+    const exportAll = String(req.query.export_all || "").toLowerCase() === "true";
     let assignedAgentScopeId = null;
     if (isCustomerSupportOperationsUser(req.sessionUser || {})) {
       const employee = await resolveCustomerSupportOperationsEmployee(req.sessionUser || {});
@@ -954,6 +961,21 @@ router.get("/lms-orders/ndr", requireSession, async (req, res) => {
         });
       }
       if (!employee.hasTeam) assignedAgentScopeId = employee._id;
+    }
+
+    if (exportAll) {
+      const rows = await Order.aggregate(buildNdrPipeline(req.query, section, false, assignedAgentScopeId)).allowDiskUse(true);
+      return res.json({
+        section,
+        page: 1,
+        limit: rows.length,
+        total: rows.length,
+        totalPages: 1,
+        statusOptions: [],
+        paymentOptions: [],
+        carriers: [],
+        data: rows,
+      });
     }
 
     const [result] = await Order.aggregate(buildNdrPipeline(req.query, section, true, assignedAgentScopeId)).allowDiskUse(true);
