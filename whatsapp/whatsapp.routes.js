@@ -3246,6 +3246,94 @@ router.post("/conversations/mark-unread", async (req, res) => {
   }
 });
 
+router.post("/conversations/pin-message", async (req, res) => {
+  try {
+    const p10 = last10(req.body?.phone || req.body?.phone10 || "");
+    const messageIdRaw = String(req.body?.messageId || "").trim();
+    const waIdRaw = String(req.body?.waId || "").trim();
+    if (!p10) return res.status(400).json({ message: "phone required" });
+    if (!messageIdRaw && !waIdRaw) return res.status(400).json({ message: "messageId required" });
+
+    const accessContext = await resolveConversationAccessContextFromRequest(req, req.body || {});
+    const allowed = await canAccessConversationPhone(p10, accessContext);
+    if (!allowed) return res.status(403).json({ message: "Forbidden" });
+
+    const messageQuery = {
+      $or: [
+        ...(messageIdRaw && mongoose.Types.ObjectId.isValid(messageIdRaw) ? [{ _id: messageIdRaw }] : []),
+        ...(waIdRaw ? [{ waId: waIdRaw }] : []),
+        ...(messageIdRaw ? [{ providerTransactionId: messageIdRaw }, { clientTempId: messageIdRaw }] : []),
+      ],
+    };
+    if (!messageQuery.$or.length) return res.status(400).json({ message: "valid messageId required" });
+
+    const msg = await WhatsAppMessage.findOne(messageQuery).lean();
+    if (!msg?._id) return res.status(404).json({ message: "Message not found" });
+    const msgPhone10 = last10(customerPhoneFromMsg(msg) || msg?.phone || msg?.to || msg?.from || "");
+    if (msgPhone10 !== p10) return res.status(400).json({ message: "Message does not belong to this chat" });
+
+    const pinnedMessage = {
+      messageId: String(msg._id || ""),
+      waId: String(msg.waId || ""),
+      text: replyPreviewTextFromMessage(msg).slice(0, 220),
+      type: String(msg.type || "text"),
+      direction: String(msg.direction || "").toUpperCase(),
+      from: String(msg.from || ""),
+      to: String(msg.to || ""),
+      pinnedAt: new Date(),
+      pinnedBy: String(req.body?.userName || req?.sessionUser?.fullName || req?.session?.user?.fullName || "").trim(),
+    };
+
+    const updated = await WhatsAppConversation.findOneAndUpdate(
+      { $or: [{ phone10: p10 }, { phone: new RegExp(`${p10}$`) }] },
+      { $set: { pinnedMessage } },
+      { new: true }
+    ).lean();
+    if (!updated?._id) return res.status(404).json({ message: "Conversation not found" });
+
+    emitConversationPatch(req, { phone10: p10, patch: { pinnedMessage } });
+    return res.json({ success: true, conversation: updated, pinnedMessage });
+  } catch (e) {
+    console.error("pin-message error:", e);
+    return res.status(500).json({ message: e.message || "pin-message failed" });
+  }
+});
+
+router.post("/conversations/unpin-message", async (req, res) => {
+  try {
+    const p10 = last10(req.body?.phone || req.body?.phone10 || "");
+    if (!p10) return res.status(400).json({ message: "phone required" });
+
+    const accessContext = await resolveConversationAccessContextFromRequest(req, req.body || {});
+    const allowed = await canAccessConversationPhone(p10, accessContext);
+    if (!allowed) return res.status(403).json({ message: "Forbidden" });
+
+    const emptyPinnedMessage = {
+      messageId: "",
+      waId: "",
+      text: "",
+      type: "",
+      direction: "",
+      from: "",
+      to: "",
+      pinnedAt: null,
+      pinnedBy: "",
+    };
+    const updated = await WhatsAppConversation.findOneAndUpdate(
+      { $or: [{ phone10: p10 }, { phone: new RegExp(`${p10}$`) }] },
+      { $set: { pinnedMessage: emptyPinnedMessage } },
+      { new: true }
+    ).lean();
+    if (!updated?._id) return res.status(404).json({ message: "Conversation not found" });
+
+    emitConversationPatch(req, { phone10: p10, patch: { pinnedMessage: emptyPinnedMessage } });
+    return res.json({ success: true, conversation: updated, pinnedMessage: emptyPinnedMessage });
+  } catch (e) {
+    console.error("unpin-message error:", e);
+    return res.status(500).json({ message: e.message || "unpin-message failed" });
+  }
+});
+
 router.get("/internal-notes", async (req, res) => {
   try {
     const p10 = last10(req.query.phone || "");

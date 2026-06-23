@@ -87,11 +87,12 @@ async function createShopifyOrder(input = {}) {
       shipping_lines: [],
       discount_codes: [],
  
-      financial_status: isPrepaid ? "paid" : "pending",
+      financial_status: isPartial ? "partially_paid" : isPrepaid ? "paid" : "pending",
 
       note_attributes: [],
       note: String(note || "").trim(),
       tags: isPartial ? "PARTIAL_COD" : isCOD ? "COD" : "PREPAID",
+      transactions: [],
     },
   };
  
@@ -112,6 +113,14 @@ async function createShopifyOrder(input = {}) {
       { name: "partial_paid_amount", value: paid.toFixed(2) },
       { name: "remaining_cod_amount", value: remaining.toFixed(2) }
     );
+
+    orderPayload.order.transactions.push({
+      kind: "authorization",
+      status: "success",
+      amount: paid.toFixed(2),
+      gateway: "manual",
+      authorization: String(transactionId || ""),
+    });
   }
  
   if (shippingCost && toNumber(shippingCost) > 0) {
@@ -144,47 +153,7 @@ async function createShopifyOrder(input = {}) {
     },
   });
 
-  const createdOrder = response.data.order;
-
-  // 2) If Partial Paid -> create external sale transaction
-  if (isPartial) {
-    const paid = toNumber(partialPaidAmount);
-
-    // source=external otherwise Shopify rejects "sale"
-    const txUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${createdOrder.id}/transactions.json?source=external`;
-
-    const txPayload = {
-      transaction: {
-        kind: "sale",
-        status: "success",
-        amount: paid.toFixed(2),
-        currency: createdOrder?.currency || "INR",
-        gateway: "manual",
-        source: "external",
-        authorization: String(transactionId || ""),
-      },
-    };
-
-    await axios.post(txUrl, txPayload, {
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
-    });
-
-    // 3) Fetch updated order so UI gets "partially_paid"
-    const getUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders/${createdOrder.id}.json`;
-    const updated = await axios.get(getUrl, {
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
-    });
-
-    return updated.data.order;
-  }
-
-  return createdOrder;
+  return response.data.order;
 }
 
 // POST /create-order endpoint

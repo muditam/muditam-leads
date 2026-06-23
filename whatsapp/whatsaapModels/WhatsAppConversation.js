@@ -39,6 +39,17 @@ const WhatsAppConversationSchema = new mongoose.Schema(
     lastOutboundAt: { type: Date, default: null },
     autoReplySentAt: { type: Date, default: null },
     autoReplyForInboundAt: { type: Date, default: null },
+    pinnedMessage: {
+      messageId: { type: String, default: "" },
+      waId: { type: String, default: "" },
+      text: { type: String, default: "" },
+      type: { type: String, default: "" },
+      direction: { type: String, default: "" },
+      from: { type: String, default: "" },
+      to: { type: String, default: "" },
+      pinnedAt: { type: Date, default: null },
+      pinnedBy: { type: String, default: "" },
+    },
   },
   { timestamps: true }
 );
