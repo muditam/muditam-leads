@@ -708,6 +708,16 @@ function parseDelayRange(value = "") {
   return ranges[key] || null;
 }
 
+function parseMultiValue(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => parseMultiValue(item));
+  }
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function normalizeNdrLevel(value = "") {
   const level = String(value || "").trim().toLowerCase();
   if (level === "level2" || level === "level_2") return "level2";
@@ -720,12 +730,12 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
   const limit = Math.min(Math.max(parseInt(query.limit || "10", 10), 1), 100);
   const skip = (page - 1) * limit;
   const search = String(query.search || "").trim();
-  const courier = String(query.courier || "").trim();
-  const status = String(query.status || "").trim();
-  const paymentMode = String(query.payment_mode || "").trim();
-  const agent = String(query.agent || "").trim();
+  const couriers = parseMultiValue(query.courier);
+  const statuses = parseMultiValue(query.status);
+  const paymentModes = parseMultiValue(query.payment_mode);
+  const agents = parseMultiValue(query.agent);
+  const delays = parseMultiValue(query.delay);
   const ndrLevel = normalizeNdrLevel(query.ndr_level);
-  const delayRange = parseDelayRange(query.delay);
   const dateFrom = parseDateStart(query.date_from);
   const dateTo = parseDateEnd(query.date_to);
   const now = new Date();
@@ -845,24 +855,47 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
     pipeline.push({ $match: { orderDateEff: dateMatch } });
   }
 
-  if (courier) pipeline.push({ $match: { carrier_title: new RegExp(escapeRegex(courier), "i") } });
-  if (status) pipeline.push({ $match: { shipment_status: statusRegexForKey(status) } });
-  if (paymentMode) pipeline.push({ $match: { paymentModeEff: new RegExp(`^${escapeRegex(paymentMode)}$`, "i") } });
-  if (agent === "no_agent") {
+  if (couriers.length) {
     pipeline.push({
       $match: {
-        $or: [
-          { assignedAgentId: null },
-          { assignedAgentId: { $exists: false } },
-        ],
+        $or: couriers.map((courier) => ({ carrier_title: new RegExp(escapeRegex(courier), "i") })),
       },
     });
-  } else if (agent && mongoose.Types.ObjectId.isValid(agent)) {
-    pipeline.push({ $match: { assignedAgentId: new mongoose.Types.ObjectId(agent) } });
   }
-  if (delayRange) {
-    const [min, max] = delayRange;
-    pipeline.push({ $match: { delayDays: max ? { $gte: min, $lte: max } : { $gte: min } } });
+  if (statuses.length) {
+    pipeline.push({
+      $match: {
+        $or: statuses.map((status) => ({ shipment_status: statusRegexForKey(status) })),
+      },
+    });
+  }
+  if (paymentModes.length) {
+    pipeline.push({
+      $match: {
+        $or: paymentModes.map((paymentMode) => ({
+          paymentModeEff: new RegExp(`^${escapeRegex(paymentMode)}$`, "i"),
+        })),
+      },
+    });
+  }
+  if (agents.length) {
+    const agentMatches = [];
+    if (agents.includes("no_agent")) {
+      agentMatches.push({ assignedAgentId: null }, { assignedAgentId: { $exists: false } });
+    }
+    agents.forEach((agent) => {
+      if (mongoose.Types.ObjectId.isValid(agent)) {
+        agentMatches.push({ assignedAgentId: new mongoose.Types.ObjectId(agent) });
+      }
+    });
+    if (agentMatches.length) pipeline.push({ $match: { $or: agentMatches } });
+  }
+  if (delays.length) {
+    const delayMatches = delays
+      .map((delay) => parseDelayRange(delay))
+      .filter(Boolean)
+      .map(([min, max]) => ({ delayDays: max ? { $gte: min, $lte: max } : { $gte: min } }));
+    if (delayMatches.length) pipeline.push({ $match: { $or: delayMatches } });
   }
   if (search) {
     const searchRegex = new RegExp(escapeRegex(search), "i");
