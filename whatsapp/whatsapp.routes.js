@@ -216,6 +216,24 @@ function normalizeNameKey(v = "") {
   return String(v || "").trim().toLowerCase();
 }
 
+const CHAT_STATUS_VALUES = new Set([
+  "open",
+  "pending_reply",
+  "waiting_for_customer",
+  "follow_up",
+  "order_issue",
+  "escalated",
+  "resolved",
+]);
+
+function normalizeChatStatus(value = "") {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  return CHAT_STATUS_VALUES.has(normalized) ? normalized : "open";
+}
+
 function toObjectId(value = "") {
   const id = String(value || "").trim();
   return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
@@ -295,6 +313,12 @@ function buildConversationTabQuery(tab = "", favoritePhones = []) {
     return list.length ? { phone10: { $in: list } } : { _id: null };
   }
   return {};
+}
+
+function buildConversationStatusQuery(chatStatus = "") {
+  const raw = String(chatStatus || "").trim().toLowerCase();
+  if (!raw || raw === "all") return {};
+  return { chatStatus: normalizeChatStatus(raw) };
 }
 
 function buildConversationDateQuery(dateStart = "", dateEnd = "") {
@@ -3388,6 +3412,46 @@ router.post("/internal-notes", async (req, res) => {
   }
 });
 
+router.post("/conversations/status", async (req, res) => {
+  try {
+    const phoneRaw = req.body?.phone || "";
+    const p10 = last10(phoneRaw);
+    if (!p10) return res.status(400).json({ message: "phone required" });
+
+    const accessContext = await resolveConversationAccessContextFromRequest(req, {
+      role: req.body?.role || req.query?.role,
+      userName: req.body?.userName || req.query?.userName,
+      userId: req.body?.userId || req.query?.userId,
+      hasTeam: req.body?.hasTeam || req.query?.hasTeam,
+      chatScope: req.body?.chatScope || req.query?.chatScope,
+    });
+
+    const allowed = await canAccessConversationPhone(p10, accessContext);
+    if (!allowed) return res.status(403).json({ message: "Forbidden" });
+
+    const chatStatus = normalizeChatStatus(req.body?.chatStatus);
+    const updated = await WhatsAppConversation.findOneAndUpdate(
+      { phone: new RegExp(`${p10}$`) },
+      { $set: { chatStatus } },
+      { new: true }
+    ).lean();
+
+    if (!updated) {
+      return res.status(404).json({ message: "Conversation not found" });
+    }
+
+    emitConversationPatch(req, {
+      phone10: p10,
+      patch: { chatStatus },
+    });
+
+    return res.json({ success: true, conversation: updated });
+  } catch (e) {
+    console.error("conversation status error:", e);
+    return res.status(500).json({ message: e.message || "status update failed" });
+  }
+});
+
 router.get("/conversations/assignable-agents", async (req, res) => {
   try {
     const sessionUser = req?.sessionUser || req?.session?.user || {};
@@ -3514,6 +3578,7 @@ router.get("/conversations", async (req, res) => {
       search,
       tab,
       assignedTo,
+      chatStatus,
       phone,
       includeCounts,
       includeAgentOptions,
@@ -3542,6 +3607,7 @@ router.get("/conversations", async (req, res) => {
       buildConversationAccessQuery(accessContext, assignedTo)
     );
     const datedBaseFilter = mergeMongoQueries(baseFilter, dateFilter);
+    const statusFilter = buildConversationStatusQuery(chatStatus);
 
     if (wantsPaginated) {
       const limit = Math.min(
@@ -3551,6 +3617,7 @@ router.get("/conversations", async (req, res) => {
       const cursorInfo = decodeConversationCursor(cursor);
       const itemFilter = mergeMongoQueries(
         datedBaseFilter,
+        statusFilter,
         buildConversationTabQuery(tab, favoritePhones),
         buildConversationSearchQuery(search),
         buildConversationCursorQuery(cursorInfo, ascendingSort ? "asc" : "desc")
@@ -3563,13 +3630,13 @@ router.get("/conversations", async (req, res) => {
           .lean(),
         wantsCounts
           ? Promise.all([
-            WhatsAppConversation.countDocuments(datedBaseFilter),
+            WhatsAppConversation.countDocuments(mergeMongoQueries(datedBaseFilter, statusFilter)),
             WhatsAppConversation.countDocuments(
-              mergeMongoQueries(datedBaseFilter, { unreadCount: { $gt: 0 } })
+              mergeMongoQueries(datedBaseFilter, statusFilter, { unreadCount: { $gt: 0 } })
             ),
             favoritePhones.length
               ? WhatsAppConversation.countDocuments(
-                mergeMongoQueries(datedBaseFilter, { phone10: { $in: favoritePhones } })
+                mergeMongoQueries(datedBaseFilter, statusFilter, { phone10: { $in: favoritePhones } })
               )
               : Promise.resolve(0),
           ])
@@ -3605,6 +3672,7 @@ router.get("/conversations", async (req, res) => {
     const conversations = await WhatsAppConversation.find(
       mergeMongoQueries(
         datedBaseFilter,
+        statusFilter,
         buildConversationTabQuery(tab, favoritePhones),
         buildConversationSearchQuery(search)
       )

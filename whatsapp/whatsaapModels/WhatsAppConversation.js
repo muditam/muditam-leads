@@ -13,6 +13,7 @@ const WhatsAppConversationSchema = new mongoose.Schema(
     displayNameNorm: { type: String, default: "", index: true },
     assignedToLabel: { type: String, default: "Unassigned" },
     assignedToLabelNorm: { type: String, default: "unassigned", index: true },
+    chatStatus: { type: String, default: "open", index: true },
     manualAssignedToLabel: { type: String, default: "" },
     manualAssignedToLabelNorm: { type: String, default: "", index: true },
     manualAssignedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
@@ -57,6 +58,7 @@ const WhatsAppConversationSchema = new mongoose.Schema(
 WhatsAppConversationSchema.index({ phone: 1, lastMessageAt: -1 });
 WhatsAppConversationSchema.index({ phone10: 1, lastMessageAt: -1 });
 WhatsAppConversationSchema.index({ assignedToLabelNorm: 1, lastMessageAt: -1 });
+WhatsAppConversationSchema.index({ chatStatus: 1, lastMessageAt: -1 });
 WhatsAppConversationSchema.index({ unknownVisibleToUserIds: 1, lastMessageAt: -1 });
 WhatsAppConversationSchema.index({ unknownVisibleToNameNorms: 1, lastMessageAt: -1 });
 WhatsAppConversationSchema.index({ unreadCount: 1, lastMessageAt: -1 });
