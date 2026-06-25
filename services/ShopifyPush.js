@@ -115,7 +115,7 @@ async function createShopifyOrder(input = {}) {
     );
 
     orderPayload.order.transactions.push({
-      kind: "authorization",
+      kind: "sale",
       status: "success",
       amount: paid.toFixed(2),
       gateway: "manual",
