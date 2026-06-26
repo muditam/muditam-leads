@@ -93,7 +93,8 @@ function buildMyOrderPayload(futureOrder, shopifyOrder) {
   };
 }
 
-async function processFutureOrder(orderId) {
+async function processFutureOrder(orderId, options = {}) {
+  const markAsPaid = Boolean(options.markAsPaid);
   const locked = await FutureOrder.findOneAndUpdate(
     { _id: orderId, status: "pending" },
     {
@@ -108,7 +109,16 @@ async function processFutureOrder(orderId) {
   let shopifyOrder = null;
 
   try {
-    shopifyOrder = await createShopifyOrder(locked.shopifyOrderPayload || {});
+    const shopifyPayload = markAsPaid
+      ? {
+          ...(locked.shopifyOrderPayload || {}),
+          paymentMode: "Prepaid",
+          paymentStatus: "paid",
+          partialPaidAmount: 0,
+        }
+      : locked.shopifyOrderPayload || {};
+
+    shopifyOrder = await createShopifyOrder(shopifyPayload);
     const myOrderPayload = buildMyOrderPayload(locked, shopifyOrder);
     let myOrder = locked.myOrderId
       ? await MyOrder.findByIdAndUpdate(locked.myOrderId, myOrderPayload, { new: true })

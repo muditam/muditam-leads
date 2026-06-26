@@ -13,11 +13,50 @@ function validationError(message) {
   return err;
 }
 
+function cleanString(value) {
+  return String(value || "").trim();
+}
+
+function pickValue(...values) {
+  for (const value of values) {
+    const cleaned = cleanString(value);
+    if (cleaned) return cleaned;
+  }
+  return "";
+}
+
+function normalizeAddress(address = {}) {
+  return {
+    firstName: pickValue(address.firstName, address.first_name),
+    lastName: pickValue(address.lastName, address.last_name),
+    email: pickValue(address.email),
+    address1: pickValue(address.address1),
+    address2: pickValue(address.address2),
+    city: pickValue(address.city),
+    province: pickValue(address.province, address.state),
+    country: pickValue(address.country, "India"),
+    zip: pickValue(address.zip, address.pincode),
+    phone: pickValue(address.phone),
+  };
+}
+
+function normalizePhone(value) {
+  const cleaned = cleanString(value);
+  const digits = cleaned.replace(/\D/g, "");
+  if (cleaned.startsWith("+")) return cleaned;
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+  return cleaned;
+}
+
 async function createShopifyOrder(input = {}) {
   const {
     cartItems,
     shippingAddress,
     billingAddress, 
+    customer,
+    email,
+    phone,
     paymentStatus,  
  
     paymentMode, 
@@ -38,6 +77,14 @@ async function createShopifyOrder(input = {}) {
   const isPartial = mode === "Partial Paid";
   const isCOD = mode === "COD" || (!mode && paymentStatus === "COD");
   const isPrepaid = mode === "Prepaid" || (!mode && paymentStatus !== "COD");
+  const normalizedShippingAddress = normalizeAddress(shippingAddress);
+  const normalizedBillingAddress = normalizeAddress(billingAddress);
+  const customerPayload = {
+    firstName: pickValue(customer?.firstName, customer?.first_name, normalizedShippingAddress.firstName, normalizedBillingAddress.firstName),
+    lastName: pickValue(customer?.lastName, customer?.last_name, normalizedShippingAddress.lastName, normalizedBillingAddress.lastName),
+    email: pickValue(customer?.email, email, normalizedShippingAddress.email, normalizedBillingAddress.email),
+    phone: normalizePhone(pickValue(customer?.phone, phone, normalizedShippingAddress.phone, normalizedBillingAddress.phone)),
+  };
  
   if (isPartial) {
     const paid = toNumber(partialPaidAmount);
@@ -63,26 +110,29 @@ async function createShopifyOrder(input = {}) {
         variant_id: item.variantId,
         quantity: item.quantity,
       })),
+      email: customerPayload.email || undefined,
+      phone: customerPayload.phone || undefined,
       shipping_address: {
-        first_name: shippingAddress?.firstName,
-        last_name: shippingAddress?.lastName,
-        address1: shippingAddress?.address1,
-        address2: shippingAddress?.address2,
-        city: shippingAddress?.city,
-        province: shippingAddress?.province,
-        country: shippingAddress?.country,
-        zip: shippingAddress?.zip,
-        phone: shippingAddress?.phone,
+        first_name: normalizedShippingAddress.firstName || customerPayload.firstName,
+        last_name: normalizedShippingAddress.lastName || customerPayload.lastName,
+        address1: normalizedShippingAddress.address1,
+        address2: normalizedShippingAddress.address2,
+        city: normalizedShippingAddress.city,
+        province: normalizedShippingAddress.province,
+        country: normalizedShippingAddress.country,
+        zip: normalizedShippingAddress.zip,
+        phone: normalizedShippingAddress.phone || customerPayload.phone,
       },
       billing_address: {
-        first_name: billingAddress?.firstName,
-        last_name: billingAddress?.lastName,
-        address1: billingAddress?.address1,
-        address2: billingAddress?.address2,
-        city: billingAddress?.city,
-        province: billingAddress?.province,
-        country: billingAddress?.country,
-        zip: billingAddress?.zip,
+        first_name: normalizedBillingAddress.firstName || customerPayload.firstName,
+        last_name: normalizedBillingAddress.lastName || customerPayload.lastName,
+        address1: normalizedBillingAddress.address1 || normalizedShippingAddress.address1,
+        address2: normalizedBillingAddress.address2 || normalizedShippingAddress.address2,
+        city: normalizedBillingAddress.city || normalizedShippingAddress.city,
+        province: normalizedBillingAddress.province || normalizedShippingAddress.province,
+        country: normalizedBillingAddress.country || normalizedShippingAddress.country,
+        zip: normalizedBillingAddress.zip || normalizedShippingAddress.zip,
+        phone: normalizedBillingAddress.phone || normalizedShippingAddress.phone || customerPayload.phone,
       },
       shipping_lines: [],
       discount_codes: [],
@@ -141,6 +191,13 @@ async function createShopifyOrder(input = {}) {
 
   if (customerId) {
     orderPayload.order.customer = { id: customerId };
+  } else if (customerPayload.email || customerPayload.phone || customerPayload.firstName || customerPayload.lastName) {
+    orderPayload.order.customer = {
+      first_name: customerPayload.firstName || undefined,
+      last_name: customerPayload.lastName || undefined,
+      email: customerPayload.email || undefined,
+      phone: customerPayload.phone || undefined,
+    };
   }
 
   const createOrderUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/orders.json`;
@@ -173,26 +230,211 @@ router.post("/create-order", async (req, res) => {
   }
 });
 
+const getPhoneDigits = (value = "") => String(value || "").replace(/\D/g, "");
+const getLastTenDigits = (value = "") => getPhoneDigits(value).slice(-10);
+const formatIndianPhone = (value = "") => {
+  const lastTen = getLastTenDigits(value);
+  return lastTen.length === 10 ? `+91${lastTen}` : "";
+};
+
+const collectCustomerPhones = (customer = {}) => {
+  const phones = [];
+  if (customer.phone) phones.push(customer.phone);
+  if (customer.default_address?.phone) phones.push(customer.default_address.phone);
+  (customer.addresses || []).forEach((address) => {
+    if (address?.phone) phones.push(address.phone);
+  });
+  return phones;
+};
+
+const buildPhoneSearchQueries = (phone = "") => {
+  const digits = getPhoneDigits(phone);
+  const lastTen = getLastTenDigits(phone);
+  return Array.from(
+    new Set(
+      [
+        phone,
+        digits,
+        lastTen.length === 10 ? lastTen : "",
+        lastTen.length === 10 ? `+91${lastTen}` : "",
+        lastTen.length === 10 ? `91${lastTen}` : "",
+        lastTen.length === 10 ? `+1${lastTen}` : "",
+        lastTen.length === 10 ? `1${lastTen}` : "",
+      ].filter(Boolean)
+    )
+  );
+};
+
+async function searchShopifyCustomersByPhone(phone, headers) {
+  const shopifyStore = process.env.SHOPIFY_STORE_NAME;
+  const lastTen = getLastTenDigits(phone);
+  const seen = new Set();
+  const matches = [];
+
+  for (const query of buildPhoneSearchQueries(phone)) {
+    const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers/search.json?query=phone:${encodeURIComponent(
+      query
+    )}`;
+    const response = await axios.get(url, { headers });
+    const customers = response.data.customers || [];
+
+    customers.forEach((customer) => {
+      if (!customer?.id || seen.has(customer.id)) return;
+
+      const customerPhones = collectCustomerPhones(customer);
+      const matchingPhone = customerPhones.find(
+        (customerPhone) => getLastTenDigits(customerPhone) === lastTen
+      );
+
+      if (matchingPhone || !lastTen) {
+        seen.add(customer.id);
+        matches.push({ customer, matchingPhone: matchingPhone || customer.phone || "" });
+      }
+    });
+
+    if (matches.length) break;
+  }
+
+  return matches;
+}
+
+const buildCountryCodeFix = (customer, matchingPhone, requestedPhone) => {
+  const requestedLastTen = getLastTenDigits(requestedPhone);
+  const matchingDigits = getPhoneDigits(matchingPhone);
+
+  if (
+    requestedLastTen.length !== 10 ||
+    matchingDigits !== `1${requestedLastTen}` ||
+    String(matchingPhone || "").includes("+91")
+  ) {
+    return null;
+  }
+
+  return {
+    customerId: customer.id,
+    currentPhone: matchingPhone,
+    suggestedPhone: `+91${requestedLastTen}`,
+  };
+};
+
 // GET /customer endpoint to search for an existing customer by phone
 router.get("/customer", async (req, res) => {
   const { phone } = req.query;
-  const shopifyStore = process.env.SHOPIFY_STORE_NAME;
   const accessToken = process.env.SHOPIFY_API_SECRET;
-  const url = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers/search.json?query=phone:${phone}`;
+
+  if (!phone) {
+    return res.status(400).json({ message: "phone is required" });
+  }
+
+  const headers = {
+    "X-Shopify-Access-Token": accessToken,
+    "Content-Type": "application/json",
+  };
 
   try {
-    const response = await axios.get(url, {
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
+    const matches = await searchShopifyCustomersByPhone(phone, headers);
+    const match = matches[0];
+
+    if (!match) {
+      return res.json({});
+    }
+
+    const countryCodeFix = buildCountryCodeFix(
+      match.customer,
+      match.matchingPhone,
+      phone
+    );
+
+    return res.json({
+      ...match.customer,
+      countryCodeFix,
     });
-    const customers = response.data.customers;
-    res.json(customers && customers.length > 0 ? customers[0] : {});
   } catch (error) {
     console.error("Error fetching customer:", error.response?.data || error.message);
     res.status(500).json({
       message: "Error fetching customer",
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
+router.put("/customer-phone-country-code", async (req, res) => {
+  const { customerId, phone } = req.body;
+  const shopifyStore = process.env.SHOPIFY_STORE_NAME;
+  const accessToken = process.env.SHOPIFY_API_SECRET;
+  const suggestedPhone = formatIndianPhone(phone);
+
+  if (!customerId || !suggestedPhone) {
+    return res.status(400).json({
+      message: "customerId and valid 10-digit phone are required",
+    });
+  }
+
+  const headers = {
+    "X-Shopify-Access-Token": accessToken,
+    "Content-Type": "application/json",
+  };
+
+  try {
+    const customerUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers/${customerId}.json`;
+    const customerResponse = await axios.get(customerUrl, { headers });
+    const customer = customerResponse.data.customer;
+
+    if (!customer?.id) {
+      return res.status(404).json({ message: "Customer not found on Shopify" });
+    }
+
+    const lastTen = getLastTenDigits(suggestedPhone);
+    const customerPhones = collectCustomerPhones(customer);
+    const hasPlusOneMatch = customerPhones.some(
+      (customerPhone) => getPhoneDigits(customerPhone) === `1${lastTen}`
+    );
+
+    if (!hasPlusOneMatch) {
+      return res.status(400).json({
+        message: "This customer does not have a matching +1 phone to update.",
+      });
+    }
+
+    const updateResponse = await axios.put(
+      customerUrl,
+      {
+        customer: {
+          id: customer.id,
+          phone: suggestedPhone,
+        },
+      },
+      { headers }
+    );
+
+    const addressUpdates = (customer.addresses || [])
+      .filter((address) => getPhoneDigits(address?.phone) === `1${lastTen}`)
+      .map((address) => {
+        const addressUrl = `https://${shopifyStore}.myshopify.com/admin/api/2024-04/customers/${customer.id}/addresses/${address.id}.json`;
+        return axios.put(
+          addressUrl,
+          {
+            address: {
+              id: address.id,
+              phone: suggestedPhone,
+            },
+          },
+          { headers }
+        );
+      });
+
+    await Promise.all(addressUpdates);
+
+    res.status(200).json({
+      message: "Customer phone updated successfully",
+      customer: updateResponse.data.customer,
+      updatedPhone: suggestedPhone,
+      updatedAddressCount: addressUpdates.length,
+    });
+  } catch (error) {
+    console.error("Error updating customer phone:", error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({
+      message: "Error updating customer phone",
       error: error.response?.data || error.message,
     });
   }

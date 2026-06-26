@@ -279,7 +279,9 @@ router.patch("/:id/details", requireSession, async (req, res) => {
 router.post("/:id/place", requireSession, async (req, res) => {
   try {
     const { processFutureOrder } = require("../services/futureOrderScheduler");
-    const result = await processFutureOrder(req.params.id);
+    const result = await processFutureOrder(req.params.id, {
+      markAsPaid: req.body?.markAsPaid === true,
+    });
     if (!result) {
       return res.status(409).json({ message: "Future order is not pending or is already processing." });
     }
