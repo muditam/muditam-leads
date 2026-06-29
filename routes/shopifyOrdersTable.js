@@ -212,21 +212,41 @@ router.get("/shopify/orders-table", requireSession, async (req, res) => {
           $addFields: {
             rawA: { $ifNull: ["$contactNumber", ""] },
             rawB: { $ifNull: ["$customerAddress.phone", ""] },
+            orderIdNoHash: {
+              $let: {
+                vars: { on: { $ifNull: ["$orderName", ""] } },
+                in: {
+                  $cond: [
+                    { $eq: [{ $substrCP: ["$$on", 0, 1] }, "#"] },
+                    { $substrCP: ["$$on", 1, { $subtract: [{ $strLenCP: "$$on" }, 1] }] },
+                    "$$on"
+                  ]
+                }
+              }
+            },
           }
         },
         {
           $lookup: {
             from: "leads",
-            let: { a: "$rawA", b: "$rawB" },
+            let: { a: "$rawA", b: "$rawB", on: "$orderName", noHash: "$orderIdNoHash" },
             pipeline: [
               {
                 $match: {
                   $expr: {
                     $or: [
+                      { $eq: ["$orderId", "$$on"] },
+                      { $eq: ["$orderId", "$$noHash"] },
+                      { $eq: ["$orderId", { $concat: ["#", "$$noHash"] }] },
                       { $and: [ { $gt: [ { $strLenCP: "$$a" }, 0 ] }, { $eq: ["$contactNumber", "$$a"] } ] },
                       { $and: [ { $gt: [ { $strLenCP: "$$b" }, 0 ] }, { $eq: ["$contactNumber", "$$b"] } ] },
                     ]
                   }
+                }
+              },
+              {
+                $match: {
+                  healthExpertAssigned: { $exists: true, $nin: ["", null] }
                 }
               },
               { $limit: 1 },
@@ -304,19 +324,39 @@ router.get("/shopify/orders-table", requireSession, async (req, res) => {
         {
           $lookup: {
             from: "leads",
-            let: { a: "$rawA", b: "$rawB" },
+            let: { a: "$rawA", b: "$rawB", on: "$orderName", noHash: "$orderIdNoHash" },
             pipeline: [
               {
                 $match: {
                   $expr: {
                     $or: [
+                      { $eq: ["$orderId", "$$on"] },
+                      { $eq: ["$orderId", "$$noHash"] },
+                      { $eq: ["$orderId", { $concat: ["#", "$$noHash"] }] },
                       { $and: [ { $gt: [ { $strLenCP: "$$a" }, 0 ] }, { $eq: ["$contactNumber", "$$a"] } ] },
                       { $and: [ { $gt: [ { $strLenCP: "$$b" }, 0 ] }, { $eq: ["$contactNumber", "$$b"] } ] },
                     ]
                   }
                 }
               },
-              { $sort: { updatedAt: -1, _id: -1 } },
+              {
+                $addFields: {
+                  orderMatchPriority: {
+                    $cond: [
+                      {
+                        $or: [
+                          { $eq: ["$orderId", "$$on"] },
+                          { $eq: ["$orderId", "$$noHash"] },
+                          { $eq: ["$orderId", { $concat: ["#", "$$noHash"] }] }
+                        ]
+                      },
+                      1,
+                      0
+                    ]
+                  }
+                }
+              },
+              { $sort: { orderMatchPriority: -1, _id: -1 } },
               { $limit: 1 },
               {
                 $project: {
