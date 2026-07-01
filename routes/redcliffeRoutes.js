@@ -1629,6 +1629,26 @@ function getRazorpayClient() {
  });
 }
 
+function buildRazorpayReturnUrlWithIntent(returnUrl, intentId) {
+ const rawReturnUrl = String(returnUrl || "").trim();
+ const rawIntentId = String(intentId || "").trim();
+ if (!rawReturnUrl || !rawIntentId) {
+   return rawReturnUrl;
+ }
+
+ try {
+   const url = new URL(rawReturnUrl);
+   url.searchParams.set("redcliffe_intent_id", rawIntentId);
+   url.searchParams.delete("razorpay_payment_link_id");
+   url.searchParams.delete("razorpay_payment_link_reference_id");
+   url.searchParams.delete("razorpay_payment_link_status");
+   return url.toString();
+ } catch (_error) {
+   const separator = rawReturnUrl.includes("?") ? "&" : "?";
+   return `${rawReturnUrl}${separator}redcliffe_intent_id=${encodeURIComponent(rawIntentId)}`;
+ }
+}
+
 function getShopifyAdminConfig() {
  const shop = String(process.env.SHOPIFY_STORE_NAME || "").trim();
  const token = String(
@@ -1943,6 +1963,111 @@ async function finalizePaidRedcliffePaymentIntent(intent, webhookPayload) {
  );
 }
 
+function extractPaymentIdFromPaymentLink(paymentLink = {}) {
+ const payments = Array.isArray(paymentLink.payments) ? paymentLink.payments : [];
+ const paymentEntry = payments.find(Boolean) || {};
+ return String(
+   paymentEntry.payment_id ||
+     paymentEntry.id ||
+     paymentEntry?.payment?.id ||
+     paymentLink.payment_id ||
+     ""
+ ).trim();
+}
+
+function buildRazorpayPaymentLinkPaidPayload(intent, paymentLink = {}) {
+ const paymentId = extractPaymentIdFromPaymentLink(paymentLink);
+ return {
+   event: "payment_link.paid",
+   payload: {
+     payment_link: {
+       entity: {
+         ...paymentLink,
+         id: paymentLink.id || intent.razorpayPaymentLinkId,
+         reference_id: paymentLink.reference_id || intent.intentId,
+         status: paymentLink.status || "paid",
+       },
+     },
+     payment: {
+       entity: {
+         id: paymentId,
+         notes: {
+           redcliffe_payment_intent_id: intent.intentId,
+           razorpay_payment_link_id:
+             paymentLink.id || intent.razorpayPaymentLinkId || "",
+         },
+       },
+     },
+   },
+ };
+}
+
+async function finalizeIntentIfRazorpayPaymentLinkPaid(intent) {
+ if (
+   !intent ||
+   intent.shopifyOrderId ||
+   ["finalizing_shopify_order", "shopify_order_created"].includes(intent.status)
+ ) {
+   return intent;
+ }
+
+ const paymentLinkId = String(intent.razorpayPaymentLinkId || "").trim();
+ if (!paymentLinkId) {
+   return intent;
+ }
+
+ const razorpay = getRazorpayClient();
+ const paymentLink = await razorpay.paymentLink.fetch(paymentLinkId);
+ const linkStatus = String(paymentLink?.status || "").trim().toLowerCase();
+ if (linkStatus !== "paid") {
+   return intent;
+ }
+
+ const fallbackPayload = buildRazorpayPaymentLinkPaidPayload(intent, paymentLink);
+ const paidIntent = await RedcliffePaymentIntent.findOneAndUpdate(
+   {
+     intentId: intent.intentId,
+     shopifyOrderId: "",
+     status: {
+       $nin: [
+         "redcliffe_booking_confirmed",
+         "finalizing_shopify_order",
+         "shopify_order_created",
+       ],
+     },
+   },
+   {
+     $set: {
+       status: "finalizing_shopify_order",
+       razorpayPayload: fallbackPayload,
+       paidAt: new Date(),
+       errorMessage: "",
+     },
+   },
+   { new: true }
+ ).lean();
+
+ if (!paidIntent) {
+   return RedcliffePaymentIntent.findOne({ intentId: intent.intentId }).lean();
+ }
+
+ try {
+   return await finalizePaidRedcliffePaymentIntent(paidIntent, fallbackPayload);
+ } catch (error) {
+   await RedcliffePaymentIntent.updateOne(
+     { intentId: intent.intentId },
+     {
+       $set: {
+         status: "failed",
+         errorMessage: error?.message || "Failed to finalize paid Redcliffe order",
+         razorpayPayload: fallbackPayload,
+       },
+     }
+   );
+   throw error;
+ }
+}
+
 
 router.get("/location-search", async (req, res) => {
  const placeQuery = String(req.query.place_query || "").trim();
@@ -2193,8 +2318,9 @@ router.post("/payments/razorpay/create-link", async (req, res) => {
      },
    };
 
-   if (returnUrl) {
-     paymentLinkPayload.callback_url = returnUrl;
+   const callbackUrl = buildRazorpayReturnUrlWithIntent(returnUrl, intentId);
+   if (callbackUrl) {
+     paymentLinkPayload.callback_url = callbackUrl;
      paymentLinkPayload.callback_method = "get";
    }
 
@@ -2241,12 +2367,21 @@ router.get("/payments/razorpay/intents/:intentId", async (req, res) => {
      });
    }
 
-   const intent = await RedcliffePaymentIntent.findOne({ intentId }).lean();
+   let intent = await RedcliffePaymentIntent.findOne({ intentId }).lean();
    if (!intent) {
      return res.status(404).json({
        status: "failure",
        message: "Redcliffe payment intent not found",
      });
+   }
+
+   let verificationError = "";
+   try {
+     intent = await finalizeIntentIfRazorpayPaymentLinkPaid(intent);
+   } catch (error) {
+     console.error("Redcliffe Razorpay paid-link verification error:", error);
+     verificationError = error?.message || "Failed to verify paid Razorpay payment link";
+     intent = await RedcliffePaymentIntent.findOne({ intentId }).lean();
    }
 
    return res.status(200).json({
@@ -2265,6 +2400,7 @@ router.get("/payments/razorpay/intents/:intentId", async (req, res) => {
        paid_at: intent.paidAt,
        finalized_at: intent.finalizedAt,
        error_message: intent.errorMessage,
+       verification_error: verificationError,
      },
    });
  } catch (error) {
