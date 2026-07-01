@@ -80,7 +80,7 @@ function buildMyOrderPayload(futureOrder, shopifyOrder) {
     shippingAddress: formatAddress(shippingAddress),
     paymentStatus: shopifyOrder.financial_status || futureOrder.paymentStatus || "",
     productOrdered: productOrderedText(shopifyOrder),
-    orderDate: shopifyOrder.created_at || new Date(),
+    orderDate: futureOrder.createdAt || shopifyOrder.created_at || new Date(),
     orderId: shopifyOrder.name || String(shopifyOrder.id || ""),
     totalPrice,
     agentName: details.agentName || futureOrder.createdBy || "N/A",
