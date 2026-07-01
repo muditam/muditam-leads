@@ -16,7 +16,7 @@ const RedcliffePaymentIntentSchema = new mongoose.Schema(
       default: "payment_link_created",
       index: true,
     },
-    bookingId: { type: String, required: true, index: true },
+    bookingId: { type: String, default: "", index: true },
     bookingPayload: { type: mongoose.Schema.Types.Mixed, required: true },
     bookingResponse: { type: mongoose.Schema.Types.Mixed, default: null },
     shopifyOrderPayload: { type: mongoose.Schema.Types.Mixed, required: true },

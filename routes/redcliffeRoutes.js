@@ -1798,20 +1798,58 @@ async function createPaidShopifyDraftOrder({ intent, paymentId }) {
  };
 }
 
-async function confirmPaidRedcliffeBooking(intent) {
- if (!intent?.bookingId) {
-   throw new Error("Redcliffe booking id is required to confirm paid booking");
+async function createRedcliffeBookingAfterPayment(intent) {
+ if (intent?.bookingId) {
+   return {
+     bookingId: String(intent.bookingId || "").trim(),
+     response: intent.bookingResponse || null,
+   };
  }
 
+ const bookingPayload = normalizeCreateBookingPayload(intent.bookingPayload || {});
+ const { order_id: _ignoredOrderId, ...upstreamPayload } = bookingPayload;
+ const result = await proxyWithMockFallback({
+   method: "POST",
+   path: "/api/external/v2/center-create-booking/",
+   data: upstreamPayload,
+ });
+
+ if (result.status >= 400) {
+   throw new Error(
+     result.data?.message ||
+       result.data?.detail ||
+       "Failed to create Redcliffe booking after payment"
+   );
+ }
+
+ await upsertBookingSnapshot(result.data, "razorpay-paid-create");
+
+ const bookingId = String(
+   result.data?.booking_id || result.data?.pk || ""
+ ).trim();
+ if (!bookingId) {
+   throw new Error("Redcliffe booking was created after payment but booking id is missing");
+ }
+
+ return {
+   bookingId,
+   response: result.data,
+ };
+}
+
+async function confirmPaidRedcliffeBooking(intent) {
  if (intent.redcliffeConfirmedAt) {
    return {
      alreadyConfirmed: true,
+     bookingId: String(intent.bookingId || "").trim(),
+     bookingResponse: intent.bookingResponse || null,
      response: intent.redcliffeConfirmResponse || null,
    };
  }
 
+ const createdBooking = await createRedcliffeBookingAfterPayment(intent);
  const payload = {
-   booking_id: intent.bookingId,
+   booking_id: createdBooking.bookingId,
    is_confirmed: true,
  };
  const result = await proxyWithMockFallback({
@@ -1829,12 +1867,14 @@ async function confirmPaidRedcliffeBooking(intent) {
  }
 
  await upsertBookingSnapshot(
-   { ...result.data, booking_id: intent.bookingId },
+   { ...result.data, booking_id: createdBooking.bookingId },
    "razorpay-paid-confirm"
  );
 
  return {
    alreadyConfirmed: false,
+   bookingId: createdBooking.bookingId,
+   bookingResponse: createdBooking.response,
    response: result.data,
  };
 }
@@ -1852,6 +1892,8 @@ async function finalizePaidRedcliffePaymentIntent(intent, webhookPayload) {
    {
      $set: {
        status: "finalizing_shopify_order",
+       bookingId: confirmation.bookingId,
+       bookingResponse: confirmation.bookingResponse,
        razorpayPaymentId: paymentId,
        razorpayPayload: webhookPayload,
        redcliffeConfirmResponse: confirmation.response,
@@ -2120,28 +2162,6 @@ router.post("/payments/razorpay/create-link", async (req, res) => {
      });
    }
 
-   const bookingResult = await proxyWithMockFallback({
-     method: "POST",
-     path: "/api/external/v2/center-create-booking/",
-     data: bookingPayload,
-   });
-
-   if (bookingResult.status >= 400) {
-     return res.status(bookingResult.status).json(bookingResult.data);
-   }
-
-   await upsertBookingSnapshot(bookingResult.data, "razorpay-payment-link");
-
-   const bookingId = String(
-     bookingResult.data?.booking_id || bookingResult.data?.pk || ""
-   ).trim();
-   if (!bookingId) {
-     return res.status(500).json({
-       status: "failure",
-       message: "Redcliffe booking created but booking id is missing",
-     });
-   }
-
    const intentId = crypto.randomUUID();
    const currency = String(req.body?.currency || "INR").trim() || "INR";
    const returnUrl = String(
@@ -2156,7 +2176,7 @@ router.post("/payments/razorpay/create-link", async (req, res) => {
      amount: Math.round(amount * 100),
      currency,
      accept_partial: false,
-     description: `Redcliffe blood test booking ${bookingId}`,
+     description: `Redcliffe blood test booking payment ${intentId}`,
      reference_id: intentId,
      customer: {
        name: bookingPayload.customer_name,
@@ -2168,7 +2188,6 @@ router.post("/payments/razorpay/create-link", async (req, res) => {
        email: true,
      },
      notes: {
-       redcliffe_booking_id: bookingId,
        redcliffe_payment_intent_id: intentId,
        source: "shopify-redcliffe-booking",
      },
@@ -2184,9 +2203,9 @@ router.post("/payments/razorpay/create-link", async (req, res) => {
    await RedcliffePaymentIntent.create({
      intentId,
      status: "payment_link_created",
-     bookingId,
+     bookingId: "",
      bookingPayload,
-     bookingResponse: bookingResult.data,
+     bookingResponse: null,
      shopifyOrderPayload,
      amount,
      currency,
@@ -2197,10 +2216,10 @@ router.post("/payments/razorpay/create-link", async (req, res) => {
    return res.status(201).json({
      status: "success",
      intent_id: intentId,
-     booking_id: bookingId,
+     booking_id: "",
      payment_link_id: paymentLink.id,
      payment_link: paymentLink.short_url,
-     booking: bookingResult.data,
+     booking_status: "pending_payment",
    });
  } catch (error) {
    console.error("Redcliffe Razorpay payment link error:", error?.response?.data || error);
@@ -3049,6 +3068,7 @@ webhookRouter.post(
 
      const event = String(payload.event || "").trim();
      const paymentLink = getPaymentLinkEntity(payload);
+     const payment = getPaymentEntity(payload);
      const linkStatus = String(paymentLink?.status || "").trim().toLowerCase();
      if (event && !["payment_link.paid", "payment.captured"].includes(event)) {
        return res.status(200).json({ status: "ignored", event });
@@ -3057,8 +3077,14 @@ webhookRouter.post(
        return res.status(200).json({ status: "ignored", payment_link_status: linkStatus });
      }
 
-     const intentId = String(paymentLink?.reference_id || "").trim();
-     const paymentLinkId = String(paymentLink?.id || "").trim();
+     const intentId = String(
+       paymentLink?.reference_id ||
+         payment?.notes?.redcliffe_payment_intent_id ||
+         ""
+     ).trim();
+     const paymentLinkId = String(
+       paymentLink?.id || payment?.notes?.razorpay_payment_link_id || ""
+     ).trim();
      if (!intentId && !paymentLinkId) {
        return res.status(200).json({
          status: "ignored",
@@ -3140,7 +3166,12 @@ webhookRouter.post(
        parsed = JSON.parse(body.toString("utf8") || "{}");
      } catch (_error) {}
      const paymentLink = getPaymentLinkEntity(parsed);
-     const intentId = String(paymentLink?.reference_id || "").trim();
+     const payment = getPaymentEntity(parsed);
+     const intentId = String(
+       paymentLink?.reference_id ||
+         payment?.notes?.redcliffe_payment_intent_id ||
+         ""
+     ).trim();
      if (intentId) {
        await RedcliffePaymentIntent.updateOne(
          { intentId },
