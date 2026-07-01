@@ -5,7 +5,13 @@ const RedcliffePaymentIntentSchema = new mongoose.Schema(
     intentId: { type: String, required: true, unique: true, index: true },
     status: {
       type: String,
-      enum: ["payment_link_created", "paid", "shopify_order_created", "failed"],
+      enum: [
+        "payment_link_created",
+        "paid",
+        "redcliffe_booking_confirmed",
+        "shopify_order_created",
+        "failed",
+      ],
       default: "payment_link_created",
       index: true,
     },
@@ -19,6 +25,8 @@ const RedcliffePaymentIntentSchema = new mongoose.Schema(
     razorpayPaymentLinkUrl: { type: String, default: "" },
     razorpayPaymentId: { type: String, default: "", index: true },
     razorpayPayload: { type: mongoose.Schema.Types.Mixed, default: null },
+    redcliffeConfirmResponse: { type: mongoose.Schema.Types.Mixed, default: null },
+    redcliffeConfirmedAt: { type: Date, default: null },
     shopifyDraftOrderId: { type: String, default: "" },
     shopifyOrderId: { type: String, default: "", index: true },
     shopifyOrderName: { type: String, default: "" },

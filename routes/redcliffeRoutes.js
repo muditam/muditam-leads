@@ -1798,6 +1798,47 @@ async function createPaidShopifyDraftOrder({ intent, paymentId }) {
  };
 }
 
+async function confirmPaidRedcliffeBooking(intent) {
+ if (!intent?.bookingId) {
+   throw new Error("Redcliffe booking id is required to confirm paid booking");
+ }
+
+ if (intent.redcliffeConfirmedAt) {
+   return {
+     alreadyConfirmed: true,
+     response: intent.redcliffeConfirmResponse || null,
+   };
+ }
+
+ const payload = {
+   booking_id: intent.bookingId,
+   is_confirmed: true,
+ };
+ const result = await proxyWithMockFallback({
+   method: "POST",
+   path: "/api/external/v2/center-confirm-booking/",
+   data: payload,
+ });
+
+ if (result.status >= 400) {
+   throw new Error(
+     result.data?.message ||
+       result.data?.detail ||
+       "Failed to confirm Redcliffe booking after payment"
+   );
+ }
+
+ await upsertBookingSnapshot(
+   { ...result.data, booking_id: intent.bookingId },
+   "razorpay-paid-confirm"
+ );
+
+ return {
+   alreadyConfirmed: false,
+   response: result.data,
+ };
+}
+
 async function finalizePaidRedcliffePaymentIntent(intent, webhookPayload) {
  if (!intent || intent.shopifyOrderId) {
    return intent;
@@ -1805,9 +1846,25 @@ async function finalizePaidRedcliffePaymentIntent(intent, webhookPayload) {
 
  const payment = getPaymentEntity(webhookPayload);
  const paymentId = String(payment?.id || intent.razorpayPaymentId || "").trim();
+ const confirmation = await confirmPaidRedcliffeBooking(intent);
+ const confirmedIntent = await RedcliffePaymentIntent.findOneAndUpdate(
+   { intentId: intent.intentId },
+   {
+     $set: {
+       status: "redcliffe_booking_confirmed",
+       razorpayPaymentId: paymentId,
+       razorpayPayload: webhookPayload,
+       redcliffeConfirmResponse: confirmation.response,
+       redcliffeConfirmedAt: intent.redcliffeConfirmedAt || new Date(),
+       paidAt: intent.paidAt || new Date(),
+       errorMessage: "",
+     },
+   },
+   { new: true }
+ ).lean();
 
  const shopifyResult = await createPaidShopifyDraftOrder({
-   intent,
+   intent: confirmedIntent || intent,
    paymentId,
  });
  const orderId = String(
@@ -1829,6 +1886,8 @@ async function finalizePaidRedcliffePaymentIntent(intent, webhookPayload) {
        status: "shopify_order_created",
        razorpayPaymentId: paymentId,
        razorpayPayload: webhookPayload,
+       redcliffeConfirmResponse: confirmation.response,
+       redcliffeConfirmedAt: confirmedIntent?.redcliffeConfirmedAt || new Date(),
        shopifyDraftOrderId: String(shopifyResult.draftOrder?.id || ""),
        shopifyOrderId: orderId,
        shopifyOrderName: orderName,
@@ -2149,6 +2208,52 @@ router.post("/payments/razorpay/create-link", async (req, res) => {
      status: "failure",
      message: "Failed to create Redcliffe Razorpay payment link",
      detail: error?.response?.data || error?.message || "Unknown server error",
+   });
+ }
+});
+
+router.get("/payments/razorpay/intents/:intentId", async (req, res) => {
+ try {
+   const intentId = String(req.params.intentId || "").trim();
+   if (!intentId) {
+     return res.status(400).json({
+       status: "failure",
+       message: "intentId is required",
+     });
+   }
+
+   const intent = await RedcliffePaymentIntent.findOne({ intentId }).lean();
+   if (!intent) {
+     return res.status(404).json({
+       status: "failure",
+       message: "Redcliffe payment intent not found",
+     });
+   }
+
+   return res.status(200).json({
+     status: "success",
+     intent: {
+       intent_id: intent.intentId,
+       status: intent.status,
+       booking_id: intent.bookingId,
+       amount: intent.amount,
+       currency: intent.currency,
+       payment_link: intent.razorpayPaymentLinkUrl,
+       razorpay_payment_id: intent.razorpayPaymentId,
+       redcliffe_confirmed: Boolean(intent.redcliffeConfirmedAt),
+       shopify_order_id: intent.shopifyOrderId,
+       shopify_order_name: intent.shopifyOrderName,
+       paid_at: intent.paidAt,
+       finalized_at: intent.finalizedAt,
+       error_message: intent.errorMessage,
+     },
+   });
+ } catch (error) {
+   console.error("Redcliffe Razorpay intent status error:", error);
+   return res.status(500).json({
+     status: "failure",
+     message: "Failed to fetch Redcliffe payment intent",
+     detail: error?.message || "Unknown server error",
    });
  }
 });

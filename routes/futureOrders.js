@@ -276,6 +276,30 @@ router.patch("/:id/details", requireSession, async (req, res) => {
   }
 });
 
+router.delete("/:id", requireSession, async (req, res) => {
+  try {
+    const futureOrder = await FutureOrder.findById(req.params.id);
+
+    if (!futureOrder) {
+      return res.status(404).json({ message: "Future order not found." });
+    }
+    if (futureOrder.status === "processing") {
+      return res.status(409).json({ message: "Future order is currently processing and cannot be deleted." });
+    }
+
+    await FutureOrder.deleteOne({ _id: futureOrder._id });
+
+    if (futureOrder.myOrderId && futureOrder.status !== "placed") {
+      await MyOrder.deleteOne({ _id: futureOrder.myOrderId });
+    }
+
+    return res.json({ message: "Future order deleted." });
+  } catch (error) {
+    console.error("DELETE /api/future-orders/:id error:", error);
+    return res.status(500).json({ message: "Failed to delete future order." });
+  }
+});
+
 router.post("/:id/place", requireSession, async (req, res) => {
   try {
     const { processFutureOrder } = require("../services/futureOrderScheduler");
