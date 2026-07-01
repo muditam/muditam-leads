@@ -1851,7 +1851,7 @@ async function finalizePaidRedcliffePaymentIntent(intent, webhookPayload) {
    { intentId: intent.intentId },
    {
      $set: {
-       status: "redcliffe_booking_confirmed",
+       status: "finalizing_shopify_order",
        razorpayPaymentId: paymentId,
        razorpayPayload: webhookPayload,
        redcliffeConfirmResponse: confirmation.response,
@@ -3076,11 +3076,35 @@ webhookRouter.post(
        });
      }
 
+     const existingFinalizedIntent = await RedcliffePaymentIntent.findOne({
+       intentId: intent.intentId,
+       shopifyOrderId: { $ne: "" },
+     }).lean();
+     if (existingFinalizedIntent) {
+       return res.status(200).json({
+         status: "success",
+         intent_id: existingFinalizedIntent.intentId,
+         shopify_order_id: existingFinalizedIntent.shopifyOrderId,
+         shopify_order_name: existingFinalizedIntent.shopifyOrderName,
+         duplicate_event: true,
+       });
+     }
+
      const paidIntent = await RedcliffePaymentIntent.findOneAndUpdate(
-       { intentId: intent.intentId },
+       {
+         intentId: intent.intentId,
+         shopifyOrderId: "",
+         status: {
+           $nin: [
+             "redcliffe_booking_confirmed",
+             "finalizing_shopify_order",
+             "shopify_order_created",
+           ],
+         },
+       },
        {
          $set: {
-           status: "paid",
+           status: "finalizing_shopify_order",
            razorpayPayload: payload,
            paidAt: new Date(),
            errorMessage: "",
@@ -3088,6 +3112,18 @@ webhookRouter.post(
        },
        { new: true }
      ).lean();
+     if (!paidIntent) {
+       const currentIntent = await RedcliffePaymentIntent.findOne({
+         intentId: intent.intentId,
+       }).lean();
+       return res.status(200).json({
+         status: "processing",
+         intent_id: currentIntent?.intentId || intent.intentId,
+         shopify_order_id: currentIntent?.shopifyOrderId || "",
+         shopify_order_name: currentIntent?.shopifyOrderName || "",
+         duplicate_event: true,
+       });
+     }
 
      const finalized = await finalizePaidRedcliffePaymentIntent(paidIntent, payload);
      return res.status(200).json({

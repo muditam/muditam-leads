@@ -9,6 +9,7 @@ const RedcliffePaymentIntentSchema = new mongoose.Schema(
         "payment_link_created",
         "paid",
         "redcliffe_booking_confirmed",
+        "finalizing_shopify_order",
         "shopify_order_created",
         "failed",
       ],
