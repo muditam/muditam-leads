@@ -1669,6 +1669,11 @@ function toAmount(value) {
  return Number.isFinite(amount) && amount > 0 ? amount : 0;
 }
 
+function toNonNegativeAmount(value) {
+ const amount = Number(value);
+ return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+}
+
 function splitCustomerName(fullName) {
  const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
  return {
@@ -1688,6 +1693,12 @@ function normalizeShopifyOrderPayload(input = {}) {
      .filter((item) => item.variantId),
    shippingAddress: input.shippingAddress || {},
    billingAddress: input.billingAddress || input.shippingAddress || {},
+   pricing: {
+     subtotal: toNonNegativeAmount(input.pricing?.subtotal),
+     collectionCharge: toNonNegativeAmount(input.pricing?.collectionCharge),
+     collectionFreeThreshold: toNonNegativeAmount(input.pricing?.collectionFreeThreshold),
+     total: toNonNegativeAmount(input.pricing?.total),
+   },
    note: String(input.note || "").trim(),
  };
 }
@@ -1735,6 +1746,7 @@ async function createPaidShopifyDraftOrder({ intent, paymentId }) {
  const customerName = splitCustomerName(bookingPayload.customer_name);
  const email = String(bookingPayload.customer_email || "").trim();
  const phone = String(bookingPayload.customer_phonenumber || "").trim();
+ const collectionCharge = toNonNegativeAmount(shopifyPayload.pricing?.collectionCharge);
 
  const draftPayload = {
    draft_order: {
@@ -1768,10 +1780,22 @@ async function createPaidShopifyDraftOrder({ intent, paymentId }) {
        { name: "redcliffe_booking_id", value: String(intent.bookingId || "") },
        { name: "redcliffe_payment_intent_id", value: String(intent.intentId || "") },
        { name: "razorpay_payment_id", value: String(paymentId || "") },
+       { name: "collection_charge", value: String(collectionCharge) },
+       {
+         name: "collection_free_threshold",
+         value: String(shopifyPayload.pricing?.collectionFreeThreshold || ""),
+       },
      ],
      tags: "REDCLIFFE,PREPAID,RAZORPAY",
    },
  };
+
+ if (collectionCharge > 0) {
+   draftPayload.draft_order.shipping_line = {
+     title: "Collection Charges",
+     price: collectionCharge.toFixed(2),
+   };
+ }
 
  const createRes = await fetch(`${baseUrl}/draft_orders.json`, {
    method: "POST",
