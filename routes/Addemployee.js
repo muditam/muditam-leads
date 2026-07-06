@@ -387,7 +387,7 @@ router.get("/api/employees/:id", async (req, res) => {
      .populate({
        path: "teamMembers",
        select:
-         "fullName email role department status target teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate monthlyDeliveredSales totalDeliveredSales permissions",
+         "fullName email role department status target hasTeam isDoctor teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate monthlyDeliveredSales totalDeliveredSales permissions",
        populate: {
          path: "teamLeader",
          select: "fullName",
@@ -998,7 +998,7 @@ router.put("/api/employees/:id/team", async (req, res) => {
      .select(
        "fullName email department callerId agentNumber async role status target hasTeam isDoctor teamMembers teamLeader joiningDate joiningSalary currentSalary teamLeaderStartDate languages permissions"
      )
-     .populate("teamMembers", "fullName email role department status target");
+     .populate("teamMembers", "fullName email role department status target hasTeam isDoctor teamLeader");
 
 
    return res.status(200).json({
