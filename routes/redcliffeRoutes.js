@@ -2987,11 +2987,29 @@ router.get("/packages", async (_req, res) => {
      name: String(item?.name || item?.test_name || item?.package_name || "").trim(),
      description: String(item?.description || "").trim(),
      type: String(item?.type || "").trim(),
+     category: String(
+       item?.category ||
+       item?.category_name ||
+       item?.package_category ||
+       item?.department ||
+       item?.health_category ||
+       item?.sub_category ||
+       item?.package_center_prices?.category ||
+       ""
+     ).trim(),
      price:
-       item?.package_center_prices?.offer_price ??
        item?.package_center_prices?.package_price ??
-       item?.offer_price ??
        item?.package_price ??
+       item?.package_center_prices?.mrp ??
+       item?.mrp ??
+       item?.package_center_prices?.offer_price ??
+       item?.offer_price ??
+       null,
+     mrp:
+       item?.package_center_prices?.package_price ??
+       item?.package_price ??
+       item?.package_center_prices?.mrp ??
+       item?.mrp ??
        null,
    }))
    .filter((item) => item.code && item.name);

@@ -39,6 +39,48 @@ function escapeRegex(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function paymentLabelFromFinancialStatus(status = "") {
+  const normalized = String(status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "paid") return "Paid";
+  if (normalized === "pending" || normalized === "payment_pending") return "COD";
+  if (normalized === "partially_paid" || normalized === "partial_paid") return "Partial paid";
+  return "";
+}
+
+function paymentLabelExpression(financialStatusPath) {
+  return {
+    $switch: {
+      branches: [
+        {
+          case: { $regexMatch: { input: { $ifNull: [financialStatusPath, ""] }, regex: /^paid$/i } },
+          then: "Paid",
+        },
+        {
+          case: { $regexMatch: { input: { $ifNull: [financialStatusPath, ""] }, regex: /^(pending|payment[\s_-]*pending)$/i } },
+          then: "COD",
+        },
+        {
+          case: { $regexMatch: { input: { $ifNull: [financialStatusPath, ""] }, regex: /^(partially[\s_-]*paid|partial[\s_-]*paid)$/i } },
+          then: "Partial paid",
+        },
+      ],
+      default: "",
+    },
+  };
+}
+
+function financialStatusRegexForPaymentLabel(paymentMode = "") {
+  const normalized = String(paymentMode || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "paid" || normalized === "prepaid") return /^paid$/i;
+  if (normalized === "cod" || normalized === "pending" || normalized === "payment_pending") {
+    return /^(pending|payment[\s_-]*pending)$/i;
+  }
+  if (normalized === "partial_paid" || normalized === "partially_paid") {
+    return /^(partially[\s_-]*paid|partial[\s_-]*paid)$/i;
+  }
+  return new RegExp(`^${escapeRegex(paymentMode)}$`, "i");
+}
+
 function cacheKeyForMatch(baseMatch = {}) {
   return JSON.stringify(baseMatch);
 }
@@ -196,11 +238,7 @@ function buildBaseMatch(query = {}) {
   }
 
   if (paymentMode) {
-    const paymentRegex = new RegExp(`^${escapeRegex(paymentMode)}$`, "i");
-    baseMatch.$or = [
-      { modeOfPayment: paymentRegex },
-      { paymentGatewayNames: paymentRegex },
-    ];
+    baseMatch.financial_status = financialStatusRegexForPaymentLabel(paymentMode);
   }
 
   if (product) {
@@ -268,7 +306,7 @@ async function getStatusMapForOrders(orderNames = []) {
 function toResponseRow(doc, statusMap) {
   const orderIdNoHash = normalizeOrderName(doc.orderName);
   const statusDoc = statusMap.get(orderIdNoHash) || {};
-  const paymentMode = doc.modeOfPayment || doc.paymentGatewayNames?.[0] || "";
+  const paymentMode = paymentLabelFromFinancialStatus(doc.financial_status);
 
   return {
     id: String(doc._id),
@@ -734,6 +772,7 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
   const statuses = parseMultiValue(query.status);
   const paymentModes = parseMultiValue(query.payment_mode);
   const agents = parseMultiValue(query.agent);
+  const remarks = parseMultiValue(query.remark);
   const delays = parseMultiValue(query.delay);
   const ndrLevel = normalizeNdrLevel(query.ndr_level);
   const dateFrom = parseDateStart(query.date_from);
@@ -797,6 +836,7 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
               amount: 1,
               modeOfPayment: 1,
               paymentGatewayNames: 1,
+              financial_status: 1,
               productsOrdered: 1,
               cancelled_at: 1,
             },
@@ -811,9 +851,7 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
         orderDateEff: { $ifNull: ["$shop.orderDate", { $ifNull: ["$order_date", "$createdAt"] }] },
         customerNameEff: { $ifNull: ["$shop.customerName", { $ifNull: ["$full_name", ""] }] },
         phoneEff: { $ifNull: ["$shop.contactNumber", { $ifNull: ["$contact_number", ""] }] },
-        paymentModeEff: {
-          $ifNull: ["$shop.modeOfPayment", { $arrayElemAt: ["$shop.paymentGatewayNames", 0] }],
-        },
+        paymentModeEff: paymentLabelExpression("$shop.financial_status"),
         delayDays: {
           $floor: {
             $divide: [{ $subtract: [now, { $ifNull: ["$shop.orderDate", { $ifNull: ["$order_date", now] }] }] }, 86400000],
@@ -889,6 +927,18 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
       }
     });
     if (agentMatches.length) pipeline.push({ $match: { $or: agentMatches } });
+  }
+  if (remarks.length) {
+    const remarkMatches = [];
+    if (remarks.includes("no_remark")) {
+      remarkMatches.push({ opsRemark: "" }, { opsRemark: null }, { opsRemark: { $exists: false } });
+    }
+    remarks.forEach((remark) => {
+      if (remark !== "no_remark") {
+        remarkMatches.push({ opsRemark: new RegExp(`^${escapeRegex(remark)}$`, "i") });
+      }
+    });
+    if (remarkMatches.length) pipeline.push({ $match: { $or: remarkMatches } });
   }
   if (delays.length) {
     const delayMatches = delays
@@ -1064,11 +1114,12 @@ router.get("/lms-orders", requireSession, async (req, res) => {
     const status = String(req.query.status || "").trim();
     const sortField = "orderDateEff";
     const sortDir = -1;
+    const exportAll = String(req.query.export_all || "").toLowerCase() === "true";
 
     const baseMatchRaw = buildBaseMatch(req.query);
     const baseMatch = mode === "active" ? withActiveOrdersCutoff(baseMatchRaw) : baseMatchRaw;
 
-    const canUseFastPath = !search && !courier && !status && sortField === "orderDateEff";
+    const canUseFastPath = !exportAll && !search && !courier && !status && sortField === "orderDateEff";
     if (canUseFastPath) {
       const meta = await getOrderMeta(baseMatch);
       const exactTotal =
@@ -1104,9 +1155,7 @@ router.get("/lms-orders", requireSession, async (req, res) => {
       {
         $addFields: {
           orderDateEff: { $ifNull: ["$orderDate", "$createdAt"] },
-          paymentModeEff: {
-            $ifNull: ["$modeOfPayment", { $arrayElemAt: ["$paymentGatewayNames", 0] }],
-          },
+          paymentModeEff: paymentLabelExpression("$financial_status"),
           orderIdNoHash: {
             $let: {
               vars: { on: { $toString: { $ifNull: ["$orderName", ""] } } },
@@ -1224,38 +1273,59 @@ router.get("/lms-orders", requireSession, async (req, res) => {
       });
     }
 
+    const projectRow = {
+      _id: 0,
+      id: { $toString: "$_id" },
+      shopifyOrderId: "$orderId",
+      orderId: "$orderIdNoHash",
+      orderName: 1,
+      orderDate: "$orderDateEff",
+      customerName: { $ifNull: ["$customerName", ""] },
+      contactNumber: { $ifNull: ["$contactNumber", ""] },
+      customerAddress: { $ifNull: ["$customerAddress", null] },
+      amount: { $ifNull: ["$amount", 0] },
+      paymentMode: { $ifNull: ["$paymentModeEff", ""] },
+      products: { $ifNull: ["$productsOrdered", []] },
+      status: "$shipmentStatus",
+      statusRaw: "$shipmentStatus",
+      trackingNumber: { $ifNull: ["$trackingNumber", ""] },
+      courier: { $ifNull: ["$carrierTitle", ""] },
+      statusUpdatedAt: 1,
+      shipmentIssue: { $ifNull: ["$shipmentIssue", ""] },
+      opsRemark: { $ifNull: ["$opsRemark", ""] },
+      financialStatus: { $ifNull: ["$financial_status", ""] },
+      fulfillmentStatus: { $ifNull: ["$fulfillment_status", ""] },
+      cancelledAt: "$cancelled_at",
+    };
+
+    if (exportAll) {
+      pipeline.push(
+        { $sort: { [sortField]: sortDir, _id: -1 } },
+        { $project: projectRow }
+      );
+
+      const rows = await ShopifyOrder.aggregate(pipeline).allowDiskUse(true);
+      const meta = await getOrderMeta(baseMatch);
+
+      return res.json({
+        page: 1,
+        limit: rows.length,
+        total: rows.length,
+        totalPages: 1,
+        statuses: buildStatusCounts(rows),
+        statusOptions: meta.statusOptions,
+        counts: meta.counts,
+        data: rows,
+      });
+    }
+
     pipeline.push({
       $facet: {
         rows: [
           { $sort: { [sortField]: sortDir, _id: -1 } },
           { $skip: skip },
           { $limit: limit },
-          {
-            $project: {
-              _id: 0,
-              id: { $toString: "$_id" },
-              shopifyOrderId: "$orderId",
-              orderId: "$orderIdNoHash",
-              orderName: 1,
-              orderDate: "$orderDateEff",
-              customerName: { $ifNull: ["$customerName", ""] },
-              contactNumber: { $ifNull: ["$contactNumber", ""] },
-              customerAddress: { $ifNull: ["$customerAddress", null] },
-              amount: { $ifNull: ["$amount", 0] },
-              paymentMode: { $ifNull: ["$paymentModeEff", ""] },
-              products: { $ifNull: ["$productsOrdered", []] },
-              status: "$shipmentStatus",
-              statusRaw: "$shipmentStatus",
-              trackingNumber: { $ifNull: ["$trackingNumber", ""] },
-              courier: { $ifNull: ["$carrierTitle", ""] },
-              statusUpdatedAt: 1,
-              shipmentIssue: { $ifNull: ["$shipmentIssue", ""] },
-              opsRemark: { $ifNull: ["$opsRemark", ""] },
-              financialStatus: { $ifNull: ["$financial_status", ""] },
-              fulfillmentStatus: { $ifNull: ["$fulfillment_status", ""] },
-              cancelledAt: "$cancelled_at",
-            },
-          },
+          { $project: projectRow },
         ],
         total: [{ $count: "count" }],
         statuses: [
