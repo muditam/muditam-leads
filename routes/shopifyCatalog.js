@@ -179,7 +179,7 @@ async function getRedcliffeProduct(productId = REDCLIFFE_PRICE_PRODUCT_ID) {
           name
           values
         }
-        variants(first: 250, after: $after) {
+        variants(first: 100, after: $after) {
           pageInfo {
             hasNextPage
             endCursor
