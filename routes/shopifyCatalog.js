@@ -243,6 +243,68 @@ async function getRedcliffeProduct(productId = REDCLIFFE_PRICE_PRODUCT_ID) {
   return product;
 }
 
+async function getProductVariantsBasic(productId = REDCLIFFE_PRICE_PRODUCT_ID) {
+  const query = `
+    query RedcliffeBasicVariants($id: ID!, $after: String) {
+      product(id: $id) {
+        variants(first: 100, after: $after) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          edges {
+            node {
+              id
+              legacyResourceId
+              title
+              displayName
+              sku
+              price
+              compareAtPrice
+              inventoryQuantity
+              availableForSale
+              selectedOptions {
+                name
+                value
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  let after = null;
+  const variants = [];
+  do {
+    const data = await shopifyGraphQL(query, { id: toProductGid(productId), after });
+    if (!data.product) {
+      throw new Error(`Shopify product ${productId} was not found`);
+    }
+    variants.push(...(data.product.variants?.edges || []).map(({ node }) => ({
+      id: node.id,
+      variantId: String(node.legacyResourceId || ""),
+      title: node.title,
+      displayName: node.displayName,
+      sku: node.sku || "",
+      price: node.price || "0",
+      compareAtPrice: node.compareAtPrice || "",
+      inventoryQuantity: node.inventoryQuantity ?? 0,
+      availableForSale: Boolean(node.availableForSale),
+      selectedOptions: (node.selectedOptions || []).map((option) => ({
+        name: option.name,
+        value: option.value,
+      })),
+      redcliffe: {},
+    })));
+    after = data.product.variants?.pageInfo?.hasNextPage
+      ? data.product.variants.pageInfo.endCursor
+      : null;
+  } while (after);
+
+  return variants;
+}
+
 function mapVariant(node) {
   const metafields = {};
   (node.metafields?.edges || []).forEach(({ node: metafield }) => {
@@ -679,8 +741,8 @@ router.get("/products", async (req, res) => {
     if (includeAllVariants) {
       for (const product of products) {
         if (String(product.productId) !== String(REDCLIFFE_PRICE_PRODUCT_ID)) continue;
-        const fullProduct = await getRedcliffeProduct(product.productId);
-        product.variants = (fullProduct.variants?.edges || []).map(({ node }) => mapVariant(node));
+        const allVariants = await getProductVariantsBasic(product.productId);
+        if (allVariants.length) product.variants = allVariants;
       }
     }
 
