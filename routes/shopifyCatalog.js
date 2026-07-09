@@ -603,6 +603,7 @@ router.get("/products", async (req, res) => {
   try {
     const search = (req.query.search || "").trim();
     const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 50);
+    const includeAllVariants = String(req.query.includeAllVariants || "").toLowerCase() === "true";
 
     const query = `
       query GetProducts($first: Int!, $search: String) {
@@ -674,6 +675,14 @@ router.get("/products", async (req, res) => {
         })),
       })),
     }));
+
+    if (includeAllVariants) {
+      for (const product of products) {
+        if (String(product.productId) !== String(REDCLIFFE_PRICE_PRODUCT_ID)) continue;
+        const fullProduct = await getRedcliffeProduct(product.productId);
+        product.variants = (fullProduct.variants?.edges || []).map(({ node }) => mapVariant(node));
+      }
+    }
 
     return res.json({
       ok: true,
