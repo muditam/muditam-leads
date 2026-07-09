@@ -102,7 +102,10 @@ function normalizePriceRow(row = {}) {
     row.category || row.pricingCategory || row.price_category || row.category_name || row.package_category
   );
   const mrp = parseMoney(row.mrp ?? row.MRP ?? row.price);
-  const ourPrice = parseMoney(row.ourPrice ?? row.our_price ?? row.price);
+  const b2bPrice = parseMoney(row.b2bPrice ?? row.b2b_price ?? row.b2b);
+  const ourPrice = parseMoney(
+    row.ourPrice ?? row.our_price ?? row.finalPrice ?? row.final_price ?? row.price
+  );
   const categoryDiscount = getCategoryDiscount(category);
   const discount = calculateDiscount(
     mrp,
@@ -114,7 +117,7 @@ function normalizePriceRow(row = {}) {
     throw new Error("Test name is required");
   }
   if (ourPrice === null || ourPrice <= 0) {
-    throw new Error(`Our Price is required for ${testName}`);
+    throw new Error(`Final Price is required for ${testName}`);
   }
 
   return {
@@ -122,6 +125,7 @@ function normalizePriceRow(row = {}) {
     code,
     category,
     mrp,
+    b2bPrice,
     ourPrice,
     discount,
   };
@@ -164,7 +168,7 @@ function extractUserErrors(payload) {
 
 async function getRedcliffeProduct(productId = REDCLIFFE_PRICE_PRODUCT_ID) {
   const query = `
-    query RedcliffePriceProduct($id: ID!) {
+    query RedcliffePriceProduct($id: ID!, $after: String) {
       product(id: $id) {
         id
         legacyResourceId
@@ -175,7 +179,11 @@ async function getRedcliffeProduct(productId = REDCLIFFE_PRICE_PRODUCT_ID) {
           name
           values
         }
-        variants(first: 250) {
+        variants(first: 250, after: $after) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
           edges {
             node {
               id
@@ -208,12 +216,31 @@ async function getRedcliffeProduct(productId = REDCLIFFE_PRICE_PRODUCT_ID) {
     }
   `;
 
-  const data = await shopifyGraphQL(query, { id: toProductGid(productId) });
-  if (!data.product) {
+  let after = null;
+  let product = null;
+  const variantEdges = [];
+
+  do {
+    const data = await shopifyGraphQL(query, { id: toProductGid(productId), after });
+    if (!data.product) {
+      throw new Error(`Shopify product ${productId} was not found`);
+    }
+    if (!product) {
+      product = data.product;
+      product.variants = { edges: [] };
+    }
+    variantEdges.push(...(data.product.variants?.edges || []));
+    after = data.product.variants?.pageInfo?.hasNextPage
+      ? data.product.variants.pageInfo.endCursor
+      : null;
+  } while (after);
+
+  if (!product) {
     throw new Error(`Shopify product ${productId} was not found`);
   }
 
-  return data.product;
+  product.variants = { edges: variantEdges };
+  return product;
 }
 
 function mapVariant(node) {
@@ -342,6 +369,15 @@ function buildMetafields(row) {
     },
   ];
 
+  if (row.b2bPrice !== null && row.b2bPrice !== undefined) {
+    fields.push({
+      namespace: "redcliffe",
+      key: "b2b_price",
+      type: "number_decimal",
+      value: String(row.b2bPrice ?? 0),
+    });
+  }
+
   if (row.code) {
     fields.push({
       namespace: "redcliffe",
@@ -441,6 +477,7 @@ async function upsertRedcliffeVariant(rawRow) {
   const price = moneyString(row.ourPrice);
 
   if (existingVariant) {
+    const optionName = getPrimaryOptionName(product);
     const mutation = `
       mutation RedcliffeVariantUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
         productVariantsBulkUpdate(productId: $productId, variants: $variants) {
@@ -469,6 +506,12 @@ async function upsertRedcliffeVariant(rawRow) {
           price,
           compareAtPrice,
           inventoryItem: row.code ? { sku: row.code } : undefined,
+          optionValues: [
+            {
+              optionName,
+              name: row.testName,
+            },
+          ],
           metafields: buildMetafields(row),
         },
       ],

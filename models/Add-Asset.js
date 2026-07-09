@@ -20,7 +20,6 @@ const AssetSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-AssetSchema.index({ assetCode: 1 }, { unique: true });
 AssetSchema.index({ emp_id: 1 });
 
 module.exports = mongoose.model("Asset", AssetSchema);
