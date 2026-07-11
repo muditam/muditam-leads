@@ -463,7 +463,11 @@ async function proxyRedcliffeRequest({ method, path, params, data }) {
 
  try {
    for (const candidate of authCandidates) {
-     const response = await fetch(`${baseUrl}${path}`, {
+     const requestPath = params ? withQuery(path, params) : path;
+     const requestUrl = /^https?:\/\//i.test(requestPath)
+       ? requestPath
+       : `${baseUrl}${requestPath}`;
+     const response = await fetch(requestUrl, {
        method,
        headers: candidate.headers,
        body: data ? JSON.stringify(data) : undefined,
@@ -2955,36 +2959,79 @@ router.get("/bookings/:bookingId/reports/digital", async (req, res) => {
 });
 
 
-router.get("/packages", async (_req, res) => {
- const result = await proxyWithMockFallback({
-   method: "GET",
-   path: "/api/external/v2/center-package-data/",
- });
+router.get("/packages", async (req, res) => {
+ const firstQuery = { ...req.query };
+ delete firstQuery.max_pages;
+ if (!firstQuery.page_size) firstQuery.page_size = 100;
+ const requestedPage = Math.max(Number(firstQuery.page) || 1, 1);
+ const maxPages = Math.min(Math.max(Number(req.query.max_pages) || 300, 1), 500);
+ const fetchPackagePage = (page) =>
+   proxyWithMockFallback({
+     method: "GET",
+     path: "/api/external/v2/center-package-data/",
+     query: { ...firstQuery, page },
+   });
 
-
- if (result.status >= 400) {
-   return res.status(result.status).json({
-     ...result.data,
+ const firstResult = await fetchPackagePage(requestedPage);
+ if (firstResult.status >= 400) {
+   return res.status(firstResult.status).json({
+     ...firstResult.data,
      message:
-       result.data?.message ||
-       result.data?.detail ||
+       firstResult.data?.message ||
+       firstResult.data?.detail ||
        "Unable to fetch Redcliffe package catalog.",
    });
  }
 
-
- const items = Array.isArray(result.data?.data)
-   ? result.data.data
-   : Array.isArray(result.data?.results)
-     ? result.data.results
+ const firstPageData = firstResult.data;
+ const firstItems = Array.isArray(firstPageData?.data)
+   ? firstPageData.data
+   : Array.isArray(firstPageData?.results)
+     ? firstPageData.results
      : [];
+ const sourceCount = Number(firstPageData?.count) || firstItems.length;
+ const sourcePageSize =
+   firstItems.length || Number(firstQuery.page_size) || Number(firstPageData?.page_size) || 100;
+ const totalPages = Math.min(
+   Math.max(Math.ceil(sourceCount / sourcePageSize), 1),
+   maxPages
+ );
+ const pagesToFetch = [];
+ for (let page = 1; page <= totalPages; page += 1) {
+   if (page !== requestedPage) pagesToFetch.push(page);
+ }
 
+ const pageResults = [];
+ const batchSize = 4;
+ for (let index = 0; index < pagesToFetch.length; index += batchSize) {
+   const batch = pagesToFetch.slice(index, index + batchSize);
+   const batchResults = await Promise.all(batch.map((page) => fetchPackagePage(page)));
+   pageResults.push(...batchResults);
+ }
+ const successfulPageResults = pageResults.filter((result) => result.status < 400);
+ const pageErrors = pageResults
+   .filter((result) => result.status >= 400)
+   .map((result) => result.data?.message || result.data?.detail || "Unable to fetch page");
 
- const normalized = items
-   .map((item) => ({
+ const allItems = [...firstItems];
+ successfulPageResults.forEach((result) => {
+   const items = Array.isArray(result.data?.data)
+     ? result.data.data
+     : Array.isArray(result.data?.results)
+       ? result.data.results
+       : [];
+   allItems.push(...items);
+ });
+
+ const normalized = allItems
+  .map((item) => {
+   const code = String(item?.code || "").trim();
+   const name = String(item?.name || item?.test_name || item?.package_name || "").trim();
+   if (!code || !name) return null;
+   return {
      id: item?.id ?? null,
-     code: String(item?.code || "").trim(),
-     name: String(item?.name || item?.test_name || item?.package_name || "").trim(),
+     code,
+     name,
      description: String(item?.description || "").trim(),
      type: String(item?.type || "").trim(),
      category: String(
@@ -2994,6 +3041,7 @@ router.get("/packages", async (_req, res) => {
        item?.department ||
        item?.health_category ||
        item?.sub_category ||
+       item?.test_category ||
        item?.package_center_prices?.category ||
        ""
      ).trim(),
@@ -3011,16 +3059,18 @@ router.get("/packages", async (_req, res) => {
        item?.package_center_prices?.mrp ??
        item?.mrp ??
        null,
-   }))
-   .filter((item) => item.code && item.name);
-
+   };
+  })
+  .filter(Boolean);
 
  return res.status(200).json({
-   status: result.data?.status || "success",
-   message: result.data?.message || "Package catalog fetched successfully",
+   status: firstPageData?.status || "success",
+   message: firstPageData?.message || "Package catalog fetched successfully",
    count: normalized.length,
+   source_count: sourceCount,
+   fetched_pages: 1 + successfulPageResults.length,
+   page_errors: pageErrors,
    results: normalized,
-   raw: result.data,
  });
 });
 
