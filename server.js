@@ -63,15 +63,6 @@ const searchRoutes = require('./routes/searchRoutes');
 const Addemployee = require('./routes/Addemployee');
 const authRoutes = require('./routes/loginRoutes');
 const clickToCallRoutes = require('./routes/clickToCallRoutes');
-const financeRoutes = require("./routes/financeRoutes");
-const razorpaySettlementRoutes = require("./PaymentGateway/razorpaySettlements");
-const GokwikSettlementRoutes = require("./PaymentGateway/easebuzz");
-const phonepeFinance = require("./PaymentGateway/phonepeFinance");
-const Cashfree = require("./PaymentGateway/cashfree");
- 
-const Bluedart = require("./PaymentGateway/bluedart");
-const Delhivery = require("./PaymentGateway/delhivery");
-const DTDC = require("./PaymentGateway/DTDC");
 const OrderSummeryOperations = require('./operations/OrderSummeryOperations');
 
 const markRTORoute = require("./operations/markRTO");
@@ -124,12 +115,6 @@ const bobotSyncRoutes = require('./routes/bobotSync');
 
 const shipmentSyncRouter = require("./routes/shipmentSync");
 
-const bankTxnRouter = require("./PaymentGateway/bankEntries");
-const bankCapital6389Routes = require("./PaymentGateway/bankCapital6389");
-const bankAxis3361Routes = require("./PaymentGateway/bankAxis3361");
-const bankCc1101Routes = require("./PaymentGateway/bankCc1101");
-const bankYesCcTejasvRoutes = require("./PaymentGateway/bankYesCcTejasv");
-const bankYesCcAbhayRoutes = require("./PaymentGateway/bankYesCcAbhay");
 const taskBoardRoutes = require("./routes/taskBoardRoutes");
 const taskReportingRoutes = require("./routes/taskReportingRoutes");
 const SwitchEmployee = require("./routes/SwitchEmployee");
@@ -146,15 +131,11 @@ const accessManagementRoutes = require("./routes/accessManagementRoutes");
 const superAdminAnalytics = require("./routes/superAdminAnalytics");
 // const retentionAuto = require("./routes/retentionAutoReactivate");
 
-const vendorsRoute = require("./routes/vendorsname");
-const purchaseRoute = require("./routes/PurchaseRcrds");
-const paymentRoute = require("./routes/paymentRcrds");
 const shopifyExport = require("./routes/shopifyExport"); 
 
 const WhatsAppRoutes = require("./whatsapp/whatsapp.routes");
 const whatsappTemplatesRoutes = require("./whatsapp/whatsappTemplatesroutes"); 
 const whatsappAiRoutes = require("./whatsapp/whatsapp.ai.routes");
-const bankReconciliationKotak = require("./PaymentGateway/bankReconciliationKotak");
 
 const retentionActivityRoutes = require("./routes/retentionActivityRoutes");
 const scriptroutes = require("./marketing/marketingroutes/ScriptRoute");
@@ -708,21 +689,6 @@ if (shouldRunSingletonJobs()) {
   );
 }
 
-app.use("/api/finance", financeRoutes);
-
-app.use("/api/razorpay", razorpaySettlementRoutes);
-
-app.use("/api/easebuzz", GokwikSettlementRoutes);
-
-app.use("/api/phonepe", phonepeFinance);
-app.use("/api/cashfree", Cashfree); 
-
-app.use("/api/bluedart", Bluedart);
-
-app.use("/api/delhivery", Delhivery);
-
-app.use("/api/dtdc", DTDC);
-
 app.use('/api/operations', OrderSummeryOperations);
 
 app.use(markRTORoute);
@@ -765,12 +731,6 @@ app.use('/api/bobot', bobotSyncRoutes);
 
 app.use("/", shipmentSyncRouter);
 
-app.use(bankTxnRouter);
-app.use("/api/bank-reconciliation", bankCapital6389Routes);
-app.use("/api/bank-reconciliation", bankAxis3361Routes);
-app.use("/api/bank-reconciliation", bankCc1101Routes);
-app.use("/api/bank-reconciliation", bankYesCcTejasvRoutes);
-app.use("/api/bank-reconciliation", bankYesCcAbhayRoutes);
 app.use("/api/tasks", taskBoardRoutes);
 app.use("/api/tasks/reporting", taskReportingRoutes);
 app.use("/api/switch-dashboard", SwitchEmployee);
@@ -787,17 +747,12 @@ app.use("/api/access", accessManagementRoutes);
 app.use("/api/super-admin/analytics", superAdminAnalytics);
 // app.use("/api/retention", retentionAuto);
 
-app.use("/api/vendors", vendorsRoute);
-app.use("/api/purchase-records", purchaseRoute);
-app.use("/api/payment-records", paymentRoute);
-
 app.use("/api/shopify", shopifyExport); 
 
 app.use("/api/whatsapp", WhatsAppRoutes);
 app.use("/api/whatsapp/templates", whatsappTemplatesRoutes); 
 
 app.use("/api/whatsapp", whatsappAiRoutes);
-app.use("/api/bank-reconciliation", bankReconciliationKotak);
 app.use("/api/retention-activity", retentionActivityRoutes);
 app.use("/api/scripts", scriptroutes);
 app.use("/api/other-videos", otherVideosRouter);

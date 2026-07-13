@@ -4,10 +4,6 @@ const router = express.Router();
 
 const Order = require("../models/Order");
 const ShopifyFinanceOrder = require("../models/ShopifyFinanceOrder");
-const EasebuzzTransaction = require("../models/EasebuzzTransaction");
-const DtdcSettlement = require("../models/DtdcSettlement");
-const DelhiverySettlement = require("../models/DelhiverySettlement");
-const BluedartSettlement = require("../models/BluedartSettlement");
 
 /* ---------------- helpers ---------------- */
 
@@ -27,32 +23,10 @@ function normOrderName(orderName) {
   return (orderName || "").toString().replace(/^#/, "").trim();
 }
 
-function variants(orderName) {
-  const raw = (orderName || "").toString().trim();
-  const clean = normOrderName(raw);
-  const n = Number(clean);
-  const numeric =
-    !Number.isNaN(n) && Number.isFinite(n) && String(n) === clean ? n : null;
-
-  const out = [raw, clean];
-  if (numeric !== null) out.push(numeric);
-  return out;
-}
-
 /** Pick ONE canonical orderAmount; received = sum; balance floored at 0 */
-function computeAmountsForOrder(amtEZ = 0, amtBD = 0, amtDL = 0, amtDTDC = 0) {
-  const orderAmount =
-    (amtEZ && Number(amtEZ)) ||
-    (amtBD && Number(amtBD)) ||
-    (amtDL && Number(amtDL)) ||
-    (amtDTDC && Number(amtDTDC)) ||
-    0;
-
-  const receivedAmount =
-    (Number(amtEZ) || 0) +
-    (Number(amtBD) || 0) +
-    (Number(amtDL) || 0) +
-    (Number(amtDTDC) || 0);
+function computeAmountsForOrder() {
+  const orderAmount = 0;
+  const receivedAmount = 0;
 
   let balanceAmount = orderAmount - receivedAmount;
   if (balanceAmount < 0) balanceAmount = 0;
@@ -87,24 +61,14 @@ async function buildDashboard() {
     };
   }
 
-  // Prepaid vs COD arrays + variant map
+  // Prepaid vs COD arrays
   const prepaidNames = [];
   const codNames = [];
-  const variantMap = new Map(); // orderName -> [raw, clean, numeric?]
 
   const cleanSet = new Set();
-  const varStringSet = new Set(); // only string keys for $in
 
   for (const r of sfoDocs) {
-    const v = variants(r.orderName);
-    variantMap.set(r.orderName, v);
-
-    v.forEach((key) => {
-      if (typeof key === "string") {
-        varStringSet.add(key);
-        cleanSet.add(normOrderName(key));
-      }
-    });
+    cleanSet.add(normOrderName(r.orderName));
 
     const fs = (r.financialStatus || "").toLowerCase();
     if (fs === "paid") prepaidNames.push(r.orderName);
@@ -112,7 +76,6 @@ async function buildDashboard() {
   }
 
   const allClean = Array.from(cleanSet);
-  const allVariantStrings = Array.from(varStringSet);
 
   // 2) Shipment status from Order collection
   const orderDocs = await Order.find(
@@ -126,73 +89,6 @@ async function buildDashboard() {
     const st = (od.shipment_status || "").toString().toLowerCase().trim();
     if (STATUS_SET.has(st)) statusByClean.set(key, st);
   }
-
-  // 3) Settlements → one pass each, indexed by raw/clean/numeric
-  const mapEZ = new Map();
-  const mapBD = new Map();
-  const mapDL = new Map();
-  const mapDTDC = new Map();
-
-  const fold = (map, key, val) => {
-    if (key === null || key === undefined) return;
-    const num = Number(val);
-    if (Number.isNaN(num)) return;
-    map.set(key, (map.get(key) || 0) + num);
-  };
-
-  const sumAllVariants = (map, idValue, amt) => {
-    const vs = variants(idValue);
-    vs.forEach((k) => fold(map, k, amt));
-  };
-
-  // Easebuzz
-  const ezDocs = await EasebuzzTransaction.find(
-    { merchantOrderId: { $in: allVariantStrings } },
-    { merchantOrderId: 1, amount: 1 }
-  ).lean();
-  for (const d of ezDocs) {
-    sumAllVariants(mapEZ, d.merchantOrderId, d.amount);
-  }
-
-  // Bluedart
-  const bdDocs = await BluedartSettlement.find(
-    { orderId: { $in: allVariantStrings } },
-    { orderId: 1, customerPayAmt: 1 }
-  ).lean();
-  for (const d of bdDocs) {
-    sumAllVariants(mapBD, d.orderId, d.customerPayAmt);
-  }
-
-  // Delhivery
-  const dlDocs = await DelhiverySettlement.find(
-    { orderId: { $in: allVariantStrings } },
-    { orderId: 1, amount: 1 }
-  ).lean();
-  for (const d of dlDocs) {
-    sumAllVariants(mapDL, d.orderId, d.amount);
-  }
-
-  // DTDC
-  const dcDocs = await DtdcSettlement.find(
-    { customerReferenceNumber: { $in: allVariantStrings } },
-    { customerReferenceNumber: 1, remittedAmount: 1 }
-  ).lean();
-  for (const d of dcDocs) {
-    sumAllVariants(mapDTDC, d.customerReferenceNumber, d.remittedAmount);
-  }
-
-  const amountsFor = (orderName) => {
-    const keys = variantMap.get(orderName) || [];
-    const sumFromMap = (map) =>
-      keys.reduce((acc, k) => acc + (map.get(k) || 0), 0);
-
-    const amtEZ = sumFromMap(mapEZ);
-    const amtBD = sumFromMap(mapBD);
-    const amtDL = sumFromMap(mapDL);
-    const amtDTDC = sumFromMap(mapDTDC);
-
-    return { amtEZ, amtBD, amtDL, amtDTDC };
-  };
 
   const newAgg = () => ({
     [STATUS_KEYS.delivered]: {
@@ -244,9 +140,8 @@ async function buildDashboard() {
 
       const label = labelFromLower(stLower);
 
-      const a = amountsFor(name);
       const { orderAmount, receivedAmount, balanceAmount } =
-        computeAmountsForOrder(a.amtEZ, a.amtBD, a.amtDL, a.amtDTDC);
+        computeAmountsForOrder();
 
       bump(agg, label, { orderAmount, receivedAmount, balanceAmount });
     }
