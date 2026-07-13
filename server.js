@@ -119,7 +119,6 @@ const taskBoardRoutes = require("./routes/taskBoardRoutes");
 const taskReportingRoutes = require("./routes/taskReportingRoutes");
 const SwitchEmployee = require("./routes/SwitchEmployee");
 const ConfirmedOrders = require("./routes/confirmedOrders");
-const invoiceRoutes = require('./routes/invoiceRoutes');
 
 const globalShopifyOrders = require("./International/globalShopifyOrders");
 const globalAbandonedCarts = require("./International/globalAbandonedCarts");
@@ -127,7 +126,6 @@ const globalRetentionLeads = require("./International/InternationalRoutes/global
 const globalRetentionDetails = require("./International/InternationalRoutes/globalRetentionDetails");
 const globalRetentionSalesRoutes = require("./International/InternationalRoutes/globalRetentionSales");
 
-const accessManagementRoutes = require("./routes/accessManagementRoutes");
 const superAdminAnalytics = require("./routes/superAdminAnalytics");
 // const retentionAuto = require("./routes/retentionAutoReactivate");
 
@@ -735,15 +733,12 @@ app.use("/api/tasks", taskBoardRoutes);
 app.use("/api/tasks/reporting", taskReportingRoutes);
 app.use("/api/switch-dashboard", SwitchEmployee);
 app.use("/api/order-confirmation", ConfirmedOrders);
-app.use('/api/invoices', invoiceRoutes);
-
 app.use("/api", globalShopifyOrders);
 app.use("/api", globalAbandonedCarts);
 app.use("/api/global-retention-leads", globalRetentionLeads);
 app.use("/api/global-retention-sales", globalRetentionSalesRoutes);
 app.use("/api/global-retention-details", globalRetentionDetails);
 
-app.use("/api/access", accessManagementRoutes);
 app.use("/api/super-admin/analytics", superAdminAnalytics);
 // app.use("/api/retention", retentionAuto);
 
