@@ -3063,14 +3063,25 @@ router.get("/packages", async (req, res) => {
   })
   .filter(Boolean);
 
+ const uniquePackages = Array.from(
+   normalized
+     .reduce((map, item) => {
+       const key = String(item.code || "").trim().toUpperCase();
+       if (key && !map.has(key)) map.set(key, item);
+       return map;
+     }, new Map())
+     .values()
+ );
+
  return res.status(200).json({
    status: firstPageData?.status || "success",
    message: firstPageData?.message || "Package catalog fetched successfully",
-   count: normalized.length,
+   count: uniquePackages.length,
    source_count: sourceCount,
+   raw_count: normalized.length,
    fetched_pages: 1 + successfulPageResults.length,
    page_errors: pageErrors,
-   results: normalized,
+   results: uniquePackages,
  });
 });
 
