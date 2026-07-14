@@ -63,25 +63,100 @@ const buildDateMatch = (startDate, endDate) => {
 
 const normalizeShipmentOrderId = (value = "") => String(value || "").replace(/^#/, "").trim();
 
+const getIncentiveShipmentBucket = (status = "") => {
+  const normalizedStatus = String(status || "").trim().toUpperCase();
+  const isDelivered = normalizedStatus.includes("DELIVERED");
+  const isRTO = normalizedStatus.includes("RTO");
+  const isInTransit = normalizedStatus.includes("TRANSIT");
+
+  if (isRTO && isDelivered) return "RTO Delivered";
+  if (isRTO) return "RTO";
+  if (isDelivered) return "Delivered";
+  if (isInTransit) return "In Transit";
+  return "Others";
+};
+
+const getShipmentStatusCategory = (status = "") => {
+  const bucket = getIncentiveShipmentBucket(status);
+  if (bucket !== "Others") return bucket;
+  return String(status || "").trim() || "Not Available";
+};
+
+const buildIncentiveShipmentSummary = (rows = []) => {
+  const buckets = {
+    Delivered: { category: "Delivered", count: 0, totalAmount: 0 },
+    RTO: { category: "RTO", count: 0, totalAmount: 0 },
+    "RTO Delivered": { category: "RTO Delivered", count: 0, totalAmount: 0 },
+    "In Transit": { category: "In Transit", count: 0, totalAmount: 0 },
+  };
+  const otherStatuses = new Map();
+
+  rows.forEach((row) => {
+    const category = getShipmentStatusCategory(row.shipway_status);
+    const amountPaid = Number(row.amountPaid || 0);
+
+    if (buckets[category]) {
+      buckets[category].count += 1;
+      buckets[category].totalAmount += amountPaid;
+      return;
+    }
+
+    const current = otherStatuses.get(category) || { category, count: 0, totalAmount: 0 };
+    current.count += 1;
+    current.totalAmount += amountPaid;
+    otherStatuses.set(category, current);
+  });
+
+  const totalCount = rows.length;
+  const totalAmount = rows.reduce((sum, row) => sum + Number(row.amountPaid || 0), 0);
+  const withPercentage = (item) => ({
+    ...item,
+    percentage: totalCount ? ((item.count / totalCount) * 100).toFixed(2) : "0.00",
+  });
+
+  return [
+    {
+      category: "Total Orders",
+      count: totalCount,
+      totalAmount,
+      percentage: totalCount ? "100.00" : "0.00",
+    },
+    ...Object.values(buckets).map(withPercentage),
+    ...Array.from(otherStatuses.values()).map(withPercentage),
+  ];
+};
+
 const matchesShipmentGroup = (status = "", group = "", category = "") => {
   const normalizedStatus = String(status || "").trim().toLowerCase();
   if (category === "Total Orders") return true;
 
   switch (String(group || "").trim().toLowerCase()) {
     case "delivered":
-      return normalizedStatus.includes("delivered") && !normalizedStatus.includes("rto");
+      return getIncentiveShipmentBucket(status) === "Delivered";
     case "rto":
-      return normalizedStatus.includes("rto");
+      return getIncentiveShipmentBucket(status) === "RTO";
     case "in_transit":
-      return normalizedStatus.includes("transit");
+      return getIncentiveShipmentBucket(status) === "In Transit";
     case "out_for_delivery":
       return normalizedStatus.includes("out for delivery");
+    case "rto_delivered":
+      return getIncentiveShipmentBucket(status) === "RTO Delivered";
+    case "others":
+      return getIncentiveShipmentBucket(status) === "Others";
     default:
+      if (["Delivered", "RTO", "RTO Delivered", "In Transit"].includes(category)) {
+        return getIncentiveShipmentBucket(status) === category;
+      }
       return String(status || "").trim() === String(category || "").trim();
   }
 };
 
-async function fetchUnifiedRetentionShipmentRows({ orderCreatedBy, startDate, endDate }) {
+async function fetchUnifiedRetentionShipmentRows({
+  orderCreatedBy,
+  startDate,
+  endDate,
+  useIncentiveMyOrderAmount = false,
+}) {
   const retentionQuery = {};
   if (orderCreatedBy) retentionQuery.orderCreatedBy = orderCreatedBy;
   if (startDate || endDate) {
@@ -148,7 +223,7 @@ async function fetchUnifiedRetentionShipmentRows({ orderCreatedBy, startDate, en
       amountPaid:
         Number(order.upsellAmount || 0) > 0
           ? Number(order.upsellAmount)
-          : Number(order.totalPrice || 0) + Number(order.partialPayment || 0),
+          : Number(order.totalPrice || 0) + (useIncentiveMyOrderAmount ? 0 : Number(order.partialPayment || 0)),
       orderCreatedBy: order.agentName || "",
     };
   });
@@ -673,148 +748,13 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
   }
 
   try {
-    // For RetentionSales, build a match filter on agent and date.
-    const retentionMatch = {
+    const rows = await fetchUnifiedRetentionShipmentRows({
       orderCreatedBy: agentName,
-      ...buildDateMatch(startDate, endDate)
-    };
-
-    const retentionPipeline = [
-      { $match: retentionMatch },
-      {
-        $group: {
-          _id: "$shipway_status",
-          count: { $sum: 1 },
-          totalAmount: {
-            $sum: { $toDouble: { $ifNull: ["$amountPaid", 0] } }
-          }
-        }
-      },
-      {
-        $project: {
-          category: {
-            $cond: [
-              { $or: [{ $eq: ["$_id", null] }, { $eq: ["$_id", ""] }] },
-              "Not available",
-              "$_id"
-            ]
-          },
-          count: 1,
-          totalAmount: 1
-        }
-      }
-    ];
-
-    // For MyOrder, match records for the agent and within the date range.
-    let myOrderMatch = { agentName };
-    if (startDate || endDate) {
-      myOrderMatch.orderDate = {};
-      if (startDate) {
-        myOrderMatch.orderDate.$gte = new Date(startDate);
-      }
-      if (endDate) {
-        const endObj = new Date(endDate);
-        endObj.setHours(23, 59, 59, 999);
-        myOrderMatch.orderDate.$lte = endObj;
-      }
-    }
-
-    // MyOrder pipeline: normalize the order ID, lookup the corresponding Order
-    // to get shipment status, and then group by that shipment status.
-    const myOrderPipeline = [
-      { $match: myOrderMatch },
-      {
-        $addFields: {
-          normalizedOrderId: {
-            $cond: [
-              { $eq: [{ $substrCP: ["$orderId", 0, 1] }, "#"] },
-              { $substrCP: ["$orderId", 1, { $subtract: [{ $strLenCP: "$orderId" }, 1] }] },
-              "$orderId"
-            ]
-          }
-        }
-      },
-      {
-        $lookup: {
-          from: "orders", // Ensure that this collection name matches yours
-          localField: "normalizedOrderId",
-          foreignField: "order_id",
-          as: "orderDoc"
-        }
-      },
-      {
-        $unwind: { path: "$orderDoc", preserveNullAndEmptyArrays: true }
-      },
-      {
-        $project: {
-          // Use the shipment status from the looked-up Order or default to "Not available"
-          shipmentStatus: { $ifNull: ["$orderDoc.shipment_status", "Not available"] },
-          // For MyOrder, determine the effective amountPaid:
-          // use upsellAmount if > 0, else totalPrice.
-          amountPaid: {
-            $cond: [
-              { $gt: ["$upsellAmount", 0] },
-              { $toDouble: "$upsellAmount" },
-              { $toDouble: "$totalPrice" }
-            ]
-          }
-        }
-      },
-      {
-        $group: {
-          _id: "$shipmentStatus",
-          count: { $sum: 1 },
-          totalAmount: { $sum: "$amountPaid" }
-        }
-      },
-      {
-        $project: {
-          category: "$_id",
-          count: 1,
-          totalAmount: 1
-        }
-      }
-    ];
-
-    // Use $unionWith to combine the two pipelines and then group by category.
-    const combinedAggregation = await RetentionSales.aggregate([
-      ...retentionPipeline,
-      {
-        $unionWith: {
-          coll: "myorders",
-          pipeline: myOrderPipeline
-        }
-      },
-      {
-        $group: {
-          _id: "$category",
-          count: { $sum: "$count" },
-          totalAmount: { $sum: "$totalAmount" }
-        }
-      },
-      {
-        $project: {
-          category: "$_id",
-          count: 1,
-          totalAmount: 1
-        }
-      }
-    ]);
-
-    // Compute overall percentages and insert a "Total Orders" row.
-    const totalCount = combinedAggregation.reduce((sum, item) => sum + item.count, 0);
-    combinedAggregation.forEach(item => {
-      item.percentage = totalCount ? ((item.count / totalCount) * 100).toFixed(2) : "0.00";
+      startDate,
+      endDate,
+      useIncentiveMyOrderAmount: true,
     });
-    const totalAmount = combinedAggregation.reduce((sum, item) => sum + item.totalAmount, 0);
-    combinedAggregation.unshift({
-      category: "Total Orders",
-      count: totalCount,
-      totalAmount: totalAmount,
-      percentage: "100.00"
-    });
-
-    res.status(200).json(combinedAggregation);
+    res.status(200).json(buildIncentiveShipmentSummary(rows));
   } catch (error) {
     console.error("Error aggregating agent shipment summary:", error);
     res.status(500).json({
@@ -827,162 +767,12 @@ router.get('/api/retention-sales/shipment-summary/agent', async (req, res) => {
 router.get('/api/retention-sales/shipment-summary', async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
-    const retentionMatch = buildDateMatch(startDate, endDate);
-
-    const retentionPipeline = [
-      { $match: retentionMatch },
-      {
-        $addFields: {
-          normalizedOrderId: {
-            $cond: [
-              { $eq: [{ $substrCP: ["$orderId", 0, 1] }, "#"] },
-              { $substrCP: ["$orderId", 1, { $subtract: [{ $strLenCP: "$orderId" }, 1] }] },
-              "$orderId"
-            ]
-          }
-        }
-      },
-      {
-        $lookup: {
-          from: "orders",
-          localField: "normalizedOrderId",
-          foreignField: "order_id",
-          as: "orderDoc"
-        }
-      },
-      {
-        $unwind: {
-          path: "$orderDoc",
-          preserveNullAndEmptyArrays: true
-        }
-      },
-      {
-        $project: {
-          shipmentStatus: {
-            $ifNull: ["$orderDoc.shipment_status", { $ifNull: ["$shipway_status", "Not available"] }]
-          },
-          amountPaid: { $toDouble: { $ifNull: ["$amountPaid", 0] } }
-        }
-      },
-      {
-        $group: {
-          _id: "$shipmentStatus",
-          count: { $sum: 1 },
-          totalAmount: { $sum: "$amountPaid" }
-        }
-      },
-      {
-        $project: {
-          category: "$_id",
-          count: 1,
-          totalAmount: 1
-        }
-      }
-    ];
-
-    const myOrderMatch = {};
-    if (startDate || endDate) {
-      myOrderMatch.orderDate = {};
-      if (startDate) myOrderMatch.orderDate.$gte = new Date(startDate);
-      if (endDate) {
-        const endObj = new Date(endDate);
-        endObj.setHours(23, 59, 59, 999);
-        myOrderMatch.orderDate.$lte = endObj;
-      }
-    }
-
-    const myOrderPipeline = [
-      { $match: myOrderMatch },
-      {
-        $addFields: {
-          normalizedOrderId: {
-            $cond: [
-              { $eq: [{ $substrCP: ["$orderId", 0, 1] }, "#"] },
-              { $substrCP: ["$orderId", 1, { $subtract: [{ $strLenCP: "$orderId" }, 1] }] },
-              "$orderId"
-            ]
-          }
-        }
-      },
-      {
-        $lookup: {
-          from: "orders",
-          localField: "normalizedOrderId",
-          foreignField: "order_id",
-          as: "orderDoc"
-        }
-      },
-      { $unwind: { path: "$orderDoc", preserveNullAndEmptyArrays: true } },
-      {
-        $project: {
-          shipmentStatus: { $ifNull: ["$orderDoc.shipment_status", "Not available"] },
-          amountPaid: {
-            $cond: [
-              { $gt: ["$upsellAmount", 0] },
-              { $toDouble: "$upsellAmount" },
-              { $toDouble: "$totalPrice" }
-            ]
-          }
-        }
-      },
-      {
-        $group: {
-          _id: "$shipmentStatus",
-          count: { $sum: 1 },
-          totalAmount: { $sum: "$amountPaid" }
-        }
-      },
-      {
-        $project: {
-          category: "$_id",
-          count: 1,
-          totalAmount: 1
-        }
-      }
-    ];
-
-    const combinedAggregation = await RetentionSales.aggregate([
-      ...retentionPipeline,
-      {
-        $unionWith: {
-          coll: "myorders",
-          pipeline: myOrderPipeline
-        }
-      },
-      {
-        $group: {
-          _id: "$category",
-          count: { $sum: "$count" },
-          totalAmount: { $sum: "$totalAmount" }
-        }
-      },
-      {
-        $project: {
-          category: "$_id",
-          count: 1,
-          totalAmount: 1
-        }
-      }
-    ]);
-
-    const totalCount = combinedAggregation.reduce((acc, curr) => acc + curr.count, 0);
-    const totalAmount = combinedAggregation.reduce((acc, curr) => acc + curr.totalAmount, 0);
-
-    const result = combinedAggregation.map(item => ({
-      category: item.category,
-      count: item.count,
-      totalAmount: item.totalAmount,
-      percentage: totalCount ? ((item.count / totalCount) * 100).toFixed(2) : "0.00"
-    }));
-
-    result.unshift({
-      category: "Total Orders",
-      count: totalCount,
-      totalAmount: totalAmount,
-      percentage: "100.00"
+    const rows = await fetchUnifiedRetentionShipmentRows({
+      startDate,
+      endDate,
+      useIncentiveMyOrderAmount: true,
     });
-
-    res.status(200).json(result);
+    res.status(200).json(buildIncentiveShipmentSummary(rows));
   } catch (error) {
     console.error("Error in shipment summary:", error);
     res.status(500).json({ message: "Error", error: error.message });
@@ -1563,6 +1353,7 @@ router.get('/api/retention-sales/shipment-details', async (req, res) => {
       orderCreatedBy,
       startDate,
       endDate,
+      useIncentiveMyOrderAmount: true,
     });
 
     const filtered = combined.filter((row) =>
