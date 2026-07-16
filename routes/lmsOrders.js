@@ -7,32 +7,32 @@ const requireSession = require("../middleware/requireSession");
 
 const router = express.Router();
 
-const CLOSED_STATUS_KEYS = new Set(["delivered", "delivered_paid_cod", "rto_received", "canceled", "lost"]);
+const CLOSED_STATUS_KEYS = new Set(["delivered", "rto_received", "canceled", "lost_damaged"]);
 const PENDING_PROCESSING_STATUS_KEY = "pending_processing";
 const PENDING_PROCESSING_STATUS_KEYS = new Set([
   "not_shipped",
   "ready_for_pickup",
   "processing",
+  "shipment_booked",
   "status_pending",
 ]);
 const STATUS_LABELS = {
   [PENDING_PROCESSING_STATUS_KEY]: "Pending / Processing",
-  shipped: "Shipped",
   in_transit: "In Transit",
   out_for_delivery: "Out for Delivery",
   delivered: "Delivered",
-  delivered_paid_cod: "Delivered & Paid (COD)",
   rto_initiated: "RTO",
   rto_received: "RTO Delivered",
   canceled: "Canceled",
-  lost: "Lost",
+  undelivered: "Undelivered",
+  lost_damaged: "Lost / Damaged",
 };
 const BASE_STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({
   value,
   label,
   count: 0,
 }));
-const CLOSED_STATUS_REGEX = /(delivered|rto[\s_-]*(received|delivered)|return[\s_-]*delivered|cancell?ed|lost)/i;
+const CLOSED_STATUS_REGEX = /(delivered|rto[\s_-]*(received|delivered)|return[\s_-]*delivered|cancell?ed|lost|dmg|damaged?)/i;
 const ACTIVE_ORDERS_START = new Date("2026-04-01T00:00:00.000Z");
 const PAGE_SELECT =
   "orderId orderName customerName contactNumber customerAddress orderDate createdAt amount modeOfPayment paymentGatewayNames productsOrdered financial_status fulfillment_status cancelled_at";
@@ -133,7 +133,11 @@ function normalizeStatusKey(status = "") {
   const normalized = raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   if (normalized === "cancelled") return "canceled";
   if (normalized === "rto_delivered" || normalized === "return_delivered") return "rto_received";
-  if (normalized === "ofd") return "out_for_delivery";
+  if (normalized === "0") return "delivered";
+  if (normalized === "delivered_paid_cod") return "delivered";
+  if (normalized === "ofd" || normalized === "ofp") return "out_for_delivery";
+  if (["pkf", "pkp", "smd", "on_hold", "undelivered"].includes(normalized) || raw.includes("hold")) return "undelivered";
+  if (normalized === "dmg" || raw.includes("lost") || raw.includes("damage")) return "lost_damaged";
   if (STATUS_LABELS[normalized]) return normalized;
   if (raw.includes("ready") && raw.includes("pickup")) return "ready_for_pickup";
   if (raw.includes("out") && raw.includes("delivery")) return "out_for_delivery";
@@ -142,8 +146,7 @@ function normalizeStatusKey(status = "") {
   if (raw.includes("rto")) return "rto_initiated";
   if (raw.includes("deliver")) return "delivered";
   if (raw.includes("cancel")) return "canceled";
-  if (raw.includes("lost")) return "lost";
-  if (raw.includes("ship")) return "shipped";
+  if (raw.includes("ship")) return "in_transit";
   return normalized || "not_shipped";
 }
 
@@ -176,17 +179,18 @@ function statusRegexForKey(status = "") {
   }
   const key = normalizeStatusKey(status);
   const patterns = {
-    [PENDING_PROCESSING_STATUS_KEY]: /^(not[\s_-]*available|not[\s_-]*shipped|not_shipped|ready[\s_-]*for[\s_-]*pickup|ready_for_pickup|processing|status[\s_-]*pending|status_pending|)$/i,
+    [PENDING_PROCESSING_STATUS_KEY]: /^(not[\s_-]*available|not[\s_-]*shipped|not_shipped|ready[\s_-]*for[\s_-]*pickup|ready_for_pickup|processing|status[\s_-]*pending|status_pending|shipment[\s_-]*booked|shipment_booked|)$/i,
     not_shipped: /^(not[\s_-]*available|not[\s_-]*shipped|not_shipped|)$/i,
     shipped: /^shipped$/i,
-    in_transit: /^(in[\s_-]*transit|in_transit)$/i,
-    out_for_delivery: /^(out[\s_-]*for[\s_-]*delivery|out_for_delivery|ofd)$/i,
+    in_transit: /^(in[\s_-]*transit|in_transit|shipped)$/i,
+    out_for_delivery: /^(out[\s_-]*for[\s_-]*delivery|out_for_delivery|ofd|ofp)$/i,
     ready_for_pickup: /^(ready[\s_-]*for[\s_-]*pickup|ready_for_pickup)$/i,
-    delivered: /^delivered$/i,
+    delivered: /^(delivered|delivered[\s_-]*paid[\s_-]*cod|delivered\s*&\s*paid.*|0)$/i,
     rto_initiated: /^(rto[\s_-]*initiated|rto_initiated|rto)$/i,
     rto_received: /^(rto[\s_-]*(received|delivered)|return[\s_-]*delivered|rto_received)$/i,
     canceled: /^cancell?ed$/i,
-    lost: /^lost$/i,
+    undelivered: /^(undelivered|pkf|pkp|smd|on[\s_-]*hold|on_hold)$/i,
+    lost_damaged: /^(lost|dmg|damaged?)$/i,
   };
   return patterns[key] || new RegExp(`^${escapeRegex(status)}$`, "i");
 }
@@ -1312,9 +1316,12 @@ router.get("/lms-orders", requireSession, async (req, res) => {
       );
     }
 
-    if (status) {
+    const statusFilters = parseMultiValue(status);
+    if (statusFilters.length) {
       pipeline.push({
-        $match: { shipmentStatus: statusRegexForKey(status) },
+        $match: {
+          $or: statusFilters.map((statusValue) => ({ shipmentStatus: statusRegexForKey(statusValue) })),
+        },
       });
     }
 
