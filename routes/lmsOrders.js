@@ -8,12 +8,18 @@ const requireSession = require("../middleware/requireSession");
 const router = express.Router();
 
 const CLOSED_STATUS_KEYS = new Set(["delivered", "delivered_paid_cod", "rto_received", "canceled", "lost"]);
+const PENDING_PROCESSING_STATUS_KEY = "pending_processing";
+const PENDING_PROCESSING_STATUS_KEYS = new Set([
+  "not_shipped",
+  "ready_for_pickup",
+  "processing",
+  "status_pending",
+]);
 const STATUS_LABELS = {
-  not_shipped: "Not Shipped",
+  [PENDING_PROCESSING_STATUS_KEY]: "Pending / Processing",
   shipped: "Shipped",
   in_transit: "In Transit",
   out_for_delivery: "Out for Delivery",
-  ready_for_pickup: "Ready for Pickup",
   delivered: "Delivered",
   delivered_paid_cod: "Delivered & Paid (COD)",
   rto_initiated: "RTO",
@@ -32,6 +38,15 @@ const PAGE_SELECT =
   "orderId orderName customerName contactNumber customerAddress orderDate createdAt amount modeOfPayment paymentGatewayNames productsOrdered financial_status fulfillment_status cancelled_at";
 const NDR_CLOSING_STATUS_REGEX = /^(delivered|delivered[\s_-]*paid[\s_-]*cod|delivered\s*&\s*paid.*|rto[\s_-]*(received|delivered)|return[\s_-]*delivered|rto_received)$/i;
 const NDR_EXCLUDED_PRODUCT_REGEX = /(blood\s*test|full\s*body\s*checkup)/i;
+const NDR_STATUS_OPTIONS = [
+  { value: "pending_processing", label: "Pending / Processing" },
+  { value: "in_transit", label: "In Transit" },
+  { value: "out_for_delivery", label: "Out for Delivery" },
+  { value: "rto_initiated", label: "RTO" },
+  { value: "undelivered", label: "Undelivered" },
+  { value: "lost_damaged", label: "Lost / Damaged" },
+  { value: "canceled", label: "Canceled" },
+];
 const META_CACHE_TTL_MS = 30000;
 const metaCache = new Map();
 
@@ -144,6 +159,7 @@ function statusLabelFromKey(statusKey) {
 function statusOptionValue(status = "") {
   const raw = String(status || "").trim();
   const key = normalizeStatusKey(raw);
+  if (PENDING_PROCESSING_STATUS_KEYS.has(key)) return PENDING_PROCESSING_STATUS_KEY;
   if (STATUS_LABELS[key]) return key;
   return raw ? `raw:${raw}` : "not_shipped";
 }
@@ -160,6 +176,7 @@ function statusRegexForKey(status = "") {
   }
   const key = normalizeStatusKey(status);
   const patterns = {
+    [PENDING_PROCESSING_STATUS_KEY]: /^(not[\s_-]*available|not[\s_-]*shipped|not_shipped|ready[\s_-]*for[\s_-]*pickup|ready_for_pickup|processing|status[\s_-]*pending|status_pending|)$/i,
     not_shipped: /^(not[\s_-]*available|not[\s_-]*shipped|not_shipped|)$/i,
     shipped: /^shipped$/i,
     in_transit: /^(in[\s_-]*transit|in_transit)$/i,
@@ -172,6 +189,49 @@ function statusRegexForKey(status = "") {
     lost: /^lost$/i,
   };
   return patterns[key] || new RegExp(`^${escapeRegex(status)}$`, "i");
+}
+
+function ndrStatusOptionValue(status = "") {
+  const raw = String(status || "").trim().toLowerCase();
+  const normalized = raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!raw || raw === "not available" || raw === "0") return "pending_processing";
+  if (["processing", "status_pending", "shipment_booked", "not_shipped", "ready_for_pickup"].includes(normalized)) {
+    return "pending_processing";
+  }
+  if (normalized === "in_transit" || raw.includes("transit")) return "in_transit";
+  if (normalized === "ofp" || normalized === "ofd" || (raw.includes("out") && raw.includes("delivery"))) {
+    return "out_for_delivery";
+  }
+  if (raw.includes("rto")) return "rto_initiated";
+  if (raw.includes("cancel")) return "canceled";
+  if (normalized === "dmg" || raw.includes("lost") || raw.includes("damage")) return "lost_damaged";
+  if (["pkf", "pkp", "smd", "on_hold", "undelivered"].includes(normalized) || raw.includes("hold")) {
+    return "undelivered";
+  }
+  return raw ? `raw:${status}` : "pending_processing";
+}
+
+function ndrStatusLabelFromValue(value = "") {
+  const raw = String(value || "").trim();
+  if (raw.startsWith("raw:")) return raw.slice(4);
+  return NDR_STATUS_OPTIONS.find((option) => option.value === raw)?.label || statusLabelFromValue(raw);
+}
+
+function ndrStatusRegexForValue(value = "") {
+  const raw = String(value || "").trim();
+  if (raw.startsWith("raw:")) {
+    return new RegExp(`^${escapeRegex(raw.slice(4))}$`, "i");
+  }
+  const patterns = {
+    pending_processing: /^(not[\s_-]*available|not[\s_-]*shipped|not_shipped|ready[\s_-]*for[\s_-]*pickup|ready_for_pickup|processing|status[\s_-]*pending|status_pending|shipment[\s_-]*booked|shipment_booked|0|)$/i,
+    in_transit: /^(in[\s_-]*transit|in_transit)$/i,
+    out_for_delivery: /^(out[\s_-]*for[\s_-]*delivery|out_for_delivery|ofd|ofp)$/i,
+    rto_initiated: /^(rto[\s_-]*initiated|rto_initiated|rto)$/i,
+    undelivered: /^(undelivered|pkf|pkp|smd|on[\s_-]*hold|on_hold)$/i,
+    lost_damaged: /^(lost|dmg|damaged?)$/i,
+    canceled: /^cancell?ed$/i,
+  };
+  return patterns[raw] || statusRegexForKey(raw);
 }
 
 function normalizeOrderName(orderName = "") {
@@ -221,6 +281,9 @@ function matchesStatusGroup(row, statusGroup) {
 
 function matchesStatusKey(row, statusKey) {
   if (!statusKey) return true;
+  if (statusKey === PENDING_PROCESSING_STATUS_KEY) {
+    return PENDING_PROCESSING_STATUS_KEYS.has(normalizeStatusKey(row.status));
+  }
   return normalizeStatusKey(row.status) === statusKey;
 }
 
@@ -903,7 +966,7 @@ function buildNdrPipeline(query = {}, section = "all", forFacet = true, assigned
   if (statuses.length) {
     pipeline.push({
       $match: {
-        $or: statuses.map((status) => ({ shipment_status: statusRegexForKey(status) })),
+        $or: statuses.map((status) => ({ shipment_status: ndrStatusRegexForValue(status) })),
       },
     });
   }
@@ -1066,11 +1129,20 @@ router.get("/lms-orders/ndr", requireSession, async (req, res) => {
     const statusMap = new Map();
     (result?.statuses || []).forEach((item) => {
       const label = String(item._id || "Not Available").trim() || "Not Available";
-      const value = `raw:${label}`;
-      const existing = statusMap.get(value) || { value, label, count: 0 };
+      const value = ndrStatusOptionValue(label);
+      const existing = statusMap.get(value) || { value, label: ndrStatusLabelFromValue(value), count: 0 };
       existing.count += Number(item.count || 0);
       statusMap.set(value, existing);
     });
+
+    const statusOptions = Array.from(statusMap.values())
+      .filter((item) => item.count > 0)
+      .sort((a, b) => {
+        const aIndex = NDR_STATUS_OPTIONS.findIndex((option) => option.value === a.value);
+        const bIndex = NDR_STATUS_OPTIONS.findIndex((option) => option.value === b.value);
+        if (aIndex !== -1 || bIndex !== -1) return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+        return a.label.localeCompare(b.label);
+      });
 
     res.json({
       section,
@@ -1078,7 +1150,7 @@ router.get("/lms-orders/ndr", requireSession, async (req, res) => {
       limit,
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),
-      statusOptions: Array.from(statusMap.values()).filter((item) => item.count > 0),
+      statusOptions,
       paymentOptions: (result?.payments || [])
         .map((item) => ({
           value: String(item._id || "").trim(),

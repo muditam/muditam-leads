@@ -2554,28 +2554,121 @@ async function maybeMirrorInboundMediaToWasabi({
    WEBHOOK PARSER
 ----------------------------------------- */
 function textFromInboundMessage(msg = {}) {
-  return (
-    String(
-      deepPick(msg, [
-        "text.body",
-        "text",
-        "message",
-        "body",
-        "content.text",
-        "payload.text",
-        "interactive.button_reply.title",
-        "interactive.button_reply.id",
-        "interactive.list_reply.title",
-        "interactive.list_reply.id",
-        "interactive.nfm_reply.body",
-        "interactive.nfm_reply.response_json",
-        "nfm_reply.body",
-        "nfm_reply.response_json",
-        "button.text",
-        "button.payload",
-      ]) || ""
-    ).trim() || ""
-  );
+  const directText = String(
+    deepPick(msg, [
+      "text.body",
+      "text",
+      "message",
+      "body",
+      "content.text",
+      "payload.text",
+      "interactive.button_reply.title",
+      "interactive.button_reply.id",
+      "interactive.list_reply.title",
+      "interactive.list_reply.id",
+      "interactive.nfm_reply.body",
+      "interactive.nfm_reply.response_json",
+      "nfm_reply.body",
+      "nfm_reply.response_json",
+      "button.text",
+      "button.payload",
+    ]) || ""
+  ).trim();
+
+  return directText || textFromContactMessage(msg);
+}
+
+function contactNameFromNode(contact = {}) {
+  return String(
+    deepPick(contact, [
+      "name.formatted_name",
+      "name.full_name",
+      "name.name",
+      "formatted_name",
+      "full_name",
+      "name.first_name",
+      "first_name",
+    ]) || ""
+  ).trim();
+}
+
+function contactPhonesFromNode(contact = {}) {
+  const phones = asArray(contact?.phones || contact?.phone || contact?.phone_numbers || []);
+  return phones
+    .map((phone) => {
+      if (!isObjectLike(phone)) return String(phone || "").trim();
+      const number = String(
+        phone?.phone ||
+          phone?.wa_id ||
+          phone?.number ||
+          phone?.value ||
+          phone?.phone_number ||
+          ""
+      ).trim();
+      const type = String(phone?.type || phone?.label || "").trim();
+      if (!number) return "";
+      return type ? `${number} (${type})` : number;
+    })
+    .filter(Boolean);
+}
+
+function contactDetailsFromNode(contact = {}) {
+  const details = [];
+
+  const emails = asArray(contact?.emails || contact?.email || [])
+    .map((email) => {
+      if (!isObjectLike(email)) return String(email || "").trim();
+      return String(email?.email || email?.value || "").trim();
+    })
+    .filter(Boolean);
+  if (emails.length) details.push(`Email: ${emails.join(", ")}`);
+
+  const org = String(deepPick(contact, ["org.company", "org.department", "organization"]) || "").trim();
+  if (org) details.push(`Company: ${org}`);
+
+  const addresses = asArray(contact?.addresses || contact?.address || [])
+    .map((address) => {
+      if (!isObjectLike(address)) return String(address || "").trim();
+      return [
+        address?.street,
+        address?.city,
+        address?.state,
+        address?.zip,
+        address?.country,
+      ]
+        .map((part) => String(part || "").trim())
+        .filter(Boolean)
+        .join(", ");
+    })
+    .filter(Boolean);
+  if (addresses.length) details.push(`Address: ${addresses.join(" | ")}`);
+
+  return details;
+}
+
+function textFromContactMessage(msg = {}) {
+  const contacts = asArray(
+    msg?.contacts ||
+      deepPick(msg, ["contact", "payload.contacts", "content.contacts"]) ||
+      []
+  ).filter(isObjectLike);
+
+  if (!contacts.length) return "";
+
+  return contacts
+    .map((contact, index) => {
+      const name = contactNameFromNode(contact) || `Contact ${index + 1}`;
+      const phones = contactPhonesFromNode(contact);
+      const details = contactDetailsFromNode(contact);
+      return [
+        "Contact details",
+        `Name: ${name}`,
+        ...(phones.length ? [`Phone: ${phones.join(", ")}`] : []),
+        ...details,
+      ].join("\n");
+    })
+    .join("\n\n")
+    .trim();
 }
 
 function mediaFromInboundMessage(msg = {}, item = {}) {
@@ -2940,7 +3033,7 @@ function parseWebhookPayload(body = {}) {
           filename: normalizedMedia.filename,
           url: normalizedMedia.url,
         })
-        : "text";
+        : rawType || "text";
 
       out.messages.push({
         waId,
@@ -3769,6 +3862,14 @@ router.get("/messages", async (req, res) => {
     const msgs = await query.lean();
     const pageDocs = wantsPageInfo && limit ? msgs.slice(0, limit) : msgs;
     const rows = limit ? pageDocs.slice().reverse() : pageDocs;
+
+    for (const msg of rows || []) {
+      if (String(msg?.text || "").trim()) continue;
+      const recoveredText = textFromInboundMessage(msg?.raw || {});
+      if (recoveredText) {
+        msg.text = String(recoveredText).slice(0, 4000);
+      }
+    }
 
     const templateMessages = (rows || []).filter((msg) => {
       if (String(msg?.type || "").toLowerCase() !== "template") return false;
