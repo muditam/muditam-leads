@@ -10,10 +10,12 @@ const SHOPIFY_STORE = `${process.env.SHOPIFY_STORE_NAME}.myshopify.com`;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
 // Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+const razorpay = process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET
+  ? new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    })
+  : null;
 
 // 🔹 Get Active Products
 router.get("/api/shopify/active-products", async (req, res) => {
@@ -129,6 +131,9 @@ router.get("/api/shopify/customers", async (req, res) => {
 // 🔹 Razorpay Payment Link
 router.post("/api/razorpay/generate-link", async (req, res) => {
   try {
+    if (!razorpay) {
+      return res.status(503).json({ error: "Razorpay is not configured" });
+    }
     const { customerName, customerPhone, customerAddress, amount } = req.body;
     if (!customerName || !customerPhone || !amount) {
       return res.status(400).json({ error: "Missing fields" });

@@ -16,11 +16,15 @@ const DYNO = String(process.env.DYNO || "").trim();
 const SINGLETON_DYNO = String(process.env.SINGLETON_DYNO || "web.1").trim();
 
 function shouldRunOcCron() {
-  if (String(process.env.RUN_SINGLETON_JOBS || "").toLowerCase() === "true") {
-    return true;
+  const singletonSetting = String(process.env.RUN_SINGLETON_JOBS || "")
+    .trim()
+    .toLowerCase();
+  if (singletonSetting) {
+    return singletonSetting === "true";
   }
-  if (String(process.env.RUN_OC_CRON || "").toLowerCase() === "true") {
-    return true;
+  const ocSetting = String(process.env.RUN_OC_CRON || "").trim().toLowerCase();
+  if (ocSetting) {
+    return ocSetting === "true";
   }
   if (!DYNO) return true;
   return DYNO === SINGLETON_DYNO;
@@ -55,10 +59,12 @@ const shopifyApi = axios.create({
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
 
-const razorpay = new Razorpay({
-  key_id: RAZORPAY_KEY_ID,
-  key_secret: RAZORPAY_KEY_SECRET,
-});
+const razorpay = RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET
+  ? new Razorpay({
+      key_id: RAZORPAY_KEY_ID,
+      key_secret: RAZORPAY_KEY_SECRET,
+    })
+  : null;
 
 // Utilities
 function normalizePhone(phone) {
@@ -684,6 +690,10 @@ router.post("/create-payment-link", requireSession, async (req, res) => {
       },
       reminder_enable: true,
     };
+
+    if (!razorpay) {
+      return res.status(503).json({ error: "Razorpay is not configured" });
+    }
 
     const link = await razorpay.paymentLink.create(payload);
     const shortUrl = link?.short_url || link?.url;
