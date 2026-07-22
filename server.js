@@ -186,7 +186,17 @@ app.use(
   })
 );
 
-const allowedOrigins = ['https://www.60brands.com', 'https://60brands.com', 'http://localhost:3000', 'https://www.muditam.com', 'https://muditam.com', 'https://muditam-lms-staging.vercel.app'];
+const allowedOrigins = [
+  'https://www.60brands.com',
+  'https://60brands.com',
+  'http://localhost:3000',
+  'https://www.muditam.com',
+  'https://muditam.com',
+];
+
+if (process.env.APP_ENV === 'staging') {
+  allowedOrigins.push('https://muditam-lms-staging.vercel.app');
+}
 
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
