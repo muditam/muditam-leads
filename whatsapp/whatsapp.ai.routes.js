@@ -34,7 +34,9 @@ const normalizeWaId = (v = "") => {
 };
 
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = process.env.OPENAI_API_KEY
+ ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+ : null;
 const DEFAULT_HELP_ME_WRITE_INSTRUCTIONS = `
 You help a support agent write a WhatsApp message.
 
@@ -284,6 +286,9 @@ function buildRetrievalQuery({ candidateQuestion = "", messages = [] }) {
 
 
 async function callOpenAI({ instructions, input, maxOutputTokens = 220 }) {
+ if (!openai) {
+  throw new Error("OpenAI is not configured");
+ }
  const model = process.env.OPENAI_MODEL || "gpt-5-mini";
 
 

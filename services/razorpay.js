@@ -1,15 +1,20 @@
 const express = require("express");
 const Razorpay = require("razorpay");
 const router = express.Router();
- 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+
+const razorpay = process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET
+  ? new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    })
+  : null;
  
 router.post("/create-payment-link", async (req, res) => {
   const { amount, currency, customer } = req.body;
   try {
+    if (!razorpay) {
+      return res.status(503).json({ message: "Razorpay is not configured" });
+    }
     const options = {
       amount: amount * 100, // converting rupees to paise
       currency: currency,
