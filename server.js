@@ -158,11 +158,24 @@ const DYNO = String(process.env.DYNO || "").trim();
 const SINGLETON_DYNO = String(process.env.SINGLETON_DYNO || "web.1").trim();
 
 function shouldRunSingletonJobs() {
-  if (String(process.env.RUN_SINGLETON_JOBS || "").toLowerCase() === "true") {
-    return true;
+  const configured = String(process.env.RUN_SINGLETON_JOBS || "")
+    .trim()
+    .toLowerCase();
+  if (configured) {
+    return configured === "true";
   }
   if (!DYNO) return true;
   return DYNO === SINGLETON_DYNO;
+}
+
+function shouldRunBackgroundWorkers() {
+  const configured = String(process.env.RUN_BACKGROUND_WORKERS || "")
+    .trim()
+    .toLowerCase();
+  if (configured) {
+    return configured === "true";
+  }
+  return process.env.APP_ENV !== "staging";
 }
 
 app.use(
@@ -2456,7 +2469,20 @@ app.get('/api/leads/first-call-stats', async (req, res) => {
   }
 });
 
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true, environment: process.env.APP_ENV || "local" });
+});
+
+app.get("/ready", (_req, res) => {
+  const connected = mongoose.connection.readyState === 1;
+  res.status(connected ? 200 : 503).json({ ok: connected });
+});
+
 httpServer.listen(PORT, () => { 
-  zoomRecordingQueue.start();
+  if (shouldRunBackgroundWorkers()) {
+    zoomRecordingQueue.start();
+  } else {
+    console.log("[workers] Zoom recording worker disabled");
+  }
   console.log(`Server running on port ${PORT}`);
 });

@@ -16,11 +16,15 @@ const DYNO = String(process.env.DYNO || "").trim();
 const SINGLETON_DYNO = String(process.env.SINGLETON_DYNO || "web.1").trim();
 
 function shouldRunOcCron() {
-  if (String(process.env.RUN_SINGLETON_JOBS || "").toLowerCase() === "true") {
-    return true;
+  const singletonSetting = String(process.env.RUN_SINGLETON_JOBS || "")
+    .trim()
+    .toLowerCase();
+  if (singletonSetting) {
+    return singletonSetting === "true";
   }
-  if (String(process.env.RUN_OC_CRON || "").toLowerCase() === "true") {
-    return true;
+  const ocSetting = String(process.env.RUN_OC_CRON || "").trim().toLowerCase();
+  if (ocSetting) {
+    return ocSetting === "true";
   }
   if (!DYNO) return true;
   return DYNO === SINGLETON_DYNO;

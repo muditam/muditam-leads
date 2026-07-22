@@ -5,6 +5,12 @@ const cron = require("node-cron");
 const ShopifyOrder = require("../models/ShopifyOrder");
 const router = express.Router();
 
+function shouldRunShopifyCron() {
+ const configured = String(process.env.RUN_SHOPIFY_CRON || "").trim().toLowerCase();
+ if (configured) return configured === "true";
+ return process.env.APP_ENV !== "staging";
+}
+
 
 function shopifyBase(store) {
  return `https://${store}.myshopify.com/admin/api/2024-04`;
@@ -519,7 +525,7 @@ router.get("/refresh/:orderId", async (req, res) => {
  }
 });
 
-if (!global.__SHOPIFY_SYNC_NEW_CRON__) {
+if (shouldRunShopifyCron() && !global.__SHOPIFY_SYNC_NEW_CRON__) {
  global.__SHOPIFY_SYNC_NEW_CRON__ = true;
  cron.schedule(
    "0 23 * * *", // 23:00 every day
@@ -623,7 +629,7 @@ router.get("/sync-unfulfilled-from-cutoff", async (req, res) => {
 });
 
 
-if (!global.__SHOPIFY_SYNC_UNFULFILLED_CRON__) {
+if (shouldRunShopifyCron() && !global.__SHOPIFY_SYNC_UNFULFILLED_CRON__) {
  global.__SHOPIFY_SYNC_UNFULFILLED_CRON__ = true;
 
  cron.schedule(
