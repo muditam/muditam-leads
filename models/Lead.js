@@ -1,5 +1,15 @@
 const mongoose = require('mongoose');
 
+const MedicalReportSchema = new mongoose.Schema(
+  {
+    url: { type: String, required: true },
+    name: String,
+    key: String,
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const LeadSchema = new mongoose.Schema({
   date: String,
   time: String,
@@ -60,18 +70,21 @@ const LeadSchema = new mongoose.Schema({
     durationOfDiabetes: String,
     lastTestDone: String,   
     diabetesReport: String,
+    diabetesReports: { type: [MedicalReportSchema], default: [] },
     totalCholesterol: Number,
     ldl: Number,
     hdl: Number,
     triglycerides: Number,
     lastCholesterolTest: String, 
     cholesterolReport: String,
+    cholesterolReports: { type: [MedicalReportSchema], default: [] },
     sgpt: Number,               
     sgot: Number,                   
     ggt: Number,
     ultrasoundFindings: String,     
     lastLiverTest: String, 
     liverReport: String,
+    liverReports: { type: [MedicalReportSchema], default: [] },
     gender: String,
     dietType: String, 
     sittingTime: String,

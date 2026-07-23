@@ -4,11 +4,17 @@ const axios = require("axios");
 const cron = require("node-cron");
 const ShopifyOrder = require("../models/ShopifyOrder");
 const router = express.Router();
+const DYNO = String(process.env.DYNO || "").trim();
+const SINGLETON_DYNO = String(process.env.SINGLETON_DYNO || "web.1").trim();
 
 function shouldRunShopifyCron() {
  const configured = String(process.env.RUN_SHOPIFY_CRON || "").trim().toLowerCase();
  if (configured) return configured === "true";
  return process.env.APP_ENV !== "staging";
+}
+
+function shouldRunSingletonShopifyCron() {
+ return shouldRunShopifyCron() && (!DYNO || DYNO === SINGLETON_DYNO);
 }
 
 
@@ -155,15 +161,22 @@ async function pageAndUpsertAll(url, headers) {
    fetched += orders.length;
 
 
-   for (const raw of orders) {
-     const doc = mapOrder(raw);
-     const resUp = await ShopifyOrder.updateOne(
-       { orderId: doc.orderId },
-       { $set: doc },
-       { upsert: true }
+   if (orders.length) {
+     const result = await ShopifyOrder.bulkWrite(
+       orders.map((raw) => {
+         const doc = mapOrder(raw);
+         return {
+           updateOne: {
+             filter: { orderId: doc.orderId },
+             update: { $set: doc },
+             upsert: true,
+           },
+         };
+       }),
+       { ordered: false }
      );
-     if (resUp.upsertedCount) created += 1;
-     else if (resUp.matchedCount) updated += 1;
+     created += result.upsertedCount || 0;
+     updated += result.modifiedCount || 0;
    }
 
 
@@ -173,6 +186,85 @@ async function pageAndUpsertAll(url, headers) {
 
 
  return { fetched, created, updated };
+}
+
+async function syncRecentlyUpdatedOrders({ sinceUpdated, limit } = {}) {
+ const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
+ if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
+   const err = new Error("Missing Shopify env vars");
+   err.statusCode = 400;
+   throw err;
+ }
+
+ let sinceISO = sinceUpdated;
+ if (!sinceISO) {
+   const latest = await ShopifyOrder.findOne({}, { shopifyUpdatedAt: 1 })
+     .sort({ shopifyUpdatedAt: -1 })
+     .lean();
+   const baseDate = latest?.shopifyUpdatedAt
+     ? new Date(latest.shopifyUpdatedAt)
+     : new Date(Date.now() - 24 * 60 * 60 * 1000);
+   baseDate.setMinutes(baseDate.getMinutes() - 5);
+   sinceISO = baseDate.toISOString();
+ }
+
+ const safeLimit = Math.min(parseInt(limit || "250", 10) || 250, 250);
+ const url =
+   `${shopifyBase(SHOPIFY_STORE_NAME)}/orders.json?status=any&limit=${safeLimit}` +
+   `&updated_at_min=${encodeURIComponent(sinceISO)}`;
+ const stats = await pageAndUpsertAll(url, authHeaders());
+ return { ok: true, mode: "incremental-updated", sinceUpdated: sinceISO, ...stats };
+}
+
+async function reconcileMissingRecentOrders({ hours = 48, limit = 250 } = {}) {
+ const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
+ if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
+   const err = new Error("Missing Shopify env vars");
+   err.statusCode = 400;
+   throw err;
+ }
+
+ const safeHours = Math.min(168, Math.max(1, Number(hours) || 48));
+ const safeLimit = Math.min(parseInt(limit || "250", 10) || 250, 250);
+ const since = new Date(Date.now() - safeHours * 60 * 60 * 1000).toISOString();
+ let url =
+   `${shopifyBase(SHOPIFY_STORE_NAME)}/orders.json?status=any&limit=${safeLimit}` +
+   `&created_at_min=${encodeURIComponent(since)}`;
+ let fetched = 0;
+ let inserted = 0;
+
+ while (url) {
+   const resp = await fetchPageWithRetry(url, authHeaders());
+   const orders = resp.data?.orders || [];
+   fetched += orders.length;
+
+   const orderIds = orders.map((order) => Number(order.id)).filter(Number.isFinite);
+   const existing = orderIds.length
+     ? await ShopifyOrder.find({ orderId: { $in: orderIds } }, { orderId: 1 }).lean()
+     : [];
+   const existingIds = new Set(existing.map((order) => Number(order.orderId)));
+   const missingDocs = orders
+     .filter((order) => !existingIds.has(Number(order.id)))
+     .map(mapOrder);
+
+   if (missingDocs.length) {
+     const result = await ShopifyOrder.bulkWrite(
+       missingDocs.map((doc) => ({
+         updateOne: {
+           filter: { orderId: doc.orderId },
+           update: { $setOnInsert: doc },
+           upsert: true,
+         },
+       })),
+       { ordered: false }
+     );
+     inserted += result.upsertedCount || 0;
+   }
+
+   url = parseLinkHeader(resp.headers.link).next || null;
+ }
+
+ return { ok: true, mode: "missing-order-reconciliation", hours: safeHours, since, fetched, inserted };
 }
 
 
@@ -525,7 +617,7 @@ router.get("/refresh/:orderId", async (req, res) => {
  }
 });
 
-if (shouldRunShopifyCron() && !global.__SHOPIFY_SYNC_NEW_CRON__) {
+if (shouldRunSingletonShopifyCron() && !global.__SHOPIFY_SYNC_NEW_CRON__) {
  global.__SHOPIFY_SYNC_NEW_CRON__ = true;
  cron.schedule(
    "0 23 * * *", // 23:00 every day
@@ -536,136 +628,38 @@ if (shouldRunShopifyCron() && !global.__SHOPIFY_SYNC_NEW_CRON__) {
          console.warn("[Cron] Skipping sync-new — missing Shopify env vars");
          return;
        }
-       console.log("[Cron] Running nightly Shopify new-orders sync (created_at) @ 23:00 IST");
-
-       const latest = await ShopifyOrder.findOne({}, { shopifyCreatedAt: 1 })
-         .sort({ shopifyCreatedAt: -1 })
-         .lean();
-       const baseDate = latest?.shopifyCreatedAt
-         ? new Date(latest.shopifyCreatedAt)
-         : new Date("2000-01-01T00:00:00Z");
-       baseDate.setMinutes(baseDate.getMinutes() - 2);
-       const sinceISO = baseDate.toISOString();
-
-       const base = shopifyBase(process.env.SHOPIFY_STORE_NAME);
-       const limit = 250;
-       let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
-         sinceISO
-       )}`;
-
-       const stats = await pageAndUpsertAll(url, authHeaders());
-       console.log("[Cron] Shopify new-orders sync done:", { sinceCreated: sinceISO, ...stats });
+       console.log("[Cron] Running nightly Shopify missing-order reconciliation @ 23:00 IST");
+       const stats = await reconcileMissingRecentOrders({ hours: 48 });
+       console.log("[Cron] Shopify missing-order reconciliation done:", stats);
      } catch (err) {
        console.error("[Cron] Shopify new-orders sync FAILED:", err?.response?.data || err);
      }
    },
    { timezone: "Asia/Kolkata" }
  );
-}
-
-async function pageAndUpsertUnfulfilledFromCutoff(url, headers, cutoffDateUtc) {
- let fetched = 0,
-   considered = 0,
-   created = 0,
-   updated = 0;
-
- while (url) {
-   const resp = await fetchPageWithRetry(url, headers);
-   const orders = resp.data?.orders || [];
-   fetched += orders.length;
-
-   for (const raw of orders) {
-     const createdAt = raw.created_at ? new Date(raw.created_at) : null;
-     const isAfterCutoff = createdAt && createdAt >= cutoffDateUtc;
-     const isUnfulfilled =
-       (raw.fulfillment_status || "").toString().toLowerCase() === "unfulfilled";
-
-     if (isAfterCutoff && isUnfulfilled) {
-       considered++;
-       const doc = mapOrder(raw);
-       const resUp = await ShopifyOrder.updateOne(
-         { orderId: doc.orderId },
-         { $set: doc },
-         { upsert: true }
-       );
-       if (resUp.upsertedCount) created += 1;
-       else if (resUp.matchedCount) updated += 1;
-     }
-   }
-
-   const links = parseLinkHeader(resp.headers.link);
-   url = links.next || null;
- }
-
- return { fetched, considered, created, updated };
+} else if (DYNO && DYNO !== SINGLETON_DYNO) {
+ console.log(
+   `[Cron] Skipping nightly Shopify new-orders sync on dyno=${DYNO}; owner=${SINGLETON_DYNO}`
+ );
 }
 
 router.get("/sync-unfulfilled-from-cutoff", async (req, res) => {
  try {
-   const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
-   if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
-     return res.status(400).json({ error: "Missing Shopify env vars" });
-   }
-
-   const cutoffIsoUtc = "2025-09-29T18:30:00.000Z";
-   const cutoffDateUtc = new Date(cutoffIsoUtc);
-
-   const base = shopifyBase(SHOPIFY_STORE_NAME);
-   const limit = 250;
-
-   let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
-     cutoffIsoUtc
-   )}`;
-
-   const stats = await pageAndUpsertUnfulfilledFromCutoff(url, authHeaders(), cutoffDateUtc);
-   res.json({ ok: true, mode: "unfulfilled-from-cutoff", cutoffIsoUtc, ...stats });
+   const stats = await syncRecentlyUpdatedOrders({
+     sinceUpdated: req.query.sinceUpdated,
+     limit: req.query.limit,
+   });
+   res.json(stats);
  } catch (err) {
-   console.error("sync-unfulfilled-from-cutoff error:", err?.response?.data || err);
+   console.error("sync-recently-updated error:", err?.response?.data || err);
    res.status(500).json({
-     error: "Failed to sync unfulfilled orders from cutoff",
+     error: "Failed to sync recently updated Shopify orders",
      details: err?.message || err,
    });
  }
 });
 
-
-if (shouldRunShopifyCron() && !global.__SHOPIFY_SYNC_UNFULFILLED_CRON__) {
- global.__SHOPIFY_SYNC_UNFULFILLED_CRON__ = true;
-
- cron.schedule(
-   "0 11,14,16 * * *",
-   async () => {
-     try {
-       const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_NAME } = process.env;
-       if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_NAME) {
-         console.warn("[Cron-Unfulfilled] Skipping — missing Shopify env vars");
-         return;
-       }
-       const cutoffIsoUtc = "2025-09-29T18:30:00.000Z";
-       const cutoffDateUtc = new Date(cutoffIsoUtc);
-
-       console.log(
-         "[Cron-Unfulfilled] Syncing unfulfilled orders from cutoff at 11/14/16 IST",
-         { cutoffIsoUtc }
-       );
-
-       const base = shopifyBase(SHOPIFY_STORE_NAME);
-       const limit = 250;
-
-       let url = `${base}/orders.json?status=any&limit=${limit}&created_at_min=${encodeURIComponent(
-         cutoffIsoUtc
-       )}`;
-
-       const stats = await pageAndUpsertUnfulfilledFromCutoff(url, authHeaders(), cutoffDateUtc);
-       console.log("[Cron-Unfulfilled] Done:", { cutoffIsoUtc, ...stats });
-     } catch (err) {
-       console.error("[Cron-Unfulfilled] FAILED:", err?.response?.data || err);
-     }
-   },
-   { timezone: "Asia/Kolkata" }
- );
-}
-
 router.syncNewCreatedOrders = syncNewCreatedOrders;
+router.syncRecentlyUpdatedOrders = syncRecentlyUpdatedOrders;
 
 module.exports = router;
