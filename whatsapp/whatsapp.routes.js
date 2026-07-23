@@ -3822,10 +3822,12 @@ router.get("/messages", async (req, res) => {
     if (!allowed) return res.status(403).json({ message: "Forbidden" });
 
     const wantsPageInfo = String(req.query.pageInfo || "").trim().toLowerCase() === "true";
-    const limitRaw = Number(req.query.limit || 0);
+    const DEFAULT_MESSAGE_LIMIT = 50;
+    const MAX_MESSAGE_LIMIT = 100;
+    const limitRaw = Number(req.query.limit);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0
-      ? Math.min(100, Math.floor(limitRaw))
-      : null;
+      ? Math.min(MAX_MESSAGE_LIMIT, Math.floor(limitRaw))
+      : DEFAULT_MESSAGE_LIMIT;
     const beforeRaw = String(req.query.before || "").trim();
     const cursorInfo = decodeMessageCursor(String(req.query.cursor || "").trim());
     const beforeDate = cursorInfo?.ts || (beforeRaw ? new Date(beforeRaw) : null);
@@ -3857,11 +3859,11 @@ router.get("/messages", async (req, res) => {
     }
 
     const query = WhatsAppMessage.find(baseQuery)
-      .sort(limit ? { timestamp: -1, _id: -1 } : { timestamp: 1, _id: 1 });
-    if (limit) query.limit(wantsPageInfo ? limit + 1 : limit);
+      .sort({ timestamp: -1, _id: -1 })
+      .limit(wantsPageInfo ? limit + 1 : limit);
     const msgs = await query.lean();
     const pageDocs = wantsPageInfo && limit ? msgs.slice(0, limit) : msgs;
-    const rows = limit ? pageDocs.slice().reverse() : pageDocs;
+    const rows = pageDocs.slice().reverse();
 
     for (const msg of rows || []) {
       if (String(msg?.text || "").trim()) continue;
