@@ -19,23 +19,12 @@ function hasFullAccess(user = {}) {
 }
 
 function requireSession(req, res, next) {
-  try {
-    const headerUser = req.headers["x-session-user"];
-
-    if (headerUser) {
-      req.sessionUser = JSON.parse(headerUser);
-      return next();
-    }
-
-    if (req.session?.user) {
-      req.sessionUser = req.session.user;
-      return next();
-    }
-
+  if (!req.session?.user?.id) {
     return res.status(401).json({ message: "Unauthorized" });
-  } catch (error) {
-    return res.status(401).json({ message: "Invalid session" });
   }
+
+  req.sessionUser = req.session.user;
+  return next();
 }
 
 function requireManager(req, res, next) {

@@ -44,20 +44,6 @@ const contactAdminError = () => ({
   message: 'contact admin for permissions',
 });
 
-function getHeaderSessionUser(req) {
-  try {
-    const headerUser = req.headers['x-session-user'];
-    if (!headerUser) return null;
-    const parsed = JSON.parse(headerUser);
-    if (parsed && (parsed.fullName || parsed.name || parsed.email || parsed.id || parsed._id)) {
-      return parsed;
-    }
-  } catch (_) {
-    // ignore malformed header
-  }
-  return null;
-}
-
 function buildSessionUserFromAny(user = {}) {
   return {
     id: toId(user.id || user._id),
@@ -69,15 +55,11 @@ function buildSessionUserFromAny(user = {}) {
 }
 
 function ensureSwitchSessionUser(req) {
-  if (req.session?.user) return req.session.user;
-  const headerUser = getHeaderSessionUser(req);
-  if (!headerUser || !req.session) return null;
-  req.session.user = buildSessionUserFromAny(headerUser);
-  return req.session.user;
+  return req.session?.user || null;
 }
 
 function hasActiveImpersonation(req) {
-  const sessionUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req) || null;
+  const sessionUser = ensureSwitchSessionUser(req);
   const originalUserId = toId(req.session?.originalUserId);
   const currentUserId = toId(req.session?.userId || req.session?.user?.id || sessionUser?.id || sessionUser?._id);
 
@@ -85,7 +67,7 @@ function hasActiveImpersonation(req) {
 }
 
 async function getActorEmployee(req) {
-  const sessionUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req) || null;
+  const sessionUser = ensureSwitchSessionUser(req);
   const originalUserId = toId(req.session?.originalUserId);
   const actorId = originalUserId || toId(sessionUser?.id || sessionUser?._id);
   const actorEmail = String(sessionUser?.email || '').trim();
@@ -221,7 +203,7 @@ async function getSwitchScope(actor) {
 // 🔍 Search employees (used by SwitchDashboard)
 router.get('/', async (req, res) => {
  try {
-   const requestUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req);
+   const requestUser = ensureSwitchSessionUser(req);
    if (!requestUser) {
      return res.status(401).json({ message: 'Unauthorized' });
    }
@@ -302,7 +284,7 @@ router.post('/impersonate', async (req, res) => {
        .json({ message: 'Session middleware not configured' });
    }
 
-   const requestUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req);
+   const requestUser = ensureSwitchSessionUser(req);
    if (!requestUser) {
      return res.status(401).json({ message: 'Unauthorized' });
    }
@@ -393,7 +375,7 @@ router.post('/revert', async (req, res) => {
 
    const originalId = req.session.originalUserId;
    if (!originalId) {
-     const currentUser = ensureSwitchSessionUser(req) || getHeaderSessionUser(req);
+     const currentUser = ensureSwitchSessionUser(req);
      if (!currentUser) {
        return res.status(401).json({ message: 'Unauthorized' });
      }

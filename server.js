@@ -262,7 +262,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-agent-name', 'x-user-json', 'x-session-user'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-agent-name', 'x-user-json'],
   })
 );
 
@@ -320,6 +320,10 @@ app.get(
 app.set("trust proxy", 1);
  
 const isProd = process.env.NODE_ENV === "production";
+
+if (isProd && !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET is required in production");
+}
 
 app.use(session({
   name: "sid",

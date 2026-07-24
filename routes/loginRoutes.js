@@ -46,6 +46,11 @@ router.post("/login", async (req, res) => {
      fullName: user.fullName,
      role: user.role,
      department: user.department || "",
+     hasTeam: Boolean(user.hasTeam),
+     callerId: user.callerId,
+     agentNumber: user.agentNumber,
+     orderConfirmActive: user.orderConfirmActive,
+     permissions,
    };
    await saveSession(req);
 
@@ -73,6 +78,5 @@ router.post("/login", async (req, res) => {
 
 
 module.exports = router;
-
 
 
