@@ -30,23 +30,12 @@ const upload = multer({
 // Auth helpers
 // ─────────────────────────────────────────────────────────────
 const requireSession = (req, res, next) => {
-  try {
-    const headerUser = req.headers["x-session-user"];
-    if (headerUser) {
-      const parsed = JSON.parse(headerUser);
-      if (parsed?.fullName) {
-        req.sessionUser = parsed;
-        return next();
-      }
-    }
-  } catch (_) {}
-
-  if (req.session?.user?.fullName) {
-    req.sessionUser = req.session.user;
-    return next();
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ message: "Unauthorized" });
   }
 
-  return res.status(401).json({ message: "Unauthorized" });
+  req.sessionUser = req.session.user;
+  return next();
 };
 
 const MANAGER_ROLES = ["admin", "manager", "super-admin", "team-leader"];

@@ -266,12 +266,6 @@ router.post("/manager/sync-now", requireSession, async (req, res) => {
 
 router.get(
   "/manager/stream",
-  (req, _res, next) => {
-    if (!req.headers["x-session-user"] && req.query?.sessionUser) {
-      req.headers["x-session-user"] = String(req.query.sessionUser);
-    }
-    next();
-  },
   requireSession,
   async (req, res) => {
   const role = req.sessionUser?.role || "";

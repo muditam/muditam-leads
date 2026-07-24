@@ -193,23 +193,12 @@ async function respondWithCache(req, res, builder, options = {}) {
 router.clearDashboardCache = clearDashboardCache;
 
 const requireSession = (req, res, next) => {
-  try {
-    const headerUser = req.headers["x-session-user"];
-    if (headerUser) {
-      const parsed = JSON.parse(headerUser);
-      if (parsed?.fullName) {
-        req.sessionUser = parsed;
-        return next();
-      }
-    }
-  } catch (_) {}
-
-  if (req.session?.user?.fullName) {
-    req.sessionUser = req.session.user;
-    return next();
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ message: "Unauthorized" });
   }
 
-  return res.status(401).json({ message: "Unauthorized" });
+  req.sessionUser = req.session.user;
+  return next();
 };
 
 function buildDateRange(dateFrom, dateTo) {
