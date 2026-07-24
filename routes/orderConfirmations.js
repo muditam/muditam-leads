@@ -205,9 +205,12 @@ async function assignRoundRobin({ batchSize = 5000 } = {}) {
         {
           $or: [
             { fulfillment_status: { $exists: false } },
-            { fulfillment_status: { $not: /^fulfilled$/i } },
+            { fulfillment_status: null },
+            { fulfillment_status: "" },
+            { fulfillment_status: /^unfulfilled$/i },
           ],
         },
+        { cancelled_at: null },
         {
           $or: [
             { "orderConfirmOps.callStatus": { $exists: false } },
@@ -1439,20 +1442,20 @@ if (shouldRunOcCron()) {
     console.log(`[OC CRON] enabled on dyno=${DYNO}`);
   }
 
-  cron.schedule("*/59 * * * *", async () => {
+  cron.schedule("0 * * * *", async () => {
     if (__ocBusy) return;
     __ocBusy = true;
     const started = Date.now();
 
     try {
+      const syncStats = await shopifyOrdersRouter.syncRecentlyUpdatedOrders({});
+      console.log("[OC CRON] sync-updated", syncStats);
+
       const rr = await assignRoundRobin({});
       console.log(
         `[OC CRON] round-robin assigned=${rr.assigned || 0} (agents=${rr.agents || 0
         })`
       );
-
-      const syncStats = await shopifyOrdersRouter.syncNewCreatedOrders({});
-      console.log("[OC CRON] sync-new", syncStats);
 
       console.log(`[OC CRON] done in ${(Date.now() - started) / 1000}s`);
     } catch (e) {

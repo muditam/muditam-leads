@@ -163,6 +163,8 @@ ShopifyOrderSchema.index(
   { name: "cohort_products_index", background: true }
 );
 ShopifyOrderSchema.index({ orderDate: -1, createdAt: -1 });
+ShopifyOrderSchema.index({ shopifyCreatedAt: -1 });
+ShopifyOrderSchema.index({ shopifyUpdatedAt: -1 });
 ShopifyOrderSchema.index({ "customerAddress.province": 1 });
 ShopifyOrderSchema.index({ modeOfPayment: 1 });
 ShopifyOrderSchema.index({ paymentGatewayNames: 1 });
@@ -196,7 +198,6 @@ ShopifyOrderSchema.index(
 
 module.exports = mongoose.model("ShopifyOrder", ShopifyOrderSchema);
 module.exports.normalizePhone = normalizePhone;
-
 
 
 
